@@ -1,0 +1,4 @@
+To set up restraints with heavy atoms between 10 and 15 angstroms restrained, with input files called 1a~1b.prm7 and 1a~1b.rst7 output files named example.{ext}:
+python addanchors.py -i 1a~1b.rst7 1a~1b.prm7 -d 10 15 -o example
+To do the same, but now reading atoms from a file called "restrained.csv"
+python addanchors.py -i 1a~1b.rst7 1a~1b.prm7 -r restrained.csv -o example
