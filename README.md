@@ -1,2 +1,2 @@
 # somd2
-SOMD2 molecular dynamics for free energy calculations
+OpenBioSim - SOMD2 molecular dynamics for free energy calculations
