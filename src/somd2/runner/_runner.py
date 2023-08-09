@@ -1,42 +1,154 @@
-import concurrent.futures
-import os
-import sire as sr
-from openmm import LocalEnergyMinimizer
-import multiprocessing
+class controller:
+    """
+    Controls the initiation of simulations as well as the assigning of
+    resources.
+    """
 
-__all__ = ["controller_CPU", "controller_GPU"]
+    def __init__(self, system, num_lambda, platform=None):
+        """
+        Constructor.
 
+        Parameters:
+        -----------
 
-class controller_CPU:
-    """Controls the initiation of simulations as well as the assigning of CPUs.
-    Fairly rudiementary at the moment, just trys to run all simulations in parallel on all available CPUs.
+        system: :class: `System <Sire.System>`| :class: `System <BioSimSpace._SireWrapper.System>`
+            The perturbable system to be simulated.
 
-    Args:
-        mols (sire.mol.MoleculeSet): Merged molecules to be simulated.
-        num_lambda (int): Number of lambda windows to be simulated."""
+        num_lambda: int
+            The number of lambda windows to be simulated.
 
-    def __init__(self, mols, num_lambda):
-        self.mols = mols
+        platform: str
+            The platform to be used for simulations.
+
+        """
+        self.system = system
         self.num_lambda = num_lambda
-        self.set_lambda_schedule()
-        self.num_workers, self.cpu_per_worker = self.calculate_workers()
 
-    def _set_lambda_schedule(self):
-        """Create Lambda schedule that will be used for all simulations
+        # import BioSimSpace as _BSS
+        from sire.system import System as sire_system
 
-        Args:
-            mols (sire.mol.MoleculeSet): Molecules to be simulated."""
-        self.lambda_schedule = self.create_lambda_schedule()
+        # if not isinstance(self.system, (_BSS._SireWrappers.system, sire_system)):
+        #    raise TypeError("System must be BioSimSpace or Sire system")
+
+        if not isinstance(self.system, (sire_system)):
+            raise TypeError("System must be BioSimSpace or Sire system")
+
+        self._set_platform(platform)
+
+        self.platform_options = self._set_platform_options()
+
+        self.schedule = self.create_lambda_schedule()
+
+    def _set_platform(self, platform=None):
+        """
+        Sets the platform to be used for simulations.
+
+        Parameters:
+        -----------
+
+        platform: str
+            The platform to be used for simulations. If None then check for
+            CUDA_VISIBLE_DEVICES, otherwise use CPU.
+        """
+        import os as _os
+
+        if platform is not None:
+            if platform not in ["CPU", "CUDA"]:
+                raise ValueError("Platform must be CPU or CUDA")
+            self.platform = platform
+        else:
+            if "CUDA_VISIBLE_DEVICES" in _os.environ:
+                self.platform = "GPU"
+            else:
+                self.platform = "CPU"
+
+    def _set_platform_options(self):
+        """
+        Sets options for the current platform.
+
+        Returns:
+        --------
+        platform_options: dict
+            Dictionary of platform options.
+        """
+        import os as _os
+
+        if self.platform == "CPU":
+            num_cpu = _os.cpu_count()
+            num_workers = 1
+            if self.num_lambda > num_cpu:
+                num_workers = num_cpu
+                cpu_per_worker = 1
+            else:
+                num_workers = self.num_lambda
+                cpu_per_worker = num_cpu // self.num_lambda
+            platform_options = {
+                "num_workers": num_workers,
+                "cpu_per_worker": cpu_per_worker,
+            }
+        elif self.platform == "CUDA":
+            devices = self.zero_CUDA_devices(self.get_CUDA_devices())
+            self.create_gpu_pool()
+            platform_options = {"num_workers": len(devices)}
+
+        else:
+            raise ValueError("Platform not recognised")
+
+        return platform_options
+
+    def create_gpu_pool(self):
+        """
+        Creates shared list that holds currently available GPUs.
+        Also intialises the list with all available GPUs.
+        """
+        from multiprocessing import Manager
+
+        manager = Manager()
+        self.gpu_pool = manager.list(self.zero_CUDA_devices(self.get_CUDA_devices()))
+        self._lock = manager.Lock()
+
+    def _update_gpu_pool(self, gpu_num):
+        """
+        Updates the GPU pool to remove the GPU that has been assigned to a worker.
+
+        Parameters:
+        -----------
+        gpu_num: str
+            The GPU number to be added to the pool.
+        """
+        self.gpu_pool.append(gpu_num)
+
+    def _remove_gpu_from_pool(self, gpu_num):
+        """
+        Removes a GPU from the GPU pool.
+
+        Parameters:
+        -----------
+        gpu_num: str
+            The GPU number to be removed from the pool.
+        """
+        self.gpu_pool.remove(gpu_num)
+
+    def get_platform(self):
+        """
+        Returns the platform to be used for simulations.
+        """
+        return self.platform
 
     @staticmethod
     def create_lambda_schedule():
-        """Create a lambda schedule, this is where more commplex morphing
-        etc. can be added in future.
-
-        Args:
-            omm (sire.openmm.OpenMM): OpenMM object for which the schedule is created.
         """
-        schedule = sr.cas.LambdaSchedule()
+        Creates a lambda schedule for the simulation.
+        Currently just creates a basic morph
+
+        Returns:
+        --------
+        schedule: :class: `LambdaSchedule <Sire.cas.LambdaSchedule>`
+            A sire lambda schedule.
+        """
+        from sire import cas
+
+        schedule = cas.LambdaSchedule()
         schedule.add_stage(
             "morphing",
             (1 - schedule.lam()) * schedule.initial()
@@ -44,97 +156,27 @@ class controller_CPU:
         )
         return schedule
 
-    def _calculate_workers(self):
-        """Calculate number of workers to be used in parallel.
-        Also calculate number of CPUs to be used by each openmm simulation."""
-        num_cpu = os.cpu_count()
-        num_workers = 1
-        if self.num_lambda > num_cpu:
-            num_workers = num_cpu
-            cpu_per_worker = 1
-        else:
-            num_workers = self.num_lambda
-            cpu_per_worker = num_cpu // self.num_lambda
-        print(f"Number of CPUs available: {os.cpu_count()}")
-        return num_workers, cpu_per_worker
-
-    def run_simulations(self):
-        """Run simulations in parallel."""
-        with concurrent.futures.ProcessPoolExecutor(
-            max_workers=self.num_workers
-        ) as executor:
-            jobs = []
-            results_done = []
-            lambda_values = [
-                i / (self.num_lambda - 1) for i in range(0, self.num_lambda)
-            ]
-            for lambda_value in lambda_values:
-                kw = {"lambda_value": lambda_value}
-                jobs.append(executor.submit(self._run_single_simulation, **kw))
-            for job in concurrent.futures.as_completed(jobs):
-                result = job.result()
-                results_done.append(result)
-                print(result)
-
-    def _run_single_simulation(self, lambda_value):
-        """Run a single simulation.
-
-        Args:
-            lambda_value (float): Lambda value for simulation."""
-        ############################################################################################################################################
-        ### Very likely that this whole function will need to be replaced by a dedicated runner - this acts as a guide to CPU queue functionality###
-        ############################################################################################################################################
-        print(f"Running lambda = {lambda_value} uisng {self.cpu_per_worker} threads")
-        map = {
-            "integrator": "langevin_middle",
-            "temperature": 300 * sr.units.kelvin,
-            "platform": "CPU",
-            "threads": self.cpu_per_worker,
-        }
-        self.omm = sr.convert.to(
-            self.mols,
-            "openmm",
-            map=map,
-        )
-        self.omm.set_lambda_schedule(self.lambda_schedule)
-        self.omm.set_lambda(lambda_value)
-        s = self.omm.getState(getEnergy=True)
-        print(
-            f"Energy of lambda = {lambda_value} before minimisation = {s.getPotentialEnergy()}"
-        )
-        LocalEnergyMinimizer.minimize(self.omm)
-        s = self.omm.getState(getEnergy=True)
-        print(
-            f"Energy of lambda = {lambda_value} after minimisation = {s.getPotentialEnergy()}"
-        )
-        self.omm.getIntegrator().step(100)
-        s = self.omm.getState(getEnergy=True)
-        return lambda_value, s.getPotentialEnergy()
-
-
-class controller_GPU:
-    """Controls the initiation of simulations as well as the assigning of GPUS.
-
-    Args:
-        mols (sire.mol.MoleculeSet): Merged molecules to be simulated.
-        num_lambda (int): Number of lambda windows to be simulated."""
-
-    def __init__(self, mols, num_lambda):
-        self.mols = mols
-        init_gpu_pool = self.zero_CUDA_devices(self.get_CUDA_devices())
-        manager = multiprocessing.Manager()
-        self._lock = manager.Lock()
-        self._gpu_pool = manager.list(init_gpu_pool)
-        self._set_lambda_schedule()
-        self.num_lambda = num_lambda
+    def _set_lambda_schedule(self):
+        """
+        Sets the lambda schedule for the simulation.
+        """
+        self.schedule = self.create_lambda_schedule()
 
     @staticmethod
     def get_CUDA_devices():
-        """Get list of available GPUs from CUDA_VISIBLE_DEVICES."""
-        if os.environ.get("CUDA_VISIBLE_DEVICES") is None:
+        """
+        Get list of available GPUs from CUDA_VISIBLE_DEVICES.
+
+        Returns:
+        --------
+        available_devices (list): List of available device numbers.
+        """
+        import os as _os
+
+        if _os.environ.get("CUDA_VISIBLE_DEVICES") is None:
             raise ValueError("CUDA_VISIBLE_DEVICES not set")
         else:
-            available_devices = os.environ.get("CUDA_VISIBLE_DEVICES").split(",")
+            available_devices = _os.environ.get("CUDA_VISIBLE_DEVICES").split(",")
             print("CUDA_VISIBLE_DEVICES set to", available_devices)
             num_gpus = len(available_devices)
             print("Number of GPUs available:", num_gpus)
@@ -142,126 +184,109 @@ class controller_GPU:
 
     @staticmethod
     def zero_CUDA_devices(devices):
-        """Set all device numbers relative to the lowest (the device number becomes equal to its index in the list).
+        """
+        Set all device numbers relative to the lowest (the device number becomes equal to its index in the list).
 
-        Args:
-            devices (list): List of available device numbers."""
+        Returns:
+        --------
+        devices (list): List of zeroed available device numbers.
+        """
         return [str(devices.index(value)) for value in devices]
 
-    def _set_lambda_schedule(self):
-        """Create Lambda schedule that will be used for all simulations
-
-        Args:
-            mols (sire.mol.MoleculeSet): Molecules to be simulated."""
-        self.lambda_schedule = self.create_lambda_schedule()
-
-    def _update_gpu_pool(self, gpu_num):
-        """Used to update GPU pool once GPU becomes free
-
-        Args:
-            gpu_num (str): GPU number to be added to pool."""
-        print(f"returning GPU {gpu_num} to pool")
-        self._gpu_pool.append(gpu_num)
-        print(self._gpu_pool)
-
-    def _remove_from_gpu_pool(self, gpu_num):
-        """Used to remove GPU from pool once it is in use.
-
-        Args:
-            gpu_num (str): GPU number to be removed from pool."""
-        print(f"Removing GPU {gpu_num} from pool")
-        self._gpu_pool.remove(gpu_num)
-        print("after removal")
-        print(self._gpu_pool)
-
-    @staticmethod
-    def create_lambda_schedule():
-        """Create a lambda schedule, this is where more commplex morphing
-        etc. can be added in future.
-
-        Args:
-            omm (sire.openmm.OpenMM): OpenMM object for which the schedule is created.
-        """
-        schedule = sr.cas.LambdaSchedule()
-        schedule.add_stage(
-            "morphing",
-            (1 - schedule.lam()) * schedule.initial()
-            + schedule.lam() * schedule.final(),
-        )
-        return schedule
-
     def run_simulations(self):
-        """Run simulations in parallel."""
-        max_wrkrs = len(self._gpu_pool)
-        with concurrent.futures.ProcessPoolExecutor(max_workers=max_wrkrs) as executor:
+        """
+        Use concurrent.futures to run lambda windows in paralell
+
+        Returns:
+        --------
+        results (list): List of simulation results.
+        """
+
+        import concurrent.futures as _futures
+
+        results = []
+        with _futures.ProcessPoolExecutor(
+            max_workers=self.platform_options["num_workers"]
+        ) as executor:
             jobs = []
-            results_done = []
+
             lambda_values = [
                 i / (self.num_lambda - 1) for i in range(0, self.num_lambda)
             ]
             for lambda_value in lambda_values:
-                kw = {"lambda_value": lambda_value}
-                jobs.append(executor.submit(self.run_single_simulation, **kw))
-            for job in concurrent.futures.as_completed(jobs):
+                kwargs = {"lambda_value": lambda_value}
+                jobs.append(executor.submit(self.run_single_simulation, **kwargs))
+            for job in _futures.as_completed(jobs):
                 result = job.result()
-                results_done.append(result)
+                results.append(result)
                 print(result)
 
-    def run_single_simulation(self, lambda_value):
-        """Run a single simulation.
+        return list(results)
 
-        Args:
-            lambda_value (float): Lambda value for simulation."""
-        ############################################################################################################################################
-        ### Very likely that this whole function will need to be replaced by a dedicated runner - this acts as a guide to GPU queue functionality###
-        ############################################################################################################################################
-        if len(self._gpu_pool) == 0:
-            raise ValueError("No GPUs available")
-        else:
-            with self._lock:
-                gpu_num = self._gpu_pool[0]
-                self._remove_from_gpu_pool(gpu_num)
-                print(self._gpu_pool)
-            print(f"Running lambda = {lambda_value} on GPU {gpu_num}")
+    def run_single_simulation(self, lambda_value):
+        """
+        Run a single simulation.
+
+        Parameters:
+        -----------
+        lambda_value: float
+            The lambda value for the simulation.
+
+        Returns:
+        --------
+        result: str
+            The result of the simulation.
+        """
+        from sire.convert import to
+        from openmm import LocalEnergyMinimizer
+        from sire.units import kelvin
+
+        def run(system, schedule, map, steps, minimise=True):
+            omm = to(system, "openmm", map=map)
+            omm.set_lambda_schedule(schedule)
+            omm.set_lambda(lambda_value)
+            if minimise:
+                LocalEnergyMinimizer.minimize(omm)
+
+            omm.getIntegrator().step(steps)
+
+        if self.platform == "CPU":
+            print(
+                f"Running lambda = {lambda_value} using {self.platform_options['cpu_per_worker']} CPUs"
+            )
             map = {
                 "integrator": "langevin_middle",
-                "temperature": 300 * sr.units.kelvin,
-                "platform": "CUDA",
+                "temperature": 300 * kelvin,
+                "platform": self.platform,
+                "threads": self.platform_options["cpu_per_worker"],
+            }
+            steps = 10
+            run(self.system, self.schedule, map, steps, minimise=False)
+            return f"Lambda = {lambda_value} complete"
+
+        elif self.platform == "CUDA":
+            with self._lock:
+                gpu_num = self.gpu_pool[0]
+                self._remove_gpu_from_pool(gpu_num)
+                print(f"Running lambda = {lambda_value} on GPU {gpu_num}")
+            map = {
+                "integrator": "langevin_middle",
+                "temperature": 300 * kelvin,
+                "platform": self.platform,
                 "device": gpu_num,
             }
-            # Need to double check that no copying needs to be done
-            self.omm = sr.convert.to(
-                self.mols,
-                "openmm",
-                map=map,
-            )
-            self.omm.set_lambda_schedule(self.lambda_schedule)
-            self.omm.set_lambda(lambda_value)
-
-            s = self.omm.getState(getEnergy=True)
-            print(
-                f"Energy of lambda = {lambda_value} before minimisation = {s.getPotentialEnergy()}"
-            )
-            LocalEnergyMinimizer.minimize(self.omm)
-            s = self.omm.getState(getEnergy=True)
-            print(
-                f"Energy of lambda = {lambda_value} after minimisation = {s.getPotentialEnergy()}"
-            )
-            self.omm.getIntegrator().step(100)
-            s = self.omm.getState(getEnergy=True)
+            steps = 10
+            run(self.system, self.schedule, map, steps, minimise=False)
             with self._lock:
                 self._update_gpu_pool(gpu_num)
-            return lambda_value, s.getPotentialEnergy()
+            return f"Lambda = {lambda_value} complete"
 
 
 if __name__ == "__main__":
+    import sire as sr
+
     mols = sr.stream.load("merged_molecule.s3")
     platform = "CPU"
-    if platform == "CPU":
-        r = controller_CPU(mols, 11)
-        r.run_simulations()
-    elif platform == "GPU":
-        r = controller_GPU(mols, 11)
-        r.run_simulations()
-    else:
-        raise ValueError("Platform not recognised")
+    r = controller(mols, platform=platform, num_lambda=10)
+    results = r.run_simulations()
+    print(results)
