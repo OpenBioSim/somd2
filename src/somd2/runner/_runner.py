@@ -1,3 +1,6 @@
+__all__ = ["controller"]
+
+
 class controller:
     """
     Controls the initiation of simulations as well as the assigning of
