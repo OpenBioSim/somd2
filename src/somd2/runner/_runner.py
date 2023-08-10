@@ -24,23 +24,23 @@ class controller:
             The platform to be used for simulations.
 
         """
-        self.system = system
-        self.num_lambda = num_lambda
+        self._system = system
+        self._num_lambda = num_lambda
 
         # import BioSimSpace as _BSS
         from sire.system import System as sire_system
 
-        # if not isinstance(self.system, (_BSS._SireWrappers.system, sire_system)):
+        # if not isinstance(self._system, (_BSS._SireWrappers.system, sire_system)):
         #    raise TypeError("System must be BioSimSpace or Sire system")
 
-        if not isinstance(self.system, (sire_system)):
+        if not isinstance(self._system, (sire_system)):
             raise TypeError("System must be BioSimSpace or Sire system")
 
         self._set_platform(platform)
 
-        self.platform_options = self._set_platform_options()
+        self._platform_options = self._set_platform_options()
 
-        self.schedule = self.create_lambda_schedule()
+        self._schedule = self.create_lambda_schedule()
 
     def _set_platform(self, platform=None):
         """
@@ -58,12 +58,12 @@ class controller:
         if platform is not None:
             if platform not in ["CPU", "CUDA"]:
                 raise ValueError("Platform must be CPU or CUDA")
-            self.platform = platform
+            self._platform = platform
         else:
             if "CUDA_VISIBLE_DEVICES" in _os.environ:
-                self.platform = "GPU"
+                self._platform = "GPU"
             else:
-                self.platform = "CPU"
+                self._platform = "CPU"
 
     def _set_platform_options(self):
         """
@@ -76,20 +76,20 @@ class controller:
         """
         import os as _os
 
-        if self.platform == "CPU":
+        if self._platform == "CPU":
             num_cpu = _os.cpu_count()
             num_workers = 1
-            if self.num_lambda > num_cpu:
+            if self._num_lambda > num_cpu:
                 num_workers = num_cpu
                 cpu_per_worker = 1
             else:
-                num_workers = self.num_lambda
-                cpu_per_worker = num_cpu // self.num_lambda
+                num_workers = self._num_lambda
+                cpu_per_worker = num_cpu // self._num_lambda
             platform_options = {
                 "num_workers": num_workers,
                 "cpu_per_worker": cpu_per_worker,
             }
-        elif self.platform == "CUDA":
+        elif self._platform == "CUDA":
             devices = self.zero_CUDA_devices(self.get_CUDA_devices())
             self.create_gpu_pool()
             platform_options = {"num_workers": len(devices)}
@@ -107,7 +107,7 @@ class controller:
         from multiprocessing import Manager
 
         manager = Manager()
-        self.gpu_pool = manager.list(self.zero_CUDA_devices(self.get_CUDA_devices()))
+        self._gpu_pool = manager.list(self.zero_CUDA_devices(self.get_CUDA_devices()))
         self._lock = manager.Lock()
 
     def _update_gpu_pool(self, gpu_num):
@@ -119,7 +119,7 @@ class controller:
         gpu_num: str
             The GPU number to be added to the pool.
         """
-        self.gpu_pool.append(gpu_num)
+        self._gpu_pool.append(gpu_num)
 
     def _remove_gpu_from_pool(self, gpu_num):
         """
@@ -130,13 +130,13 @@ class controller:
         gpu_num: str
             The GPU number to be removed from the pool.
         """
-        self.gpu_pool.remove(gpu_num)
+        self._gpu_pool.remove(gpu_num)
 
     def get_platform(self):
         """
         Returns the platform to be used for simulations.
         """
-        return self.platform
+        return self._platform
 
     @staticmethod
     def create_lambda_schedule():
@@ -163,7 +163,7 @@ class controller:
         """
         Sets the lambda schedule for the simulation.
         """
-        self.schedule = self.create_lambda_schedule()
+        self._schedule = self.create_lambda_schedule()
 
     @staticmethod
     def get_CUDA_devices():
@@ -209,12 +209,12 @@ class controller:
 
         results = []
         with _futures.ProcessPoolExecutor(
-            max_workers=self.platform_options["num_workers"]
+            max_workers=self._platform_options["num_workers"]
         ) as executor:
             jobs = []
 
             lambda_values = [
-                i / (self.num_lambda - 1) for i in range(0, self.num_lambda)
+                i / (self._num_lambda - 1) for i in range(0, self._num_lambda)
             ]
             for lambda_value in lambda_values:
                 kwargs = {"lambda_value": lambda_value}
@@ -253,33 +253,33 @@ class controller:
 
             omm.getIntegrator().step(steps)
 
-        if self.platform == "CPU":
+        if self._platform == "CPU":
             print(
-                f"Running lambda = {lambda_value} using {self.platform_options['cpu_per_worker']} CPUs"
+                f"Running lambda = {lambda_value} using {self._platform_options['cpu_per_worker']} CPUs"
             )
             map = {
                 "integrator": "langevin_middle",
                 "temperature": 300 * kelvin,
-                "platform": self.platform,
-                "threads": self.platform_options["cpu_per_worker"],
+                "platform": self._platform,
+                "threads": self._platform_options["cpu_per_worker"],
             }
             steps = 10
-            run(self.system, self.schedule, map, steps, minimise=False)
+            run(self._system, self._schedule, map, steps, minimise=False)
             return f"Lambda = {lambda_value} complete"
 
-        elif self.platform == "CUDA":
+        elif self._platform == "CUDA":
             with self._lock:
-                gpu_num = self.gpu_pool[0]
+                gpu_num = self._gpu_pool[0]
                 self._remove_gpu_from_pool(gpu_num)
                 print(f"Running lambda = {lambda_value} on GPU {gpu_num}")
             map = {
                 "integrator": "langevin_middle",
                 "temperature": 300 * kelvin,
-                "platform": self.platform,
+                "platform": self._platform,
                 "device": gpu_num,
             }
             steps = 10
-            run(self.system, self.schedule, map, steps, minimise=False)
+            run(self._system, self._schedule, map, steps, minimise=False)
             with self._lock:
                 self._update_gpu_pool(gpu_num)
             return f"Lambda = {lambda_value} complete"
