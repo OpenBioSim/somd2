@@ -223,10 +223,18 @@ class controller:
                 result = job.result()
                 results.append(result)
                 print(result)
+            """temperatures = [i for i in range(200, 500, 50)]
+            for temperature in temperatures:
+                kwargs = {"lambda_value": None, "temperature": temperature}
+                jobs.append(executor.submit(self.run_single_simulation, **kwargs))
+            for job in _futures.as_completed(jobs):
+                result = job.result()
+                results.append(result)
+                print(result)"""
 
         return list(results)
 
-    def run_single_simulation(self, lambda_value):
+    def run_single_simulation(self, lambda_value, temperature=300):
         """
         Run a single simulation.
 
@@ -240,55 +248,75 @@ class controller:
         result: str
             The result of the simulation.
         """
-        from sire.convert import to
-        from openmm import LocalEnergyMinimizer
         from sire.units import kelvin
+        from _sire_merge_runsim import _merged_simulation
 
-        def run(system, schedule, map, steps, minimise=True):
-            omm = to(system, "openmm", map=map)
-            omm.set_lambda_schedule(schedule)
-            omm.set_lambda(lambda_value)
-            if minimise:
-                LocalEnergyMinimizer.minimize(omm)
-
-            omm.getIntegrator().step(steps)
+        self._system = self._system.clone()
+        # I strongly suspect there is some kind of system sharing happening here
+        # needs further investigation
+        # for mol in self._system.molecules("property is_perturbable"):
+        #    mol = mol.edit().add_link("coordinates", "coordinates0").commit()
+        #    self._system.update(mol)
 
         if self._platform == "CPU":
-            print(
-                f"Running lambda = {lambda_value} using {self._platform_options['cpu_per_worker']} CPUs"
-            )
+            if lambda_value is not None:
+                print(
+                    f"Running lambda = {lambda_value} using {self._platform_options['cpu_per_worker']} CPUs"
+                )
             map = {
                 "integrator": "langevin_middle",
-                "temperature": 300 * kelvin,
+                "temperature": temperature * kelvin,
                 "platform": self._platform,
                 "threads": self._platform_options["cpu_per_worker"],
             }
-            steps = 10
-            run(self._system, self._schedule, map, steps, minimise=False)
-            return f"Lambda = {lambda_value} complete"
+            # run_merged(self._system, lambda_value, map, minimise=False)
+            sim = _merged_simulation(
+                self._system,
+                map,
+                lambda_val=lambda_value,
+                minimise=False,
+                no_bookkeeping_time="2ps",
+            )
+            df = sim._run_with_bookkeeping(runtime="10ps")
+            print(df.head(10))
+            if lambda_value is not None:
+                return f"Lambda = {lambda_value} complete"
+            else:
+                return f"Temperature = {temperature} complete"
 
         elif self._platform == "CUDA":
             with self._lock:
                 gpu_num = self._gpu_pool[0]
                 self._remove_gpu_from_pool(gpu_num)
-                print(f"Running lambda = {lambda_value} on GPU {gpu_num}")
+                if lambda_value is not None:
+                    print(f"Running lambda = {lambda_value} on GPU {gpu_num}")
             map = {
                 "integrator": "langevin_middle",
-                "temperature": 300 * kelvin,
+                "temperature": temperature * kelvin,
                 "platform": self._platform,
                 "device": gpu_num,
             }
-            steps = 10
-            run(self._system, self._schedule, map, steps, minimise=False)
+            sim = _merged_simulation(
+                self._system,
+                map,
+                lambda_val=lambda_value,
+                minimise=False,
+                no_bookkeeping_time="2ps",
+            )
+            df = sim._run_with_bookkeeping(runtime="10ps")
             with self._lock:
                 self._update_gpu_pool(gpu_num)
-            return f"Lambda = {lambda_value} complete"
+            if lambda_value is not None:
+                return f"Lambda = {lambda_value} complete"
+            else:
+                return f"Temperature = {temperature} complete"
 
 
 if __name__ == "__main__":
     import sire as sr
 
     mols = sr.stream.load("merged_molecule.s3")
+    # mols = sr.load(sr.expand(sr.tutorial_url, "ala.top", "ala.crd"), silent=True)
     platform = "CPU"
     r = controller(mols, platform=platform, num_lambda=10)
     results = r.run_simulations()
