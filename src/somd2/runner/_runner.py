@@ -264,10 +264,10 @@ class controller:
                     f"Running lambda = {lambda_value} using {self._platform_options['cpu_per_worker']} CPUs"
                 )
             map = {
-                "integrator": "langevin_middle",
-                "temperature": temperature * kelvin,
-                "platform": self._platform,
-                "threads": self._platform_options["cpu_per_worker"],
+                "Integrator": "langevin_middle",
+                "Temperature": temperature * kelvin,
+                "Platform": self._platform,
+                "Threads": self._platform_options["cpu_per_worker"],
             }
             # run_merged(self._system, lambda_value, map, minimise=False)
             sim = _merged_simulation(
@@ -291,10 +291,10 @@ class controller:
                 if lambda_value is not None:
                     print(f"Running lambda = {lambda_value} on GPU {gpu_num}")
             map = {
-                "integrator": "langevin_middle",
-                "temperature": temperature * kelvin,
-                "platform": self._platform,
-                "device": gpu_num,
+                "Integrator": "langevin_middle",
+                "Temperature": temperature * kelvin,
+                "Platform": self._platform,
+                "Device": gpu_num,
             }
             sim = _merged_simulation(
                 self._system,
