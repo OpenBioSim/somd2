@@ -249,7 +249,7 @@ class controller:
             The result of the simulation.
         """
         from sire.units import kelvin
-        from _sire_merge_runsim import _merged_simulation
+        from _sire_merge_runsim import MergedSimulation
 
         self._system = self._system.clone()
         # I strongly suspect there is some kind of system sharing happening here
@@ -270,7 +270,7 @@ class controller:
                 "Threads": self._platform_options["cpu_per_worker"],
             }
             # run_merged(self._system, lambda_value, map, minimise=False)
-            sim = _merged_simulation(
+            sim = MergedSimulation(
                 self._system,
                 map,
                 lambda_val=lambda_value,
@@ -296,7 +296,7 @@ class controller:
                 "Platform": self._platform,
                 "Device": gpu_num,
             }
-            sim = _merged_simulation(
+            sim = MergedSimulation(
                 self._system,
                 map,
                 lambda_val=lambda_value,

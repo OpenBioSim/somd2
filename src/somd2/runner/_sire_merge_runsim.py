@@ -1,7 +1,7 @@
-__all__ = ["Merged_Simulation"]
+__all__ = ["MergedSimulation"]
 
 
-class Merged_Simulation:
+class MergedSimulation:
     """
     Class for controlling the running and bookkeeping of a single lambda value simulation
     Currently just a wrapper around sire dynamics
