@@ -274,7 +274,7 @@ class controller:
                 self._system,
                 map,
                 lambda_val=lambda_value,
-                minimise=False,
+                minimise=True,
                 no_bookkeeping_time="2ps",
             )
             df = sim._run_with_bookkeeping(runtime="10ps")
@@ -294,13 +294,13 @@ class controller:
                 "Integrator": "langevin_middle",
                 "Temperature": temperature * kelvin,
                 "Platform": self._platform,
-                "Device": gpu_num,
+                "device": gpu_num,
             }
             sim = MergedSimulation(
                 self._system,
                 map,
                 lambda_val=lambda_value,
-                minimise=False,
+                minimise=True,
                 no_bookkeeping_time="2ps",
             )
             df = sim._run_with_bookkeeping(runtime="10ps")

@@ -66,7 +66,7 @@ class MergedSimulation:
         self._minimise = minimise
         self._no_bookkeeping_only = no_bookkeeping_only
         self._no_bookeeping_time = no_bookkeeping_time
-        # self._setup_dynamics()
+        self._setup_dynamics()
         print("Here", flush=True)
 
     @staticmethod
@@ -156,7 +156,9 @@ class MergedSimulation:
         """
 
         if self._minimise:
-            self._system.minimisation(lambda_value=self._lambda_val).run().commit()
+            self._system = (
+                self._system.minimisation(lambda_value=self._lambda_val).run().commit()
+            )
 
         self._dyn = self._system.dynamics(
             timestep=timestep,
@@ -166,8 +168,6 @@ class MergedSimulation:
 
     def _run_no_bookkeeping(
         self,
-        runtime="10ps",
-        energy_frequency="0.05ps",
         frame_frequency="1ps",
         save_velocities=False,
     ):
@@ -186,10 +186,9 @@ class MergedSimulation:
             Timestep of the simulation
         """
         self._dyn.run(
-            runtime,
+            self._no_bookeeping_time,
             frame_frequency=frame_frequency,
             save_velocities=save_velocities,
-            energy_frequency=energy_frequency,
         )
         self._dyn.commit()
 
@@ -214,19 +213,8 @@ class MergedSimulation:
         timestep : str
             Timestep of the simulation
         """
-        self._dyn = self._system.dynamics(
-            timestep="2fs",
-            lambda_value=self._lambda_val,
-            temperature="300K",
-            map=self._map,
-        )
         if self._no_bookeeping_time is not None:
-            self._dyn.run(
-                self._no_bookeeping_time,
-                frame_frequency=frame_frequency,
-                save_velocities=save_velocities,
-            )
-            self._dyn.commit()
+            self._run_no_bookkeeping()
 
         def generate_lam_vals(lambda_base, increment):
             """Generate lambda values for a given lambda_base and increment"""
@@ -248,14 +236,14 @@ class MergedSimulation:
             save_velocities=save_velocities,
             auto_fix_minimise=False,
         )
-        self._dyn.commit()
+        self._system = self._dyn.commit()
         df = self._system.property("energy_trajectory").to_pandas()
 
         from scipy import constants as _const
         from sire import u as _u
 
         beta = 1.0 / (
-            (_const.gas_constant / 1000) * _u(self._map["temperature"]).to("K")
+            (_const.gas_constant / 1000) * _u(self._map["Temperature"]).to("K")
         )
         data = self.calculate_gradient(df, self._lambda_val, beta)
         return data
