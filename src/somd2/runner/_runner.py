@@ -213,10 +213,10 @@ class controller:
         ) as executor:
             jobs = []
 
-            lambda_values = [
+            self._lambda_values = [
                 i / (self._num_lambda - 1) for i in range(0, self._num_lambda)
             ]
-            for lambda_value in lambda_values:
+            for lambda_value in self._lambda_values:
                 kwargs = {"lambda_value": lambda_value}
                 jobs.append(executor.submit(self.run_single_simulation, **kwargs))
             for job in _futures.as_completed(jobs):
@@ -302,6 +302,7 @@ class controller:
                 lambda_val=lambda_value,
                 minimise=True,
                 no_bookkeeping_time="2ps",
+                lambda_array=self._lambda_values,
             )
             df = sim._run_with_bookkeeping(runtime="10ps")
             with self._lock:

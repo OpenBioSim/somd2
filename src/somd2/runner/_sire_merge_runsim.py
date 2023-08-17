@@ -14,6 +14,7 @@ class MergedSimulation:
         system,
         map,
         lambda_val,
+        lambda_array=None,
         increment=0.001,
         minimise=False,
         no_bookkeeping_only=False,
@@ -32,6 +33,10 @@ class MergedSimulation:
 
         lambda_val : float
             Lambda value for the simulation
+
+        lambda_array : list
+            List of lambda values to be used for perturbation, if none won't return
+            reduced perturbed energies
 
         increment : float
             Increment of lambda value - used for calculating the gradient
@@ -66,11 +71,12 @@ class MergedSimulation:
         self._minimise = minimise
         self._no_bookkeeping_only = no_bookkeeping_only
         self._no_bookeeping_time = no_bookkeeping_time
+        self._lambda_array = lambda_array
         self._setup_dynamics()
         print("Here", flush=True)
 
     @staticmethod
-    def calculate_gradient(df, base_lambda, beta):
+    def calculate_gradient_and_pert_energies(df, base_lambda, beta, lambda_array=None):
         """
         Calculates the gradient, along with forward and backward metropolis
           using energy values in the dataframe
@@ -81,18 +87,19 @@ class MergedSimulation:
             dataframe of energy values output from sire dynamics
 
         base_lambda : float
-            lambda value at which gradient is to be calculated
+            lambda value of the current simulation
+
+        lambda_array:
 
         beta : float
             Thermodynamic beta value
 
         Returns
         --------
-        df_final : pandas dataframe
+        df : pandas dataframe
             dataframe of energy values with gradient, forward and backward metropolis
-            values appended
+            values appended, as well as columns for lambda_array re-scaled to perturbation
         """
-
         import pandas as _pd
         import numpy as _np
 
@@ -100,8 +107,10 @@ class MergedSimulation:
         columns_lambdas = df.columns[
             _pd.to_numeric(df.columns, errors="coerce").to_series().notnull()
         ]
-        if len(columns_lambdas) > 3:
-            raise ValueError("More than 3 lambda values in the dataframe")
+        if len(columns_lambdas) > 3 and lambda_array is None:
+            raise ValueError(
+                "More than 3 lambda values in the dataframe..but no lambda array provided"
+            )
         try:
             lam_below = max(
                 [
@@ -122,6 +131,7 @@ class MergedSimulation:
             )
         except ValueError:
             lam_above = None
+        print(lam_above, lam_below)
         if lam_below is None:
             double_incr = (lam_above - base_lambda) * 2
             grad = (df[str(lam_above)] - df[str(base_lambda)]) * 2 / double_incr
@@ -144,11 +154,17 @@ class MergedSimulation:
         grad.name = "gradient"
         back_m.name = "backward_mc"
         forward_m.name = "forward_mc"
-        df_final = _pd.concat(
+
+        if lambda_array is not None:
+            df[[str(i) for i in lambda_array]] = df[
+                [str(i) for i in lambda_array]
+            ].apply(lambda x: x * -1 * beta)
+
+        df = _pd.concat(
             [df, _pd.DataFrame(grad), _pd.DataFrame(back_m), _pd.DataFrame(forward_m)],
             axis=1,
         )
-        return df_final
+        return df
 
     def _setup_dynamics(self, timestep="2fs"):
         """
@@ -232,7 +248,8 @@ class MergedSimulation:
             runtime,
             energy_frequency=energy_frequency,
             frame_frequency=frame_frequency,
-            lambda_windows=generate_lam_vals(self._lambda_val, self._increment),
+            lambda_windows=self._lambda_array
+            + generate_lam_vals(self._lambda_val, self._increment),
             save_velocities=save_velocities,
             auto_fix_minimise=False,
         )
@@ -245,5 +262,10 @@ class MergedSimulation:
         beta = 1.0 / (
             (_const.gas_constant / 1000) * _u(self._map["Temperature"]).to("K")
         )
-        data = self.calculate_gradient(df, self._lambda_val, beta)
+        data = self.calculate_gradient_and_pert_energies(
+            df,
+            self._lambda_val,
+            beta,
+            self._lambda_array,
+        )
         return data
