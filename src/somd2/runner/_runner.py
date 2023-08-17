@@ -252,11 +252,6 @@ class controller:
         from _sire_merge_runsim import MergedSimulation
 
         self._system = self._system.clone()
-        # I strongly suspect there is some kind of system sharing happening here
-        # needs further investigation
-        # for mol in self._system.molecules("property is_perturbable"):
-        #    mol = mol.edit().add_link("coordinates", "coordinates0").commit()
-        #    self._system.update(mol)
 
         if self._platform == "CPU":
             if lambda_value is not None:
