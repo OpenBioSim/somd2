@@ -73,7 +73,6 @@ class MergedSimulation:
         self._no_bookeeping_time = no_bookkeeping_time
         self._lambda_array = lambda_array
         self._setup_dynamics()
-        print("Here", flush=True)
 
     @staticmethod
     def calculate_gradient_and_pert_energies(df, base_lambda, beta, lambda_array=None):
@@ -131,7 +130,6 @@ class MergedSimulation:
             )
         except ValueError:
             lam_above = None
-        print(lam_above, lam_below)
         if lam_below is None:
             double_incr = (lam_above - base_lambda) * 2
             grad = (df[str(lam_above)] - df[str(base_lambda)]) * 2 / double_incr
@@ -188,6 +186,7 @@ class MergedSimulation:
         save_velocities=False,
     ):
         """
+        Placeholder for per-window equilibration.
         Run the simulation without bookkeeping
 
         Parameters

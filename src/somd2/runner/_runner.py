@@ -91,24 +91,28 @@ class controller:
             }
         elif self._platform == "CUDA":
             devices = self.zero_CUDA_devices(self.get_CUDA_devices())
-            self.create_gpu_pool()
             platform_options = {"num_workers": len(devices)}
 
         else:
             raise ValueError("Platform not recognised")
 
+        self._create_shared_resources()
+
         return platform_options
 
-    def create_gpu_pool(self):
+    def _create_shared_resources(self):
         """
         Creates shared list that holds currently available GPUs.
         Also intialises the list with all available GPUs.
         """
-        from multiprocessing import Manager
+        if self._platform == "CUDA":
+            from multiprocessing import Manager
 
-        manager = Manager()
-        self._gpu_pool = manager.list(self.zero_CUDA_devices(self.get_CUDA_devices()))
-        self._lock = manager.Lock()
+            manager = Manager()
+            self._lock = manager.Lock()
+            self._gpu_pool = manager.list(
+                self.zero_CUDA_devices(self.get_CUDA_devices())
+            )
 
     def _update_gpu_pool(self, gpu_num):
         """
@@ -207,7 +211,7 @@ class controller:
 
         import concurrent.futures as _futures
 
-        results = []
+        results = {}
         with _futures.ProcessPoolExecutor(
             max_workers=self._platform_options["num_workers"]
         ) as executor:
@@ -220,19 +224,10 @@ class controller:
                 kwargs = {"lambda_value": lambda_value}
                 jobs.append(executor.submit(self.run_single_simulation, **kwargs))
             for job in _futures.as_completed(jobs):
-                result = job.result()
-                results.append(result)
-                print(result)
-            """temperatures = [i for i in range(200, 500, 50)]
-            for temperature in temperatures:
-                kwargs = {"lambda_value": None, "temperature": temperature}
-                jobs.append(executor.submit(self.run_single_simulation, **kwargs))
-            for job in _futures.as_completed(jobs):
-                result = job.result()
-                results.append(result)
-                print(result)"""
+                lambda_val, result = job.result()
+                results[str(lambda_val)] = result
 
-        return list(results)
+        return results
 
     def run_single_simulation(self, lambda_value, temperature=300):
         """
@@ -248,22 +243,22 @@ class controller:
         result: str
             The result of the simulation.
         """
-        from sire.units import kelvin
+        from sire.units import kelvin, atm
         from _sire_merge_runsim import MergedSimulation
 
-        self._system = self._system.clone()
-
+        # set all properties not specific to platform
+        map = {
+            "Integrator": "langevin_middle",
+            "Temperature": temperature * kelvin,
+            "Pressure": 1.0 * atm,
+        }
         if self._platform == "CPU":
             if lambda_value is not None:
                 print(
                     f"Running lambda = {lambda_value} using {self._platform_options['cpu_per_worker']} CPUs"
                 )
-            map = {
-                "Integrator": "langevin_middle",
-                "Temperature": temperature * kelvin,
-                "Platform": self._platform,
-                "Threads": self._platform_options["cpu_per_worker"],
-            }
+            map["Platform"] = self._platform
+            map["Threads"] = self._platform_options["cpu_per_worker"]
             # run_merged(self._system, lambda_value, map, minimise=False)
             sim = MergedSimulation(
                 self._system,
@@ -273,7 +268,6 @@ class controller:
                 no_bookkeeping_time="2ps",
             )
             df = sim._run_with_bookkeeping(runtime="10ps")
-            print(df.head(10))
             if lambda_value is not None:
                 return f"Lambda = {lambda_value} complete"
             else:
@@ -285,12 +279,8 @@ class controller:
                 self._remove_gpu_from_pool(gpu_num)
                 if lambda_value is not None:
                     print(f"Running lambda = {lambda_value} on GPU {gpu_num}")
-            map = {
-                "Integrator": "langevin_middle",
-                "Temperature": temperature * kelvin,
-                "Platform": self._platform,
-                "device": gpu_num,
-            }
+            map["Platform"] = (self._platform,)
+            map["device"] = (gpu_num,)
             sim = MergedSimulation(
                 self._system,
                 map,
@@ -302,18 +292,48 @@ class controller:
             df = sim._run_with_bookkeeping(runtime="10ps")
             with self._lock:
                 self._update_gpu_pool(gpu_num)
-            if lambda_value is not None:
-                return f"Lambda = {lambda_value} complete"
-            else:
-                return f"Temperature = {temperature} complete"
+            return lambda_value, df
+
+
+def dataframe_to_parquet(df, metadata):
+    """
+    Save a dataframe to parquet format with custom metadata.
+
+    Parameters:
+    -----------
+    df: pandas.DataFrame`
+        The dataframe to be saved. In this case containing info required for FEP calculation
+
+    metadata: dict
+        Dictionary containing metadata to be saved with the dataframe.
+        Currently just temperature and lambda value.
+    """
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    import json
+
+    custom_meta_key = "SOMD2.iot"
+
+    table = pa.Table.from_pandas(df)
+    custom_meta_json = json.dumps(metadata)
+    existing_meta = table.schema.metadata
+
+    combined_meta = {
+        custom_meta_key.encode(): custom_meta_json.encode(),
+        **existing_meta,
+    }
+    table = table.replace_schema_metadata(combined_meta)
+    filename = f"Lam_{metadata['lambda'].replace('.','')[:5]}_T_{metadata['temperature']}.parquet"
+    pq.write_table(table, filename)
 
 
 if __name__ == "__main__":
     import sire as sr
 
     mols = sr.stream.load("merged_molecule.s3")
-    # mols = sr.load(sr.expand(sr.tutorial_url, "ala.top", "ala.crd"), silent=True)
     platform = "CPU"
     r = controller(mols, platform=platform, num_lambda=10)
     results = r.run_simulations()
-    print(results)
+    for key, dataframe in results.items():
+        dataframe_to_parquet(dataframe, metadata={"lambda": key, "temperature": 300})
