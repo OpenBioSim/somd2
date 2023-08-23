@@ -257,7 +257,7 @@ class controller:
                 print(
                     f"Running lambda = {lambda_value} using {self._platform_options['cpu_per_worker']} CPUs"
                 )
-            map["Platform"] = self._platform
+            map["platform"] = self._platform
             map["Threads"] = self._platform_options["cpu_per_worker"]
             # run_merged(self._system, lambda_value, map, minimise=False)
             sim = MergedSimulation(
@@ -279,7 +279,7 @@ class controller:
                 self._remove_gpu_from_pool(gpu_num)
                 if lambda_value is not None:
                     print(f"Running lambda = {lambda_value} on GPU {gpu_num}")
-            map["Platform"] = (self._platform,)
+            map["platform"] = (self._platform,)
             map["device"] = (gpu_num,)
             sim = MergedSimulation(
                 self._system,

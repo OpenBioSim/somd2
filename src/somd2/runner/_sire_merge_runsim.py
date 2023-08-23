@@ -74,96 +74,6 @@ class MergedSimulation:
         self._lambda_array = lambda_array
         self._setup_dynamics()
 
-    @staticmethod
-    def calculate_gradient_and_pert_energies(df, base_lambda, beta, lambda_array=None):
-        """
-        Calculates the gradient, along with forward and backward metropolis
-          using energy values in the dataframe
-
-        Parameters
-        ----------
-        df : pandas dataframe
-            dataframe of energy values output from sire dynamics
-
-        base_lambda : float
-            lambda value of the current simulation
-
-        lambda_array:
-
-        beta : float
-            Thermodynamic beta value
-
-        Returns
-        --------
-        df : pandas dataframe
-            dataframe of energy values with gradient, forward and backward metropolis
-            values appended, as well as columns for lambda_array re-scaled to perturbation
-        """
-        import pandas as _pd
-        import numpy as _np
-
-        df = df.copy()
-        columns_lambdas = df.columns[
-            _pd.to_numeric(df.columns, errors="coerce").to_series().notnull()
-        ]
-        if len(columns_lambdas) > 3 and lambda_array is None:
-            raise ValueError(
-                "More than 3 lambda values in the dataframe..but no lambda array provided"
-            )
-        try:
-            lam_below = max(
-                [
-                    float(lambda_val)
-                    for lambda_val in columns_lambdas
-                    if float(lambda_val) < float(base_lambda)
-                ]
-            )
-        except ValueError:
-            lam_below = None
-        try:
-            lam_above = min(
-                [
-                    float(lambda_val)
-                    for lambda_val in columns_lambdas
-                    if float(lambda_val) > float(base_lambda)
-                ]
-            )
-        except ValueError:
-            lam_above = None
-        if lam_below is None:
-            double_incr = (lam_above - base_lambda) * 2
-            grad = (df[str(lam_above)] - df[str(base_lambda)]) * 2 / double_incr
-            back_m = _np.exp(beta * (df[str(lam_above)] - df[str(base_lambda)]))
-            forward_m = _np.exp(
-                -1 * beta * (df[str(lam_above)] - df[str(base_lambda)])
-            )  # just 1/back_m?
-        elif lam_above is None:
-            double_incr = (base_lambda - lam_below) * 2
-            grad = (df[str(base_lambda)] - df[str(lam_below)]) * 2 / double_incr
-            back_m = _np.exp(-1 * beta * (df[str(lam_below)] - df[str(base_lambda)]))
-            forward_m = _np.exp(beta * (df[str(lam_below)] - df[str(base_lambda)]))
-
-        else:
-            double_incr = lam_above - lam_below
-            grad = (df[str(lam_above)] - df[str(lam_below)]) / double_incr
-            back_m = _np.exp(beta * (df[str(base_lambda)] - df[str(lam_below)]))
-            forward_m = _np.exp(beta * (df[str(base_lambda)] - df[str(lam_above)]))
-
-        grad.name = "gradient"
-        back_m.name = "backward_mc"
-        forward_m.name = "forward_mc"
-
-        if lambda_array is not None:
-            df[[str(i) for i in lambda_array]] = df[
-                [str(i) for i in lambda_array]
-            ].apply(lambda x: x * -1 * beta)
-
-        df = _pd.concat(
-            [df, _pd.DataFrame(grad), _pd.DataFrame(back_m), _pd.DataFrame(forward_m)],
-            axis=1,
-        )
-        return df
-
     def _setup_dynamics(self, timestep="2fs"):
         """
         Minimise if needed and then setup dynamics object
@@ -227,6 +137,12 @@ class MergedSimulation:
 
         timestep : str
             Timestep of the simulation
+
+        Returns
+        -------
+        df : pandas dataframe
+            Dataframe containing the sire energy
+            trajectory
         """
         if self._no_bookeeping_time is not None:
             self._run_no_bookkeeping()
@@ -254,17 +170,4 @@ class MergedSimulation:
         )
         self._system = self._dyn.commit()
         df = self._system.property("energy_trajectory").to_pandas()
-
-        from scipy import constants as _const
-        from sire import u as _u
-
-        beta = 1.0 / (
-            (_const.gas_constant / 1000) * _u(self._map["Temperature"]).to("K")
-        )
-        data = self.calculate_gradient_and_pert_energies(
-            df,
-            self._lambda_val,
-            beta,
-            self._lambda_array,
-        )
-        return data
+        return df
