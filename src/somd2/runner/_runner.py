@@ -279,7 +279,7 @@ class controller:
                 self._remove_gpu_from_pool(gpu_num)
                 if lambda_value is not None:
                     print(f"Running lambda = {lambda_value} on GPU {gpu_num}")
-            map["platform"] = (self._platform,)
+            map["Platform"] = (self._platform,)
             map["device"] = (gpu_num,)
             sim = MergedSimulation(
                 self._system,
@@ -331,8 +331,8 @@ def dataframe_to_parquet(df, metadata):
 if __name__ == "__main__":
     import sire as sr
 
-    mols = sr.stream.load("merged_molecule.s3")
-    platform = "CPU"
+    mols = sr.stream.load("Methane_Ethane_solv.bss")
+    platform = "CUDA"
     r = controller(mols, platform=platform, num_lambda=10)
     results = r.run_simulations()
     for key, dataframe in results.items():
