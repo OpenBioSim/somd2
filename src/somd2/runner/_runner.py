@@ -61,7 +61,7 @@ class controller:
             self._platform = platform
         else:
             if "CUDA_VISIBLE_DEVICES" in _os.environ:
-                self._platform = "GPU"
+                self._platform = "CUDA"
             else:
                 self._platform = "CPU"
 
