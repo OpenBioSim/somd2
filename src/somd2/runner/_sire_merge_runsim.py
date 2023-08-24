@@ -58,8 +58,7 @@ class MergedSimulation:
         except KeyError:
             raise KeyError("No perturbable molecules in the system")
 
-        # Cloning might not be needed as its already done by sire dynamics
-        self._system = system.clone()
+        self._system = system
         try:
             self._system.molecules("property is_perturbable")
         except KeyError:
@@ -72,7 +71,6 @@ class MergedSimulation:
         self._no_bookkeeping_only = no_bookkeeping_only
         self._no_bookeeping_time = no_bookkeeping_time
         self._lambda_array = lambda_array
-        self._setup_dynamics()
 
     def _setup_dynamics(self, timestep="2fs"):
         """
@@ -144,6 +142,7 @@ class MergedSimulation:
             Dataframe containing the sire energy
             trajectory
         """
+        self._setup_dynamics()
         if self._no_bookeeping_time is not None:
             self._run_no_bookkeeping()
 
@@ -159,15 +158,23 @@ class MergedSimulation:
                 lam_vals = [lambda_base - increment, lambda_base + increment]
             return lam_vals
 
-        self._dyn.run(
-            runtime,
-            energy_frequency=energy_frequency,
-            frame_frequency=frame_frequency,
-            lambda_windows=self._lambda_array
-            + generate_lam_vals(self._lambda_val, self._increment),
-            save_velocities=save_velocities,
-            auto_fix_minimise=False,
-        )
+        if self._lambda_array is None:
+            lam_arr = generate_lam_vals(self._lambda_val, self._increment)
+        else:
+            lam_arr = self._lambda_array + generate_lam_vals(
+                self._lambda_val, self._increment
+            )
+        try:
+            self._dyn.run(
+                runtime,
+                energy_frequency=energy_frequency,
+                frame_frequency=frame_frequency,
+                lambda_windows=lam_arr,
+                save_velocities=save_velocities,
+                auto_fix_minimise=False,
+            )
+        except Exception:
+            raise
         self._system = self._dyn.commit()
         df = self._system.property("energy_trajectory").to_pandas()
         return df

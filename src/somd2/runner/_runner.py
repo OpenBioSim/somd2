@@ -211,21 +211,26 @@ class controller:
 
         import concurrent.futures as _futures
 
-        results = {}
+        results = []
         with _futures.ProcessPoolExecutor(
             max_workers=self._platform_options["num_workers"]
         ) as executor:
-            jobs = []
-
             self._lambda_values = [
-                i / (self._num_lambda - 1) for i in range(0, self._num_lambda)
+                i / (self._num_lambda) for i in range(0, self._num_lambda + 1)
             ]
             for lambda_value in self._lambda_values:
                 kwargs = {"lambda_value": lambda_value}
-                jobs.append(executor.submit(self.run_single_simulation, **kwargs))
+                jobs = {
+                    executor.submit(self.run_single_simulation, **kwargs): lambda_value
+                }
             for job in _futures.as_completed(jobs):
-                lambda_val, result = job.result()
-                results[str(lambda_val)] = result
+                lam = jobs[job]
+                try:
+                    result = job.result()
+                except Exception as exc:
+                    print(f"{lam} generated an exception: {exc}")
+                else:
+                    results.append(result)
 
         return results
 
@@ -252,26 +257,25 @@ class controller:
             "Temperature": temperature * kelvin,
             "Pressure": 1.0 * atm,
         }
+        system = self._system.clone()
         if self._platform == "CPU":
             if lambda_value is not None:
                 print(
                     f"Running lambda = {lambda_value} using {self._platform_options['cpu_per_worker']} CPUs"
                 )
-            map["platform"] = self._platform
+            map["Platform"] = self._platform
             map["Threads"] = self._platform_options["cpu_per_worker"]
-            # run_merged(self._system, lambda_value, map, minimise=False)
-            sim = MergedSimulation(
-                self._system,
-                map,
-                lambda_val=lambda_value,
-                minimise=True,
-                no_bookkeeping_time="2ps",
-            )
-            df = sim._run_with_bookkeeping(runtime="10ps")
-            if lambda_value is not None:
-                return f"Lambda = {lambda_value} complete"
-            else:
-                return f"Temperature = {temperature} complete"
+            try:
+                sim = MergedSimulation(
+                    system,
+                    map,
+                    lambda_val=lambda_value,
+                    minimise=True,
+                    no_bookkeeping_time="2ps",
+                )
+                df = sim._run_with_bookkeeping(runtime="10ps")
+            except Exception as e:
+                return e
 
         elif self._platform == "CUDA":
             with self._lock:
@@ -281,59 +285,78 @@ class controller:
                     print(f"Running lambda = {lambda_value} on GPU {gpu_num}")
             map["Platform"] = (self._platform,)
             map["device"] = (gpu_num,)
-            sim = MergedSimulation(
-                self._system,
-                map,
-                lambda_val=lambda_value,
-                minimise=True,
-                no_bookkeeping_time="2ps",
-                lambda_array=self._lambda_values,
-            )
-            df = sim._run_with_bookkeeping(runtime="10ps")
-            with self._lock:
-                self._update_gpu_pool(gpu_num)
-            return lambda_value, df
 
+            try:
+                sim = MergedSimulation(
+                    system,
+                    map,
+                    lambda_val=lambda_value,
+                    minimise=True,
+                    no_bookkeeping_time="2ps",
+                    lambda_array=self._lambda_values,
+                )
+            except Exception:
+                print(f"Lambda = {lambda_value} failed to initialise", flush=True)
+                raise
+            try:
+                df = sim._run_with_bookkeeping(runtime="10ps")
+            except Exception:
+                with self._lock:
+                    self._update_gpu_pool(gpu_num)
+                    print(f"Lambda = {lambda_value} failed", flush=True)
+                raise
+            else:
+                with self._lock:
+                    self._update_gpu_pool(gpu_num)
+                    print(f"Lambda = {lambda_value} complete", flush=True)
 
-def dataframe_to_parquet(df, metadata):
-    """
-    Save a dataframe to parquet format with custom metadata.
+        self.dataframe_to_parquet(
+            df,
+            metadata={
+                "lambda": str(lambda_value),
+                "temperature": str(map["Temperature"].value()),
+            },
+        )
+        return f"Lambda = {lambda_value} complete"
 
-    Parameters:
-    -----------
-    df: pandas.DataFrame`
-        The dataframe to be saved. In this case containing info required for FEP calculation
+    @staticmethod
+    def dataframe_to_parquet(df, metadata):
+        """
+        Save a dataframe to parquet format with custom metadata.
 
-    metadata: dict
-        Dictionary containing metadata to be saved with the dataframe.
-        Currently just temperature and lambda value.
-    """
+        Parameters:
+        -----------
+        df: pandas.DataFrame`
+            The dataframe to be saved. In this case containing info required for FEP calculation
 
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-    import json
+        metadata: dict
+            Dictionary containing metadata to be saved with the dataframe.
+            Currently just temperature and lambda value.
+        """
 
-    custom_meta_key = "SOMD2.iot"
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+        import json
 
-    table = pa.Table.from_pandas(df)
-    custom_meta_json = json.dumps(metadata)
-    existing_meta = table.schema.metadata
+        custom_meta_key = "SOMD2.iot"
 
-    combined_meta = {
-        custom_meta_key.encode(): custom_meta_json.encode(),
-        **existing_meta,
-    }
-    table = table.replace_schema_metadata(combined_meta)
-    filename = f"Lam_{metadata['lambda'].replace('.','')[:5]}_T_{metadata['temperature']}.parquet"
-    pq.write_table(table, filename)
+        table = pa.Table.from_pandas(df)
+        custom_meta_json = json.dumps(metadata)
+        existing_meta = table.schema.metadata
+
+        combined_meta = {
+            custom_meta_key.encode(): custom_meta_json.encode(),
+            **existing_meta,
+        }
+        table = table.replace_schema_metadata(combined_meta)
+        filename = f"Lam_{metadata['lambda'].replace('.','')[:5]}_T_{metadata['temperature']}.parquet"
+        pq.write_table(table, filename)
 
 
 if __name__ == "__main__":
     import sire as sr
 
-    mols = sr.stream.load("Methane_Ethane_solv.bss")
-    platform = "CUDA"
+    mols = sr.stream.load("merged_molecule.s3")
+    platform = "CPU"
     r = controller(mols, platform=platform, num_lambda=10)
     results = r.run_simulations()
-    for key, dataframe in results.items():
-        dataframe_to_parquet(dataframe, metadata={"lambda": key, "temperature": 300})
