@@ -227,8 +227,8 @@ class controller:
                 lam = jobs[job]
                 try:
                     result = job.result()
-                except Exception as exc:
-                    print(f"{lam} generated an exception: {exc}")
+                except Exception:
+                    pass
                 else:
                     results.append(result)
 
@@ -243,6 +243,9 @@ class controller:
         lambda_value: float
             The lambda value for the simulation.
 
+        temperature: float
+            The temperature for the simulation.
+
         Returns:
         --------
         result: str
@@ -250,6 +253,54 @@ class controller:
         """
         from sire.units import kelvin, atm
         from _sire_merge_runsim import MergedSimulation
+        from loguru import logger as _logger
+
+        def _run(system, map, lambda_value, lam_minimisation=None):
+            if lam_minimisation is None:
+                try:
+                    sim = MergedSimulation(
+                        system,
+                        map,
+                        lambda_val=lambda_value,
+                        minimise=True,
+                        no_bookkeeping_time="2ps",
+                    )
+                except Exception:
+                    _logger.warning(f"System creation at {lambda_value} failed")
+                    raise
+                try:
+                    sim._setup_dynamics(lam_val_min=lam_minimisation)
+                    df = sim._run_with_bookkeeping(runtime="10ps")
+                except Exception:
+                    _logger.warning(
+                        f"Minimisation/dynamics at Lambda = {lambda_value} failed, trying again with minimsation at Lambda = {lam_minimisation}"
+                    )
+                    df = _run(system, map, lambda_value, lam_minimisation=0.0)
+                    return df
+                else:
+                    return df
+            else:
+                try:
+                    sim = MergedSimulation(
+                        system,
+                        map,
+                        lambda_val=lambda_value,
+                        minimise=True,
+                        no_bookkeeping_time="2ps",
+                    )
+                except Exception:
+                    _logger.warning(f"System creation at {lambda_value} failed")
+                    raise
+                try:
+                    sim._setup_dynamics(lam_val_min=lam_minimisation)
+                    df = sim._run_with_bookkeeping(runtime="10ps")
+                except Exception:
+                    _logger.error(
+                        f"Minimisation/dynamics at Lambda = {lambda_value} failed, even after minimisation at Lambda = {lam_minimisation}"
+                    )
+                    raise
+                else:
+                    return df
 
         # set all properties not specific to platform
         map = {
@@ -258,6 +309,7 @@ class controller:
             "Pressure": 1.0 * atm,
         }
         system = self._system.clone()
+
         if self._platform == "CPU":
             if lambda_value is not None:
                 print(
@@ -266,16 +318,9 @@ class controller:
             map["Platform"] = self._platform
             map["Threads"] = self._platform_options["cpu_per_worker"]
             try:
-                sim = MergedSimulation(
-                    system,
-                    map,
-                    lambda_val=lambda_value,
-                    minimise=True,
-                    no_bookkeeping_time="2ps",
-                )
-                df = sim._run_with_bookkeeping(runtime="10ps")
-            except Exception as e:
-                return e
+                df = _run(system, map, lambda_value=lambda_value)
+            except Exception:
+                raise
 
         elif self._platform == "CUDA":
             with self._lock:
@@ -287,19 +332,7 @@ class controller:
             map["device"] = (gpu_num,)
 
             try:
-                sim = MergedSimulation(
-                    system,
-                    map,
-                    lambda_val=lambda_value,
-                    minimise=True,
-                    no_bookkeeping_time="2ps",
-                    lambda_array=self._lambda_values,
-                )
-            except Exception:
-                print(f"Lambda = {lambda_value} failed to initialise", flush=True)
-                raise
-            try:
-                df = sim._run_with_bookkeeping(runtime="10ps")
+                df = _run(system, map, lambda_value=lambda_value)
             except Exception:
                 with self._lock:
                     self._update_gpu_pool(gpu_num)

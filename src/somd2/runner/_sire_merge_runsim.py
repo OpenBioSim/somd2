@@ -72,15 +72,31 @@ class MergedSimulation:
         self._no_bookeeping_time = no_bookkeeping_time
         self._lambda_array = lambda_array
 
-    def _setup_dynamics(self, timestep="2fs"):
+    def _setup_dynamics(self, timestep="2fs", lam_val_min=None):
         """
         Minimise if needed and then setup dynamics object
+
+        Parameters
+        ----------
+        timestep : str
+            Timestep of the simulation
+
+        lam_val_min : float
+            Lambda value aat which to run minimisation,
+            if None run at pre-set lambda_val
         """
 
         if self._minimise:
-            self._system = (
-                self._system.minimisation(lambda_value=self._lambda_val).run().commit()
-            )
+            if lam_val_min is None:
+                self._system = (
+                    self._system.minimisation(lambda_value=self._lambda_val)
+                    .run()
+                    .commit()
+                )
+            else:
+                self._system = (
+                    self._system.minimisation(lambda_value=lam_val_min).run().commit()
+                )
 
         self._dyn = self._system.dynamics(
             timestep=timestep,
@@ -142,7 +158,6 @@ class MergedSimulation:
             Dataframe containing the sire energy
             trajectory
         """
-        self._setup_dynamics()
         if self._no_bookeeping_time is not None:
             self._run_no_bookkeeping()
 
