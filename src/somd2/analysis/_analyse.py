@@ -27,26 +27,49 @@ class analyse_single_lambda:
 
         self._meta_key = custom_meta_key
 
-        self._parquet_to_Dataframe()
+        self._dataframe, self._metadata = self.parquet_to_dataframe(
+            self._parquet_file, self._meta_key
+        )
+        print(self._metadata)
 
-    def _parquet_to_Dataframe(self):
+    @staticmethod
+    def parquet_to_dataframe(filepath, meta_key="SOMD2.iot"):
+        """
+        Reads a parquet file containing an energy trajectory,
+        extracts the trajectory as a dataframe and the metadata as a
+        dictionary
+
+        parameters
+        ----------
+        filepath : str
+            Path to the parquet file containing the energy trajectory
+
+        meta_key : str
+            Key of the metadata to be used for analysis
+
+        returns
+        -------
+        restored_df : pandas dataframe
+            Dataframe containing the energy trajectory
+
+        restored_meta : dict
+            Dictionary containing the metadata for the simulation"""
         import pyarrow.parquet as _pq
         import json as _json
 
         try:
-            restored_table = _pq.read_table(self._parquet_file)
+            restored_table = _pq.read_table(filepath)
         except:
             raise ValueError("Unable to read parquet file")
         restored_df = restored_table.to_pandas()
         try:
-            restored_meta_json = restored_table.schema.metadata[self._meta_key.encode()]
+            restored_meta_json = restored_table.schema.metadata[meta_key.encode()]
         except KeyError:
-            raise KeyError("No metadata with key {} found".format(self._meta_key))
+            raise KeyError("No metadata with key {} found".format(meta_key))
         restored_meta = _json.loads(restored_meta_json)
         if not all(key in restored_meta for key in ["lambda", "temperature"]):
             raise KeyError("No lambda and/or temperature found in metadata")
-        self._dataframe = restored_df
-        self._metadata = restored_meta
+        return restored_df, restored_meta
 
     def analyse(self):
         """
@@ -71,9 +94,10 @@ class analyse_single_lambda:
         from sire import u as _u
         from sire.units import kelvin as _kelvin
 
+        print(self._metadata["temperature"])
         self._beta = 1.0 / (
             (_const.gas_constant / 1000)
-            * _u(self._metadata["temperature"] * _kelvin).to("K")
+            * _u(float(self._metadata["temperature"]) * _kelvin).to("K")
         )
 
     @staticmethod
@@ -90,10 +114,12 @@ class analyse_single_lambda:
         base_lambda : float
             lambda value of the current simulation
 
-        lambda_array:
-
         beta : float
             Thermodynamic beta value
+
+        lambda_array:
+            Array of lambda values used accross all simulations,
+            required for MBAR analysis
 
         Returns
         --------
@@ -235,7 +261,7 @@ class Analyse_all:
             time = list(dataframe["time"])
         except KeyError:
             time = list(dataframe.index)
-        lam = len(time) * metadata["lambda"]
+        lam = len(time) * [float(metadata["lambda"])]
         import pandas as _pd
 
         # Create a multi-index from the two lists
@@ -286,16 +312,19 @@ class Analyse_all:
     def analyse_all(self):
         """
         Function to call analyse on all parquet files in the directory
+        returns a list of dataframes that is sorted and ready to be used
+        by alchemlyb
         """
-        extracted_list = []  # list of lists to store extracted data, needs to be sorted
-        # and returned as a list containing only dataframes
+        extracted_dict = (
+            {}
+        )  # dict to store extracted data, needs to be sorted, python 3.7+ required
         lam_array = None  # Used to check that all lambda arrays match
         for parquet_file in self._parquet_files:
             temp = analyse_single_lambda(parquet_file, self._custom_meta_key)
             analysed = temp.analyse()
             meta = temp.get_metadata()
             lam_curr = float(meta["lambda"])
-            if self._method == "TI":
+            if self._method == "MBAR":
                 if lam_array is None:
                     lam_array = meta["lambda_array"]
                 else:
@@ -303,10 +332,13 @@ class Analyse_all:
                         raise ValueError(
                             "Lambda arrays do not match across all simulations"
                         )
-                extracted_list.append([lam_curr, self.extract_data_TI(analysed, meta)])
-            elif self._method == "MBAR":
-                extracted_list.append(
-                    [lam_curr, self.extract_data_MBAR(analysed, meta)]
-                )
-        extracted_data = [l[1] for l in extracted_list.sort()]
-        self._extracted_data = extracted_data
+                extracted_dict[lam_curr] = self.extract_data_MBAR(
+                    analysed, meta
+                ).dropna()
+            elif self._method == "TI":
+                extracted_dict[lam_curr] = self.extract_data_TI(analysed, meta).dropna()
+
+        s = dict(sorted(extracted_dict.items()))
+        data = list(s.values())
+
+        return data
