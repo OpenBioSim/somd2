@@ -252,7 +252,7 @@ class controller:
             The result of the simulation.
         """
         from sire.units import kelvin, atm
-        from _sire_merge_runsim import MergedSimulation
+        from ._sire_merge_runsim import MergedSimulation
         from loguru import logger as _logger
 
         def _run(system, map, lambda_value, lam_minimisation=None):
