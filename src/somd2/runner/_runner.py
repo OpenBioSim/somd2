@@ -208,7 +208,7 @@ class controller:
         --------
         results (list): List of simulation results.
         """
-
+        print("here")
         import concurrent.futures as _futures
 
         results = []
@@ -227,7 +227,8 @@ class controller:
                 lam = jobs[job]
                 try:
                     result = job.result()
-                except Exception:
+                except Exception as e:
+                    print(e)
                     pass
                 else:
                     results.append(result)
@@ -262,6 +263,7 @@ class controller:
                         system,
                         map,
                         lambda_val=lambda_value,
+                        lambda_array=self._lambda_values,
                         minimise=True,
                         no_bookkeeping_time="2ps",
                     )
@@ -285,6 +287,7 @@ class controller:
                         system,
                         map,
                         lambda_val=lambda_value,
+                        lambda_array=self._lambda_values,
                         minimise=True,
                         no_bookkeeping_time="2ps",
                     )
@@ -348,6 +351,7 @@ class controller:
             metadata={
                 "lambda": str(lambda_value),
                 "temperature": str(map["Temperature"].value()),
+                "lambda_array": self._lambda_values,
             },
         )
         return f"Lambda = {lambda_value} complete"
@@ -389,7 +393,7 @@ class controller:
 if __name__ == "__main__":
     import sire as sr
 
-    mols = sr.stream.load("merged_molecule.s3")
-    platform = "CPU"
+    mols = sr.stream.load("Methane_Ethane_direct.bss")
+    platform = "CUDA"
     r = controller(mols, platform=platform, num_lambda=10)
     results = r.run_simulations()
