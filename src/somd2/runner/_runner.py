@@ -26,7 +26,9 @@ class controller:
         """
         self._system = system
         self._num_lambda = num_lambda
-
+        self._options_set = (
+            False  # Will track if simulation options have been set by the user
+        )
         # import BioSimSpace as _BSS
         from sire.system import System as sire_system
 
@@ -216,7 +218,7 @@ class controller:
             max_workers=self._platform_options["num_workers"]
         ) as executor:
             self._lambda_values = [
-                i / (self._num_lambda) for i in range(0, self._num_lambda + 1)
+                round(i / (self._num_lambda - 1), 5) for i in range(0, self._num_lambda)
             ]
             for lambda_value in self._lambda_values:
                 kwargs = {"lambda_value": lambda_value}
