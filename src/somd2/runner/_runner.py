@@ -192,7 +192,8 @@ class controller:
     @staticmethod
     def zero_CUDA_devices(devices):
         """
-        Set all device numbers relative to the lowest (the device number becomes equal to its index in the list).
+        Set all device numbers relative to the lowest
+        (the device number becomes equal to its index in the list).
 
         Returns:
         --------
@@ -208,7 +209,6 @@ class controller:
         --------
         results (list): List of simulation results.
         """
-        print("here")
         import concurrent.futures as _futures
 
         results = []
@@ -307,10 +307,15 @@ class controller:
 
         # set all properties not specific to platform
         map = {
-            "Integrator": "langevin_middle",
-            "Temperature": temperature * kelvin,
-            "Pressure": 1.0 * atm,
+            "integrator": "langevin_middle",
+            "temperature": temperature * kelvin,
         }
+        # Pressure control. Only set if the system has a periodic space.
+        if (
+            self._system.has_property("space")
+            and self._system.property("space").is_periodic()
+        ):
+            map["pressure"] = 1.0 * atm
         system = self._system.clone()
 
         if self._platform == "CPU":
@@ -318,8 +323,8 @@ class controller:
                 print(
                     f"Running lambda = {lambda_value} using {self._platform_options['cpu_per_worker']} CPUs"
                 )
-            map["Platform"] = self._platform
-            map["Threads"] = self._platform_options["cpu_per_worker"]
+            map["platform"] = self._platform
+            map["threads"] = self._platform_options["cpu_per_worker"]
             try:
                 df = _run(system, map, lambda_value=lambda_value)
             except Exception:
@@ -331,7 +336,7 @@ class controller:
                 self._remove_gpu_from_pool(gpu_num)
                 if lambda_value is not None:
                     print(f"Running lambda = {lambda_value} on GPU {gpu_num}")
-            map["Platform"] = (self._platform,)
+            map["platform"] = (self._platform,)
             map["device"] = (gpu_num,)
 
             try:
@@ -350,7 +355,7 @@ class controller:
             df,
             metadata={
                 "lambda": str(lambda_value),
-                "temperature": str(map["Temperature"].value()),
+                "temperature": str(map["temperature"].value()),
                 "lambda_array": self._lambda_values,
             },
         )

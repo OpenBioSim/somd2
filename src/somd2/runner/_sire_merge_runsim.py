@@ -88,15 +88,19 @@ class MergedSimulation:
 
         if self._minimise:
             if lam_val_min is None:
-                self._system = (
-                    self._system.minimisation(lambda_value=self._lambda_val)
-                    .run()
-                    .commit()
-                )
+                try:
+                    m = (
+                        self._system.minimisation(lambda_value=self._lambda_val, map=self._map)
+                    )
+                    m.run()
+                    self._system = m.commit()
+                except:
+                    raise
             else:
-                self._system = (
-                    self._system.minimisation(lambda_value=lam_val_min).run().commit()
-                )
+                try:
+                    self._system = (
+                        self._system.minimisation(lambda_value=lam_val_min).run().commit()
+                    )
 
         self._dyn = self._system.dynamics(
             timestep=timestep,

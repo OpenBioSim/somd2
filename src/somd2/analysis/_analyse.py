@@ -30,7 +30,6 @@ class analyse_single_lambda:
         self._dataframe, self._metadata = self.parquet_to_dataframe(
             self._parquet_file, self._meta_key
         )
-        print(self._metadata)
 
     @staticmethod
     def parquet_to_dataframe(filepath, meta_key="SOMD2.iot"):
@@ -94,7 +93,6 @@ class analyse_single_lambda:
         from sire import u as _u
         from sire.units import kelvin as _kelvin
 
-        print(self._metadata["temperature"])
         self._beta = 1.0 / (
             (_const.gas_constant / 1000)
             * _u(float(self._metadata["temperature"]) * _kelvin).to("K")
@@ -274,7 +272,7 @@ class Analyse_all:
         return df
 
     @staticmethod
-    def extract_data_MBAR(dataframe, metadata):
+    def extract_data_MBAR(dataframe, metadata, lambda_array=None):
         """
         Extract gradients from a processed dataframe,
         formats in alchemlyb-compatible dataframe format
@@ -293,12 +291,13 @@ class Analyse_all:
         -------
         df : pandas dataframe
             Dataframe containing the reduced potential values, formatted for MBAR"""
-        try:
-            lambda_array = metadata["lambda_array"]
-        except KeyError:
-            raise KeyError(
-                "No lambda_array found in metadata,unable to perform MBAR calculation"
-            )
+        if lambda_array is None:
+            try:
+                lambda_array = metadata["lambda_array"]
+            except KeyError:
+                raise KeyError(
+                    "No lambda_array found in metadata and no lambda array provided,unable to perform MBAR calculation"
+                )
         import pandas as _pd
 
         temp = dataframe[[str(i) for i in lambda_array]].copy()
@@ -309,7 +308,7 @@ class Analyse_all:
         temp.index = multiindex
         return temp
 
-    def analyse_all(self):
+    def analyse_all(self, lam_array=None):
         """
         Function to call analyse on all parquet files in the directory
         returns a list of dataframes that is sorted and ready to be used
@@ -318,22 +317,15 @@ class Analyse_all:
         extracted_dict = (
             {}
         )  # dict to store extracted data, needs to be sorted, python 3.7+ required
-        lam_array = None  # Used to check that all lambda arrays match
+        lam_array_local = lam_array
         for parquet_file in self._parquet_files:
             temp = analyse_single_lambda(parquet_file, self._custom_meta_key)
             analysed = temp.analyse()
             meta = temp.get_metadata()
             lam_curr = float(meta["lambda"])
             if self._method == "MBAR":
-                if lam_array is None:
-                    lam_array = meta["lambda_array"]
-                else:
-                    if sorted(meta["lambda_array"]) != sorted(lam_array):
-                        raise ValueError(
-                            "Lambda arrays do not match across all simulations"
-                        )
                 extracted_dict[lam_curr] = self.extract_data_MBAR(
-                    analysed, meta
+                    analysed, meta, lambda_array=lam_array_local
                 ).dropna()
             elif self._method == "TI":
                 extracted_dict[lam_curr] = self.extract_data_TI(analysed, meta).dropna()
