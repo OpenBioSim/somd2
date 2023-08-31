@@ -429,9 +429,9 @@ class controller:
                         frame_frequency=self._sim_options["frame frequency"],
                         save_velocities=self._sim_options["save velocities"],
                     )
-                except Exception:
+                except Exception as e:
                     _logger.warning(
-                        f"Minimisation/dynamics at Lambda = {lambda_value} failed, trying again with minimsation at Lambda = {lam_minimisation}"
+                        f"Minimisation/dynamics at Lambda = {lambda_value} failed, trying again with minimsation at Lambda = {lam_minimisation}. The following warning was raised: {e}"
                     )
                     df = _run(system, map, lambda_value, lam_minimisation=0.0)
                     return df
@@ -446,9 +446,9 @@ class controller:
                         frame_frequency=self._sim_options["frame frequency"],
                         save_velocities=self._sim_options["save velocities"],
                     )
-                except Exception:
+                except Exception as e:
                     _logger.error(
-                        f"Minimisation/dynamics at Lambda = {lambda_value} failed, even after minimisation at Lambda = {lam_minimisation}"
+                        f"Minimisation/dynamics at Lambda = {lambda_value} failed, even after minimisation at Lambda = {lam_minimisation}. The following warning was raised: {e}."
                     )
                     raise
                 else:
@@ -470,7 +470,7 @@ class controller:
                 print(
                     f"Running lambda = {lambda_value} using {self._platform_options['cpu_per_worker']} CPUs"
                 )
-            map["platform"] = self._platform
+            map["Platform"] = self._platform
             map["threads"] = self._platform_options["cpu_per_worker"]
             try:
                 df = _run(system, map, lambda_value=lambda_value)
@@ -483,7 +483,7 @@ class controller:
                 self._remove_gpu_from_pool(gpu_num)
                 if lambda_value is not None:
                     print(f"Running lambda = {lambda_value} on GPU {gpu_num}")
-            map["platform"] = (self._platform,)
+            map["Platform"] = (self._platform,)
             map["device"] = (gpu_num,)
 
             try:
