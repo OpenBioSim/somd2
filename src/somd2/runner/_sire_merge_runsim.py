@@ -165,7 +165,9 @@ class MergedSimulation:
             trajectory
         """
         if self._no_bookeeping_time is not None:
-            self._run_no_bookkeeping()
+            self._run_no_bookkeeping(
+                frame_frequency=frame_frequency, save_velocities=save_velocities
+            )
 
         def generate_lam_vals(lambda_base, increment):
             """Generate lambda values for a given lambda_base and increment"""

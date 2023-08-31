@@ -44,6 +44,8 @@ class controller:
 
         self._schedule = self.create_lambda_schedule()
 
+        self._check_space_options()
+
     def _set_platform(self, platform=None):
         """
         Sets the platform to be used for simulations.
@@ -115,6 +117,148 @@ class controller:
             self._gpu_pool = manager.list(
                 self.zero_CUDA_devices(self.get_CUDA_devices())
             )
+
+    def _check_space_options(self):
+        """
+        Check if the system has a periodic space.
+        """
+        if (
+            self._system.has_property("space")
+            and self._system.property("space").is_periodic()
+        ):
+            self._has_space = True
+        else:
+            self._has_space = False
+
+    def create_sim_options(self, options):
+        """
+        Creates a dictionary of simulation options.
+
+        Parameters:
+        -----------
+        options: dict
+            Dictionary of simulation options.
+        """
+        self._sim_options = self._verify_sim_options(options)
+
+        self._options_set = True
+
+    def _verify_sim_options(self, options):
+        """
+        Verify user-input simulation options, checking whether options are valid and verifyiong units.
+        Default values are used for any options not specified by the user.
+
+        Parameters:
+        -----------
+        options: dict
+            Dictionary of simulation options. Given by user.
+
+        Returns:
+        --------
+        options_ver: dict
+            Dictionary of verified simulation options.
+        """
+        options_nodupes = {}
+        # remove duplicate options from input dict
+        for key, value in options.items():
+            if value not in options_nodupes.values():
+                options_nodupes[key] = value
+        inputs = list(options_nodupes.keys())
+
+        from sire import u as _u
+
+        option_list_withunits = [
+            "temperature",
+            "timestep",
+            "no bookkeeping time",
+            "runtime",
+            "energy frequency",
+            "frame frequency",
+        ]
+        if self._has_space:
+            option_list_withunits.append("pressure")
+        options_list_bool = ["save velocities", "minimise"]
+        options_list_other = ["integrator"]
+        options_ver = {}
+        for key in options_nodupes:
+            if key not in (
+                option_list_withunits + options_list_bool + options_list_other
+            ):
+                raise ValueError(
+                    f"Option {key} not recognised, allowed options are {option_list_withunits + options_list_bool + options_list_other}"
+                )
+            else:
+                for option in option_list_withunits:
+                    if key == option:
+                        try:
+                            options_ver[key] = _u(options_nodupes[key])
+                            continue
+                        except Exception:
+                            raise ValueError(
+                                f"Option {key} has invalid units, please see list of valid sire units"
+                            )
+                for option in options_list_bool:
+                    if key == option:
+                        if options_nodupes[key] not in [True, False]:
+                            raise ValueError(
+                                f"Option {key} must be True or False, not {options_nodupes[key]}"
+                            )
+                        else:
+                            options_ver[key] = options_nodupes[key]
+                        continue
+                for option in options_list_other:
+                    if key == option:
+                        # This would be a good place to have a list of supported integrators
+                        options_ver[key] = options_nodupes[key]
+                        continue
+
+        not_set = list(set(option_list_withunits + options_list_bool) - set(inputs))
+        if not_set:
+            defaults = self.get_defaults()
+            for key in not_set:
+                options_ver[key] = defaults[key]
+        return options_ver
+
+    @staticmethod
+    def get_defaults():
+        """
+        Returns a dictionary of default simulation options.
+
+        returns:
+        --------
+        defaults: dict
+            Dictionary of default simulation options.
+        """
+        from sire import u as _u
+
+        defaults = {
+            "temperature": _u("300 K"),
+            "pressure": _u("1 atm"),
+            "timestep": _u("2 fs"),
+            "no bookkeeping time": _u("2 ps"),
+            "runtime": _u("10 ps"),
+            "energy frequency": _u("0.05 ps"),
+            "frame frequency": _u("1 ps"),
+            "save velocities": False,
+            "minimise": True,
+            "integrator": "langevin_middle",
+        }
+        return defaults
+
+    def get_options(self):
+        """
+        Returns a dictionary of simulation options.
+
+        returns:
+        --------
+        options: dict
+            Dictionary of simulation options.
+        """
+        if self._options_set:
+            return self._sim_options
+        else:
+            print("No simulation options set, using defaults")
+            return self.get_defaults()
 
     def _update_gpu_pool(self, gpu_num):
         """
@@ -211,6 +355,8 @@ class controller:
         --------
         results (list): List of simulation results.
         """
+        if not self._options_set:
+            self._sim_options = self.get_defaults()
         import concurrent.futures as _futures
 
         results = []
@@ -237,7 +383,7 @@ class controller:
 
         return results
 
-    def run_single_simulation(self, lambda_value, temperature=300):
+    def run_single_simulation(self, lambda_value):
         """
         Run a single simulation.
 
@@ -259,22 +405,30 @@ class controller:
         from loguru import logger as _logger
 
         def _run(system, map, lambda_value, lam_minimisation=None):
+            try:
+                sim = MergedSimulation(
+                    system,
+                    map,
+                    lambda_val=lambda_value,
+                    lambda_array=self._lambda_values,
+                    minimise=self._sim_options["minimise"],
+                    no_bookkeeping_time=self._sim_options["no bookkeeping time"],
+                )
+            except Exception:
+                _logger.warning(f"System creation at {lambda_value} failed")
+                raise
             if lam_minimisation is None:
                 try:
-                    sim = MergedSimulation(
-                        system,
-                        map,
-                        lambda_val=lambda_value,
-                        lambda_array=self._lambda_values,
-                        minimise=True,
-                        no_bookkeeping_time="2ps",
+                    sim._setup_dynamics(
+                        lam_val_min=lam_minimisation,
+                        timestep=self._sim_options["timestep"],
                     )
-                except Exception:
-                    _logger.warning(f"System creation at {lambda_value} failed")
-                    raise
-                try:
-                    sim._setup_dynamics(lam_val_min=lam_minimisation)
-                    df = sim._run_with_bookkeeping(runtime="10ps")
+                    df = sim._run_with_bookkeeping(
+                        runtime=self._sim_options["runtime"],
+                        energy_frequency=self._sim_options["energy frequency"],
+                        frame_frequency=self._sim_options["frame frequency"],
+                        save_velocities=self._sim_options["save velocities"],
+                    )
                 except Exception:
                     _logger.warning(
                         f"Minimisation/dynamics at Lambda = {lambda_value} failed, trying again with minimsation at Lambda = {lam_minimisation}"
@@ -285,20 +439,13 @@ class controller:
                     return df
             else:
                 try:
-                    sim = MergedSimulation(
-                        system,
-                        map,
-                        lambda_val=lambda_value,
-                        lambda_array=self._lambda_values,
-                        minimise=True,
-                        no_bookkeeping_time="2ps",
-                    )
-                except Exception:
-                    _logger.warning(f"System creation at {lambda_value} failed")
-                    raise
-                try:
                     sim._setup_dynamics(lam_val_min=lam_minimisation)
-                    df = sim._run_with_bookkeeping(runtime="10ps")
+                    df = sim._run_with_bookkeeping(
+                        runtime=self._sim_options["runtime"],
+                        energy_frequency=self._sim_options["energy frequency"],
+                        frame_frequency=self._sim_options["frame frequency"],
+                        save_velocities=self._sim_options["save velocities"],
+                    )
                 except Exception:
                     _logger.error(
                         f"Minimisation/dynamics at Lambda = {lambda_value} failed, even after minimisation at Lambda = {lam_minimisation}"
@@ -307,17 +454,15 @@ class controller:
                 else:
                     return df
 
-        # set all properties not specific to platform
-        map = {
-            "integrator": "langevin_middle",
-            "temperature": temperature * kelvin,
-        }
-        # Pressure control. Only set if the system has a periodic space.
-        if (
-            self._system.has_property("space")
-            and self._system.property("space").is_periodic()
-        ):
-            map["pressure"] = 1.0 * atm
+        if not self._options_set:
+            self._sim_options = self.get_defaults()
+        map_options = ["integrator", "temperature", "pressure"]
+        map = {}
+        for option in map_options:
+            try:
+                map[option] = self._sim_options[option]
+            except KeyError:
+                continue
         system = self._system.clone()
 
         if self._platform == "CPU":
