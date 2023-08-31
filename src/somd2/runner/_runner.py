@@ -175,7 +175,8 @@ class controller:
             "energy frequency",
             "frame frequency",
         ]
-        if self._has_space:
+        # Only run NPT if pressure is specified
+        if self._has_space and "pressure" in inputs:
             option_list_withunits.append("pressure")
         options_list_bool = ["save velocities", "minimise"]
         options_list_other = ["integrator"]
@@ -212,7 +213,10 @@ class controller:
                         options_ver[key] = options_nodupes[key]
                         continue
 
-        not_set = list(set(option_list_withunits + options_list_bool) - set(inputs))
+        not_set = list(
+            set(option_list_withunits + options_list_bool + options_list_other)
+            - set(inputs)
+        )
         if not_set:
             defaults = self.get_defaults()
             for key in not_set:
@@ -233,7 +237,6 @@ class controller:
 
         defaults = {
             "temperature": _u("300 K"),
-            "pressure": _u("1 atm"),
             "timestep": _u("2 fs"),
             "no bookkeeping time": _u("2 ps"),
             "runtime": _u("10 ps"),
