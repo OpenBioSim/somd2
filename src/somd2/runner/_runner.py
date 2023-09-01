@@ -179,7 +179,7 @@ class controller:
         if self._has_space and "pressure" in inputs:
             option_list_withunits.append("pressure")
         options_list_bool = ["save velocities", "minimise"]
-        options_list_other = ["integrator"]
+        options_list_other = ["integrator", "output directory"]
         options_ver = {}
         for key in options_nodupes:
             if key not in (
@@ -221,7 +221,26 @@ class controller:
             defaults = self.get_defaults()
             for key in not_set:
                 options_ver[key] = defaults[key]
+        self._verify_output_directory()
         return options_ver
+
+    def _verify_output_directory(self):
+        """
+        Verify that the output directory exists and is writeable.
+        If it does not yet exist, create it.
+        """
+        from pathlib import Path as _Path
+
+        output_dir = self._sim_options["output directory"]
+        if not _Path(output_dir).exists() or not _Path(output_dir).is_dir():
+            try:
+                _Path(output_dir).mkdir(parents=True, exist_ok=True)
+            except:
+                raise ValueError(
+                    f"Output directory {output_dir} does not exist and cannot be created"
+                )
+        if not _Path(output_dir).is_writable():
+            raise ValueError(f"Output directory {output_dir} is not writeable")
 
     @staticmethod
     def get_defaults():
@@ -234,6 +253,7 @@ class controller:
             Dictionary of default simulation options.
         """
         from sire import u as _u
+        from pathlib import Path as _Path
 
         defaults = {
             "temperature": _u("300 K"),
@@ -245,6 +265,7 @@ class controller:
             "save velocities": False,
             "minimise": True,
             "integrator": "langevin_middle",
+            "output directory": _Path.cwd() / "outputs",
         }
         return defaults
 
@@ -430,6 +451,7 @@ class controller:
                         energy_frequency=self._sim_options["energy frequency"],
                         frame_frequency=self._sim_options["frame frequency"],
                         save_velocities=self._sim_options["save velocities"],
+                        traj_directory=self._sim_options["output directory"],
                     )
                 except Exception as e:
                     _logger.warning(
@@ -447,6 +469,7 @@ class controller:
                         energy_frequency=self._sim_options["energy frequency"],
                         frame_frequency=self._sim_options["frame frequency"],
                         save_velocities=self._sim_options["save velocities"],
+                        traj_directory=self._sim_options["output directory"],
                     )
                 except Exception as e:
                     _logger.error(
@@ -511,7 +534,7 @@ class controller:
         return f"Lambda = {lambda_value} complete"
 
     @staticmethod
-    def dataframe_to_parquet(df, metadata):
+    def dataframe_to_parquet(df, metadata, filepath=None):
         """
         Save a dataframe to parquet format with custom metadata.
 
@@ -523,11 +546,21 @@ class controller:
         metadata: dict
             Dictionary containing metadata to be saved with the dataframe.
             Currently just temperature and lambda value.
+
+        filepath: str or pathlib.PosixPath
+            The of the parent directory in to which the parquet file will be saved.
+            If None, save to current working directory.
         """
 
         import pyarrow as pa
         import pyarrow.parquet as pq
         import json
+        from pathlib import Path as _Path
+
+        if filepath is None:
+            filepath = _Path.cwd()
+        elif isinstance(filepath, str):
+            filepath = _Path(filepath)
 
         custom_meta_key = "somd2"
 
@@ -541,13 +574,4 @@ class controller:
         }
         table = table.replace_schema_metadata(combined_meta)
         filename = f"Lam_{metadata['lambda'].replace('.','')[:5]}_T_{metadata['temperature']}.parquet"
-        pq.write_table(table, filename)
-
-
-if __name__ == "__main__":
-    import sire as sr
-
-    mols = sr.stream.load("Methane_Ethane_direct.bss")
-    platform = "CUDA"
-    r = controller(mols, platform=platform, num_lambda=10)
-    results = r.run_simulations()
+        pq.write_table(table, filepath / filename)

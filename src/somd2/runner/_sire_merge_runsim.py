@@ -143,6 +143,7 @@ class MergedSimulation:
         energy_frequency="0.05ps",
         frame_frequency="1ps",
         save_velocities=False,
+        traj_directory=None,
     ):
         """
         Run the simulation with bookkeeping
@@ -157,6 +158,9 @@ class MergedSimulation:
 
         timestep : str
             Timestep of the simulation
+
+        traj_directory : str or pathlib.PosixPath
+            Directory to save the trajectory to
 
         Returns
         -------
@@ -199,5 +203,15 @@ class MergedSimulation:
         except Exception:
             raise
         self._system = self._dyn.commit()
+        from pathlib import Path as _Path
+
+        if traj_directory is not None:
+            outdir = _Path(traj_directory).mkdir(parents=True, exist_ok=True)
+        else:
+            outdir = _Path.cwd()
+        traj_filename = outdir / f"traj_{self._lambda_val}"
+        from sire import save as _save
+
+        _save(self._system.trajectory(), traj_filename, format=["DCD"])
         df = self._system.property("energy_trajectory").to_pandas()
         return df
