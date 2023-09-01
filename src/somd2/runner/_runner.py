@@ -141,6 +141,8 @@ class controller:
         """
         self._sim_options = self._verify_sim_options(options)
 
+        self._verify_output_directory()
+
         self._options_set = True
 
     def _verify_sim_options(self, options):
@@ -221,7 +223,6 @@ class controller:
             defaults = self.get_defaults()
             for key in not_set:
                 options_ver[key] = defaults[key]
-        self._verify_output_directory()
         return options_ver
 
     def _verify_output_directory(self):
