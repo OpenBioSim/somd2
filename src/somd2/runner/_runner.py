@@ -529,7 +529,7 @@ class controller:
         import pyarrow.parquet as pq
         import json
 
-        custom_meta_key = "SOMD2.iot"
+        custom_meta_key = "somd2"
 
         table = pa.Table.from_pandas(df)
         custom_meta_json = json.dumps(metadata)

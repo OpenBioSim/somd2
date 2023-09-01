@@ -7,7 +7,7 @@ class analyse_single_lambda:
     performs analysis on the trajectory.
     Currently only supports SOMD-style simulations."""
 
-    def __init__(self, data_parquet, custom_meta_key="SOMD2.iot"):
+    def __init__(self, data_parquet, custom_meta_key="somd2"):
         """
         Constructor
 
@@ -32,7 +32,7 @@ class analyse_single_lambda:
         )
 
     @staticmethod
-    def parquet_to_dataframe(filepath, meta_key="SOMD2.iot"):
+    def parquet_to_dataframe(filepath, meta_key="somd2"):
         """
         Reads a parquet file containing an energy trajectory,
         extracts the trajectory as a dataframe and the metadata as a
@@ -205,7 +205,7 @@ class Analyse_all:
     alchemlyb
     """
 
-    def __init__(self, parquet_folder, method="TI", custom_meta_key="SOMD2.iot"):
+    def __init__(self, parquet_folder, method="TI", custom_meta_key="somd2"):
         """
         Constructor
 
