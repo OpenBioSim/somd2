@@ -160,15 +160,10 @@ class controller:
         options_ver: dict
             Dictionary of verified simulation options.
         """
-        options_nodupes = {}
-        # remove duplicate options from input dict
-        for key, value in options.items():
-            if value not in options_nodupes.values():
-                options_nodupes[key] = value
-        inputs = list(options_nodupes.keys())
 
         from sire import u as _u
 
+        inputs = list(options.keys())
         option_list_withunits = [
             "temperature",
             "timestep",
@@ -183,7 +178,7 @@ class controller:
         options_list_bool = ["save velocities", "minimise"]
         options_list_other = ["integrator", "output directory"]
         options_ver = {}
-        for key in options_nodupes:
+        for key in options:
             if key not in (
                 option_list_withunits + options_list_bool + options_list_other
             ):
@@ -194,7 +189,7 @@ class controller:
                 for option in option_list_withunits:
                     if key == option:
                         try:
-                            options_ver[key] = _u(options_nodupes[key])
+                            options_ver[key] = _u(options[key])
                             continue
                         except Exception:
                             raise ValueError(
@@ -202,28 +197,22 @@ class controller:
                             )
                 for option in options_list_bool:
                     if key == option:
-                        if options_nodupes[key] not in [True, False]:
+                        if options[key] not in [True, False]:
                             raise ValueError(
-                                f"Option {key} must be True or False, not {options_nodupes[key]}"
+                                f"Option {key} must be True or False, not {options[key]}"
                             )
                         else:
-                            options_ver[key] = options_nodupes[key]
+                            options_ver[key] = options[key]
                         continue
                 for option in options_list_other:
                     if key == option:
                         # This would be a good place to have a list of supported integrators
-                        options_ver[key] = options_nodupes[key]
+                        options_ver[key] = options[key]
                         continue
 
-        not_set = list(
-            set(option_list_withunits + options_list_bool + options_list_other)
-            - set(inputs)
-        )
-        if not_set:
-            defaults = self.get_defaults()
-            for key in not_set:
-                options_ver[key] = defaults[key]
-        return options_ver
+        defaults = self.get_defaults()
+        opt_master = {**defaults, **options_ver}
+        return opt_master
 
     def _verify_output_directory(self):
         """
