@@ -206,12 +206,13 @@ class MergedSimulation:
         from pathlib import Path as _Path
 
         if traj_directory is not None:
-            outdir = _Path(traj_directory).mkdir(parents=True, exist_ok=True)
+            _Path(traj_directory).mkdir(parents=True, exist_ok=True)
+            outdir = _Path(traj_directory)
         else:
             outdir = _Path.cwd()
         traj_filename = outdir / f"traj_{self._lambda_val}"
-        from sire import save as _save
+        # from sire import save as _save
 
-        _save(self._system.trajectory(), traj_filename, format=["DCD"])
+        # _save(self._system.trajectory(), traj_filename, format=["DCD"])
         df = self._system.property("energy_trajectory").to_pandas()
         return df
