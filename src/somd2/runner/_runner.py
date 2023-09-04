@@ -240,8 +240,6 @@ class controller:
                 raise ValueError(
                     f"Output directory {output_dir} does not exist and cannot be created"
                 )
-        if not _Path(output_dir).is_writable():
-            raise ValueError(f"Output directory {output_dir} is not writeable")
 
     @staticmethod
     def get_defaults():
@@ -531,6 +529,7 @@ class controller:
                 "temperature": str(map["temperature"].value()),
                 "lambda_array": self._lambda_values,
             },
+            filepath=self._sim_options["output directory"],
         )
         return f"Lambda = {lambda_value} complete"
 
