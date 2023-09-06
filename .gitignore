@@ -20,6 +20,7 @@ setup.err
 dist/
 build/
 somd2.egg-info
+src/somd2/_version.py
 
 # Test output.
 output.yaml
