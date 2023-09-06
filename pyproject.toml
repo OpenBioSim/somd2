@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "somd2"
+authors = [
+    { name = "Matthew Burman", email = "matthew@openbiosim.org" },
+    { name = "Lester Hedges", email = "lester@openbiosim.org" },
+    { name = "Christopher Woods", email = "christopher@openbiosim.org" },
+    { name = "Julien Michel", email = "julien@openbiosim.org" },
+]
+description = "An open-source engine for alchemical free-energy calculations"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "GPL-3.0-or-later"}
+dynamic = ["version"]
+
+[tool.setuptools]
+license-files = ["LICENSE"]
+
+[project.urls]
+repository = "https://github.com/OpenBioSim/somd2"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools_scm]
+write_to = "src/somd2/_version.py"
+
