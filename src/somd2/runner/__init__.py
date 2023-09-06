@@ -1,3 +1,3 @@
-all = ["controller"]
+all = ["Controller"]
 
-from ._runner import controller
+from ._runner import Controller

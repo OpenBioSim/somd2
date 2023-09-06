@@ -1,7 +1,7 @@
-__all__ = ["controller"]
+__all__ = ["Controller"]
 
 
-class controller:
+class Controller:
     """
     Controls the initiation of simulations as well as the assigning of
     resources.
