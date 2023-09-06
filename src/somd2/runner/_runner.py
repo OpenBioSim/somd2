@@ -446,8 +446,10 @@ class controller:
                         f"Minimisation/dynamics at Lambda = {lambda_value} failed, trying again with minimsation at Lambda = {lam_minimisation}. The following warning was raised: {e}"
                     )
                     df = _run(system, map, lambda_value, lam_minimisation=0.0)
+                    sim._cleanup()
                     return df
                 else:
+                    sim._cleanup()
                     return df
             else:
                 try:
@@ -520,6 +522,7 @@ class controller:
             },
             filepath=self._sim_options["output directory"],
         )
+        del system
         return f"Lambda = {lambda_value} complete"
 
     @staticmethod

@@ -168,7 +168,9 @@ class MergedSimulation:
             Dataframe containing the sire energy
             trajectory
         """
-        if self._no_bookeeping_time is not None:
+        from sire import u as _u
+
+        if self._no_bookeeping_time is not (None or 0):
             self._run_no_bookkeeping(
                 frame_frequency=frame_frequency, save_velocities=save_velocities
             )
@@ -216,3 +218,12 @@ class MergedSimulation:
         # _save(self._system.trajectory(), traj_filename, format=["DCD"])
         df = self._system.property("energy_trajectory").to_pandas()
         return df
+
+    def _get_system(self):
+        return self._system
+
+    def _get_dynamics(self):
+        return self._dyn
+
+    def _cleanup(self):
+        del self._dyn
