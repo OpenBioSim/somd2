@@ -26,5 +26,5 @@ repository = "https://github.com/OpenBioSim/somd2"
 where = ["src"]
 
 [tool.setuptools_scm]
-write_to = "somd2/_version.py"
+write_to = "src/somd2/_version.py"
 
