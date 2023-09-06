@@ -1,4 +1,4 @@
-from ..runner import controller
+from somd2.runner import Controller
 from sire import stream
 from sire import u
 import tempfile
@@ -23,7 +23,7 @@ def test_setup():
         "pressure",
     ]
     system = stream.load("./src/somd2/tests/test_systems/merged_molecule.s3")
-    runner = controller(system, platform="CPU", num_lambda=11)
+    runner = Controller(system, platform="CPU", num_lambda=11)
     runner.create_sim_options(simulation_options)
     options = runner.get_options()
     for key in simulation_options.keys():
@@ -50,7 +50,7 @@ def test_run():
         "output directory": temp_dir.name,
     }
     system = stream.load("./src/somd2/tests/test_systems/merged_molecule.s3")
-    runner = controller(system, platform="CPU", num_lambda=2)
+    runner = Controller(system, platform="CPU", num_lambda=2)
     runner.create_sim_options(simulation_options)
     runner.run_simulations()
     temp_dir.cleanup()
