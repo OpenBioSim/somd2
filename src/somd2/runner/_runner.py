@@ -176,7 +176,7 @@ class Controller:
         if self._has_space and "pressure" in inputs:
             option_list_withunits.append("pressure")
         options_list_bool = ["save velocities", "minimise"]
-        options_list_other = ["integrator", "output directory"]
+        options_list_other = ["integrator", "cutoff type", "output directory"]
         options_ver = {}
         for key in options:
             if key not in (
@@ -253,6 +253,7 @@ class Controller:
             "save velocities": False,
             "minimise": True,
             "integrator": "langevin_middle",
+            "cutoff type": "PME",
             "output directory": _Path.cwd() / "outputs",
         }
         return defaults
@@ -423,6 +424,7 @@ class Controller:
                     lambda_val=lambda_value,
                     lambda_array=self._lambda_values,
                     minimise=self._sim_options["minimise"],
+                    cutoff_type=self._sim_options["cutoff type"],
                     no_bookkeeping_time=self._sim_options["no bookkeeping time"],
                 )
             except Exception:
@@ -446,11 +448,13 @@ class Controller:
                         f"Minimisation/dynamics at Lambda = {lambda_value} failed, trying again with minimsation at Lambda = {lam_minimisation}. The following warning was raised: {e}"
                     )
                     df = _run(system, map, lambda_value, lam_minimisation=0.0)
+                    speed = sim.get_timing()
                     sim._cleanup()
-                    return df
+                    return df, speed
                 else:
+                    speed = sim.get_timing()
                     sim._cleanup()
-                    return df
+                    return df, speed
             else:
                 try:
                     sim._setup_dynamics(lam_val_min=lam_minimisation)
@@ -502,7 +506,7 @@ class Controller:
             map["device"] = gpu_num
 
             try:
-                df = _run(system, map, lambda_value=lambda_value)
+                df, speed = _run(system, map, lambda_value=lambda_value)
             except Exception:
                 with self._lock:
                     self._update_gpu_pool(gpu_num)
@@ -519,6 +523,7 @@ class Controller:
                 "lambda": str(lambda_value),
                 "temperature": str(map["temperature"].value()),
                 "lambda_array": self._lambda_values,
+                "speed": speed,
             },
             filepath=self._sim_options["output directory"],
         )

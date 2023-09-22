@@ -13,6 +13,7 @@ class MergedSimulation:
         self,
         system,
         map,
+        cutoff_type,
         lambda_val,
         lambda_array=None,
         increment=0.001,
@@ -66,6 +67,7 @@ class MergedSimulation:
 
         self._map = map
         self._lambda_val = lambda_val
+        self._cutoff_type = cutoff_type
         self._increment = increment
         self._minimise = minimise
         self._no_bookkeeping_only = no_bookkeeping_only
@@ -107,6 +109,7 @@ class MergedSimulation:
         self._dyn = self._system.dynamics(
             timestep=timestep,
             lambda_value=self._lambda_val,
+            cutoff_type=self._cutoff_type,
             map=self._map,
         )
 
@@ -224,6 +227,9 @@ class MergedSimulation:
 
     def _get_dynamics(self):
         return self._dyn
+
+    def get_timing(self):
+        return self._dyn.time_speed()
 
     def _cleanup(self):
         del self._dyn
