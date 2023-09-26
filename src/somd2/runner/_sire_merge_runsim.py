@@ -219,7 +219,7 @@ class MergedSimulation:
         # from sire import save as _save
 
         # _save(self._system.trajectory(), traj_filename, format=["DCD"])
-        df = self._system.property("energy_trajectory").to_pandas()
+        df = self._system.energy_trajectory(to_alchemlyb=True)
         return df
 
     def _get_system(self):

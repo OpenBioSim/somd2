@@ -520,6 +520,7 @@ class Controller:
         self.dataframe_to_parquet(
             df,
             metadata={
+                "attrs": df.attrs,
                 "lambda": str(lambda_value),
                 "temperature": str(map["temperature"].value()),
                 "lambda_array": self._lambda_values,
