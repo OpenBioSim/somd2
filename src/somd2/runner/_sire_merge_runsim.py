@@ -190,12 +190,13 @@ class MergedSimulation:
                 lam_vals = [lambda_base - increment, lambda_base + increment]
             return lam_vals
 
+        # Work out the lambda values for finite-difference gradient analysis.
+        self._lambda_grad = generate_lam_vals(self._lambda_val, self._increment)
+
         if self._lambda_array is None:
-            lam_arr = generate_lam_vals(self._lambda_val, self._increment)
+            lam_arr = self._lambda_grad
         else:
-            lam_arr = self._lambda_array + generate_lam_vals(
-                self._lambda_val, self._increment
-            )
+            lam_arr = self._lambda_array + self._lambda_grad
         try:
             self._dyn.run(
                 runtime,
@@ -219,7 +220,7 @@ class MergedSimulation:
         # from sire import save as _save
 
         # _save(self._system.trajectory(), traj_filename, format=["DCD"])
-        df = self._system.property("energy_trajectory").to_pandas()
+        df = self._system.energy_trajectory(to_alchemlyb=True)
         return df
 
     def _get_system(self):

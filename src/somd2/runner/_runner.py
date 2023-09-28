@@ -443,35 +443,38 @@ class Controller:
                         save_velocities=self._sim_options["save velocities"],
                         traj_directory=self._sim_options["output directory"],
                     )
+                    lambda_grad = sim._lambda_grad
+
                 except Exception as e:
                     _logger.warning(
                         f"Minimisation/dynamics at Lambda = {lambda_value} failed, trying again with minimsation at Lambda = {lam_minimisation}. The following warning was raised: {e}"
                     )
-                    df = _run(system, map, lambda_value, lam_minimisation=0.0)
+                    df, lambda_grad = _run(system, map, lambda_value, lam_minimisation=0.0)
                     speed = sim.get_timing()
                     sim._cleanup()
                     return df, speed
                 else:
                     speed = sim.get_timing()
                     sim._cleanup()
-                    return df, speed
+                    return df, lambda_grad, speed
             else:
                 try:
                     sim._setup_dynamics(lam_val_min=lam_minimisation)
-                    df = sim._run_with_bookkeeping(
+                    df, lambda_grad = sim._run_with_bookkeeping(
                         runtime=self._sim_options["runtime"],
                         energy_frequency=self._sim_options["energy frequency"],
                         frame_frequency=self._sim_options["frame frequency"],
                         save_velocities=self._sim_options["save velocities"],
                         traj_directory=self._sim_options["output directory"],
                     )
+                    lambda_grad = sim._lambda_grad
                 except Exception as e:
                     _logger.error(
                         f"Minimisation/dynamics at Lambda = {lambda_value} failed, even after minimisation at Lambda = {lam_minimisation}. The following warning was raised: {e}."
                     )
                     raise
                 else:
-                    return df
+                    return df, lambda_grad
 
         if not self._options_set:
             self._sim_options = self.get_defaults()
@@ -492,7 +495,7 @@ class Controller:
             map["platform"] = self._platform
             map["threads"] = self._platform_options["cpu_per_worker"]
             try:
-                df = _run(system, map, lambda_value=lambda_value)
+                df, lambda_grad = _run(system, map, lambda_value=lambda_value)
             except Exception:
                 raise
 
@@ -506,7 +509,7 @@ class Controller:
             map["device"] = gpu_num
 
             try:
-                df, speed = _run(system, map, lambda_value=lambda_value)
+                df, lambda_grad, speed = _run(system, map, lambda_value=lambda_value)
             except Exception:
                 with self._lock:
                     self._update_gpu_pool(gpu_num)
@@ -520,10 +523,12 @@ class Controller:
         self.dataframe_to_parquet(
             df,
             metadata={
+                "attrs": df.attrs,
                 "lambda": str(lambda_value),
-                "temperature": str(map["temperature"].value()),
                 "lambda_array": self._lambda_values,
+                "lambda_grad": lambda_grad,
                 "speed": speed,
+                "temperature": str(map["temperature"].value()),
             },
             filepath=self._sim_options["output directory"],
         )
