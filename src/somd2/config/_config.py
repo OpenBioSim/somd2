@@ -90,9 +90,11 @@ class Config:
 
         max_CPU_cores: int
             Maximum number of CPU cores to use for simulation (default None, uses all available)
+            Does nothing if platfrom is set to CUDA
 
         max_GPUS: int
             Maximum number of GPUs to use for simulation (default None, uses all available)
+            does nothing if platform is set to CPU
 
         run_parallel: bool
             Whether to run simulation in parallel (default False)

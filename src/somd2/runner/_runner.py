@@ -73,9 +73,16 @@ class Controller:
             # Storing the lock but not the manager - make self.manager
             self._manager = Manager()
             self._lock = self._manager.Lock()
-            self._gpu_pool = self._manager.list(
-                self.zero_CUDA_devices(self.get_CUDA_devices())
-            )
+            if self.config.max_GPUS is None:
+                self._gpu_pool = self._manager.list(
+                    self.zero_CUDA_devices(self.get_CUDA_devices())
+                )
+            else:
+                self._gpu_pool = self._manager.list(
+                    self.zero_CUDA_devices(
+                        self.get_CUDA_devices()[: self.config.max_GPUS]
+                    )
+                )
 
     def _check_space_options(self):
         """
@@ -188,7 +195,7 @@ class Controller:
             )
             self.config = _Config()
         results = []
-        if self.config.run_parallel and self.config.num_lambda is not None:
+        if self.config.run_parallel and (self.config.num_lambda is not None):
             self._create_shared_resources()
             import concurrent.futures as _futures
 
@@ -231,6 +238,8 @@ class Controller:
                         results.append(result)
 
         elif self.config.num_lambda is not None:
+            if self.config.platform == "CPU":
+                self.config.extra_args = {"threads": self.config.max_CPU_cores}
             self._lambda_values = [
                 round(i / (self.config.num_lambda - 1), 5)
                 for i in range(0, self.config.num_lambda)
@@ -266,13 +275,14 @@ class Controller:
         from ._run_single_pert import RunSingleWindow
         from loguru import logger as _logger
 
-        def _run(system, config, lambda_value, lam_minimisation=None):
+        def _run(system, config, lambda_value, lam_minimisation=None, device=None):
             try:
                 sim = RunSingleWindow(
                     system,
                     lambda_val=lambda_value,
                     lambda_array=self._lambda_values,
                     config=config,
+                    device=device,
                 )
             except Exception:
                 _logger.warning(f"System creation at {lambda_value} failed")
@@ -329,7 +339,7 @@ class Controller:
 
             try:
                 df, lambda_grad, speed = _run(
-                    system, self.config, lambda_value=lambda_value
+                    system, self.config, lambda_value=lambda_value, device=gpu_num
                 )
             except Exception:
                 with self._lock:

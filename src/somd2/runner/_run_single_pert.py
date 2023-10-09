@@ -18,6 +18,7 @@ class RunSingleWindow:
         lambda_array,
         config,
         increment=0.001,
+        device=None,
     ):
         """
         Constructor
@@ -40,6 +41,9 @@ class RunSingleWindow:
         config : somd2 Config object
             Config object containing simulation options
 
+        device : int
+            GPU device number to use  - does nothing if running on CPU (default None)
+
         """
 
         try:
@@ -59,6 +63,7 @@ class RunSingleWindow:
         self._lambda_val = lambda_val
         self._lambda_array = lambda_array
         self._increment = increment
+        self._device = device
 
     # Would prob. be better to just set up the dynamics object here,
     # then run a separate dynamics.minimise
@@ -73,7 +78,7 @@ class RunSingleWindow:
             if None run at pre-set lambda_val
         """
 
-        if self._minimise:
+        if self._config.minimise:
             if lam_val_min is None:
                 try:
                     m = self._system.minimisation(
@@ -102,8 +107,9 @@ class RunSingleWindow:
             timestep=self._config.timestep,
             lambda_value=self._lambda_val,
             cutoff_type=self._config.cutoff_type,
-            timestep=self._config.timestep,
             schedule=self._config.lambda_schedule,
+            platform=self._config.platform,
+            device=self._device,
             map=self._config.extra_args,
         )
 
