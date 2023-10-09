@@ -1,4 +1,5 @@
 __all__ = ["Controller"]
+from ..config import Config as _Config
 
 
 class Controller:
@@ -7,7 +8,7 @@ class Controller:
     resources.
     """
 
-    def __init__(self, system, num_lambda, platform=None):
+    def __init__(self, system):
         """
         Constructor.
 
@@ -25,10 +26,16 @@ class Controller:
 
         """
         self._system = system
-        self._num_lambda = num_lambda
-        self._options_set = (
+        self._configured = (
             False  # Will track if simulation options have been set by the user
         )
+        # parallel = True keyword
+        # control cpu core numbers, set cuda devices
+        # query status of processes
+        # checkpointing
+        # simulation settings in metadata or to yaml?
+        # cuda lower case in function name
+        # lambda schedule as keyword argument
         # import BioSimSpace as _BSS
         from sire.system import System as sire_system
 
@@ -36,85 +43,37 @@ class Controller:
         #    raise TypeError("System must be BioSimSpace or Sire system")
 
         if not isinstance(self._system, (sire_system)):
-            raise TypeError("System must be BioSimSpace or Sire system")
+            raise TypeError("System must be Sire system")
 
-        self._set_platform(platform)
+        try:
+            self._system.molecules("property is_perturbable")
+        except KeyError:
+            raise KeyError("No perturbable molecules in the system")
 
-        self._platform_options = self._set_platform_options()
-
-        self._schedule = self.create_lambda_schedule()
-
-        self._check_space_options()
-
-    def _set_platform(self, platform=None):
+    def configure(self, input):
         """
-        Sets the platform to be used for simulations.
+        Configure simulation options.
 
         Parameters:
         -----------
-
-        platform: str
-            The platform to be used for simulations. If None then check for
-            CUDA_VISIBLE_DEVICES, otherwise use CPU.
+        input: dict
+            Dictionary of simulation options.
         """
-        import os as _os
-
-        if platform is not None:
-            if platform not in ["CPU", "CUDA"]:
-                raise ValueError("Platform must be CPU or CUDA")
-            self._platform = platform
-        else:
-            if "CUDA_VISIBLE_DEVICES" in _os.environ:
-                self._platform = "CUDA"
-            else:
-                self._platform = "CPU"
-
-    def _set_platform_options(self):
-        """
-        Sets options for the current platform.
-
-        Returns:
-        --------
-        platform_options: dict
-            Dictionary of platform options.
-        """
-        import os as _os
-
-        if self._platform == "CPU":
-            num_cpu = _os.cpu_count()
-            num_workers = 1
-            if self._num_lambda > num_cpu:
-                num_workers = num_cpu
-                cpu_per_worker = 1
-            else:
-                num_workers = self._num_lambda
-                cpu_per_worker = num_cpu // self._num_lambda
-            platform_options = {
-                "num_workers": num_workers,
-                "cpu_per_worker": cpu_per_worker,
-            }
-        elif self._platform == "CUDA":
-            devices = self.zero_CUDA_devices(self.get_CUDA_devices())
-            platform_options = {"num_workers": len(devices)}
-
-        else:
-            raise ValueError("Platform not recognised")
-
-        self._create_shared_resources()
-
-        return platform_options
+        self.config = _Config(**input)
+        self._configured = True
 
     def _create_shared_resources(self):
         """
         Creates shared list that holds currently available GPUs.
         Also intialises the list with all available GPUs.
         """
-        if self._platform == "CUDA":
+        if self.config.platform == "CUDA":
             from multiprocessing import Manager
 
-            manager = Manager()
-            self._lock = manager.Lock()
-            self._gpu_pool = manager.list(
+            # Storing the lock but not the manager - make self.manager
+            self._manager = Manager()
+            self._lock = self._manager.Lock()
+            self._gpu_pool = self._manager.list(
                 self.zero_CUDA_devices(self.get_CUDA_devices())
             )
 
@@ -130,134 +89,6 @@ class Controller:
         else:
             self._has_space = False
 
-    def create_sim_options(self, options):
-        """
-        Creates a dictionary of simulation options.
-
-        Parameters:
-        -----------
-        options: dict
-            Dictionary of simulation options.
-        """
-        self._sim_options = self._verify_sim_options(options)
-
-        self._verify_output_directory()
-
-        self._options_set = True
-
-    def _verify_sim_options(self, options):
-        """
-        Verify user-input simulation options, checking whether options are valid and verifyiong units.
-        Default values are used for any options not specified by the user.
-
-        Parameters:
-        -----------
-        options: dict
-            Dictionary of simulation options. Given by user.
-
-        Returns:
-        --------
-        options_ver: dict
-            Dictionary of verified simulation options.
-        """
-
-        from sire import u as _u
-
-        inputs = list(options.keys())
-        option_list_withunits = [
-            "temperature",
-            "timestep",
-            "no bookkeeping time",
-            "runtime",
-            "energy frequency",
-            "frame frequency",
-        ]
-        # Only run NPT if pressure is specified
-        if self._has_space and "pressure" in inputs:
-            option_list_withunits.append("pressure")
-        options_list_bool = ["save velocities", "minimise"]
-        options_list_other = ["integrator", "cutoff type", "output directory"]
-        options_ver = {}
-        for key in options:
-            if key not in (
-                option_list_withunits + options_list_bool + options_list_other
-            ):
-                raise ValueError(
-                    f"Option {key} not recognised, allowed options are {option_list_withunits + options_list_bool + options_list_other}"
-                )
-            else:
-                for option in option_list_withunits:
-                    if key == option:
-                        try:
-                            options_ver[key] = _u(options[key])
-                            continue
-                        except Exception:
-                            raise ValueError(
-                                f"Option {key} has invalid units, please see list of valid sire units"
-                            )
-                for option in options_list_bool:
-                    if key == option:
-                        if options[key] not in [True, False]:
-                            raise ValueError(
-                                f"Option {key} must be True or False, not {options[key]}"
-                            )
-                        else:
-                            options_ver[key] = options[key]
-                        continue
-                for option in options_list_other:
-                    if key == option:
-                        # This would be a good place to have a list of supported integrators
-                        options_ver[key] = options[key]
-                        continue
-
-        defaults = self.get_defaults()
-        opt_master = {**defaults, **options_ver}
-        return opt_master
-
-    def _verify_output_directory(self):
-        """
-        Verify that the output directory exists and is writeable.
-        If it does not yet exist, create it.
-        """
-        from pathlib import Path as _Path
-
-        output_dir = self._sim_options["output directory"]
-        if not _Path(output_dir).exists() or not _Path(output_dir).is_dir():
-            try:
-                _Path(output_dir).mkdir(parents=True, exist_ok=True)
-            except:
-                raise ValueError(
-                    f"Output directory {output_dir} does not exist and cannot be created"
-                )
-
-    @staticmethod
-    def get_defaults():
-        """
-        Returns a dictionary of default simulation options.
-
-        returns:
-        --------
-        defaults: dict
-            Dictionary of default simulation options.
-        """
-        from sire import u as _u
-        from pathlib import Path as _Path
-
-        defaults = {
-            "temperature": _u("300 K"),
-            "timestep": _u("2 fs"),
-            "no bookkeeping time": _u("2 ps"),
-            "runtime": _u("10 ps"),
-            "energy frequency": _u("0.05 ps"),
-            "frame frequency": _u("1 ps"),
-            "save velocities": False,
-            "minimise": True,
-            "integrator": "langevin_middle",
-            "cutoff type": "PME",
-            "output directory": _Path.cwd() / "outputs",
-        }
-        return defaults
-
     def get_options(self):
         """
         Returns a dictionary of simulation options.
@@ -267,11 +98,12 @@ class Controller:
         options: dict
             Dictionary of simulation options.
         """
-        if self._options_set:
-            return self._sim_options
+        if self._configured:
+            return self.config.__dict__
         else:
-            print("No simulation options set, using defaults")
-            return self.get_defaults()
+            self.config = _Config()
+            print(f"No simulation options set, using defaults: {self.config.__dict__}")
+            self._configured = True
 
     def _update_gpu_pool(self, gpu_num):
         """
@@ -295,38 +127,20 @@ class Controller:
         """
         self._gpu_pool.remove(gpu_num)
 
-    def get_platform(self):
+    def _set_lambda_schedule(self, schedule):
         """
-        Returns the platform to be used for simulations.
-        """
-        return self._platform
+        Sets the lambda schedule.
 
-    @staticmethod
-    def create_lambda_schedule():
+        Parameters:
+        -----------
+        schedule: sr.cas.LambdaSchedule
+            Lambda schedule to be set.
         """
-        Creates a lambda schedule for the simulation.
-        Currently just creates a basic morph
-
-        Returns:
-        --------
-        schedule: :class: `LambdaSchedule <Sire.cas.LambdaSchedule>`
-            A sire lambda schedule.
-        """
-        from sire import cas
-
-        schedule = cas.LambdaSchedule()
-        schedule.add_stage(
-            "morphing",
-            (1 - schedule.lam()) * schedule.initial()
-            + schedule.lam() * schedule.final(),
-        )
-        return schedule
-
-    def _set_lambda_schedule(self):
-        """
-        Sets the lambda schedule for the simulation.
-        """
-        self._schedule = self.create_lambda_schedule()
+        if self._configured:
+            self.config.lambda_schedule = schedule
+        else:
+            self.config = _Config(lambda_schedule=schedule)
+            self._configured = True
 
     @staticmethod
     def get_CUDA_devices():
@@ -362,37 +176,73 @@ class Controller:
 
     def run_simulations(self):
         """
-        Use concurrent.futures to run lambda windows in paralell
+        Use concurrent.futures to run lambda windows in parallel
 
         Returns:
         --------
         results (list): List of simulation results.
         """
-        if not self._options_set:
-            self._sim_options = self.get_defaults()
-        import concurrent.futures as _futures
-
+        if not self._configured:
+            print(
+                "No configuration set... using defaults. To set configuration use configure() method."
+            )
+            self.config = _Config()
         results = []
-        with _futures.ProcessPoolExecutor(
-            max_workers=self._platform_options["num_workers"]
-        ) as executor:
+        if self.config.run_parallel and self.config.num_lambda is not None:
+            self._create_shared_resources()
+            import concurrent.futures as _futures
+
+            # figure out max workers and number of CPUs depending on platform and number of lambda windows
+            if self.config.platform == "CPU":
+                # Finding number of CPUs per worker is done here rather than in config due to platform dependency
+                if self.config.num_lambda > self.config.max_CPU_cores:
+                    self.max_workers = self.config.max_CPU_cores
+                    cpu_per_worker = 1
+                else:
+                    self.max_workers = self.config.num_lambda
+                    cpu_per_worker = self.config.max_CPU_cores // self.config.num_lambda
+                if self.config.extra_args is None:
+                    self.config.extra_args = {"threads": cpu_per_worker}
+                else:
+                    self.config.extra_args["threads"] = cpu_per_worker
+            else:
+                self.max_workers = len(self._gpu_pool)
+
+            with _futures.ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+                self._lambda_values = [
+                    round(i / (self.config.num_lambda - 1), 5)
+                    for i in range(0, self.config.num_lambda)
+                ]
+                for lambda_value in self._lambda_values:
+                    kwargs = {"lambda_value": lambda_value}
+                    jobs = {
+                        executor.submit(
+                            self.run_single_simulation, **kwargs
+                        ): lambda_value
+                    }
+                for job in _futures.as_completed(jobs):
+                    lam = jobs[job]
+                    try:
+                        result = job.result()
+                    except Exception as e:
+                        print(e)
+                        pass
+                    else:
+                        results.append(result)
+
+        elif self.config.num_lambda is not None:
             self._lambda_values = [
-                round(i / (self._num_lambda - 1), 5) for i in range(0, self._num_lambda)
+                round(i / (self.config.num_lambda - 1), 5)
+                for i in range(0, self.config.num_lambda)
             ]
             for lambda_value in self._lambda_values:
-                kwargs = {"lambda_value": lambda_value}
-                jobs = {
-                    executor.submit(self.run_single_simulation, **kwargs): lambda_value
-                }
-            for job in _futures.as_completed(jobs):
-                lam = jobs[job]
-                try:
-                    result = job.result()
-                except Exception as e:
-                    print(e)
-                    pass
-                else:
-                    results.append(result)
+                result = self.run_single_simulation(lambda_value)
+                results.append(result)
+
+        else:
+            raise ValueError(
+                "Vanilla MD not currently supported. Please set num_lambda > 1."
+            )
 
         return results
 
@@ -413,19 +263,16 @@ class Controller:
         result: str
             The result of the simulation.
         """
-        from ._sire_merge_runsim import MergedSimulation
+        from ._run_single_pert import RunSingleWindow
         from loguru import logger as _logger
 
-        def _run(system, map, lambda_value, lam_minimisation=None):
+        def _run(system, config, lambda_value, lam_minimisation=None):
             try:
-                sim = MergedSimulation(
+                sim = RunSingleWindow(
                     system,
-                    map,
                     lambda_val=lambda_value,
                     lambda_array=self._lambda_values,
-                    minimise=self._sim_options["minimise"],
-                    cutoff_type=self._sim_options["cutoff type"],
-                    no_bookkeeping_time=self._sim_options["no bookkeeping time"],
+                    config=config,
                 )
             except Exception:
                 _logger.warning(f"System creation at {lambda_value} failed")
@@ -434,25 +281,20 @@ class Controller:
                 try:
                     sim._setup_dynamics(
                         lam_val_min=lam_minimisation,
-                        timestep=self._sim_options["timestep"],
                     )
-                    df = sim._run_with_bookkeeping(
-                        runtime=self._sim_options["runtime"],
-                        energy_frequency=self._sim_options["energy frequency"],
-                        frame_frequency=self._sim_options["frame frequency"],
-                        save_velocities=self._sim_options["save velocities"],
-                        traj_directory=self._sim_options["output directory"],
-                    )
+                    df = sim._run()
                     lambda_grad = sim._lambda_grad
 
                 except Exception as e:
                     _logger.warning(
                         f"Minimisation/dynamics at Lambda = {lambda_value} failed, trying again with minimsation at Lambda = {lam_minimisation}. The following warning was raised: {e}"
                     )
-                    df, lambda_grad = _run(system, map, lambda_value, lam_minimisation=0.0)
+                    df, lambda_grad = _run(
+                        system, config, lambda_value, lam_minimisation=0.0
+                    )
                     speed = sim.get_timing()
                     sim._cleanup()
-                    return df, speed
+                    return df, lambda_grad, speed
                 else:
                     speed = sim.get_timing()
                     sim._cleanup()
@@ -460,13 +302,7 @@ class Controller:
             else:
                 try:
                     sim._setup_dynamics(lam_val_min=lam_minimisation)
-                    df, lambda_grad = sim._run_with_bookkeeping(
-                        runtime=self._sim_options["runtime"],
-                        energy_frequency=self._sim_options["energy frequency"],
-                        frame_frequency=self._sim_options["frame frequency"],
-                        save_velocities=self._sim_options["save velocities"],
-                        traj_directory=self._sim_options["output directory"],
-                    )
+                    df, lambda_grad = sim._run()
                     lambda_grad = sim._lambda_grad
                 except Exception as e:
                     _logger.error(
@@ -476,40 +312,25 @@ class Controller:
                 else:
                     return df, lambda_grad
 
-        if not self._options_set:
-            self._sim_options = self.get_defaults()
-        map_options = ["integrator", "temperature", "pressure"]
-        map = {}
-        for option in map_options:
-            try:
-                map[option] = self._sim_options[option]
-            except KeyError:
-                continue
         system = self._system.clone()
 
-        if self._platform == "CPU":
-            if lambda_value is not None:
-                print(
-                    f"Running lambda = {lambda_value} using {self._platform_options['cpu_per_worker']} CPUs"
-                )
-            map["platform"] = self._platform
-            map["threads"] = self._platform_options["cpu_per_worker"]
+        if self.config.platform == "CPU":
             try:
-                df, lambda_grad = _run(system, map, lambda_value=lambda_value)
+                df, lambda_grad = _run(system, self.config, lambda_value=lambda_value)
             except Exception:
                 raise
 
-        elif self._platform == "CUDA":
+        elif self.config.platform == "CUDA":
             with self._lock:
                 gpu_num = self._gpu_pool[0]
                 self._remove_gpu_from_pool(gpu_num)
                 if lambda_value is not None:
                     print(f"Running lambda = {lambda_value} on GPU {gpu_num}")
-            map["platform"] = self._platform
-            map["device"] = gpu_num
 
             try:
-                df, lambda_grad, speed = _run(system, map, lambda_value=lambda_value)
+                df, lambda_grad, speed = _run(
+                    system, self.config, lambda_value=lambda_value
+                )
             except Exception:
                 with self._lock:
                     self._update_gpu_pool(gpu_num)
@@ -528,9 +349,9 @@ class Controller:
                 "lambda_array": self._lambda_values,
                 "lambda_grad": lambda_grad,
                 "speed": speed,
-                "temperature": str(map["temperature"].value()),
+                "temperature": str(self.config.temperature.value()),
             },
-            filepath=self._sim_options["output directory"],
+            filepath=self.config.output_directory,
         )
         del system
         return f"Lambda = {lambda_value} complete"

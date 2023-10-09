@@ -1,25 +1,23 @@
 __all__ = ["MergedSimulation"]
+from ..config import Config as _Config
 
 
-class MergedSimulation:
+# rename this
+class RunSingleWindow:
     """
     Class for controlling the running and bookkeeping of a single lambda value simulation
     Currently just a wrapper around sire dynamics
 
-    Currently the input map handles all simulation options
+    Simulation options are held within a Config object
     """
 
     def __init__(
         self,
         system,
-        map,
-        cutoff_type,
         lambda_val,
-        lambda_array=None,
+        lambda_array,
+        config,
         increment=0.001,
-        minimise=False,
-        no_bookkeeping_only=False,
-        no_bookkeeping_time=None,
     ):
         """
         Constructor
@@ -28,9 +26,6 @@ class MergedSimulation:
         ----------
         system : Sire System
             Sire system containing at least one perturbable molecule
-
-        map : Sire Map
-            Sire map containing all the simulation options
 
         lambda_val : float
             Lambda value for the simulation
@@ -42,17 +37,10 @@ class MergedSimulation:
         increment : float
             Increment of lambda value - used for calculating the gradient
 
-        minimise : bool
-            Whether to minimise the system before running the simulation
+        config : somd2 Config object
+            Config object containing simulation options
 
-        no_bookkeeping_only : bool
-            Only run the simulation without bookkeeping
-
-        no_bookkeeping_time : str
-            Time for which to run no bookkeeping section
         """
-        if map is None:
-            raise ValueError("No map given")
 
         try:
             system.molecules("property is_perturbable")
@@ -65,26 +53,23 @@ class MergedSimulation:
         except KeyError:
             raise KeyError("No perturbable molecules in the system")
 
-        self._map = map
+        if not isinstance(config, _Config):
+            raise TypeError("config must be a Config object")
+        self._config = config
         self._lambda_val = lambda_val
-        self._cutoff_type = cutoff_type
-        self._increment = increment
-        self._minimise = minimise
-        self._no_bookkeeping_only = no_bookkeeping_only
-        self._no_bookeeping_time = no_bookkeeping_time
         self._lambda_array = lambda_array
+        self._increment = increment
 
-    def _setup_dynamics(self, timestep="2fs", lam_val_min=None):
+    # Would prob. be better to just set up the dynamics object here,
+    # then run a separate dynamics.minimise
+    def _setup_dynamics(self, lam_val_min=None):
         """
         Minimise if needed and then setup dynamics object
 
         Parameters
         ----------
-        timestep : str
-            Timestep of the simulation
-
         lam_val_min : float
-            Lambda value aat which to run minimisation,
+            Lambda value at which to run minimisation,
             if None run at pre-set lambda_val
         """
 
@@ -92,7 +77,10 @@ class MergedSimulation:
             if lam_val_min is None:
                 try:
                     m = self._system.minimisation(
-                        lambda_value=self._lambda_val, map=self._map
+                        cutoff_type=self._config.cutoff_type,
+                        schedule=self._config.lambda_schedule,
+                        lambda_value=self._lambda_val,
+                        map=self._config.extra_args,
                     )
                     m.run()
                     self._system = m.commit()
@@ -100,71 +88,42 @@ class MergedSimulation:
                     raise
             else:
                 try:
-                    m = self._system.minimisation(lambda_value=lam_val_min)
+                    m = self._system.minimisation(
+                        cutoff_type=self._config.cutoff_type,
+                        schedule=self._config.lambda_schedule,
+                        lambda_value=lam_val_min,
+                        map=self._config.extra_args,
+                    )
                     m.run()
                     self._system = m.commit()
                 except:
                     raise
-
         self._dyn = self._system.dynamics(
-            timestep=timestep,
+            timestep=self._config.timestep,
             lambda_value=self._lambda_val,
-            cutoff_type=self._cutoff_type,
-            map=self._map,
+            cutoff_type=self._config.cutoff_type,
+            timestep=self._config.timestep,
+            schedule=self._config.lambda_schedule,
+            map=self._config.extra_args,
         )
 
-    def _run_no_bookkeeping(
-        self,
-        frame_frequency="1ps",
-        save_velocities=False,
-    ):
+    # combine these - just equil time
+    # reset timer to zero when bookeeping starts
+    def _equilibration(self):
         """
         Placeholder for per-window equilibration.
         Run the simulation without bookkeeping
-
-        Parameters
-        ----------
-        runtime : str
-            Runtime of the simulation
-
-        runtime : str
-            Runtime of the simulation
-
-        timestep : str
-            Timestep of the simulation
         """
         self._dyn.run(
-            self._no_bookeeping_time,
-            frame_frequency=frame_frequency,
-            save_velocities=save_velocities,
+            self._config.equilibration_time,
+            frame_frequency=self._config.frame_frequency,
+            save_velocities=self._config.save_velocities,
         )
         self._dyn.commit()
 
-    def _run_with_bookkeeping(
-        self,
-        runtime="10ps",
-        energy_frequency="0.05ps",
-        frame_frequency="1ps",
-        save_velocities=False,
-        traj_directory=None,
-    ):
+    def _run(self):
         """
         Run the simulation with bookkeeping
-
-        Parameters
-        ----------
-        runtime : str
-            Runtime of the simulation
-
-        runtime : str
-            Runtime of the simulation
-
-        timestep : str
-            Timestep of the simulation
-
-        traj_directory : str or pathlib.PosixPath
-            Directory to save the trajectory to
-
         Returns
         -------
         df : pandas dataframe
@@ -172,11 +131,6 @@ class MergedSimulation:
             trajectory
         """
         from sire import u as _u
-
-        if self._no_bookeeping_time is not (None or 0):
-            self._run_no_bookkeeping(
-                frame_frequency=frame_frequency, save_velocities=save_velocities
-            )
 
         def generate_lam_vals(lambda_base, increment):
             """Generate lambda values for a given lambda_base and increment"""
@@ -190,6 +144,9 @@ class MergedSimulation:
                 lam_vals = [lambda_base - increment, lambda_base + increment]
             return lam_vals
 
+        if self._config.equilibrate:
+            self._equilibration()
+
         # Work out the lambda values for finite-difference gradient analysis.
         self._lambda_grad = generate_lam_vals(self._lambda_val, self._increment)
 
@@ -199,11 +156,11 @@ class MergedSimulation:
             lam_arr = self._lambda_array + self._lambda_grad
         try:
             self._dyn.run(
-                runtime,
-                energy_frequency=energy_frequency,
-                frame_frequency=frame_frequency,
+                self._config.runtime,
+                energy_frequency=self._config.energy_frequency,
+                frame_frequency=self._config.frame_frequency,
                 lambda_windows=lam_arr,
-                save_velocities=save_velocities,
+                save_velocities=self._config.save_velocities,
                 auto_fix_minimise=False,
             )
         except Exception:
@@ -211,9 +168,9 @@ class MergedSimulation:
         self._system = self._dyn.commit()
         from pathlib import Path as _Path
 
-        if traj_directory is not None:
-            _Path(traj_directory).mkdir(parents=True, exist_ok=True)
-            outdir = _Path(traj_directory)
+        if self._config.output_directory is not None:
+            _Path(self._config.output_directory).mkdir(parents=True, exist_ok=True)
+            outdir = _Path(self._config.output_directory)
         else:
             outdir = _Path.cwd()
         traj_filename = outdir / f"traj_{self._lambda_val}"
@@ -222,12 +179,6 @@ class MergedSimulation:
         # _save(self._system.trajectory(), traj_filename, format=["DCD"])
         df = self._system.energy_trajectory(to_alchemlyb=True)
         return df
-
-    def _get_system(self):
-        return self._system
-
-    def _get_dynamics(self):
-        return self._dyn
 
     def get_timing(self):
         return self._dyn.time_speed()
