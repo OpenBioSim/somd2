@@ -178,7 +178,7 @@ class Controller:
         """
         return [str(devices.index(value)) for value in devices]
 
-    def initialise_simulation(self, system, lambda_value, device=None):
+    def _initialise_simulation(self, system, lambda_value, device=None):
         """
         Create simulation object.
 
@@ -208,7 +208,7 @@ class Controller:
             _logger.warning(f"System creation at {lambda_value} failed")
             raise
 
-    def cleanup_simulation(self):
+    def _cleanup_simulation(self):
         """
         Used to delete simulation objects once the required data has been extracted.
         """
@@ -347,7 +347,7 @@ class Controller:
         system = self._system.clone()
 
         if self.config.platform == "CPU":
-            self.initialise_simulation(system, lambda_value)
+            self._initialise_simulation(system, lambda_value)
             try:
                 df, lambda_grad, speed = _run(self._sim)
             except Exception:
@@ -364,7 +364,7 @@ class Controller:
             # Assumes that device for non-parallel GPU jobs is 0
             else:
                 gpu_num = 0
-            self.initialise_simulation(system, lambda_value, device=gpu_num)
+            self._initialise_simulation(system, lambda_value, device=gpu_num)
             try:
                 df, lambda_grad, speed = _run(self._sim)
             except Exception:
