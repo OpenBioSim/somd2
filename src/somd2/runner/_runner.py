@@ -30,17 +30,10 @@ class Controller:
             False  # Will track if simulation options have been set by the user
         )
         # parallel = True keyword
-        # control cpu core numbers, set cuda devices
         # query status of processes
         # checkpointing
         # simulation settings in metadata or to yaml?
-        # cuda lower case in function name
-        # lambda schedule as keyword argument
-        # import BioSimSpace as _BSS
         from sire.system import System as sire_system
-
-        # if not isinstance(self._system, (_BSS._SireWrappers.system, sire_system)):
-        #    raise TypeError("System must be BioSimSpace or Sire system")
 
         if not isinstance(self._system, (sire_system)):
             raise TypeError("System must be Sire system")
@@ -60,6 +53,10 @@ class Controller:
             Dictionary of simulation options.
         """
         self.config = _Config(**input)
+        self._lambda_values = [
+            round(i / (self.config.num_lambda - 1), 5)
+            for i in range(0, self.config.num_lambda)
+        ]
         self._configured = True
 
     def _create_shared_resources(self):
@@ -75,12 +72,12 @@ class Controller:
             self._lock = self._manager.Lock()
             if self.config.max_GPUS is None:
                 self._gpu_pool = self._manager.list(
-                    self.zero_CUDA_devices(self.get_CUDA_devices())
+                    self.zero_cuda_devices(self.get_cuda_devices())
                 )
             else:
                 self._gpu_pool = self._manager.list(
-                    self.zero_CUDA_devices(
-                        self.get_CUDA_devices()[: self.config.max_GPUS]
+                    self.zero_cuda_devices(
+                        self.get_cuda_devices()[: self.config.max_GPUS]
                     )
                 )
 
@@ -150,7 +147,7 @@ class Controller:
             self._configured = True
 
     @staticmethod
-    def get_CUDA_devices():
+    def get_cuda_devices():
         """
         Get list of available GPUs from CUDA_VISIBLE_DEVICES.
 
@@ -170,7 +167,7 @@ class Controller:
             return available_devices
 
     @staticmethod
-    def zero_CUDA_devices(devices):
+    def zero_cuda_devices(devices):
         """
         Set all device numbers relative to the lowest
         (the device number becomes equal to its index in the list).
@@ -193,7 +190,8 @@ class Controller:
             print(
                 "No configuration set... using defaults. To set configuration use configure() method."
             )
-            self.config = _Config()
+            self.configure({})
+            self.configured = True
         results = []
         if self.config.run_parallel and (self.config.num_lambda is not None):
             self._create_shared_resources()
@@ -216,10 +214,6 @@ class Controller:
                 self.max_workers = len(self._gpu_pool)
 
             with _futures.ProcessPoolExecutor(max_workers=self.max_workers) as executor:
-                self._lambda_values = [
-                    round(i / (self.config.num_lambda - 1), 5)
-                    for i in range(0, self.config.num_lambda)
-                ]
                 for lambda_value in self._lambda_values:
                     kwargs = {"lambda_value": lambda_value}
                     jobs = {
@@ -274,6 +268,13 @@ class Controller:
         """
         from ._run_single_pert import RunSingleWindow
         from loguru import logger as _logger
+
+        if not self._configured:
+            print(
+                "No configuration set... using defaults. To set configuration use configure() method."
+            )
+            self.configure({})
+            self.configured = True
 
         def _run(system, config, lambda_value, lam_minimisation=None, device=None):
             try:
