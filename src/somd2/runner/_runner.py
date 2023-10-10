@@ -178,6 +178,42 @@ class Controller:
         """
         return [str(devices.index(value)) for value in devices]
 
+    def initialise_simulation(self, system, lambda_value, device=None):
+        """
+        Create simulation object.
+
+        Parameters:
+        -----------
+        system: sire sytem
+            The system to be simulated.
+
+        lambda_value: float
+            The lambda value for the simulation.
+
+        device: int
+            The GPU device number to be used for the simulation.
+        """
+        from ._run_single_pert import RunSingleWindow
+        from loguru import logger as _logger
+
+        try:
+            self._sim = RunSingleWindow(
+                system,
+                lambda_val=lambda_value,
+                lambda_array=self._lambda_values,
+                config=self.config,
+                device=device,
+            )
+        except Exception:
+            _logger.warning(f"System creation at {lambda_value} failed")
+            raise
+
+    def cleanup_simulation(self):
+        """
+        Used to delete simulation objects once the required data has been extracted.
+        """
+        self._sim._cleanup()
+
     def run_simulations(self):
         """
         Use concurrent.futures to run lambda windows in parallel
@@ -276,18 +312,7 @@ class Controller:
             self.configure({})
             self.configured = True
 
-        def _run(system, config, lambda_value, lam_minimisation=None, device=None):
-            try:
-                sim = RunSingleWindow(
-                    system,
-                    lambda_val=lambda_value,
-                    lambda_array=self._lambda_values,
-                    config=config,
-                    device=device,
-                )
-            except Exception:
-                _logger.warning(f"System creation at {lambda_value} failed")
-                raise
+        def _run(sim, lam_minimisation=None):
             if lam_minimisation is None:
                 try:
                     sim._setup_dynamics(
@@ -300,20 +325,16 @@ class Controller:
                     _logger.warning(
                         f"Minimisation/dynamics at Lambda = {lambda_value} failed, trying again with minimsation at Lambda = {lam_minimisation}. The following warning was raised: {e}"
                     )
-                    df, lambda_grad = _run(
-                        system, config, lambda_value, lam_minimisation=0.0
-                    )
+                    df, lambda_grad = _run(sim, lam_minimisation=0.0)
                     speed = sim.get_timing()
-                    sim._cleanup()
                     return df, lambda_grad, speed
                 else:
                     speed = sim.get_timing()
-                    sim._cleanup()
                     return df, lambda_grad, speed
             else:
                 try:
                     sim._setup_dynamics(lam_val_min=lam_minimisation)
-                    df, lambda_grad = sim._run()
+                    df = sim._run()
                     lambda_grad = sim._lambda_grad
                 except Exception as e:
                     _logger.error(
@@ -326,12 +347,12 @@ class Controller:
         system = self._system.clone()
 
         if self.config.platform == "CPU":
+            self.initialise_simulation(system, lambda_value)
             try:
-                df, lambda_grad, speed = _run(
-                    system, self.config, lambda_value=lambda_value
-                )
+                df, lambda_grad, speed = _run(self._sim)
             except Exception:
                 raise
+            self._sim._cleanup()
 
         elif self.config.platform == "CUDA":
             if self.config.run_parallel:
@@ -343,11 +364,9 @@ class Controller:
             # Assumes that device for non-parallel GPU jobs is 0
             else:
                 gpu_num = 0
-
+            self.initialise_simulation(system, lambda_value, device=gpu_num)
             try:
-                df, lambda_grad, speed = _run(
-                    system, self.config, lambda_value=lambda_value, device=gpu_num
-                )
+                df, lambda_grad, speed = _run(self._sim)
             except Exception:
                 if self.config.run_parallel:
                     with self._lock:
@@ -357,6 +376,7 @@ class Controller:
                 if self.config.run_parallel:
                     with self._lock:
                         self._update_gpu_pool(gpu_num)
+            self._sim._cleanup()
 
         self.dataframe_to_parquet(
             df,
