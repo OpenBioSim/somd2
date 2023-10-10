@@ -30,6 +30,7 @@ class Config:
         max_CPU_cores=None,
         max_GPUS=None,
         run_parallel=False,
+        vacuum=False,
         output_directory=_Path.cwd() / "output",
         extra_args=None,
     ):
@@ -99,6 +100,9 @@ class Config:
         run_parallel: bool
             Whether to run simulation in parallel (default False)
 
+        vacuum: bool
+            Set True if running in vacuum (default False)
+
         output_directory: str
             Directory in which energy and trajectory info is stored
 
@@ -127,6 +131,7 @@ class Config:
         self.max_CPU_cores = max_CPU_cores
         self.max_GPUS = max_GPUS
         self.run_parallel = run_parallel
+        self.vacuum = vacuum
         self.output_directory = output_directory
         self.extra_args = extra_args
 
@@ -417,6 +422,16 @@ class Config:
         if not isinstance(run_parallel, bool):
             raise ValueError("'run_parallel' must be a boolean")
         self._run_parallel = run_parallel
+
+    @property
+    def vacuum(self):
+        return self._vacuum
+
+    @vacuum.setter
+    def vacuum(self, vacuum):
+        if not isinstance(vacuum, bool):
+            raise ValueError("'vacuum' must be a boolean")
+        self._vacuum = vacuum
 
     @property
     def output_directory(self):

@@ -326,30 +326,36 @@ class Controller:
 
         if self.config.platform == "CPU":
             try:
-                df, lambda_grad = _run(system, self.config, lambda_value=lambda_value)
+                df, lambda_grad, speed = _run(
+                    system, self.config, lambda_value=lambda_value
+                )
             except Exception:
                 raise
 
         elif self.config.platform == "CUDA":
-            with self._lock:
-                gpu_num = self._gpu_pool[0]
-                self._remove_gpu_from_pool(gpu_num)
-                if lambda_value is not None:
-                    print(f"Running lambda = {lambda_value} on GPU {gpu_num}")
+            if self.config.run_parallel:
+                with self._lock:
+                    gpu_num = self._gpu_pool[0]
+                    self._remove_gpu_from_pool(gpu_num)
+                    if lambda_value is not None:
+                        print(f"Running lambda = {lambda_value} on GPU {gpu_num}")
+            # Assumes that device for non-parallel GPU jobs is 0
+            else:
+                gpu_num = 0
 
             try:
                 df, lambda_grad, speed = _run(
                     system, self.config, lambda_value=lambda_value, device=gpu_num
                 )
             except Exception:
-                with self._lock:
-                    self._update_gpu_pool(gpu_num)
-                    print(f"Lambda = {lambda_value} failed", flush=True)
+                if self.config.run_parallel:
+                    with self._lock:
+                        self._update_gpu_pool(gpu_num)
                 raise
             else:
-                with self._lock:
-                    self._update_gpu_pool(gpu_num)
-                    print(f"Lambda = {lambda_value} complete", flush=True)
+                if self.config.run_parallel:
+                    with self._lock:
+                        self._update_gpu_pool(gpu_num)
 
         self.dataframe_to_parquet(
             df,

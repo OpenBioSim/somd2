@@ -104,6 +104,8 @@ class RunSingleWindow:
                 except:
                     raise
         self._dyn = self._system.dynamics(
+            temperature=self._config.temperature,
+            pressure=self._config.pressure,
             timestep=self._config.timestep,
             lambda_value=self._lambda_val,
             cutoff_type=self._config.cutoff_type,
