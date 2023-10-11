@@ -1,56 +1,23 @@
 from somd2.runner import Controller
-from sire import stream
-from sire import u
-import tempfile
+import sire as sr
 import pytest
 
 
-def test_setup():
-    temp_dir = tempfile.TemporaryDirectory()
-    simulation_options = {
-        "no bookkeeping time": "1ps",
-        "runtime": "1ns",
-        "frame frequency": "0.5ps",
-        "energy frequency": "0.1ps",
-        "pressure": "1atm",
-        "output directory": temp_dir.name,
-    }
-    options_units = [
-        "no bookkeeping time",
-        "runtime",
-        "frame frequency",
-        "energy frequency",
-        "pressure",
-    ]
-    system = stream.load("./src/somd2/tests/test_systems/merged_molecule.s3")
-    runner = Controller(system, platform="CPU", num_lambda=11)
-    runner.create_sim_options(simulation_options)
-    options = runner.get_options()
-    for key in simulation_options.keys():
-        if key in options_units:
-            try:
-                assert options[key] == u(simulation_options[key])
-            except AssertionError:
-                print(f"{options[key]} != {simulation_options[key]}")
-                raise
+def test_config():
+    # Testing that default options are set correctly
+    mols = sr.stream.load("Methane_Ethane_solv.bss")
+    for mol in mols.molecules("molecule property is_perturbable"):
+        mols.update(mol.perturbation().link_to_reference().commit())
 
-        else:
-            assert options[key] == simulation_options[key]
-    temp_dir.cleanup()
-
-
-def test_run():
-    temp_dir = tempfile.TemporaryDirectory()
-    simulation_options = {
-        "no bookkeeping time": "1ps",
-        "runtime": "1ps",
-        "frame frequency": "0.5ps",
-        "energy frequency": "0.1ps",
-        "pressure": "1atm",
-        "output directory": temp_dir.name,
-    }
-    system = stream.load("./src/somd2/tests/test_systems/merged_molecule.s3")
-    runner = Controller(system, platform="CPU", num_lambda=2)
-    runner.create_sim_options(simulation_options)
-    runner.run_simulations()
-    temp_dir.cleanup()
+    runner = Controller(mols)
+    runner.configure({})
+    runner._initialise_simulation(runner._system.clone(), 0.0)
+    runner._sim._setup_dynamics()
+    d = runner._sim._dyn
+    config_inp = runner.config
+    assert config_inp.timestep == d.timestep()
+    assert config_inp.temperature == d.ensemble().temperature()
+    assert config_inp.pressure == d.ensemble().pressure()
+    assert config_inp.lambda_schedule.to_string() == d.get_schedule().to_string()
+    assert config_inp.cutoff_type == d.info().cutoff_type()
+    assert config_inp.platform == d.platform()
