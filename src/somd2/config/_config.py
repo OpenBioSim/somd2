@@ -141,10 +141,21 @@ class Config:
         self.config_to_file = config_to_file
         self.extra_args = extra_args
 
-    def __getstate__(self):
-        state = self.__dict__.copy()
-        del state["hidden"]
-        return state
+    def as_dict(self):
+        """Convert config object to dictionary"""
+        from pathlib import PosixPath as _PosixPath
+
+        d = {}
+        for attr, value in self.__dict__.items():
+            attr_l = attr[1:]
+            if isinstance(value, _PosixPath):
+                d[attr_l] = str(value)
+            else:
+                try:
+                    d[attr_l] = value.to_string()
+                except AttributeError:
+                    d[attr_l] = value
+        return d
 
     @property
     def runtime(self):

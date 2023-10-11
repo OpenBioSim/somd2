@@ -29,7 +29,6 @@ class Controller:
         self._configured = (
             False  # Will track if simulation options have been set by the user
         )
-        # parallel = True keyword
         # query status of processes
         # checkpointing
         # simulation settings in metadata or to yaml?
@@ -103,10 +102,10 @@ class Controller:
             Dictionary of simulation options.
         """
         if self._configured:
-            return self.config.__dict__
+            return self.config.as_dict()
         else:
             self.config = _Config()
-            print(f"No simulation options set, using defaults: {self.config.__dict__}")
+            print(f"No simulation options set, using defaults: {self.config.as_dict()}")
             self._configured = True
 
     def _update_gpu_pool(self, gpu_num):
@@ -282,6 +281,8 @@ class Controller:
             raise ValueError(
                 "Vanilla MD not currently supported. Please set num_lambda > 1."
             )
+        if self.config.config_to_file:
+            self.dict_to_yaml(self.config.as_dict(), self.config.output_directory)
 
         return results
 
@@ -302,7 +303,6 @@ class Controller:
         result: str
             The result of the simulation.
         """
-        from ._run_single_pert import RunSingleWindow
         from loguru import logger as _logger
 
         if not self._configured:
@@ -435,3 +435,38 @@ class Controller:
         table = table.replace_schema_metadata(combined_meta)
         filename = f"Lam_{metadata['lambda'].replace('.','')[:5]}_T_{metadata['temperature']}.parquet"
         pq.write_table(table, filepath / filename)
+
+    @staticmethod
+    def dict_to_yaml(data_dict, file_path, filename="config.yaml"):
+        """
+        Write a dictionary to a YAML file.
+
+        Parameters:
+        -----------
+        data_dict: dict
+            The dictionary to be written to a YAML file.
+
+        file_path: str or pathlib.PosixPath
+            The path to the YAML file to be written.
+
+        filename: str
+            The name of the YAML file to be written (default 'config.yaml').
+        """
+        from pathlib import Path as _Path
+        import yaml as _yaml
+
+        try:
+            file_path = _Path(file_path) / filename
+
+            # Ensure the parent directory for the file exists
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Open the file in write mode and write the dictionary as YAML
+            with file_path.open("w") as yaml_file:
+                _yaml.dump(
+                    data_dict,
+                    yaml_file,
+                )
+            print("config written")
+        except Exception as e:
+            print(f"Error writing the dictionary to {file_path}: {e}")
