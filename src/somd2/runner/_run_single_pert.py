@@ -119,15 +119,16 @@ class RunSingleWindow:
     # reset timer to zero when bookeeping starts
     def _equilibration(self):
         """
-        Placeholder for per-window equilibration.
-        Run the simulation without bookkeeping
+        Per-window equilibration.
+        Currently just runs dynamics without any saving
         """
         self._dyn.run(
             self._config.equilibration_time,
-            frame_frequency=self._config.frame_frequency,
-            save_velocities=self._config.save_velocities,
+            frame_frequency=0,
+            energy_frequency=0,
+            save_velocities=False,
         )
-        self._dyn.commit()
+        self._system = self._dyn.commit()
 
     def _run(self):
         """
@@ -154,6 +155,8 @@ class RunSingleWindow:
 
         if self._config.equilibrate:
             self._equilibration()
+            # Reset the timer to zero
+            self._dyn.set_time(_u("0ps"))
 
         # Work out the lambda values for finite-difference gradient analysis.
         self._lambda_grad = generate_lam_vals(self._lambda_val, self._increment)
