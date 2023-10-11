@@ -4,6 +4,7 @@ and outputs a config class object in which options are converted to SI units"""
 __all__ = ["Config"]
 from sire import u as _u
 from pathlib import Path as _Path
+from loguru import logger as _logger
 
 
 class Config:
@@ -32,6 +33,7 @@ class Config:
         run_parallel=False,
         vacuum=False,
         output_directory=_Path.cwd() / "output",
+        config_to_file=False,
         extra_args=None,
     ):
         """Initialise the config class object
@@ -106,6 +108,9 @@ class Config:
         output_directory: str
             Directory in which energy and trajectory info is stored
 
+        config_to_file: bool
+            Dump configuration options to a yaml file in the output directory
+
         extra_args: dict
             Dictionary passed to sire as a map - only use if there is no other way,
             inputs for this dictionary are not checked for validity.
@@ -133,7 +138,13 @@ class Config:
         self.run_parallel = run_parallel
         self.vacuum = vacuum
         self.output_directory = output_directory
+        self.config_to_file = config_to_file
         self.extra_args = extra_args
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        del state["hidden"]
+        return state
 
     @property
     def runtime(self):
@@ -270,6 +281,10 @@ class Config:
     def minimise(self, minimise):
         if not isinstance(minimise, bool):
             raise ValueError("'Minimise' must be a boolean")
+        if not minimise:
+            _logger.warning(
+                "Minimisation is highly recommended for increased stability in SOMD2"
+            )
         self._minimise = minimise
 
     @property
@@ -394,6 +409,10 @@ class Config:
 
         if max_CPU_cores is not None:
             self._max_CPU_cores = max_CPU_cores
+            if self._platform == "CUDA":
+                _logger.warning(
+                    "CUDA platform requested but max_CPU_cores set - ignoring max_CPU_cores"
+                )
         else:
             self._max_CPU_cores = _os.cpu_count()
 
@@ -407,6 +426,10 @@ class Config:
 
         if max_GPUS is not None:
             self._max_GPUS = max_GPUS
+            if self._platform == "CPU":
+                _logger.warning(
+                    "CPU platform requested but max_GPUS set - ignoring max_GPUS"
+                )
         else:
             if "CUDA_VISIBLE_DEVICES" in _os.environ:
                 self._max_GPUS = len(_os.environ["CUDA_VISIBLE_DEVICES"].split(","))
@@ -431,6 +454,10 @@ class Config:
     def vacuum(self, vacuum):
         if not isinstance(vacuum, bool):
             raise ValueError("'vacuum' must be a boolean")
+        if vacuum and self._pressure is not None:
+            _logger.warning(
+                "Vacuum requested but pressure specified - ignoring pressure"
+            )
         self._vacuum = vacuum
 
     @property
@@ -452,6 +479,16 @@ class Config:
                     f"Output directory {output_directory} does not exist and cannot be created"
                 )
         self._output_directory = output_directory
+
+    @property
+    def config_to_file(self):
+        return self._config_to_file
+
+    @config_to_file.setter
+    def config_to_file(self, config_to_file):
+        if not isinstance(config_to_file, bool):
+            raise ValueError("'config_to_file' must be a boolean")
+        self._config_to_file = config_to_file
 
     @property
     def extra_args(self):
