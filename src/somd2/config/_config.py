@@ -23,7 +23,7 @@ class Config:
         minimise=True,
         equilibrate=False,
         equilibration_time="2ps",
-        equilibration_timestep="2fs",
+        equilibration_timestep="1fs",
         energy_frequency="1ps",
         frame_frequency="2ps",
         save_velocities=False,

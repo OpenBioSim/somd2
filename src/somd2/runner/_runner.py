@@ -312,37 +312,65 @@ class Controller:
             self.configure({})
             self.configured = True
 
-        def _run(sim, lam_minimisation=None):
-            if lam_minimisation is None:
+        def _run(sim):
+            # This function is complex due to the mixture of options for minimisation and dynamics
+            if self.config.minimise:
                 try:
-                    sim._setup_dynamics(
-                        lam_val_min=lam_minimisation,
-                    )
                     df = sim._run()
                     lambda_grad = sim._lambda_grad
-
+                    speed = sim.get_timing()
+                    return df, lambda_grad, speed
                 except Exception as e:
                     _logger.warning(
-                        f"Minimisation/dynamics at Lambda = {lambda_value} failed, trying again with minimsation at Lambda = {lam_minimisation}. The following warning was raised: {e}"
+                        f"Minimisation/dynamics at Lambda = {lambda_value} failed with the following exception {e}, trying again with minimsation at Lambda = 0."
                     )
-                    df, lambda_grad = _run(sim, lam_minimisation=0.0)
-                    speed = sim.get_timing()
-                    return df, lambda_grad, speed
-                else:
-                    speed = sim.get_timing()
-                    return df, lambda_grad, speed
+                    try:
+                        df = sim._run(lambda_minimisation=0.0)
+                        lambda_grad = sim._lambda_grad
+                        speed = sim.get_timing()
+                        return df, lambda_grad, speed
+                    except Exception as e:
+                        _logger.error(
+                            f"Minimisation/dynamics at Lambda = {lambda_value} failed, even after minimisation at Lambda = 0. The following warning was raised: {e}."
+                        )
+                        raise
             else:
                 try:
-                    sim._setup_dynamics(lam_val_min=lam_minimisation)
                     df = sim._run()
                     lambda_grad = sim._lambda_grad
+                    speed = sim.get_timing()
+                    return df, lambda_grad, speed
                 except Exception as e:
                     _logger.error(
-                        f"Minimisation/dynamics at Lambda = {lambda_value} failed, even after minimisation at Lambda = {lam_minimisation}. The following warning was raised: {e}."
+                        f"Dynamics at Lambda = {lambda_value} failed. The following warning was raised: {e}. This may be due to a lack of minimisation."
                     )
-                    raise
+
+                    """try:
+                        df = sim._run()
+                        lambda_grad = sim._lambda_grad
+
+                    except Exception as e:
+                        _logger.warning(
+                            f"Minimisation/dynamics at Lambda = {lambda_value} failed, trying again with minimsation at Lambda = {lam_minimisation}. The following warning was raised: {e}"
+                        )
+                        df, lambda_grad = _run(sim, lam_minimisation=0.0)
+                        speed = sim.get_timing()
+                        return df, lambda_grad, speed
+                    else:
+                        speed = sim.get_timing()
+                        return df, lambda_grad, speed
                 else:
-                    return df, lambda_grad
+                    try:
+                        sim._setup_dynamics(lam_val_min=lam_minimisation)
+                        df = sim._run()
+                        lambda_grad = sim._lambda_grad
+                    except Exception as e:
+                        _logger.error(
+                            f"Minimisation/dynamics at Lambda = {lambda_value} failed, even after minimisation at Lambda = {lam_minimisation}. The following warning was raised: {e}."
+                        )
+                        raise
+                    else:
+                        return df, lambda_grad"""
 
         system = self._system.clone()
 
@@ -400,7 +428,7 @@ class Controller:
 
         Parameters:
         -----------
-        df: pandas.DataFrame`
+        df: pandas.DataFrame
             The dataframe to be saved. In this case containing info required for FEP calculation
 
         metadata: dict

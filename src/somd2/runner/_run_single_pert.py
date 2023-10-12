@@ -67,7 +67,7 @@ class RunSingleWindow:
 
     # Would prob. be better to just set up the dynamics object here,
     # then run a separate dynamics.minimise
-    def _setup_dynamics(self, lam_val_min=None):
+    def _setup_dynamics(self, equilibration=False):
         """
         Minimise if needed and then setup dynamics object
 
@@ -78,35 +78,12 @@ class RunSingleWindow:
             if None run at pre-set lambda_val
         """
 
-        if self._config.minimise:
-            if lam_val_min is None:
-                try:
-                    m = self._system.minimisation(
-                        cutoff_type=self._config.cutoff_type,
-                        schedule=self._config.lambda_schedule,
-                        lambda_value=self._lambda_val,
-                        map=self._config.extra_args,
-                    )
-                    m.run()
-                    self._system = m.commit()
-                except:
-                    raise
-            else:
-                try:
-                    m = self._system.minimisation(
-                        cutoff_type=self._config.cutoff_type,
-                        schedule=self._config.lambda_schedule,
-                        lambda_value=lam_val_min,
-                        map=self._config.extra_args,
-                    )
-                    m.run()
-                    self._system = m.commit()
-                except:
-                    raise
         self._dyn = self._system.dynamics(
             temperature=self._config.temperature,
             pressure=self._config.pressure,
-            timestep=self._config.timestep,
+            timestep=self._config.equilibration_timestep
+            if equilibration
+            else self._config.timestep,
             lambda_value=self._lambda_val,
             cutoff_type=self._config.cutoff_type,
             schedule=self._config.lambda_schedule,
@@ -115,6 +92,41 @@ class RunSingleWindow:
             map=self._config.extra_args,
         )
 
+    def _minimisation(self, lambda_min=None):
+        """
+        Minimisation of self._system
+
+        Parameters
+        ----------
+        lambda_min : float
+            Lambda value at which to run minimisation,
+            if None run at pre-set lambda_val
+        """
+        if lambda_min is None:
+            try:
+                m = self._system.minimisation(
+                    cutoff_type=self._config.cutoff_type,
+                    schedule=self._config.lambda_schedule,
+                    lambda_value=self._lambda_val,
+                    map=self._config.extra_args,
+                )
+                m.run()
+                self._system = m.commit()
+            except:
+                raise
+        else:
+            try:
+                m = self._system.minimisation(
+                    cutoff_type=self._config.cutoff_type,
+                    schedule=self._config.lambda_schedule,
+                    lambda_value=lambda_min,
+                    map=self._config.extra_args,
+                )
+                m.run()
+                self._system = m.commit()
+            except:
+                raise
+
     # combine these - just equil time
     # reset timer to zero when bookeeping starts
     def _equilibration(self):
@@ -122,6 +134,7 @@ class RunSingleWindow:
         Per-window equilibration.
         Currently just runs dynamics without any saving
         """
+        self._setup_dynamics(equilibration=True)
         self._dyn.run(
             self._config.equilibration_time,
             frame_frequency=0,
@@ -130,7 +143,7 @@ class RunSingleWindow:
         )
         self._system = self._dyn.commit()
 
-    def _run(self):
+    def _run(self, lambda_minimisation=None):
         """
         Run the simulation with bookkeeping
         Returns
@@ -153,11 +166,15 @@ class RunSingleWindow:
                 lam_vals = [lambda_base - increment, lambda_base + increment]
             return lam_vals
 
+        if self._config.minimise:
+            self._minimisation(lambda_minimisation)
+
         if self._config.equilibrate:
             self._equilibration()
             # Reset the timer to zero
-            self._dyn.set_time(_u("0ps"))
+            self._system.set_time(_u("0ps"))
 
+        self._setup_dynamics(equilibration=False)
         # Work out the lambda values for finite-difference gradient analysis.
         self._lambda_grad = generate_lam_vals(self._lambda_val, self._increment)
 
