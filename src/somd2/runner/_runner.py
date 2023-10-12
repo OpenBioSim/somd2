@@ -8,7 +8,7 @@ class Controller:
     resources.
     """
 
-    def __init__(self, system):
+    def __init__(self, system, input_options={}):
         """
         Constructor.
 
@@ -26,9 +26,7 @@ class Controller:
 
         """
         self._system = system
-        self._configured = (
-            False  # Will track if simulation options have been set by the user
-        )
+        self.configure(input_options)
         # query status of processes
         # checkpointing
         # simulation settings in metadata or to yaml?
@@ -45,6 +43,8 @@ class Controller:
     def configure(self, input):
         """
         Configure simulation options.
+        This is called upon construction of the Controller object,
+        use this if settings need to be changed after construction.
 
         Parameters:
         -----------
@@ -56,7 +56,9 @@ class Controller:
             round(i / (self.config.num_lambda - 1), 5)
             for i in range(0, self.config.num_lambda)
         ]
-        self._configured = True
+        # Save config whenever 'configure' is called to keep it up to date
+        if self.config.config_to_file:
+            self.dict_to_yaml(self.config.as_dict(), self.config.output_directory)
 
     def _create_shared_resources(self):
         """
@@ -101,12 +103,7 @@ class Controller:
         options: dict
             Dictionary of simulation options.
         """
-        if self._configured:
-            return self.config.as_dict()
-        else:
-            self.config = _Config()
-            print(f"No simulation options set, using defaults: {self.config.as_dict()}")
-            self._configured = True
+        return self.config.as_dict()
 
     def _update_gpu_pool(self, gpu_num):
         """
@@ -139,11 +136,7 @@ class Controller:
         schedule: sr.cas.LambdaSchedule
             Lambda schedule to be set.
         """
-        if self._configured:
-            self.config.lambda_schedule = schedule
-        else:
-            self.config = _Config(lambda_schedule=schedule)
-            self._configured = True
+        self.config.lambda_schedule = schedule
 
     @staticmethod
     def get_cuda_devices():
@@ -221,12 +214,6 @@ class Controller:
         --------
         results (list): List of simulation results.
         """
-        if not self._configured:
-            print(
-                "No configuration set... using defaults. To set configuration use configure() method."
-            )
-            self.configure({})
-            self.configured = True
         results = []
         if self.config.run_parallel and (self.config.num_lambda is not None):
             self._create_shared_resources()
@@ -281,8 +268,6 @@ class Controller:
             raise ValueError(
                 "Vanilla MD not currently supported. Please set num_lambda > 1."
             )
-        if self.config.config_to_file:
-            self.dict_to_yaml(self.config.as_dict(), self.config.output_directory)
 
         return results
 
@@ -304,13 +289,6 @@ class Controller:
             The result of the simulation.
         """
         from loguru import logger as _logger
-
-        if not self._configured:
-            print(
-                "No configuration set... using defaults. To set configuration use configure() method."
-            )
-            self.configure({})
-            self.configured = True
 
         def _run(sim):
             # This function is complex due to the mixture of options for minimisation and dynamics

@@ -25,6 +25,7 @@ class Config:
         equilibration_time="2ps",
         equilibration_timestep="1fs",
         energy_frequency="1ps",
+        save_trajectories=True,
         frame_frequency="2ps",
         save_velocities=False,
         platform=None,
@@ -130,6 +131,7 @@ class Config:
         self.equilibration_time = equilibration_time
         self.equilibration_timestep = equilibration_timestep
         self.energy_frequency = energy_frequency
+        self.save_trajectories = save_trajectories
         self.frame_frequency = frame_frequency
         self.save_velocities = save_velocities
         self.platform = platform
