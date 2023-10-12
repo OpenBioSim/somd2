@@ -345,33 +345,6 @@ class Controller:
                         f"Dynamics at Lambda = {lambda_value} failed. The following warning was raised: {e}. This may be due to a lack of minimisation."
                     )
 
-                    """try:
-                        df = sim._run()
-                        lambda_grad = sim._lambda_grad
-
-                    except Exception as e:
-                        _logger.warning(
-                            f"Minimisation/dynamics at Lambda = {lambda_value} failed, trying again with minimsation at Lambda = {lam_minimisation}. The following warning was raised: {e}"
-                        )
-                        df, lambda_grad = _run(sim, lam_minimisation=0.0)
-                        speed = sim.get_timing()
-                        return df, lambda_grad, speed
-                    else:
-                        speed = sim.get_timing()
-                        return df, lambda_grad, speed
-                else:
-                    try:
-                        sim._setup_dynamics(lam_val_min=lam_minimisation)
-                        df = sim._run()
-                        lambda_grad = sim._lambda_grad
-                    except Exception as e:
-                        _logger.error(
-                            f"Minimisation/dynamics at Lambda = {lambda_value} failed, even after minimisation at Lambda = {lam_minimisation}. The following warning was raised: {e}."
-                        )
-                        raise
-                    else:
-                        return df, lambda_grad"""
-
         system = self._system.clone()
 
         if self.config.platform == "CPU":

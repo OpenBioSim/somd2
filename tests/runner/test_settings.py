@@ -12,7 +12,11 @@ def test_config():
     runner = Controller(mols)
     runner.configure({})
     runner._initialise_simulation(runner._system.clone(), 0.0)
-    runner._sim._setup_dynamics()
+    runner._sim._setup_dynamics(equilibration=True)
+    config_inp = runner.config
+    d = runner._sim._dyn
+    assert config_inp.equilibration_timestep == d.timestep()
+    runner._sim._setup_dynamics(equilibration=False)
     d = runner._sim._dyn
     config_inp = runner.config
     assert config_inp.timestep == d.timestep()
