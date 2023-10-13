@@ -1,5 +1,6 @@
 __all__ = ["Controller"]
 from ..config import Config as _Config
+from ..io import *
 
 
 class Controller:
@@ -29,7 +30,6 @@ class Controller:
         self.configure(input_options)
         # query status of processes
         # checkpointing
-        # simulation settings in metadata or to yaml?
         from sire.system import System as sire_system
 
         if not isinstance(self._system, (sire_system)):
@@ -58,7 +58,7 @@ class Controller:
         ]
         # Save config whenever 'configure' is called to keep it up to date
         if self.config.config_to_file:
-            self.dict_to_yaml(self.config.as_dict(), self.config.output_directory)
+            dict_to_yaml(self.config.as_dict(), self.config.output_directory)
 
     def _create_shared_resources(self):
         """
@@ -68,7 +68,6 @@ class Controller:
         if self.config.platform == "CUDA":
             from multiprocessing import Manager
 
-            # Storing the lock but not the manager - make self.manager
             self._manager = Manager()
             self._lock = self._manager.Lock()
             if self.config.max_GPUS is None:
@@ -357,7 +356,7 @@ class Controller:
                         self._update_gpu_pool(gpu_num)
             self._sim._cleanup()
 
-        self.dataframe_to_parquet(
+        dataframe_to_parquet(
             df,
             metadata={
                 "attrs": df.attrs,
@@ -371,81 +370,3 @@ class Controller:
         )
         del system
         return f"Lambda = {lambda_value} complete"
-
-    @staticmethod
-    def dataframe_to_parquet(df, metadata, filepath=None):
-        """
-        Save a dataframe to parquet format with custom metadata.
-
-        Parameters:
-        -----------
-        df: pandas.DataFrame
-            The dataframe to be saved. In this case containing info required for FEP calculation
-
-        metadata: dict
-            Dictionary containing metadata to be saved with the dataframe.
-            Currently just temperature and lambda value.
-
-        filepath: str or pathlib.PosixPath
-            The of the parent directory in to which the parquet file will be saved.
-            If None, save to current working directory.
-        """
-
-        import pyarrow as pa
-        import pyarrow.parquet as pq
-        import json
-        from pathlib import Path as _Path
-
-        if filepath is None:
-            filepath = _Path.cwd()
-        elif isinstance(filepath, str):
-            filepath = _Path(filepath)
-
-        custom_meta_key = "somd2"
-
-        table = pa.Table.from_pandas(df)
-        custom_meta_json = json.dumps(metadata)
-        existing_meta = table.schema.metadata
-
-        combined_meta = {
-            custom_meta_key.encode(): custom_meta_json.encode(),
-            **existing_meta,
-        }
-        table = table.replace_schema_metadata(combined_meta)
-        filename = f"Lam_{metadata['lambda'].replace('.','')[:5]}_T_{metadata['temperature']}.parquet"
-        pq.write_table(table, filepath / filename)
-
-    @staticmethod
-    def dict_to_yaml(data_dict, file_path, filename="config.yaml"):
-        """
-        Write a dictionary to a YAML file.
-
-        Parameters:
-        -----------
-        data_dict: dict
-            The dictionary to be written to a YAML file.
-
-        file_path: str or pathlib.PosixPath
-            The path to the YAML file to be written.
-
-        filename: str
-            The name of the YAML file to be written (default 'config.yaml').
-        """
-        from pathlib import Path as _Path
-        import yaml as _yaml
-
-        try:
-            file_path = _Path(file_path) / filename
-
-            # Ensure the parent directory for the file exists
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Open the file in write mode and write the dictionary as YAML
-            with file_path.open("w") as yaml_file:
-                _yaml.dump(
-                    data_dict,
-                    yaml_file,
-                )
-            print("config written")
-        except Exception as e:
-            print(f"Error writing the dictionary to {file_path}: {e}")
