@@ -1,4 +1,9 @@
-__all__ = ["dataframe_to_parquet", "dict_to_yaml", "parquet_append"]
+__all__ = [
+    "dataframe_to_parquet",
+    "dict_to_yaml",
+    "parquet_append",
+    "parquet_to_dataframe",
+]
 import pyarrow
 from pathlib import Path as _Path
 import pyarrow as _pa
@@ -7,7 +12,7 @@ import json
 import pandas as _pd
 
 
-def dataframe_to_parquet(df, metadata, filepath=None):
+def dataframe_to_parquet(df, metadata, filepath=None, filename=None):
     """
     Save a dataframe to parquet format with custom metadata.
     Parameters:
@@ -35,7 +40,13 @@ def dataframe_to_parquet(df, metadata, filepath=None):
         **existing_meta,
     }
     table = table.replace_schema_metadata(combined_meta)
-    filename = f"Lam_{metadata['lambda'].replace('.','')[:5]}_T_{metadata['temperature']}.parquet"
+    if filename is None:
+        if "lambda" in metadata and "temperature" in metadata:
+            filename = f"Lam_{metadata['lambda'].replace('.','')[:5]}_T_{metadata['temperature']}.parquet"
+        else:
+            filename = "output.parquet"
+    if not filename.endswith(".parquet"):
+        filename += ".parquet"
     _pq.write_table(table, filepath / filename)
 
 
@@ -101,3 +112,37 @@ def parquet_append(filepath: _Path or str, df: _pd.DataFrame) -> None:
     except (FileNotFoundError, IOError, Exception) as e:
         # Handle specific exceptions that might occur during file operations
         print(f"Error occurred: {e}")
+
+
+@staticmethod
+def parquet_to_dataframe(filepath, meta_key="somd2"):
+    """
+    Reads a parquet file containing an energy trajectory,
+    extracts the trajectory as a dataframe and the metadata as a
+    dictionary
+    parameters
+    ----------
+    filepath : str
+        Path to the parquet file containing the energy trajectory
+    meta_key : str
+        Key of the metadata to be used for analysis
+    returns
+    -------
+    restored_df : pandas dataframe
+        Dataframe containing the energy trajectory
+    restored_meta : dict
+        Dictionary containing the metadata for the simulation"""
+    import pyarrow.parquet as _pq
+    import json as _json
+
+    try:
+        restored_table = _pq.read_table(filepath)
+    except:
+        raise ValueError("Unable to read parquet file")
+    restored_df = restored_table.to_pandas()
+    try:
+        restored_meta_json = restored_table.schema.metadata[meta_key.encode()]
+    except KeyError:
+        raise KeyError("No metadata with key {} found".format(meta_key))
+    restored_meta = _json.loads(restored_meta_json)
+    return restored_df, restored_meta
