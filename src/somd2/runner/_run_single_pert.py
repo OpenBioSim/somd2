@@ -1,6 +1,7 @@
 __all__ = ["MergedSimulation"]
 from ..config import Config as _Config
 from pathlib import Path as _Path
+from ..io import *
 
 
 # rename this
@@ -196,6 +197,10 @@ class RunSingleWindow:
                     rem -= self._config.checkpoint_frequency
                 else:
                     break
+            # Append only this number of lines from the end of the dataframe during checkpointing
+            energy_per_block = (
+                self._config.checkpoint_frequency / self._config.energy_frequency
+            )
             sire_checkpoint_name = (
                 _Path(self._config.output_directory)
                 / f"checkpoint_{self._lambda_val}.s3"
@@ -216,6 +221,26 @@ class RunSingleWindow:
                 try:
                     self._system = self._dyn.commit()
                     _stream.save(self._system, str(sire_checkpoint_name))
+                    df = self._system.energy_trajectory(to_alchemlyb=True)
+                    if _ == 0:
+                        # Not inlcuding speed in checkpoints for now
+
+                        f = dataframe_to_parquet(
+                            df,
+                            metadata={
+                                "attrs": df.attrs,
+                                "lambda": str(self._lambda_val),
+                                "lambda_array": lam_arr,
+                                "lambda_grad": self._lambda_grad,
+                                "temperature": str(self._config.temperature.value()),
+                            },
+                            filepath=self._config.output_directory,
+                        )
+                    else:
+                        parquet_append(
+                            f,
+                            df.iloc[-int(energy_per_block) :],
+                        )
                 except Exception:
                     raise
             # No need to checkpoint here as it is the final block

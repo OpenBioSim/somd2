@@ -48,6 +48,7 @@ def dataframe_to_parquet(df, metadata, filepath=None, filename=None):
     if not filename.endswith(".parquet"):
         filename += ".parquet"
     _pq.write_table(table, filepath / filename)
+    return filepath / filename
 
 
 def dict_to_yaml(data_dict, file_path, filename="config.yaml"):

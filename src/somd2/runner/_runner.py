@@ -358,7 +358,7 @@ class Controller:
                         self._update_gpu_pool(gpu_num)
             self._sim._cleanup()
 
-        dataframe_to_parquet(
+        _ = dataframe_to_parquet(
             df,
             metadata={
                 "attrs": df.attrs,
