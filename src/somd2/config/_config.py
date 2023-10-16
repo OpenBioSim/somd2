@@ -18,6 +18,8 @@ class Config:
         pressure="1 atm",
         integrator="langevin_middle",
         cutoff_type="PME",
+        repartition_h_mass=True,
+        h_mass_factor=1.5,
         num_lambda=11,
         lambda_schedule=None,
         minimise=True,
@@ -60,6 +62,12 @@ class Config:
 
         cutoff_type: str
             Cutoff type to use for simulation (currently only PMF and RF are supported)
+
+        repartition_h_mass: bool
+            Whether to repartition hydrogen mass prior to simulation
+
+        h_mass_factor: float
+            Factor by which to scale hydrogen mass if repartitioning is used
 
         num_lambda: int
             Number of lambda windows to use for alchemical free energy simulations
@@ -132,11 +140,13 @@ class Config:
         """
 
         self.runtime = runtime
-        self.timestep = timestep
         self.temperature = temperature
         self.pressure = pressure
         self.integrator = integrator
         self.cutoff_type = cutoff_type
+        self.repartition_h_mass = repartition_h_mass
+        self.h_mass_factor = h_mass_factor
+        self.timestep = timestep
         self.num_lambda = num_lambda
         self.lambda_schedule = lambda_schedule
         self.minimise = minimise
@@ -189,22 +199,6 @@ class Config:
         if not t.has_same_units(picosecond):
             raise ValueError("Runtime units are invalid.")
         self._runtime = t
-
-    @property
-    def timestep(self):
-        return self._timestep
-
-    @timestep.setter
-    def timestep(self, timestep):
-        from sire.units import femtosecond
-
-        try:
-            t = _u(timestep)
-        except Exception as e:
-            print(e.message)
-        if not t.has_same_units(femtosecond):
-            raise ValueError("Timestep units are invalid.")
-        self._timestep = t
 
     @property
     def temperature(self):
@@ -274,6 +268,52 @@ class Config:
                 f"Cutoff type not recognised. Valid cutoff types are: {valid_cutoff_types}"
             )
         self._cutoff_type = str(cutoff_type)
+
+    @property
+    def repartition_h_mass(self):
+        return self._repartition_h_mass
+
+    @repartition_h_mass.setter
+    def repartition_h_mass(self, repartition_h_mass):
+        if not isinstance(repartition_h_mass, bool):
+            raise ValueError("'repartition_h_mass' must be a boolean")
+        self._repartition_h_mass = repartition_h_mass
+
+    @property
+    def h_mass_factor(self):
+        return self._h_mass_factor
+
+    @h_mass_factor.setter
+    def h_mass_factor(self, h_mass_factor):
+        if not isinstance(h_mass_factor, float):
+            try:
+                h_mass_factor = float(h_mass_factor)
+            except Exception as e:
+                raise ValueError("'h_mass_factor' must be a float")
+        if not self.repartition_h_mass:
+            _logger.warning(
+                "Repartitioning hydrogen mass is not enabled - ignoring h_mass_factor"
+            )
+        self._h_mass_factor = h_mass_factor
+
+    @property
+    def timestep(self):
+        return self._timestep
+
+    @timestep.setter
+    def timestep(self, timestep):
+        from sire.units import femtosecond
+
+        try:
+            t = _u(timestep)
+        except Exception as e:
+            print(e.message)
+        if not t.has_same_units(femtosecond):
+            raise ValueError("Timestep units are invalid.")
+
+        if t > _u("2fs") and not self.repartition_h_mass:
+            _logger.warning("Timestep is large - consider repartitioning hydrogen mass")
+        self._timestep = t
 
     @property
     def num_lambda(self):

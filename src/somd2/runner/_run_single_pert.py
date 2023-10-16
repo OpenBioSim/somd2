@@ -78,6 +78,9 @@ class RunSingleWindow:
         lam_val_min : float
             Lambda value at which to run minimisation,
             if None run at pre-set lambda_val
+
+        equilibration : bool
+            If True, use equilibration settings, otherwise use production settings
         """
 
         self._dyn = self._system.dynamics(
@@ -91,6 +94,8 @@ class RunSingleWindow:
             schedule=self._config.lambda_schedule,
             platform=self._config.platform,
             device=self._device,
+            constraint="none" if equilibration else "h-bonds",
+            perturbable_constraint="none",
             map=self._config.extra_args,
         )
 

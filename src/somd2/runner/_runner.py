@@ -40,6 +40,9 @@ class Controller:
         except KeyError:
             raise KeyError("No perturbable molecules in the system")
 
+        if self.config.repartition_h_mass:
+            self.repartition_h_mass()
+
     def configure(self, input):
         """
         Configure simulation options.
@@ -168,6 +171,25 @@ class Controller:
         devices (list): List of zeroed available device numbers.
         """
         return [str(devices.index(value)) for value in devices]
+
+    def repartition_h_mass(self):
+        """
+        Perform HMR on the input system.
+        Performs a short minimisation before repartitioning for increased stability
+        """
+        print("Repartitioning hydrogen masses")
+        from sire.morph import (
+            repartition_hydrogen_masses as _repartition_hydrogen_masses,
+        )
+
+        self._system = (
+            self._system.minimisation(map={"platform": self.config.platform})
+            .run()
+            .commit()
+        )
+        mol = self._system.molecule("molecule property is_perturbable")
+        mol = _repartition_hydrogen_masses(mol, mass_factor=self.config.h_mass_factor)
+        self._system.update(mol)
 
     def _initialise_simulation(self, system, lambda_value, device=None):
         """
