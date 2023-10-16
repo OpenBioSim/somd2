@@ -1,5 +1,6 @@
 __all__ = ["MergedSimulation"]
 from ..config import Config as _Config
+from pathlib import Path as _Path
 
 
 # rename this
@@ -140,6 +141,7 @@ class RunSingleWindow:
             frame_frequency=0,
             energy_frequency=0,
             save_velocities=False,
+            auto_fix_minimise=False,
         )
         self._system = self._dyn.commit()
 
@@ -153,6 +155,7 @@ class RunSingleWindow:
             trajectory
         """
         from sire import u as _u
+        from sire import stream as _stream
 
         def generate_lam_vals(lambda_base, increment):
             """Generate lambda values for a given lambda_base and increment"""
@@ -182,29 +185,72 @@ class RunSingleWindow:
             lam_arr = self._lambda_grad
         else:
             lam_arr = self._lambda_array + self._lambda_grad
-        try:
-            self._dyn.run(
-                self._config.runtime,
-                energy_frequency=self._config.energy_frequency,
-                frame_frequency=self._config.frame_frequency,
-                lambda_windows=lam_arr,
-                save_velocities=self._config.save_velocities,
-                auto_fix_minimise=False,
+
+        if self._config.checkpoint:
+            ### Calc number of blocks and remainder (surely there's a better way?)###
+            num_blocks = 0
+            rem = self._config.runtime
+            while True:
+                if rem > self._config.checkpoint_frequency:
+                    num_blocks += 1
+                    rem -= self._config.checkpoint_frequency
+                else:
+                    break
+            sire_checkpoint_name = (
+                _Path(self._config.output_directory)
+                / f"checkpoint_{self._lambda_val}.s3"
             )
-        except Exception:
-            raise
-        self._system = self._dyn.commit()
-        from pathlib import Path as _Path
-
-        if self._config.output_directory is not None:
-            _Path(self._config.output_directory).mkdir(parents=True, exist_ok=True)
-            outdir = _Path(self._config.output_directory)
+            # Run num_blocks dynamics and then run a final block if rem > 0
+            for _ in range(int(num_blocks)):
+                try:
+                    self._dyn.run(
+                        self._config.checkpoint_frequency,
+                        energy_frequency=self._config.energy_frequency,
+                        frame_frequency=self._config.frame_frequency,
+                        lambda_windows=lam_arr,
+                        save_velocities=self._config.save_velocities,
+                        auto_fix_minimise=False,
+                    )
+                except Exception:
+                    raise
+                try:
+                    self._system = self._dyn.commit()
+                    _stream.save(self._system, str(sire_checkpoint_name))
+                except Exception:
+                    raise
+            # No need to checkpoint here as it is the final block
+            if rem > 0:
+                try:
+                    self._dyn.run(
+                        rem,
+                        energy_frequency=self._config.energy_frequency,
+                        frame_frequency=self._config.frame_frequency,
+                        lambda_windows=lam_arr,
+                        save_velocities=self._config.save_velocities,
+                        auto_fix_minimise=False,
+                    )
+                except Exception:
+                    raise
+                self._system = self._dyn.commit()
         else:
-            outdir = _Path.cwd()
-        traj_filename = outdir / f"traj_{self._lambda_val}"
-        # from sire import save as _save
+            try:
+                self._dyn.run(
+                    self._config.checkpoint_frequency,
+                    energy_frequency=self._config.energy_frequency,
+                    frame_frequency=self._config.frame_frequency,
+                    lambda_windows=lam_arr,
+                    save_velocities=self._config.save_velocities,
+                    auto_fix_minimise=False,
+                )
+            except Exception:
+                raise
+            self._system = self._dyn.commit()
 
-        # _save(self._system.trajectory(), traj_filename, format=["DCD"])
+        if self._config.save_trajectories:
+            traj_filename = self._config.output_directory / f"traj_{self._lambda_val}"
+            from sire import save as _save
+
+            _save(self._system.trajectory(), traj_filename, format=["DCD"])
         df = self._system.energy_trajectory(to_alchemlyb=True)
         return df
 

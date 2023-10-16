@@ -289,6 +289,8 @@ class Controller:
         """
         from loguru import logger as _logger
 
+        _logger.info(f"Running lambda = {lambda_value}")
+
         def _run(sim):
             # This function is complex due to the mixture of options for minimisation and dynamics
             if self.config.minimise:
@@ -369,4 +371,5 @@ class Controller:
             filepath=self.config.output_directory,
         )
         del system
+        _logger.success("Lambda = {} complete".format(lambda_value))
         return f"Lambda = {lambda_value} complete"

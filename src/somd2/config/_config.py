@@ -28,6 +28,8 @@ class Config:
         save_trajectories=True,
         frame_frequency="2ps",
         save_velocities=False,
+        checkpoint=True,
+        checkpoint_frequency="5ps",
         platform=None,
         max_CPU_cores=None,
         max_GPUS=None,
@@ -83,11 +85,22 @@ class Config:
         energy_frequency: str
             Frequency at which to output energy data
 
+        save_trajectories: bool
+            Whether to save trajectory frames to a separate file
+
         frame_frequency: str
             Frequency at which to output trajectory frames
 
         save_velocities: bool
             Whether to save velocities in trajectory frames
+
+        checkpoint: bool
+            Whether to save checkpoint files - turning this off may increase performance,
+            but will make the simulations unrecoverable if they crash
+
+        checkpoint_frequency: str
+            Frequency at which to save checkpoint files, should be larger than
+            min(energy_frequency, frame_frequency)
 
         platform: str
             Platform to run simulation on (CPU or CUDA)
@@ -134,6 +147,8 @@ class Config:
         self.save_trajectories = save_trajectories
         self.frame_frequency = frame_frequency
         self.save_velocities = save_velocities
+        self.checkpoint = checkpoint
+        self.checkpoint_frequency = checkpoint_frequency
         self.platform = platform
         self.max_CPU_cores = max_CPU_cores
         self.max_GPUS = max_GPUS
@@ -359,6 +374,16 @@ class Config:
         self._energy_frequency = t
 
     @property
+    def save_trajectories(self):
+        return self._save_trajectories
+
+    @save_trajectories.setter
+    def save_trajectories(self, save_trajectories):
+        if not isinstance(save_trajectories, bool):
+            raise ValueError("'save_trajectories' must be a boolean")
+        self._save_trajectories = save_trajectories
+
+    @property
     def frame_frequency(self):
         return self._frame_frequency
 
@@ -383,6 +408,36 @@ class Config:
         if not isinstance(save_velocities, bool):
             raise ValueError("'save_velocities' must be a boolean")
         self._save_velocities = save_velocities
+
+    @property
+    def checkpoint(self):
+        return self._checkpoint
+
+    @checkpoint.setter
+    def checkpoint(self, checkpoint):
+        if not isinstance(checkpoint, bool):
+            raise ValueError("'checkpoint' must be a boolean")
+        self._checkpoint = checkpoint
+
+    @property
+    def checkpoint_frequency(self):
+        return self._checkpoint_frequency
+
+    @checkpoint_frequency.setter
+    def checkpoint_frequency(self, checkpoint_frequency):
+        from sire.units import picosecond
+
+        try:
+            t = _u(checkpoint_frequency)
+        except Exception as e:
+            print(e.message)
+        if not t.has_same_units(picosecond):
+            raise ValueError("Checkpoint frequency units are invalid.")
+        if t < self._energy_frequency and t < self._frame_frequency:
+            _logger.warning(
+                "Checkpoint frequency is low - should be greater min(energy_frequency, frame_frequency)"
+            )
+        self._checkpoint_frequency = t
 
     @property
     def platform(self):
