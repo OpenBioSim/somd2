@@ -133,8 +133,10 @@ class Dynamics:
             schedule=self._config.lambda_schedule,
             platform=self._config.platform,
             device=self._device,
-            constraint="none" if equilibration else "h-bonds",
-            perturbable_constraint="none",
+            constraint="none" if equilibration else self._config.constraint,
+            perturbable_constraint="none"
+            if equilibration
+            else self._config.perturbable_constraint,
             map=map,
         )
 

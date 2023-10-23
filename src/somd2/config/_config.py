@@ -37,6 +37,20 @@ class Config:
 
     # A dictionary of choices for options that support them.
     _choices = {
+        "constraint": [
+            "none",
+            "h-bonds",
+            "bonds",
+            "h-bonds-h-angles",
+            "bonds-h-angles",
+        ],
+        "perturbable_constraint": [
+            "none",
+            "h-bonds",
+            "bonds",
+            "h-bonds-h-angles",
+            "bonds-h-angles",
+        ],
         "integrator": [
             "verlet",
             "leapfrog",
@@ -66,6 +80,8 @@ class Config:
         num_lambda=11,
         lambda_schedule="standard_morph",
         charge_scale_factor=0.2,
+        constraint="h-bonds",
+        perturbable_constraint=None,
         minimise=True,
         equilibrate=False,
         equilibration_time="2ps",
@@ -115,6 +131,15 @@ class Config:
 
         lambda_schedule: str
             Lambda schedule to use for alchemical free energy simulations.
+
+        charge_scale_factor: float
+            Factor by which to scale charges for charge scaled morph.
+
+        constraint: str
+            Constraint type to use for non-perturbable molecules.
+
+        perturbable_constraint: str
+            Constraint type to use for perturbable molecules.
 
         minimise: bool
             Whether to minimise the system before simulation.
@@ -176,6 +201,9 @@ class Config:
         self.timestep = timestep
         self.num_lambda = num_lambda
         self.lambda_schedule = lambda_schedule
+        self.charge_scale_factor = charge_scale_factor
+        self.constraint = constraint
+        self.perturbable_constraint = perturbable_constraint
         self.minimise = minimise
         self.equilibrate = equilibrate
         self.equilibration_time = equilibration_time
@@ -392,6 +420,48 @@ class Config:
             self._lambda_schedule = _LambdaSchedule.charge_scaled_morph(
                 self._charge_scale_factor
             )
+
+    @property
+    def constraint(self):
+        return self._constraint
+
+    @constraint.setter
+    def constraint(self, constraint):
+        if constraint is not None:
+            if not isinstance(constraint, str):
+                raise TypeError("'constraint' must be of type 'str'")
+            constraint = constraint.lower().replace(" ", "")
+            if constraint not in self._choices["constraint"]:
+                raise ValueError(
+                    f"'constraint' not recognised. Valid constraints are: {', '.join(self._choices['constraint'])}"
+                )
+            if constraint == "none":
+                self._constraint = None
+            else:
+                self._constraint = constraint
+        else:
+            self._constraint = None
+
+    @property
+    def perturbable_constraint(self):
+        return self._perturbable_constraint
+
+    @perturbable_constraint.setter
+    def perturbable_constraint(self, perturbable_constraint):
+        if perturbable_constraint is not None:
+            if not isinstance(perturbable_constraint, str):
+                raise TypeError("'perturbable_constraint' must be of type 'str'")
+            perturbable_constraint = perturbable_constraint.lower().replace(" ", "")
+            if perturbable_constraint not in self._choices["perturbable_constraint"]:
+                raise ValueError(
+                    f"'perturbable_constrant' not recognised. Valid constraints are: {', '.join(self._choices['constraint'])}"
+                )
+            if perturbable_constraint == "none":
+                self._perturbable_constraint = None
+            else:
+                self._perturbable_constraint = perturbable_constraint
+        else:
+            self._perturbable_constraint = None
 
     @property
     def minimise(self):
