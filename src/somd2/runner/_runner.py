@@ -279,11 +279,7 @@ class Runner:
             with _futures.ProcessPoolExecutor(max_workers=self.max_workers) as executor:
                 for lambda_value in self._lambda_values:
                     kwargs = {"lambda_value": lambda_value}
-                    jobs = {
-                        executor.submit(
-                            self.run_window, **kwargs
-                        ): lambda_value
-                    }
+                    jobs = {executor.submit(self.run_window, **kwargs): lambda_value}
                 for job in _futures.as_completed(jobs):
                     lam = jobs[job]
                     try:

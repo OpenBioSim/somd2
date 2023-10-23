@@ -547,9 +547,7 @@ class Config:
                 f"Platform not recognised. Valid platforms are: {', '.join(self._choices['platform'])}"
             )
         if platform == "cuda" and _os.environ.get("CUDA_VISIBLE_DEVICES") is None:
-            raise ValueError(
-                "CUDA platform requested but CUDA_VISIBLE_DEVICES not set"
-            )
+            raise ValueError("CUDA platform requested but CUDA_VISIBLE_DEVICES not set")
         else:
             if platform in ["cuda", "auto"] and "CUDA_VISIBLE_DEVICES" in _os.environ:
                 self._platform = "cuda"
