@@ -19,4 +19,16 @@
 # along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
-from . import runner
+"""
+.. currentmodule:: somd2.app
+
+Functions
+=========
+
+.. autosummary::
+    :toctree: generated/
+
+    cli
+"""
+
+from .run import *

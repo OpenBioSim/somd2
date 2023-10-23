@@ -1,142 +1,170 @@
-"""Configuration class for SOMD2 runner.
-Takes in a list of simulation options (currently in the form of a dictionary), checks the valdiity of them,
-and outputs a config class object in which options are converted to SI units"""
+######################################################################
+# SOMD2: GPU accelerated alchemical free-energy engine.
+#
+# Copyright: 2023
+#
+# Authors: The OpenBioSim Team <team@openbiosim.org>
+#
+# SOMD2 is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# SOMD2 is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
+#####################################################################
+
+"""
+Configuration class for SOMD2 runner.
+"""
+
 __all__ = ["Config"]
+
 from sire import u as _u
 from pathlib import Path as _Path
 from loguru import logger as _logger
 
 
 class Config:
-    """Class for storing simulation options in SI units"""
+    """
+    Class for storing a SOMD2 simulation configuration.
+    """
+
+    # A dictionary of choices for options that support them.
+    _choices = {
+        "integrator": [
+            "verlet",
+            "leapfrog",
+            "langevin_middle",
+            "langevin",
+            "noose_hoover",
+            "brownian",
+            "andersen",
+        ],
+        "cutoff_type": ["pme", "rf"],
+        "lambda_schedule": [
+            "standard_morph",
+            "charge_scaled_morph",
+        ],
+        "platform": ["auto", "cpu", "cuda"],
+    }
 
     def __init__(
         self,
-        runtime="10ps",
+        runtime="1ns",
         timestep="2fs",
         temperature="300K",
         pressure="1 atm",
         integrator="langevin_middle",
-        cutoff_type="PME",
-        repartition_h_mass=True,
+        cutoff_type="pme",
         h_mass_factor=1.5,
         num_lambda=11,
-        lambda_schedule=None,
+        lambda_schedule="standard_morph",
+        charge_scale_factor=0.2,
         minimise=True,
         equilibrate=False,
         equilibration_time="2ps",
         equilibration_timestep="1fs",
         energy_frequency="1ps",
         save_trajectories=True,
-        frame_frequency="2ps",
+        frame_frequency="20ps",
         save_velocities=False,
         checkpoint=True,
-        checkpoint_frequency="5ps",
-        platform=None,
-        max_CPU_cores=None,
-        max_GPUS=None,
-        run_parallel=False,
-        vacuum=False,
-        output_directory=_Path.cwd() / "output",
-        config_to_file=False,
-        extra_args=None,
+        checkpoint_frequency="100ps",
+        platform="auto",
+        max_threads=None,
+        max_gpus=None,
+        run_parallel=True,
+        output_directory="output",
+        write_config=True,
     ):
-        """Initialise the config class object
+        """
+        Constructor.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
+
         runtime: str
-            Length of simulation
+            Simulation length for each lambda window.
 
         timestep: str
-            Simulation timestep
+            Integration timestep.
 
         temperature: str
-            Simulation temperature
+            Simulation temperature.
 
         pressure: str
-            Simulation pressure - simulations will run in the NVT ensemble unless presure is specified
+            Simulation pressure. (Simulations will run in the NVT ensemble unless a pressure is specified.)
 
         integrator: str
-            Integrator to use for simulation
+            Integrator to use for simulation.
 
         cutoff_type: str
-            Cutoff type to use for simulation (currently only PMF and RF are supported)
-
-        repartition_h_mass: bool
-            Whether to repartition hydrogen mass prior to simulation
+            Cutoff type to use for simulation.
 
         h_mass_factor: float
-            Factor by which to scale hydrogen mass if repartitioning is used
+            Factor by which to scale hydrogen masses.
 
         num_lambda: int
-            Number of lambda windows to use for alchemical free energy simulations
-            (default None, runs vanilla MD)
+            Number of lambda windows to use.
 
         lambda_schedule: str
             Lambda schedule to use for alchemical free energy simulations.
-            Has no function unless num_lambda is specified, defaults to simple morph
-            if not set.
 
         minimise: bool
-            Whether to minimise the system before simulation
+            Whether to minimise the system before simulation.
 
         equilibrate: bool
-            Whether to equilibrate the system before simulation
+            Whether to equilibrate the system before simulation.
 
         equilibration_time: str
-            Length of equilibration
+            Time interval for equilibration.
 
         equilibration_timestep: str
-            Equilibration timestep (can be different to simulation timestep, default 2fs)
+            Equilibration timestep. (Can be different to simulation timestep.)
 
         energy_frequency: str
-            Frequency at which to output energy data
+            Frequency at which to output energy data.
 
         save_trajectories: bool
-            Whether to save trajectory frames to a separate file
+            Whether to save trajectory files
 
         frame_frequency: str
-            Frequency at which to output trajectory frames
+            Frequency at which to output trajectory frames.
 
         save_velocities: bool
-            Whether to save velocities in trajectory frames
+            Whether to save velocities in trajectory frames.
 
         checkpoint: bool
-            Whether to save checkpoint files - turning this off may increase performance,
-            but will make the simulations unrecoverable if they crash
+            Whether to checkpoint.
 
         checkpoint_frequency: str
-            Frequency at which to save checkpoint files, should be larger than
-            min(energy_frequency, frame_frequency)
+            Frequency at which to save checkpoint files, should be larger than min(energy_frequency, frame_frequency).
 
         platform: str
-            Platform to run simulation on (CPU or CUDA)
+            Platform to run simulation on.
 
-        max_CPU_cores: int
-            Maximum number of CPU cores to use for simulation (default None, uses all available)
-            Does nothing if platfrom is set to CUDA
+        max_threads: int
+            Maximum number of CPU threads to use for simulation (default None, uses all available)
+            Does nothing if platform is set to CUDA.
 
-        max_GPUS: int
+        max_gpus: int
             Maximum number of GPUs to use for simulation (default None, uses all available)
-            does nothing if platform is set to CPU
+            does nothing if platform is set to CPU.
 
         run_parallel: bool
-            Whether to run simulation in parallel (default False)
-
-        vacuum: bool
-            Set True if running in vacuum (default False)
+            Whether to run simulation in parallel.
 
         output_directory: str
-            Directory in which energy and trajectory info is stored
+            Path to a directory to store output files.
 
-        config_to_file: bool
-            Dump configuration options to a yaml file in the output directory
-
-        extra_args: dict
-            Dictionary passed to sire as a map - only use if there is no other way,
-            inputs for this dictionary are not checked for validity.
-            !!Arguments set here here may overwrite config options!!
+        write_config: bool
+            Whether to write the configuration options to a YAML file in the output directory.
         """
 
         self.runtime = runtime
@@ -144,7 +172,6 @@ class Config:
         self.pressure = pressure
         self.integrator = integrator
         self.cutoff_type = cutoff_type
-        self.repartition_h_mass = repartition_h_mass
         self.h_mass_factor = h_mass_factor
         self.timestep = timestep
         self.num_lambda = num_lambda
@@ -160,17 +187,16 @@ class Config:
         self.checkpoint = checkpoint
         self.checkpoint_frequency = checkpoint_frequency
         self.platform = platform
-        self.max_CPU_cores = max_CPU_cores
-        self.max_GPUS = max_GPUS
+        self.max_threads = max_threads
+        self.max_gpus = max_gpus
         self.run_parallel = run_parallel
-        self.vacuum = vacuum
         self.output_directory = output_directory
-        self.config_to_file = config_to_file
-        self.extra_args = extra_args
+        self.write_config = write_config
 
     def as_dict(self):
         """Convert config object to dictionary"""
         from pathlib import PosixPath as _PosixPath
+        from sire.cas import LambdaSchedule as _LambdaSchedule
 
         d = {}
         for attr, value in self.__dict__.items():
@@ -182,6 +208,15 @@ class Config:
                     d[attr_l] = value.to_string()
                 except AttributeError:
                     d[attr_l] = value
+
+        # Handle the lambda schedule separately so that we can use simplified
+        # keyword options.
+        if self.lambda_schedule == _LambdaSchedule.standard_morph():
+            d["lambda_schedule"] = "standard_morph"
+        elif self.lambda_schedule == _LambdaSchedule.charge_scaled_morph(
+            self._charge_scale_factor
+        ):
+            d["lambda_schedule"] = "charge_scaled_morph"
         return d
 
     @property
@@ -242,19 +277,14 @@ class Config:
 
     @integrator.setter
     def integrator(self, integrator):
-        valid_integrators = [
-            "verlet",
-            "leapfrog",
-            "langevin_middle",
-            "langevin",
-            "noose_hoover",
-            "brownian",
-        ]
-        if str(integrator) not in valid_integrators:
+        if not isinstance(integrator, str):
+            raise TypeError("'integrator' must be of type 'str'")
+        integrator = integrator.lower().replace(" ", "")
+        if integrator not in self._choices["integrator"]:
             raise ValueError(
-                f"Integrator not recognised. Valid integrators are: {valid_integrators}"
+                f"Integrator not recognised. Valid integrators are: {', '.join(self._choices['integrator'])}"
             )
-        self._integrator = str(integrator)
+        self._integrator = integrator
 
     @property
     def cutoff_type(self):
@@ -262,22 +292,14 @@ class Config:
 
     @cutoff_type.setter
     def cutoff_type(self, cutoff_type):
-        valid_cutoff_types = ["PME", "RF"]
-        if str(cutoff_type) not in valid_cutoff_types:
+        if not isinstance(cutoff_type, str):
+            raise TypeError("'cutoff_type' must be of type 'str'")
+        cutoff = cutoff_type.lower().replace(" ", "")
+        if cutoff_type not in self._choices["cutoff_type"]:
             raise ValueError(
-                f"Cutoff type not recognised. Valid cutoff types are: {valid_cutoff_types}"
+                f"Cutoff type not recognised. Valid cutoff types are: {', '.join(self._choices['cutoff_type'])}"
             )
-        self._cutoff_type = str(cutoff_type)
-
-    @property
-    def repartition_h_mass(self):
-        return self._repartition_h_mass
-
-    @repartition_h_mass.setter
-    def repartition_h_mass(self, repartition_h_mass):
-        if not isinstance(repartition_h_mass, bool):
-            raise ValueError("'repartition_h_mass' must be a boolean")
-        self._repartition_h_mass = repartition_h_mass
+        self._cutoff_type = cutoff_type
 
     @property
     def h_mass_factor(self):
@@ -290,10 +312,6 @@ class Config:
                 h_mass_factor = float(h_mass_factor)
             except Exception as e:
                 raise ValueError("'h_mass_factor' must be a float")
-        if not self.repartition_h_mass:
-            _logger.warning(
-                "Repartitioning hydrogen mass is not enabled - ignoring h_mass_factor"
-            )
         self._h_mass_factor = h_mass_factor
 
     @property
@@ -335,11 +353,45 @@ class Config:
         from sire.cas import LambdaSchedule as _LambdaSchedule
 
         if lambda_schedule is not None:
-            if not isinstance(lambda_schedule, _LambdaSchedule):
-                raise ValueError("'lambda_schedule' must be a LambdaSchedule object")
-            self._lambda_schedule = lambda_schedule
+            if not isinstance(lambda_schedule, (str, _LambdaSchedule)):
+                raise ValueError(
+                    "'lambda_schedule' must be of type 'str' or 'LambdaSchedule' object"
+                )
+            if isinstance(lambda_schedule, str):
+                # Strip whitespace and convert to lower case.
+                lambda_schedule = lambda_schedule.strip().lower()
+                if lambda_schedule not in self._choices["lambda_schedule"]:
+                    raise ValueError(
+                        f"Lambda schedule not recognised. Valid lambda schedules are: {self._choices['lambda_schedule']}"
+                    )
+                if lambda_schedule == "standard_morph":
+                    self._lambda_schedule = _LambdaSchedule.standard_morph()
+                elif lambda_schedule == "charge_scaled_morph":
+                    self._lambda_schedule = _LambdaSchedule.charge_scaled_morph(
+                        self._charge_scale_factor
+                    )
+            else:
+                self._lambda_schedule = lambda_schedule
         else:
             self._lambda_schedule = _LambdaSchedule.standard_morph()
+
+    @property
+    def charge_scale_factor(self):
+        return self._charge_scale_factor
+
+    @charge_scale_factor.setter
+    def charge_scale_factor(self, charge_scale_factor):
+        if not isinstance(charge_scale_factor, float):
+            try:
+                charge_scale_factor = float(charge_scale_factor)
+            except Exception as e:
+                raise ValueError("'charge_scale_factor' must be a float")
+        self._charge_scale_factor = charge_scale_factor
+        # Update the lambda schedule if it is charge scaled morph.
+        if self._lambda_schedule == "charge_scaled_morph":
+            self._lambda_schedule = _LambdaSchedule.charge_scaled_morph(
+                self._charge_scale_factor
+            )
 
     @property
     def minimise(self):
@@ -487,62 +539,59 @@ class Config:
     def platform(self, platform):
         import os as _os
 
-        valid_platforms = ["CPU", "CUDA"]
-        if platform is not None:
-            if str(platform) not in valid_platforms:
-                raise ValueError(
-                    f"Platform not recognised. Valid platforms are: {valid_platforms}"
-                )
-            elif (
-                str(platform) == "CUDA"
-                and _os.environ.get("CUDA_VISIBLE_DEVICES") is None
-            ):
-                raise ValueError(
-                    "CUDA platform requested but CUDA_VISIBLE_DEVICES not set"
-                )
-            self._platform = str(platform)
+        if not isinstance(platform, str):
+            raise TypeError("'platform' must be of type 'str'")
+        platform = platform.lower().replace(" ", "")
+        if platform not in self._choices["platform"]:
+            raise ValueError(
+                f"Platform not recognised. Valid platforms are: {', '.join(self._choices['platform'])}"
+            )
+        if platform == "cuda" and _os.environ.get("CUDA_VISIBLE_DEVICES") is None:
+            raise ValueError(
+                "CUDA platform requested but CUDA_VISIBLE_DEVICES not set"
+            )
         else:
-            if "CUDA_VISIBLE_DEVICES" in _os.environ:
-                self._platform = "CUDA"
+            if platform in ["cuda", "auto"] and "CUDA_VISIBLE_DEVICES" in _os.environ:
+                self._platform = "cuda"
             else:
-                self._platform = "CPU"
+                self._platform = "cpu"
 
     @property
-    def max_CPU_cores(self):
-        return self._max_CPU_cores
+    def max_threads(self):
+        return self._max_threads
 
-    @max_CPU_cores.setter
-    def max_CPU_cores(self, max_CPU_cores):
+    @max_threads.setter
+    def max_threads(self, max_threads):
         import os as _os
 
-        if max_CPU_cores is not None:
-            self._max_CPU_cores = max_CPU_cores
+        if max_threads is not None:
+            self._max_threads = max_CPU_cores
             if self._platform == "CUDA":
                 _logger.warning(
-                    "CUDA platform requested but max_CPU_cores set - ignoring max_CPU_cores"
+                    "CUDA platform requested but max_threads set - ignoring max_threads"
                 )
         else:
-            self._max_CPU_cores = _os.cpu_count()
+            self._max_threads = _os.cpu_count()
 
     @property
-    def max_GPUS(self):
-        return self._max_GPUS
+    def max_gpus(self):
+        return self._max_gpus
 
-    @max_GPUS.setter
-    def max_GPUS(self, max_GPUS):
+    @max_gpus.setter
+    def max_gpus(self, max_gpus):
         import os as _os
 
-        if max_GPUS is not None:
-            self._max_GPUS = max_GPUS
+        if max_gpus is not None:
+            self._max_gpus = max_gpus
             if self._platform == "CPU":
                 _logger.warning(
-                    "CPU platform requested but max_GPUS set - ignoring max_GPUS"
+                    "CPU platform requested but max_gpus set - ignoring max_gpus"
                 )
         else:
             if "CUDA_VISIBLE_DEVICES" in _os.environ:
-                self._max_GPUS = len(_os.environ["CUDA_VISIBLE_DEVICES"].split(","))
+                self._max_gpus = len(_os.environ["CUDA_VISIBLE_DEVICES"].split(","))
             else:
-                self._max_GPUS = 0
+                self._max_gpus = 0
 
     @property
     def run_parallel(self):
@@ -553,20 +602,6 @@ class Config:
         if not isinstance(run_parallel, bool):
             raise ValueError("'run_parallel' must be a boolean")
         self._run_parallel = run_parallel
-
-    @property
-    def vacuum(self):
-        return self._vacuum
-
-    @vacuum.setter
-    def vacuum(self, vacuum):
-        if not isinstance(vacuum, bool):
-            raise ValueError("'vacuum' must be a boolean")
-        if vacuum and self._pressure is not None:
-            _logger.warning(
-                "Vacuum requested but pressure specified - ignoring pressure"
-            )
-        self._vacuum = vacuum
 
     @property
     def output_directory(self):
@@ -589,22 +624,102 @@ class Config:
         self._output_directory = output_directory
 
     @property
-    def config_to_file(self):
-        return self._config_to_file
+    def write_config(self):
+        return self._write_config
 
-    @config_to_file.setter
-    def config_to_file(self, config_to_file):
-        if not isinstance(config_to_file, bool):
-            raise ValueError("'config_to_file' must be a boolean")
-        self._config_to_file = config_to_file
+    @write_config.setter
+    def write_config(self, write_config):
+        if not isinstance(write_config, bool):
+            raise ValueError("'write_config' must be a boolean")
+        self._write_config = write_config
 
-    @property
-    def extra_args(self):
-        return self._extra_args
+    @classmethod
+    def _create_parser(cls):
+        """
+        Internal method to create a argparse parser for the config object.
+        """
 
-    @extra_args.setter
-    def extra_args(self, extra_args):
-        if extra_args is not None:
-            if not isinstance(extra_args, dict):
-                raise ValueError("'extra_args' must be a dictionary")
-        self._extra_args = extra_args
+        import configargparse
+        import inspect
+
+        # Inspect this object to get the default parameters and docstrings.
+        sig = inspect.signature(Config.__init__)
+        params = sig.parameters
+        params = {
+            key: value
+            for key, value in params.items()
+            if key not in ["self", "args", "kwargs"]
+        }
+
+        # Get the docstrings for each parameter.
+        doc = inspect.getdoc(Config.__init__).split("\n")
+
+        # Create a dictionary to map the parameter name to the help string.
+        help = {}
+
+        # Loop over all parameters.
+        for param in params:
+            found_param = False
+            string = ""
+
+            # Loop over all lines in the docstring until we find the parameter.
+            for line in doc:
+                if param in line:
+                    found_param = True
+                elif found_param:
+                    if line == "":
+                        found_param = False
+                        break
+                    else:
+                        string += line
+
+            # Store the help string for this parameter.
+            help[param] = string
+
+        # Initialise the parser.
+        parser = configargparse.ArgParser(
+            description="SOMD2: GPU accelerated alchemical free-energy engine.",
+            formatter_class=configargparse.ArgumentDefaultsHelpFormatter,
+            config_file_parser_class=configargparse.YAMLConfigFileParser,
+            add_config_file_help=True,
+        )
+
+        # Add a YAML config file option.
+        parser.add(
+            "--config",
+            required=False,
+            is_config_file=True,
+            help="YAML config file path",
+        )
+
+        # Add the parameters.
+        for param in params:
+            # This parameter has choices.
+            if param in cls._choices:
+                parser.add_argument(
+                    f"--{param}",
+                    type=type(params[param].default),
+                    default=params[param].default,
+                    choices=cls._choices[param],
+                    help=help[param],
+                    required=False,
+                )
+            # This is a standard parameter.
+            else:
+                parser.add_argument(
+                    f"--{param}",
+                    type=type(params[param].default),
+                    default=params[param].default,
+                    help=help[param],
+                    required=False,
+                )
+
+        # Add the system to the parser.
+        parser.add_argument(
+            "--system",
+            type=str,
+            required=True,
+            help="Path to a stream file containing the perturbable system.",
+        )
+
+        return parser

@@ -1,15 +1,45 @@
-__all__ = ["Controller"]
+######################################################################
+# SOMD2: GPU accelerated alchemical free-energy engine.
+#
+# Copyright: 2023
+#
+# Authors: The OpenBioSim Team <team@openbiosim.org>
+#
+# SOMD2 is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# SOMD2 is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
+#####################################################################
+
+__all__ = ["Runner"]
+
+
+import sire as _sr
+
 from ..config import Config as _Config
 from ..io import *
 
 
-class Controller:
+class Runner:
     """
     Controls the initiation of simulations as well as the assigning of
     resources.
     """
 
-    def __init__(self, system, input_options={}):
+    from multiprocessing import Manager
+
+    _manager = Manager()
+    _lock = _manager.Lock()
+
+    def __init__(self, system, config):
         """
         Constructor.
 
@@ -26,65 +56,62 @@ class Controller:
             The platform to be used for simulations.
 
         """
-        self._system = system
-        self.configure(input_options)
-        # query status of processes
-        # checkpointing
-        from sire.system import System as sire_system
+        # Try to load the system stream file.
+        try:
+            self._system = _sr.stream.load(system)
+        except:
+            raise IOError(f"Unable to load system from stream file: '{system}'")
 
-        if not isinstance(self._system, (sire_system)):
-            raise TypeError("System must be Sire system")
-
+        # Make sure the system contains perturbable molecules.
         try:
             self._system.molecules("property is_perturbable")
         except KeyError:
             raise KeyError("No perturbable molecules in the system")
 
-        if self.config.repartition_h_mass:
-            self.repartition_h_mass()
+        # Link properties to the lambda = 0 end state.
+        for mol in self._system.molecules("molecule property is_perturbable"):
+            self._system.update(mol.perturbation().link_to_reference().commit())
 
-    def configure(self, input):
-        """
-        Configure simulation options.
-        This is called upon construction of the Controller object,
-        use this if settings need to be changed after construction.
+        # Check for a periodic space.
+        self._check_space()
 
-        Parameters:
-        -----------
-        input: dict
-            Dictionary of simulation options.
-        """
-        self.config = _Config(**input)
+        # Validate the configuration.
+        if not isinstance(config, _Config):
+            raise TypeError("'config' must be of type 'somd2.config.Config'")
+        self._config = config
+
+        # Set the lambda values.
         self._lambda_values = [
-            round(i / (self.config.num_lambda - 1), 5)
-            for i in range(0, self.config.num_lambda)
+            round(i / (self._config.num_lambda - 1), 5)
+            for i in range(0, self._config.num_lambda)
         ]
+
+        # Repartition hydrogen masses if required.
+        if self._config.h_mass_factor > 1:
+            self._repartition_h_mass()
+
         # Save config whenever 'configure' is called to keep it up to date
-        if self.config.config_to_file:
-            dict_to_yaml(self.config.as_dict(), self.config.output_directory)
+        if self._config.write_config:
+            dict_to_yaml(self._config.as_dict(), self._config.output_directory)
 
     def _create_shared_resources(self):
         """
         Creates shared list that holds currently available GPUs.
         Also intialises the list with all available GPUs.
         """
-        if self.config.platform == "CUDA":
-            from multiprocessing import Manager
-
-            self._manager = Manager()
-            self._lock = self._manager.Lock()
-            if self.config.max_GPUS is None:
+        if self._config.platform == "cuda":
+            if self._config.max_gpus is None:
                 self._gpu_pool = self._manager.list(
                     self.zero_cuda_devices(self.get_cuda_devices())
                 )
             else:
                 self._gpu_pool = self._manager.list(
                     self.zero_cuda_devices(
-                        self.get_cuda_devices()[: self.config.max_GPUS]
+                        self.get_cuda_devices()[: self._config.max_gpus]
                     )
                 )
 
-    def _check_space_options(self):
+    def _check_space(self):
         """
         Check if the system has a periodic space.
         """
@@ -105,7 +132,7 @@ class Controller:
         options: dict
             Dictionary of simulation options.
         """
-        return self.config.as_dict()
+        return self._config.as_dict()
 
     def _update_gpu_pool(self, gpu_num):
         """
@@ -138,7 +165,7 @@ class Controller:
         schedule: sr.cas.LambdaSchedule
             Lambda schedule to be set.
         """
-        self.config.lambda_schedule = schedule
+        self._config.lambda_schedule = schedule
 
     @staticmethod
     def get_cuda_devices():
@@ -172,24 +199,18 @@ class Controller:
         """
         return [str(devices.index(value)) for value in devices]
 
-    def repartition_h_mass(self):
+    def _repartition_h_mass(self):
         """
-        Perform HMR on the input system.
-        Performs a short minimisation before repartitioning for increased stability
+        Reparartition hydrogen masses.
         """
-        print("Repartitioning hydrogen masses")
+
         from sire.morph import (
             repartition_hydrogen_masses as _repartition_hydrogen_masses,
         )
 
-        self._system = (
-            self._system.minimisation(map={"platform": self.config.platform})
-            .run()
-            .commit()
+        self._system = _repartition_hydrogen_masses(
+            self._system, mass_factor=self._config.h_mass_factor
         )
-        mol = self._system.molecule("molecule property is_perturbable")
-        mol = _repartition_hydrogen_masses(mol, mass_factor=self.config.h_mass_factor)
-        self._system.update(mol)
 
     def _initialise_simulation(self, system, lambda_value, device=None):
         """
@@ -206,16 +227,17 @@ class Controller:
         device: int
             The GPU device number to be used for the simulation.
         """
-        from ._run_single_pert import RunSingleWindow
+        from ._dynamics import Dynamics
         from loguru import logger as _logger
 
         try:
-            self._sim = RunSingleWindow(
+            self._sim = Dynamics(
                 system,
                 lambda_val=lambda_value,
                 lambda_array=self._lambda_values,
-                config=self.config,
+                config=self._config,
                 device=device,
+                has_space=self._has_space,
             )
         except Exception:
             _logger.warning(f"System creation at {lambda_value} failed")
@@ -227,7 +249,7 @@ class Controller:
         """
         self._sim._cleanup()
 
-    def run_simulations(self):
+    def run(self):
         """
         Use concurrent.futures to run lambda windows in parallel
 
@@ -236,32 +258,30 @@ class Controller:
         results (list): List of simulation results.
         """
         results = []
-        if self.config.run_parallel and (self.config.num_lambda is not None):
+        if self._config.run_parallel and (self._config.num_lambda is not None):
             self._create_shared_resources()
             import concurrent.futures as _futures
 
             # figure out max workers and number of CPUs depending on platform and number of lambda windows
-            if self.config.platform == "CPU":
+            if self._config.platform == "cpu":
                 # Finding number of CPUs per worker is done here rather than in config due to platform dependency
-                if self.config.num_lambda > self.config.max_CPU_cores:
-                    self.max_workers = self.config.max_CPU_cores
+                if self._config.num_lambda > self._config.max_threads:
+                    self.max_workers = self._config.max_threads
                     cpu_per_worker = 1
                 else:
-                    self.max_workers = self.config.num_lambda
-                    cpu_per_worker = self.config.max_CPU_cores // self.config.num_lambda
-                if self.config.extra_args is None:
-                    self.config.extra_args = {"threads": cpu_per_worker}
-                else:
-                    self.config.extra_args["threads"] = cpu_per_worker
+                    self.max_workers = self._config.num_lambda
+                    cpu_per_worker = self._config.max_threads // self._config.num_lambda
+                self._config.extra_args = {"threads": cpu_per_worker}
             else:
                 self.max_workers = len(self._gpu_pool)
+                self._config.extra_args = {}
 
             with _futures.ProcessPoolExecutor(max_workers=self.max_workers) as executor:
                 for lambda_value in self._lambda_values:
                     kwargs = {"lambda_value": lambda_value}
                     jobs = {
                         executor.submit(
-                            self.run_single_simulation, **kwargs
+                            self.run_window, **kwargs
                         ): lambda_value
                     }
                 for job in _futures.as_completed(jobs):
@@ -274,15 +294,15 @@ class Controller:
                     else:
                         results.append(result)
 
-        elif self.config.num_lambda is not None:
-            if self.config.platform == "CPU":
-                self.config.extra_args = {"threads": self.config.max_CPU_cores}
+        elif self._config.num_lambda is not None:
+            if self._config.platform == "cpu":
+                self._config.extra_args = {"threads": self._config.max_threads}
             self._lambda_values = [
-                round(i / (self.config.num_lambda - 1), 5)
-                for i in range(0, self.config.num_lambda)
+                round(i / (self._config.num_lambda - 1), 5)
+                for i in range(0, self._config.num_lambda)
             ]
             for lambda_value in self._lambda_values:
-                result = self.run_single_simulation(lambda_value)
+                result = self.run_window(lambda_value)
                 results.append(result)
 
         else:
@@ -292,7 +312,7 @@ class Controller:
 
         return results
 
-    def run_single_simulation(self, lambda_value):
+    def run_window(self, lambda_value):
         """
         Run a single simulation.
 
@@ -315,7 +335,7 @@ class Controller:
 
         def _run(sim):
             # This function is complex due to the mixture of options for minimisation and dynamics
-            if self.config.minimise:
+            if self._config.minimise:
                 try:
                     df = sim._run()
                     lambda_grad = sim._lambda_grad
@@ -348,7 +368,7 @@ class Controller:
 
         system = self._system.clone()
 
-        if self.config.platform == "CPU":
+        if self._config.platform == "cpu":
             self._initialise_simulation(system, lambda_value)
             try:
                 df, lambda_grad, speed = _run(self._sim)
@@ -356,8 +376,8 @@ class Controller:
                 raise
             self._sim._cleanup()
 
-        elif self.config.platform == "CUDA":
-            if self.config.run_parallel:
+        elif self._config.platform == "cuda":
+            if self._config.run_parallel:
                 with self._lock:
                     gpu_num = self._gpu_pool[0]
                     self._remove_gpu_from_pool(gpu_num)
@@ -370,12 +390,12 @@ class Controller:
             try:
                 df, lambda_grad, speed = _run(self._sim)
             except Exception:
-                if self.config.run_parallel:
+                if self._config.run_parallel:
                     with self._lock:
                         self._update_gpu_pool(gpu_num)
                 raise
             else:
-                if self.config.run_parallel:
+                if self._config.run_parallel:
                     with self._lock:
                         self._update_gpu_pool(gpu_num)
             self._sim._cleanup()
@@ -388,9 +408,9 @@ class Controller:
                 "lambda_array": self._lambda_values,
                 "lambda_grad": lambda_grad,
                 "speed": speed,
-                "temperature": str(self.config.temperature.value()),
+                "temperature": str(self._config.temperature.value()),
             },
-            filepath=self.config.output_directory,
+            filepath=self._config.output_directory,
         )
         del system
         _logger.success("Lambda = {} complete".format(lambda_value))

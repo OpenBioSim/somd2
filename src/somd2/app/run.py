@@ -19,4 +19,42 @@
 # along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
-from . import runner
+#!/usr/bin/env python
+
+"""
+The somd2 command line program.
+
+Usage:
+    To get the help for this program and list all of the
+    arguments (with defaults) use:
+
+    somd2 --help
+"""
+
+
+def cli():
+    """
+    SOMD2: Command-line interface.
+    """
+
+    from somd2.config import Config
+    from somd2.runner import Runner
+
+    # Generate the parser.
+    parser = Config._create_parser()
+
+    # Parse the arguments into a dictionary.
+    args = vars(parser.parse_args())
+
+    # Pop config and system from the arguments dictionary.
+    config = args.pop("config")
+    system = args.pop("system")
+
+    # Instantiate a Config object to validate the arguments.
+    config = Config(**args)
+
+    # Instantiate a Runner object to run the simulation.
+    runner = Runner(system, config)
+
+    # Run the simulation.
+    runner.run()

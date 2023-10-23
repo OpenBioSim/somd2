@@ -1,14 +1,36 @@
-__all__ = ["MergedSimulation"]
-from ..config import Config as _Config
+######################################################################
+# SOMD2: GPU accelerated alchemical free-energy engine.
+#
+# Copyright: 2023
+#
+# Authors: The OpenBioSim Team <team@openbiosim.org>
+#
+# SOMD2 is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# SOMD2 is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
+#####################################################################
+
+__all__ = ["Dynamics"]
+
 from pathlib import Path as _Path
+
+from ..config import Config as _Config
 from ..io import *
 
 
-# rename this
-class RunSingleWindow:
+class Dynamics:
     """
-    Class for controlling the running and bookkeeping of a single lambda value simulation
-    Currently just a wrapper around sire dynamics
+    Class for controlling the running and bookkeeping of a single lambda value
+    simulation.Currently just a wrapper around sire dynamics
 
     Simulation options are held within a Config object
     """
@@ -21,6 +43,7 @@ class RunSingleWindow:
         config,
         increment=0.001,
         device=None,
+        has_space=True,
     ):
         """
         Constructor
@@ -46,6 +69,10 @@ class RunSingleWindow:
         device : int
             GPU device number to use  - does nothing if running on CPU (default None)
 
+        has_space : bool
+            Whether this simulation has a periodic space or not. Disable NPT if
+            no space is present.
+
         """
 
         try:
@@ -66,6 +93,7 @@ class RunSingleWindow:
         self._lambda_array = lambda_array
         self._increment = increment
         self._device = device
+        self._has_space = has_space
 
     # Would prob. be better to just set up the dynamics object here,
     # then run a separate dynamics.minimise
@@ -83,9 +111,20 @@ class RunSingleWindow:
             If True, use equilibration settings, otherwise use production settings
         """
 
+        # Don't use NPT for vacuum simulations.
+        if self._has_space:
+            pressure = self._config.pressure
+        else:
+            pressure = None
+
+        try:
+            map = self._config.extra_args
+        except:
+            map = None
+
         self._dyn = self._system.dynamics(
             temperature=self._config.temperature,
-            pressure=self._config.pressure,
+            pressure=pressure,
             timestep=self._config.equilibration_timestep
             if equilibration
             else self._config.timestep,
@@ -96,7 +135,7 @@ class RunSingleWindow:
             device=self._device,
             constraint="none" if equilibration else "h-bonds",
             perturbable_constraint="none",
-            map=self._config.extra_args,
+            map=map,
         )
 
     def _minimisation(self, lambda_min=None):

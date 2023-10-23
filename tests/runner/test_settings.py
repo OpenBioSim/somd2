@@ -1,27 +1,24 @@
-from somd2.runner import Controller
-import sire as sr
 import pytest
+import sire as sr
+
+from somd2.config import Config
+from somd2.runner import Runner
 
 
 def test_config():
     # Testing that default options are set correctly
-    mols = sr.stream.load("Methane_Ethane_solv.bss")
-    for mol in mols.molecules("molecule property is_perturbable"):
-        mols.update(mol.perturbation().link_to_reference().commit())
-
-    runner = Controller(mols)
-    runner.configure({})
+    runner = Runner("ethane_methanol.bss", Config())
     runner._initialise_simulation(runner._system.clone(), 0.0)
     runner._sim._setup_dynamics(equilibration=True)
-    config_inp = runner.config
+    config_inp = runner._config
     d = runner._sim._dyn
     assert config_inp.equilibration_timestep == d.timestep()
     runner._sim._setup_dynamics(equilibration=False)
     d = runner._sim._dyn
-    config_inp = runner.config
-    assert config_inp.timestep == d.timestep()
-    assert config_inp.temperature == d.ensemble().temperature()
-    assert config_inp.pressure == d.ensemble().pressure()
-    assert config_inp.lambda_schedule.to_string() == d.get_schedule().to_string()
-    assert config_inp.cutoff_type == d.info().cutoff_type()
-    assert config_inp.platform == d.platform()
+    config_inp = runner._config
+    assert str(config_inp.timestep).lower() == str(d.timestep()).lower()
+    assert str(config_inp.temperature).lower() == str(d.ensemble().temperature()).lower()
+    assert str(config_inp.pressure).lower() == str(d.ensemble().pressure()).lower()
+    assert config_inp.lambda_schedule.to_string().lower() == d.get_schedule().to_string().lower()
+    assert config_inp.cutoff_type.lower() == d.info().cutoff_type().lower()
+    assert config_inp.platform.lower() == d.platform().lower()
