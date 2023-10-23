@@ -86,6 +86,22 @@ class Runner:
             for i in range(0, self._config.num_lambda)
         ]
 
+        from sire.mol import Element
+        from math import isclose
+
+        # Store the expected hydrogen mass.
+        expected_h_mass = Element("H").mass().value()
+
+        # Get the hydrogen mass.
+        h_mass = self._system.molecules("property is_perturbable")["element H"][
+            0
+        ].mass()
+
+        if not isclose(h_mass.value(), expected_h_mass, rel_tol=1e-3):
+            raise ValueError(
+                "The hydrogen mass in the system is not the expected value of 1.008 g/mol"
+            )
+
         # Repartition hydrogen masses if required.
         if self._config.h_mass_factor > 1:
             self._repartition_h_mass()
