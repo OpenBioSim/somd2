@@ -1,0 +1,9 @@
+name: somd2
+
+channels:
+  - conda-forge
+  - openbiosim
+
+dependencies:
+  - biosimspace
+  - configargparse
