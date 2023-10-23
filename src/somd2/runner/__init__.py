@@ -19,6 +19,4 @@
 # along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
-all = ["Runner"]
-
-from ._runner import Runner
+from ._runner import *

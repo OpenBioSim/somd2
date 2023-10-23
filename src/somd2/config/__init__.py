@@ -31,6 +31,4 @@ Classes
     Config
 """
 
-all = ["Config"]
-
-from ._config import Config
+from ._config import *
