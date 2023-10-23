@@ -44,8 +44,12 @@ def cli():
     # Parse the arguments into a dictionary.
     args = vars(parser.parse_args())
 
-    # Pop config and system from the arguments dictionary.
-    config = args.pop("config")
+    # Pop the YAML config and system from the arguments dictionary. The YAML
+    # config isn't required since, when specified, it is only used to set
+    # configuration options that are not set by the command line. The "system"
+    # is a path to a Sire/BioSimSpace stream file containing a perturbable
+    # system and is passed separately to the Runner constructor.
+    yaml_config = args.pop("config")
     system = args.pop("system")
 
     # Instantiate a Config object to validate the arguments.
