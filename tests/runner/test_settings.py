@@ -17,8 +17,13 @@ def test_config():
     d = runner._sim._dyn
     config_inp = runner._config
     assert str(config_inp.timestep).lower() == str(d.timestep()).lower()
-    assert str(config_inp.temperature).lower() == str(d.ensemble().temperature()).lower()
+    assert (
+        str(config_inp.temperature).lower() == str(d.ensemble().temperature()).lower()
+    )
     assert str(config_inp.pressure).lower() == str(d.ensemble().pressure()).lower()
-    assert config_inp.lambda_schedule.to_string().lower() == d.get_schedule().to_string().lower()
+    assert (
+        config_inp.lambda_schedule.to_string().lower()
+        == d.get_schedule().to_string().lower()
+    )
     assert config_inp.cutoff_type.lower() == d.info().cutoff_type().lower()
     assert config_inp.platform.lower() == d.platform().lower()
