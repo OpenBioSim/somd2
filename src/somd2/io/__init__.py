@@ -19,6 +19,21 @@
 # along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
+"""
+.. currentmodule:: somd2.io
+
+Functions
+=========
+
+.. autosummary::
+    :toctree: generated/
+
+    dataframe_to_parquet
+    dict_to_yaml
+    parquet_append
+    parquet_to_dataframe
+"""
+
 __all__ = [
     "dataframe_to_parquet",
     "dict_to_yaml",

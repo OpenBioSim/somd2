@@ -19,6 +19,18 @@
 # along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
+"""
+.. currentmodule:: somd2.config
+
+Classes
+=======
+
+.. autosummary::
+    :toctree: generated/
+
+    Config
+"""
+
 all = ["Config"]
 
 from ._config import Config
