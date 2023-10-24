@@ -61,4 +61,4 @@ import BioSimSpace as BSS
 pmf, overlap = BSS.FreeEnergy.Relative.analyse("output")
 ```
 
-(Here we assume that the output directory is called `output`._)
+(Here we assume that the output directory is called `output`.)
