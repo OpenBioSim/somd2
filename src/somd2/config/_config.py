@@ -233,6 +233,33 @@ class Config:
         self.output_directory = output_directory
         self.write_config = write_config
 
+    def __str__(self):
+        """Return a string representation of this object."""
+
+        # Get a dictionary representation of the object.
+        d = self.as_dict()
+
+        # Initialise the string.
+        string = "Config("
+
+        for k, v in d.items():
+            if isinstance(v, str):
+                string += f"{k.replace('', '')}='{v}', "
+            else:
+                string += f"{k.replace('', '')}={v}, "
+
+        # Remove the trailing comma and space.
+        string = string[:-2]
+
+        # Close the string.
+        string += ")"
+
+        return string
+
+    def __repr__(self):
+        """Return a string representation of this object."""
+        return self.__str__()
+
     def as_dict(self):
         """Convert config object to dictionary"""
         from pathlib import PosixPath as _PosixPath
