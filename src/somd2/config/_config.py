@@ -80,6 +80,9 @@ class Config:
         num_lambda=11,
         lambda_schedule="standard_morph",
         charge_scale_factor=0.2,
+        swap_end_states=False,
+        coulomb_power=0.0,
+        shift_delta="2A",
         constraint="h-bonds",
         perturbable_constraint=None,
         minimise=True,
@@ -133,6 +136,17 @@ class Config:
 
         charge_scale_factor: float
             Factor by which to scale charges for charge scaled morph.
+
+        swap_end_states: bool
+            Whether to perform the perturbation in the reverse direction.
+
+        couloumb_power : float
+            Power to use for the soft-core Coulomb interaction. This is used
+            to soften the electrostatic interaction.
+
+        shift_delta : str
+            The soft-core shift-delta parameter. This is used to soften the
+            Lennard-Jones interaction.
 
         constraint: str
             Constraint type to use for non-perturbable molecules.
@@ -198,6 +212,9 @@ class Config:
         self.num_lambda = num_lambda
         self.lambda_schedule = lambda_schedule
         self.charge_scale_factor = charge_scale_factor
+        self.swap_end_states = swap_end_states
+        self.coulomb_power = coulomb_power
+        self.shift_delta = shift_delta
         self.constraint = constraint
         self.perturbable_constraint = perturbable_constraint
         self.minimise = minimise
@@ -261,7 +278,7 @@ class Config:
             )
 
         if not t.has_same_units(picosecond):
-            raise ValueError("Runtime units are invalid.")
+            raise ValueError("'runtime' units are invalid.")
 
         self._runtime = t
 
@@ -284,7 +301,7 @@ class Config:
             )
 
         if not t.has_same_units(kelvin):
-            raise ValueError("Temperature units are invalid.")
+            raise ValueError("'temperature' units are invalid.")
 
         self._temperature = t
 
@@ -307,7 +324,7 @@ class Config:
                     f"Unable to parse 'pressure' as a Sire GeneralUnit: {pressure}"
                 )
             if not p.has_same_units(atm):
-                raise ValueError("Pressure units are invalid.")
+                raise ValueError("'pressure' units are invalid.")
 
             self._pressure = p
 
@@ -353,7 +370,7 @@ class Config:
         if not isinstance(h_mass_factor, float):
             try:
                 h_mass_factor = float(h_mass_factor)
-            except Exception as e:
+            except Exception:
                 raise ValueError("'h_mass_factor' must be a float")
         self._h_mass_factor = h_mass_factor
 
@@ -375,7 +392,7 @@ class Config:
                 f"Unable to parse 'timestep' as a Sire GeneralUnit: {timestep}"
             )
         if not t.has_same_units(femtosecond):
-            raise ValueError("Timestep units are invalid.")
+            raise ValueError("'timestep' units are invalid.")
 
         if t > _u("2fs") and self.h_mass_factor <= 1.0:
             _logger.warning("Timestep is large - consider repartitioning hydrogen mass")
@@ -432,7 +449,7 @@ class Config:
         if not isinstance(charge_scale_factor, float):
             try:
                 charge_scale_factor = float(charge_scale_factor)
-            except Exception as e:
+            except Exception:
                 raise ValueError("'charge_scale_factor' must be a float")
         self._charge_scale_factor = charge_scale_factor
         # Update the lambda schedule if it is charge scaled morph.
@@ -440,6 +457,51 @@ class Config:
             self._lambda_schedule = _LambdaSchedule.charge_scaled_morph(
                 self._charge_scale_factor
             )
+
+    @property
+    def swap_end_states(self):
+        return self._swap_end_states
+
+    @swap_end_states.setter
+    def swap_end_states(self, swap_end_states):
+        if not isinstance(swap_end_states, bool):
+            raise ValueError("'swap_end_states' must be of type 'bool'")
+        self._swap_end_states = swap_end_states
+
+    @property
+    def coulomb_power(self):
+        return self._coulomb_power
+
+    @coulomb_power.setter
+    def coulomb_power(self, coulomb_power):
+        if not isinstance(coulomb_power, float):
+            try:
+                coulomb_power = float(coulomb_power)
+            except Exception:
+                raise ValueError("'coulomb_power' must be a of type 'float'")
+        self._coulomb_power = coulomb_power
+
+    @property
+    def shift_delta(self):
+        return self._shift_delta
+
+    @shift_delta.setter
+    def shift_delta(self, shift_delta):
+        if not isinstance(shift_delta, str):
+            raise TypeError("'shift_delta' must be of type 'str'")
+
+        from sire.units import angstrom
+
+        try:
+            sd = _u(shift_delta)
+        except:
+            raise ValueError(
+                f"Unable to parse 'shift_delta' as a Sire GeneralUnit: {shift_delta}"
+            )
+        if not sd.has_same_units(angstrom):
+            raise ValueError("'shift_delta' units are invalid.")
+
+        self._shift_delta = sd
 
     @property
     def constraint(self):
@@ -490,7 +552,7 @@ class Config:
     @minimise.setter
     def minimise(self, minimise):
         if not isinstance(minimise, bool):
-            raise ValueError("'Minimise' must be a boolean")
+            raise ValueError("'minimise' must be of type 'bool'")
         if not minimise:
             _logger.warning(
                 "Minimisation is highly recommended for increased stability in SOMD2"
@@ -516,7 +578,7 @@ class Config:
             )
 
         if t.value() != 0 and not t.has_same_units(picosecond):
-            raise ValueError("Equilibration time units are invalid.")
+            raise ValueError("'equilibration_time' units are invalid.")
 
         self._equilibration_time = t
 
@@ -539,7 +601,7 @@ class Config:
             )
 
         if not t.has_same_units(femtosecond):
-            raise ValueError("Equilibration timestep units are invalid.")
+            raise ValueError("'equilibration_timestep' units are invalid.")
 
         self._equilibration_timestep = t
 
@@ -562,7 +624,7 @@ class Config:
             )
 
         if not t.has_same_units(picosecond):
-            raise ValueError("Energy frequency units are invalid.")
+            raise ValueError("'energy_frequency' units are invalid.")
 
         self._energy_frequency = t
 
@@ -573,7 +635,7 @@ class Config:
     @save_trajectories.setter
     def save_trajectories(self, save_trajectories):
         if not isinstance(save_trajectories, bool):
-            raise ValueError("'save_trajectories' must be a boolean")
+            raise ValueError("'save_trajectories' must be of type 'bool'")
         self._save_trajectories = save_trajectories
 
     @property
@@ -595,7 +657,7 @@ class Config:
             )
 
         if not t.has_same_units(picosecond):
-            raise ValueError("Frame frequency units are invalid.")
+            raise ValueError("'frame_frequency' units are invalid.")
 
         self._frame_frequency = t
 
@@ -606,7 +668,7 @@ class Config:
     @save_velocities.setter
     def save_velocities(self, save_velocities):
         if not isinstance(save_velocities, bool):
-            raise ValueError("'save_velocities' must be a boolean")
+            raise ValueError("'save_velocities' must be of type 'bool'")
         self._save_velocities = save_velocities
 
     @property
@@ -616,7 +678,7 @@ class Config:
     @checkpoint.setter
     def checkpoint(self, checkpoint):
         if not isinstance(checkpoint, bool):
-            raise ValueError("'checkpoint' must be a boolean")
+            raise ValueError("'checkpoint' must be of type 'bool'")
         self._checkpoint = checkpoint
 
     @property
@@ -638,7 +700,7 @@ class Config:
             )
 
         if not t.has_same_units(picosecond):
-            raise ValueError("Checkpoint frequency units are invalid.")
+            raise ValueError("'checkpoint_frequency' units are invalid.")
         if t < self._energy_frequency and t < self._frame_frequency:
             _logger.warning(
                 "Checkpoint frequency is low - should be greater min(energy_frequency, frame_frequency)"
@@ -712,7 +774,7 @@ class Config:
     @run_parallel.setter
     def run_parallel(self, run_parallel):
         if not isinstance(run_parallel, bool):
-            raise ValueError("'run_parallel' must be a boolean")
+            raise ValueError("'run_parallel' must be of type 'bool'")
         self._run_parallel = run_parallel
 
     @property
@@ -742,7 +804,7 @@ class Config:
     @write_config.setter
     def write_config(self, write_config):
         if not isinstance(write_config, bool):
-            raise ValueError("'write_config' must be a boolean")
+            raise ValueError("'write_config' must be of type 'bool'")
         self._write_config = write_config
 
     @classmethod
