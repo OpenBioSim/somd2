@@ -83,7 +83,6 @@ class Config:
         constraint="h-bonds",
         perturbable_constraint=None,
         minimise=True,
-        equilibrate=False,
         equilibration_time="2ps",
         equilibration_timestep="1fs",
         energy_frequency="1ps",
@@ -144,9 +143,6 @@ class Config:
         minimise: bool
             Whether to minimise the system before simulation.
 
-        equilibrate: bool
-            Whether to equilibrate the system before simulation.
-
         equilibration_time: str
             Time interval for equilibration.
 
@@ -205,7 +201,6 @@ class Config:
         self.constraint = constraint
         self.perturbable_constraint = perturbable_constraint
         self.minimise = minimise
-        self.equilibrate = equilibrate
         self.equilibration_time = equilibration_time
         self.equilibration_timestep = equilibration_timestep
         self.energy_frequency = energy_frequency
@@ -253,14 +248,21 @@ class Config:
 
     @runtime.setter
     def runtime(self, runtime):
+        if not isinstance(runtime, str):
+            raise TypeError("'runtime' must be of type 'str'")
+
         from sire.units import picosecond
 
         try:
             t = _u(runtime)
-        except Exception as e:
-            print(e.message)
+        except:
+            raise ValueError(
+                f"Unable to parse 'runtime' as a Sire GeneralUnit: {runtime}"
+            )
+
         if not t.has_same_units(picosecond):
             raise ValueError("Runtime units are invalid.")
+
         self._runtime = t
 
     @property
@@ -269,14 +271,21 @@ class Config:
 
     @temperature.setter
     def temperature(self, temperature):
+        if not isinstance(temperature, str):
+            raise TypeError("'temperature' must be of type 'str'")
+
         from sire.units import kelvin
 
         try:
             t = _u(temperature)
-        except Exception as e:
-            print(e.message)
+        except:
+            raise ValueError(
+                f"Unable to parse 'temperature' as a Sire GeneralUnit: {temperature}"
+            )
+
         if not t.has_same_units(kelvin):
             raise ValueError("Temperature units are invalid.")
+
         self._temperature = t
 
     @property
@@ -285,15 +294,21 @@ class Config:
 
     @pressure.setter
     def pressure(self, pressure):
+        if pressure is not None and not isinstance(pressure, str):
+            raise TypeError("'pressure' must be of type 'str'")
+
         from sire.units import atm
 
         if pressure is not None:
             try:
                 p = _u(pressure)
-            except Exception as e:
-                print(e.message)
+            except:
+                raise ValueError(
+                    f"Unable to parse 'pressure' as a Sire GeneralUnit: {pressure}"
+                )
             if not p.has_same_units(atm):
                 raise ValueError("Pressure units are invalid.")
+
             self._pressure = p
 
         else:
@@ -348,12 +363,17 @@ class Config:
 
     @timestep.setter
     def timestep(self, timestep):
+        if not isinstance(timestep, str):
+            raise TypeError("'timestep' must be of type 'str'")
+
         from sire.units import femtosecond
 
         try:
             t = _u(timestep)
-        except Exception as e:
-            print(e.message)
+        except:
+            raise ValueError(
+                f"Unable to parse 'timestep' as a Sire GeneralUnit: {timestep}"
+            )
         if not t.has_same_units(femtosecond):
             raise ValueError("Timestep units are invalid.")
 
@@ -478,29 +498,26 @@ class Config:
         self._minimise = minimise
 
     @property
-    def equilibrate(self):
-        return self._equilibrate
-
-    @equilibrate.setter
-    def equilibrate(self, equilibrate):
-        if not isinstance(equilibrate, bool):
-            raise ValueError("'Equilibrate' must be a boolean")
-        self._equilibrate = equilibrate
-
-    @property
     def equilibration_time(self):
         return self._equilibration_time
 
     @equilibration_time.setter
     def equilibration_time(self, equilibration_time):
+        if not isinstance(equilibration_time, str):
+            raise TypeError("'equilibration_time' must be of type 'str'")
+
         from sire.units import picosecond
 
         try:
             t = _u(equilibration_time)
-        except Exception as e:
-            print(e.message)
-        if not t.has_same_units(picosecond):
+        except:
+            raise ValueError(
+                f"Unable to parse 'equilibration_time' as a Sire GeneralUnit: {equilibration_time}"
+            )
+
+        if t.value() != 0 and not t.has_same_units(picosecond):
             raise ValueError("Equilibration time units are invalid.")
+
         self._equilibration_time = t
 
     @property
@@ -509,14 +526,21 @@ class Config:
 
     @equilibration_timestep.setter
     def equilibration_timestep(self, equilibration_timestep):
+        if not isinstance(equilibration_timestep, str):
+            raise TypeError("'equilibration_timestep' must be of type 'str'")
+
         from sire.units import femtosecond
 
         try:
             t = _u(equilibration_timestep)
-        except Exception as e:
-            print(e.message)
+        except:
+            raise valueError(
+                f"Unable to parse 'equilibration_timestep' as a Sire GeneralUnit: {equilibration_timestep}"
+            )
+
         if not t.has_same_units(femtosecond):
             raise ValueError("Equilibration timestep units are invalid.")
+
         self._equilibration_timestep = t
 
     @property
@@ -525,14 +549,21 @@ class Config:
 
     @energy_frequency.setter
     def energy_frequency(self, energy_frequency):
+        if not isinstance(energy_frequency, str):
+            raise TypeError("'energy_frequency' must be of type 'str'")
+
         from sire.units import picosecond
 
         try:
             t = _u(energy_frequency)
-        except Exception as e:
-            print(e.message)
+        except:
+            raise ValueError(
+                f"Unable to parse 'energy_frequency' as a Sire GeneralUnit: {energy_frequency}"
+            )
+
         if not t.has_same_units(picosecond):
             raise ValueError("Energy frequency units are invalid.")
+
         self._energy_frequency = t
 
     @property
@@ -551,14 +582,21 @@ class Config:
 
     @frame_frequency.setter
     def frame_frequency(self, frame_frequency):
+        if not isinstance(frame_frequency, str):
+            raise TypeError("'frame_frequency' must be of type 'str'")
+
         from sire.units import picosecond
 
         try:
             t = _u(frame_frequency)
-        except Exception as e:
-            print(e.message)
+        except:
+            raise ValueError(
+                f"Unable to parse 'frame_frequency' as a Sire GeneralUnit: {frame_frequency}"
+            )
+
         if not t.has_same_units(picosecond):
             raise ValueError("Frame frequency units are invalid.")
+
         self._frame_frequency = t
 
     @property
@@ -587,12 +625,18 @@ class Config:
 
     @checkpoint_frequency.setter
     def checkpoint_frequency(self, checkpoint_frequency):
+        if not isinstance(checkpoint_frequency, str):
+            raise TypeError("'checkpoint_frequency' must be of type 'str'")
+
         from sire.units import picosecond
 
         try:
             t = _u(checkpoint_frequency)
-        except Exception as e:
-            print(e.message)
+        except:
+            raise ValueError(
+                f"Unable to parse 'checkpoint_frequency' as a Sire GeneralUnit: {checkpoint_frequency}"
+            )
+
         if not t.has_same_units(picosecond):
             raise ValueError("Checkpoint frequency units are invalid.")
         if t < self._energy_frequency and t < self._frame_frequency:

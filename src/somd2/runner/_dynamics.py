@@ -219,7 +219,7 @@ class Dynamics:
         if self._config.minimise:
             self._minimisation(lambda_minimisation)
 
-        if self._config.equilibrate:
+        if self._config.equilibration_time.value() > 0.0:
             self._equilibration()
             # Reset the timer to zero
             self._system.set_time(_u("0ps"))
