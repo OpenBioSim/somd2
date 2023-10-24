@@ -1,7 +1,7 @@
 # SOMD2
 
 Open-source GPU accelerated molecular dynamics engine for alchemical free-energy
-simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and [OpenMM](https://github.com/openmm/openmm).
+simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and [OpenMM](https://github.com/openmm/openmm). The code is still under active development and is not yet ready for general use.
 
 ## Installation
 
