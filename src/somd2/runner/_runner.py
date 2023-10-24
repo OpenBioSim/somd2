@@ -118,6 +118,14 @@ class Runner:
         if self._config.write_config:
             dict_to_yaml(self._config.as_dict(), self._config.output_directory)
 
+    def __str__(self):
+        """Return a string representation of the object."""
+        return f"Runner(system={self._system}, config={self._config})"
+
+    def __repr__(self):
+        """Return a string representation of the object."""
+        return self.__str__()
+
     def _create_shared_resources(self):
         """
         Creates shared list that holds currently available GPUs.
