@@ -868,10 +868,13 @@ class Config:
 
         # Add the parameters.
         for param in params:
+            # Convert underscores to hyphens for the command line.
+            cli_param = param.replace("_", "-")
+
             # This parameter has choices.
             if param in cls._choices:
                 parser.add_argument(
-                    f"--{param}",
+                    f"--{cli_param}",
                     type=type(params[param].default),
                     default=params[param].default,
                     choices=cls._choices[param],
@@ -881,7 +884,7 @@ class Config:
             # This is a standard parameter.
             else:
                 parser.add_argument(
-                    f"--{param}",
+                    f"--{cli_param}",
                     type=type(params[param].default),
                     default=params[param].default,
                     help=help[param],
