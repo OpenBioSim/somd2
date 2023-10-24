@@ -98,7 +98,6 @@ def dict_to_yaml(data_dict, file_path, filename="config.yaml"):
                 data_dict,
                 yaml_file,
             )
-        print("config written")
     except Exception as e:
         print(f"Error writing the dictionary to {file_path}: {e}")
 
