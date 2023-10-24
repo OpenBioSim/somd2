@@ -51,7 +51,7 @@ with their default values.)
 ## Analysis
 
 Simulation output will be written to the directory specified using the
-`--output-directory` paramter. This will contain a number of files, including
+`--output-directory` parameter. This will contain a number of files, including
 Parquet files for the energy trajectories of each λ window. These can be
 processed using [BioSimSpace](https://github.com/OpenBioSim/biosimspace) as follows:
 
