@@ -24,7 +24,8 @@ __all__ = ["Dynamics"]
 from pathlib import Path as _Path
 
 from ..config import Config as _Config
-from ..io import *
+from ..io import dataframe_to_parquet as _dataframe_to_parquet
+from ..io import parquet_append as _parquet_append
 
 
 class Dynamics:
@@ -271,7 +272,7 @@ class Dynamics:
                     if _ == 0:
                         # Not inlcuding speed in checkpoints for now
 
-                        f = dataframe_to_parquet(
+                        f = _dataframe_to_parquet(
                             df,
                             metadata={
                                 "attrs": df.attrs,
@@ -283,7 +284,7 @@ class Dynamics:
                             filepath=self._config.output_directory,
                         )
                     else:
-                        parquet_append(
+                        _parquet_append(
                             f,
                             df.iloc[-int(energy_per_block) :],
                         )

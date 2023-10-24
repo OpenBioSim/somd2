@@ -25,7 +25,8 @@ __all__ = ["Runner"]
 import sire as _sr
 
 from ..config import Config as _Config
-from ..io import *
+from ..io import dataframe_to_parquet as _dataframe_to_parquet
+from ..io import dict_to_yaml as _dict_to_yaml
 
 
 class Runner:
@@ -116,7 +117,7 @@ class Runner:
 
         # Save config whenever 'configure' is called to keep it up to date
         if self._config.write_config:
-            dict_to_yaml(self._config.as_dict(), self._config.output_directory)
+            _dict_to_yaml(self._config.as_dict(), self._config.output_directory)
 
     def __str__(self):
         """Return a string representation of the object."""
@@ -428,7 +429,7 @@ class Runner:
                         self._update_gpu_pool(gpu_num)
             self._sim._cleanup()
 
-        _ = dataframe_to_parquet(
+        _ = _dataframe_to_parquet(
             df,
             metadata={
                 "attrs": df.attrs,
