@@ -260,6 +260,10 @@ class Config:
         """Return a string representation of this object."""
         return self.__str__()
 
+    def __eq__(self, other):
+        """Equality operator."""
+        return self.as_dict() == other.as_dict()
+
     def as_dict(self):
         """Convert config object to dictionary"""
         from pathlib import PosixPath as _PosixPath
