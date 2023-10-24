@@ -86,7 +86,7 @@ class Config:
         constraint="h-bonds",
         perturbable_constraint=None,
         minimise=True,
-        equilibration_time="2ps",
+        equilibration_time="0ps",
         equilibration_timestep="1fs",
         energy_frequency="1ps",
         save_trajectories=True,
