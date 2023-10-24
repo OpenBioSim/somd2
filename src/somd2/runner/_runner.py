@@ -46,8 +46,9 @@ class Runner:
         Parameters:
         -----------
 
-        system: :class: `System <Sire.System>`| :class: `System <BioSimSpace._SireWrapper.System>`
-            The perturbable system to be simulated.
+        system: str, :class: `System <sire.system.System>`
+            The perturbable system to be simulated. This can be either a path
+            to a stream file, or a Sire system object.
 
         num_lambda: int
             The number of lambda windows to be simulated.
@@ -56,11 +57,18 @@ class Runner:
             The platform to be used for simulations.
 
         """
-        # Try to load the system stream file.
-        try:
-            self._system = _sr.stream.load(system)
-        except:
-            raise IOError(f"Unable to load system from stream file: '{system}'")
+
+        if not isinstance(system, (str, _sr.system.System)):
+            raise TypeError("'system' must be of type 'str' or 'sire.system.System'")
+
+        if isinstance(system, str):
+            # Try to load the stream file.
+            try:
+                self._system = _sr.stream.load(system)
+            except:
+                raise IOError(f"Unable to load system from stream file: '{system}'")
+        else:
+            self._system = system
 
         # Make sure the system contains perturbable molecules.
         try:
@@ -234,7 +242,7 @@ class Runner:
 
         Parameters:
         -----------
-        system: sire sytem
+        system: :class: `System <sire.system.System>`
             The system to be simulated.
 
         lambda_value: float
