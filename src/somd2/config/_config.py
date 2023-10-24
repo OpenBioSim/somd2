@@ -760,14 +760,6 @@ class Config:
             help="YAML config file path",
         )
 
-        # Add the system to the parser.
-        parser.add_argument(
-            "--system",
-            type=str,
-            required=True,
-            help="Path to a stream file containing the perturbable system.",
-        )
-
         # Add the parameters.
         for param in params:
             # This parameter has choices.

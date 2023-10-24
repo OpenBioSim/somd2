@@ -41,6 +41,13 @@ def cli():
     # Generate the parser.
     parser = Config._create_parser()
 
+    # Add simulation specific positional arguments.
+    parser.add_argument(
+        "system",
+        type=str,
+        help="Path to a stream file containing the perturbable system.",
+    )
+
     # Parse the arguments into a dictionary.
     args = vars(parser.parse_args())
 
@@ -49,7 +56,7 @@ def cli():
     # configuration options that are not set by the command line. The "system"
     # is a path to a Sire/BioSimSpace stream file containing a perturbable
     # system and is passed separately to the Runner constructor.
-    yaml_config = args.pop("config")
+    args.pop("config")
     system = args.pop("system")
 
     # Instantiate a Config object to validate the arguments.
