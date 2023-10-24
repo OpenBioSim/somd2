@@ -357,7 +357,7 @@ class Config:
         if not t.has_same_units(femtosecond):
             raise ValueError("Timestep units are invalid.")
 
-        if t > _u("2fs") and not self.repartition_h_mass:
+        if t > _u("2fs") and self.h_mass_factor <= 1.0:
             _logger.warning("Timestep is large - consider repartitioning hydrogen mass")
         self._timestep = t
 
