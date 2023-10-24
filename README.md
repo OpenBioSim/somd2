@@ -17,7 +17,7 @@ Now install `somd2` into the environment:
 
 ```
 mamba activate somd2
-python setup.py develop
+pip install --editable .
 ```
 
 You should now have a `somd2` executable in your path. To test, run:
