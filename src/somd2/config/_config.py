@@ -71,7 +71,7 @@ class Config:
     def __init__(
         self,
         runtime="1ns",
-        timestep="2fs",
+        timestep="4fs",
         temperature="300K",
         pressure="1 atm",
         integrator="langevin_middle",
