@@ -313,15 +313,20 @@ class Runner:
                 for lambda_value in self._lambda_values:
                     kwargs = {"lambda_value": lambda_value}
                     jobs = {executor.submit(self.run_window, **kwargs): lambda_value}
-                for job in _futures.as_completed(jobs):
-                    lam = jobs[job]
-                    try:
-                        result = job.result()
-                    except Exception as e:
-                        print(e)
-                        pass
-                    else:
-                        results.append(result)
+                try:
+                    for job in _futures.as_completed(jobs):
+                        lam = jobs[job]
+                        try:
+                            result = job.result()
+                        except Exception as e:
+                            print(e)
+                            pass
+                        else:
+                            results.append(result)
+                # Kill all current and future jobs if keyboard interrupt
+                except KeyboardInterrupt:
+                    for pid in executor._processes:
+                        executor._processes[pid].terminate()
 
         elif self._config.num_lambda is not None:
             if self._config.platform == "cpu":
