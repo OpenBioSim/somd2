@@ -96,8 +96,6 @@ class Dynamics:
         self._device = device
         self._has_space = has_space
 
-    # Would prob. be better to just set up the dynamics object here,
-    # then run a separate dynamics.minimise
     def _setup_dynamics(self, equilibration=False):
         """
         Minimise if needed and then setup dynamics object
@@ -157,6 +155,7 @@ class Dynamics:
                     cutoff_type=self._config.cutoff_type,
                     schedule=self._config.lambda_schedule,
                     lambda_value=self._lambda_val,
+                    platform=self._config.platform,
                     map=self._config.extra_args,
                 )
                 m.run()
@@ -169,6 +168,7 @@ class Dynamics:
                     cutoff_type=self._config.cutoff_type,
                     schedule=self._config.lambda_schedule,
                     lambda_value=lambda_min,
+                    platform=self._config.platform,
                     map=self._config.extra_args,
                 )
                 m.run()
