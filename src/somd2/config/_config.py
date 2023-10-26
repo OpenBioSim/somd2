@@ -95,8 +95,8 @@ class Config:
         checkpoint=True,
         checkpoint_frequency="100ps",
         platform="auto",
-        max_threads=None,
-        max_gpus=None,
+        max_threads=-1,
+        max_gpus=-1,
         run_parallel=True,
         output_directory="output",
         write_config=True,
@@ -769,8 +769,8 @@ class Config:
     def max_threads(self, max_threads):
         import os as _os
 
-        if max_threads is not None:
-            self._max_threads = max_CPU_cores
+        if max_threads > 0:
+            self._max_threads = int(max_threads)
             if self._platform == "CUDA":
                 _logger.warning(
                     "CUDA platform requested but max_threads set - ignoring max_threads"
@@ -786,7 +786,7 @@ class Config:
     def max_gpus(self, max_gpus):
         import os as _os
 
-        if max_gpus is not None:
+        if max_gpus > 0:
             self._max_gpus = max_gpus
             if self._platform == "CPU":
                 _logger.warning(
