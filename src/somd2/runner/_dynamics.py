@@ -160,7 +160,7 @@ class Dynamics:
                 )
                 m.run()
                 self._system = m.commit()
-            except:
+            except Exception:
                 raise
         else:
             try:
@@ -173,7 +173,7 @@ class Dynamics:
                 )
                 m.run()
                 self._system = m.commit()
-            except:
+            except Exception:
                 raise
 
     # combine these - just equil time
