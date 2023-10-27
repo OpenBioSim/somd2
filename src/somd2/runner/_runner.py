@@ -272,7 +272,7 @@ class Runner:
                 device=device,
                 has_space=self._has_space,
             )
-        except Exception:
+        except:
             _logger.warning(f"System creation at {lambda_value} failed")
             raise
 
@@ -406,7 +406,7 @@ class Runner:
             self._initialise_simulation(system, lambda_value)
             try:
                 df, lambda_grad, speed = _run(self._sim)
-            except Exception:
+            except:
                 raise
             self._sim._cleanup()
 
@@ -423,7 +423,7 @@ class Runner:
             self._initialise_simulation(system, lambda_value, device=gpu_num)
             try:
                 df, lambda_grad, speed = _run(self._sim)
-            except Exception:
+            except:
                 if self._config.run_parallel:
                     with self._lock:
                         self._update_gpu_pool(gpu_num)

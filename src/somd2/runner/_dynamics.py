@@ -160,7 +160,7 @@ class Dynamics:
                 )
                 m.run()
                 self._system = m.commit()
-            except Exception:
+            except:
                 raise
         else:
             try:
@@ -173,7 +173,7 @@ class Dynamics:
                 )
                 m.run()
                 self._system = m.commit()
-            except Exception:
+            except:
                 raise
 
     # combine these - just equil time
@@ -263,7 +263,7 @@ class Dynamics:
                         save_velocities=self._config.save_velocities,
                         auto_fix_minimise=False,
                     )
-                except Exception:
+                except:
                     raise
                 try:
                     self._system = self._dyn.commit()
@@ -288,7 +288,7 @@ class Dynamics:
                             f,
                             df.iloc[-int(energy_per_block) :],
                         )
-                except Exception:
+                except:
                     raise
             # No need to checkpoint here as it is the final block
             if rem > 0:
@@ -301,7 +301,7 @@ class Dynamics:
                         save_velocities=self._config.save_velocities,
                         auto_fix_minimise=False,
                     )
-                except Exception:
+                except:
                     raise
                 self._system = self._dyn.commit()
         else:
@@ -314,7 +314,7 @@ class Dynamics:
                     save_velocities=self._config.save_velocities,
                     auto_fix_minimise=False,
                 )
-            except Exception:
+            except:
                 raise
             self._system = self._dyn.commit()
 
