@@ -25,9 +25,10 @@ Configuration class for SOMD2 runner.
 
 __all__ = ["Config"]
 
-from sire import u as _u
 from pathlib import Path as _Path
 from loguru import logger as _logger
+
+import sire as _sr
 
 
 class Config:
@@ -35,37 +36,19 @@ class Config:
     Class for storing a SOMD2 simulation configuration.
     """
 
-    # A dictionary of choices for options that support them.
+    # A dictionary of choices for options that support them. Here we inspect
+    # the Sire options module to get the valid choices. This allows us to be
+    # forwards compatible with new options.
     _choices = {
-        "constraint": [
-            "none",
-            "h-bonds",
-            "bonds",
-            "h-bonds-h-angles",
-            "bonds-h-angles",
-        ],
-        "perturbable_constraint": [
-            "none",
-            "h-bonds",
-            "bonds",
-            "h-bonds-h-angles",
-            "bonds-h-angles",
-        ],
-        "integrator": [
-            "verlet",
-            "leapfrog",
-            "langevin_middle",
-            "langevin",
-            "noose_hoover",
-            "brownian",
-            "andersen",
-        ],
-        "cutoff_type": ["pme", "rf"],
+        "constraint": [x.value for x in _sr.options.Constraint],
+        "perturbable_constraint": [x.value for x in _sr.options.PerturbableConstraint],
+        "integrator": [x.value for x in _sr.options.Integrator],
+        "cutoff_type": [x.value for x in _sr.options.Cutoff],
+        "platform": [x.value for x in _sr.options.Platform],
         "lambda_schedule": [
             "standard_morph",
             "charge_scaled_morph",
         ],
-        "platform": ["auto", "cpu", "cuda"],
     }
 
     def __init__(
@@ -302,7 +285,7 @@ class Config:
         from sire.units import picosecond
 
         try:
-            t = _u(runtime)
+            t = _sr.u(runtime)
         except:
             raise ValueError(
                 f"Unable to parse 'runtime' as a Sire GeneralUnit: {runtime}"
@@ -325,7 +308,7 @@ class Config:
         from sire.units import kelvin
 
         try:
-            t = _u(temperature)
+            t = _sr.u(temperature)
         except:
             raise ValueError(
                 f"Unable to parse 'temperature' as a Sire GeneralUnit: {temperature}"
@@ -349,7 +332,7 @@ class Config:
 
         if pressure is not None:
             try:
-                p = _u(pressure)
+                p = _sr.u(pressure)
             except:
                 raise ValueError(
                     f"Unable to parse 'pressure' as a Sire GeneralUnit: {pressure}"
@@ -417,7 +400,7 @@ class Config:
         from sire.units import femtosecond
 
         try:
-            t = _u(timestep)
+            t = _sr.u(timestep)
         except:
             raise ValueError(
                 f"Unable to parse 'timestep' as a Sire GeneralUnit: {timestep}"
@@ -425,7 +408,7 @@ class Config:
         if not t.has_same_units(femtosecond):
             raise ValueError("'timestep' units are invalid.")
 
-        if t > _u("2fs") and self.h_mass_factor <= 1.0:
+        if t > _sr.u("2fs") and self.h_mass_factor <= 1.0:
             _logger.warning("Timestep is large - consider repartitioning hydrogen mass")
         self._timestep = t
 
@@ -524,7 +507,7 @@ class Config:
         from sire.units import angstrom
 
         try:
-            sd = _u(shift_delta)
+            sd = _sr.u(shift_delta)
         except:
             raise ValueError(
                 f"Unable to parse 'shift_delta' as a Sire GeneralUnit: {shift_delta}"
@@ -602,7 +585,7 @@ class Config:
         from sire.units import picosecond
 
         try:
-            t = _u(equilibration_time)
+            t = _sr.u(equilibration_time)
         except:
             raise ValueError(
                 f"Unable to parse 'equilibration_time' as a Sire GeneralUnit: {equilibration_time}"
@@ -625,7 +608,7 @@ class Config:
         from sire.units import femtosecond
 
         try:
-            t = _u(equilibration_timestep)
+            t = _sr.u(equilibration_timestep)
         except:
             raise valueError(
                 f"Unable to parse 'equilibration_timestep' as a Sire GeneralUnit: {equilibration_timestep}"
@@ -648,7 +631,7 @@ class Config:
         from sire.units import picosecond
 
         try:
-            t = _u(energy_frequency)
+            t = _sr.u(energy_frequency)
         except:
             raise ValueError(
                 f"Unable to parse 'energy_frequency' as a Sire GeneralUnit: {energy_frequency}"
@@ -681,7 +664,7 @@ class Config:
         from sire.units import picosecond
 
         try:
-            t = _u(frame_frequency)
+            t = _sr.u(frame_frequency)
         except:
             raise ValueError(
                 f"Unable to parse 'frame_frequency' as a Sire GeneralUnit: {frame_frequency}"
@@ -724,7 +707,7 @@ class Config:
         from sire.units import picosecond
 
         try:
-            t = _u(checkpoint_frequency)
+            t = _sr.u(checkpoint_frequency)
         except:
             raise ValueError(
                 f"Unable to parse 'checkpoint_frequency' as a Sire GeneralUnit: {checkpoint_frequency}"
