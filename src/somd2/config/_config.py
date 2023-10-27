@@ -84,7 +84,7 @@ class Config:
         coulomb_power=0.0,
         shift_delta="2A",
         constraint="h-bonds",
-        perturbable_constraint=None,
+        perturbable_constraint="none",
         minimise=True,
         equilibration_time="0ps",
         equilibration_timestep="1fs",
@@ -95,8 +95,8 @@ class Config:
         checkpoint=True,
         checkpoint_frequency="100ps",
         platform="auto",
-        max_threads=-1,
-        max_gpus=-1,
+        max_threads="none",
+        max_gpus="none",
         run_parallel=True,
         output_directory="output",
         write_config=True,
@@ -185,12 +185,12 @@ class Config:
             Platform to run simulation on.
 
         max_threads: int
-            Maximum number of CPU threads to use for simulation (default None, uses all available)
+            Maximum number of CPU threads to use for simulation. (Default None, uses all available)
             Does nothing if platform is set to CUDA.
 
         max_gpus: int
-            Maximum number of GPUs to use for simulation (default None, uses all available)
-            does nothing if platform is set to CPU.
+            Maximum number of GPUs to use for simulation (Default None, uses all available.)
+            Does nothing if platform is set to CPU.
 
         run_parallel: bool
             Whether to run simulation in parallel.
@@ -769,14 +769,18 @@ class Config:
     def max_threads(self, max_threads):
         import os as _os
 
-        if max_threads > 0:
-            self._max_threads = int(max_threads)
+        if max_threads is None or max_threads.lower().replace(" ", "") == "none":
+            self._max_threads = _os.cpu_count()
+
+        else:
+            try:
+                self._max_threads = int(max_threads)
+            except:
+                raise ValueError("'max_threads' must be of type 'int'")
             if self._platform == "CUDA":
                 _logger.warning(
                     "CUDA platform requested but max_threads set - ignoring max_threads"
                 )
-        else:
-            self._max_threads = _os.cpu_count()
 
     @property
     def max_gpus(self):
@@ -786,17 +790,21 @@ class Config:
     def max_gpus(self, max_gpus):
         import os as _os
 
-        if max_gpus > 0:
-            self._max_gpus = max_gpus
-            if self._platform == "CPU":
-                _logger.warning(
-                    "CPU platform requested but max_gpus set - ignoring max_gpus"
-                )
-        else:
+        if max_gpus is None or max_gpus.lower().replace(" ", "") == "none":
             if "CUDA_VISIBLE_DEVICES" in _os.environ:
                 self._max_gpus = len(_os.environ["CUDA_VISIBLE_DEVICES"].split(","))
             else:
                 self._max_gpus = 0
+
+        else:
+            try:
+                self._max_gpus = int(max_gpus)
+            except:
+                raise ValueError("'max_gpus' must be of type 'int'")
+            if self._platform == "CPU":
+                _logger.warning(
+                    "CPU platform requested but max_gpus set - ignoring max_gpus"
+                )
 
     @property
     def run_parallel(self):
