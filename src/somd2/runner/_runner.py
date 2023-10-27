@@ -44,8 +44,8 @@ class Runner:
         """
         Constructor.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
 
         system: str, :class: `System <sire.system.System>`
             The perturbable system to be simulated. This can be either a path
@@ -171,8 +171,9 @@ class Runner:
         """
         Updates the GPU pool to remove the GPU that has been assigned to a worker.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
+
         gpu_num: str
             The GPU number to be added to the pool.
         """
@@ -182,8 +183,9 @@ class Runner:
         """
         Removes a GPU from the GPU pool.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
+
         gpu_num: str
             The GPU number to be removed from the pool.
         """
@@ -193,8 +195,9 @@ class Runner:
         """
         Sets the lambda schedule.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
+
         schedule: sr.cas.LambdaSchedule
             Lambda schedule to be set.
         """
@@ -205,9 +208,11 @@ class Runner:
         """
         Get list of available GPUs from CUDA_VISIBLE_DEVICES.
 
-        Returns:
+        Returns
         --------
-        available_devices (list): List of available device numbers.
+
+        available_devices : [int]
+            List of available device numbers.
         """
         import os as _os
 
@@ -226,15 +231,17 @@ class Runner:
         Set all device numbers relative to the lowest
         (the device number becomes equal to its index in the list).
 
-        Returns:
-        --------
-        devices (list): List of zeroed available device numbers.
+        Returns
+        -------
+
+        devices : [int]
+            List of zeroed available device numbers.
         """
         return [str(devices.index(value)) for value in devices]
 
     def _repartition_h_mass(self):
         """
-        Reparartition hydrogen masses.
+        Reprartition hydrogen masses.
         """
 
         from sire.morph import (
@@ -249,8 +256,9 @@ class Runner:
         """
         Create simulation object.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
+
         system: :class: `System <sire.system.System>`
             The system to be simulated.
 
@@ -286,9 +294,11 @@ class Runner:
         """
         Use concurrent.futures to run lambda windows in parallel
 
-        Returns:
+        Returns
         --------
-        results (list): List of simulation results.
+
+        results : [str]
+            List of simulation results.
         """
         results = []
         if self._config.run_parallel and (self._config.num_lambda is not None):
@@ -350,16 +360,18 @@ class Runner:
         """
         Run a single simulation.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
+
         lambda_value: float
             The lambda value for the simulation.
 
         temperature: float
             The temperature for the simulation.
 
-        Returns:
-        --------
+        Returns
+        -------
+
         result: str
             The result of the simulation.
         """

@@ -51,6 +51,7 @@ class Dynamics:
 
         Parameters
         ----------
+
         system : Sire System
             Sire system containing at least one perturbable molecule
 
@@ -102,6 +103,7 @@ class Dynamics:
 
         Parameters
         ----------
+
         lam_val_min : float
             Lambda value at which to run minimisation,
             if None run at pre-set lambda_val
@@ -145,6 +147,7 @@ class Dynamics:
 
         Parameters
         ----------
+
         lambda_min : float
             Lambda value at which to run minimisation,
             if None run at pre-set lambda_val
@@ -195,12 +198,13 @@ class Dynamics:
 
     def _run(self, lambda_minimisation=None):
         """
-        Run the simulation with bookkeeping
+        Run the simulation with bookkeeping.
+
         Returns
         -------
+
         df : pandas dataframe
-            Dataframe containing the sire energy
-            trajectory
+            Dataframe containing the sire energy trajectory.
         """
         from sire import u as _u
         from sire import stream as _stream

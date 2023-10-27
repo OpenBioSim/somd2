@@ -38,13 +38,18 @@ import pandas as _pd
 def dataframe_to_parquet(df, metadata, filepath=None, filename=None):
     """
     Save a dataframe to parquet format with custom metadata.
-    Parameters:
-    -----------
+
+    Parameters
+    ----------
+
     df: pandas.DataFrame
-        The dataframe to be saved. In this case containing info required for FEP calculation
+        The dataframe to be saved. In this case containing info required for
+        FEP calculation.
+
     metadata: dict
         Dictionary containing metadata to be saved with the dataframe.
         Currently just temperature and lambda value.
+
     filepath: str or pathlib.PosixPath
         The of the parent directory in to which the parquet file will be saved.
         If None, save to current working directory.
@@ -77,12 +82,15 @@ def dataframe_to_parquet(df, metadata, filepath=None, filename=None):
 def dict_to_yaml(data_dict, file_path, filename="config.yaml"):
     """
     Write a dictionary to a YAML file.
-    Parameters:
-    -----------
+
+    Parameter:
+    ----------
     data_dict: dict
         The dictionary to be written to a YAML file.
+
     file_path: str or pathlib.PosixPath
         The path to the YAML file to be written.
+
     filename: str
         The name of the YAML file to be written (default 'config.yaml').
     """
@@ -104,15 +112,17 @@ def dict_to_yaml(data_dict, file_path, filename="config.yaml"):
 
 def parquet_append(filepath: _Path or str, df: _pd.DataFrame) -> None:
     """
-    Append to dataframe to existing .parquet file. Reads original .parquet file in, appends new dataframe, writes new .parquet file out.
+    Append to dataframe to existing .parquet file. Reads original .parquet file in,
+    appends new dataframe, writes new .parquet file out.
 
     Parameters
     ----------
-    filepath: Filepath for parquet file.
-    df: Pandas dataframe to append. Must be same schema as original.
-    """
-    import shutil
+    filepath: str
+        Filepath for parquet file.
 
+    df: pandas.DataFrame
+        Pandas dataframe to append. Must be same schema as original.
+    """
     try:
         table_original_file = _pq.read_table(
             source=str(filepath), pre_buffer=False, use_threads=True, memory_map=True
@@ -129,32 +139,39 @@ def parquet_append(filepath: _Path or str, df: _pd.DataFrame) -> None:
             temp_writer.write_table(table_original_file)
             temp_writer.write_table(table_to_append)
 
-        # Atomic operation to ensure data integrity
-        shutil.move(temp_file, filepath)
+        import shutil as _shutil
 
-    except (FileNotFoundError, IOError, Exception) as e:
-        # Handle specific exceptions that might occur during file operations
-        print(f"Error occurred: {e}")
+        # Atomic operation to ensure data integrity
+        _shutil.move(temp_file, filepath)
+
+    except Exception as e:
+        raise(f"Error occurred append to Parquet file: {e}")
 
 
 @staticmethod
 def parquet_to_dataframe(filepath, meta_key="somd2"):
     """
-    Reads a parquet file containing an energy trajectory,
-    extracts the trajectory as a dataframe and the metadata as a
-    dictionary
-    parameters
+    Reads a parquet file containing an energy trajectory, extracts the trajectory
+    as a dataframe and the metadata as a dictionary.
+
+    Parameters
     ----------
+
     filepath : str
         Path to the parquet file containing the energy trajectory
+
     meta_key : str
         Key of the metadata to be used for analysis
-    returns
+
+    Returns
     -------
+
     restored_df : pandas dataframe
         Dataframe containing the energy trajectory
+
     restored_meta : dict
         Dictionary containing the metadata for the simulation"""
+
     import pyarrow.parquet as _pq
     import json as _json
 
