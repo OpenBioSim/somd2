@@ -66,7 +66,7 @@ class Config:
         swap_end_states=False,
         coulomb_power=0.0,
         shift_delta="2A",
-        constraint="h-bonds",
+        constraint="h_bonds",
         perturbable_constraint=None,
         minimise=True,
         equilibration_time="0ps",
