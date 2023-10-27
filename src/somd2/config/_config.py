@@ -247,6 +247,33 @@ class Config:
         """Equality operator."""
         return self.as_dict() == other.as_dict()
 
+    @staticmethod
+    def from_yaml(path):
+        """
+        Create a Config object from a YAML file.
+
+        Parameters
+        ----------
+
+        path: str
+            Path to YAML file.
+        """
+        import os as _os
+        import yaml as _yaml
+
+        if not isinstance(path, str):
+            raise TypeError("'path' must be of type 'str'")
+        if not _os.path.exists(path):
+            raise ValueError(f"File does not exist: {path}")
+
+        try:
+            with open(path, "r") as f:
+                d = _yaml.safe_load(f)
+        except Exception as e:
+            raise ValueError(f"Could not load YAML file: {e}")
+
+        return Config(**d)
+
     def as_dict(self):
         """Convert config object to dictionary"""
         from pathlib import PosixPath as _PosixPath
