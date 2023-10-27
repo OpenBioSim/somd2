@@ -19,4 +19,12 @@
 # along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
+# Disable Sire progress bars until we work out the best way to handle
+# them for the SOMD2 runner, i.e. when running multiple dynamics objects
+# in parallel.
+from sire.legacy.Base import ProgressBar as _ProgressBar
+
+_ProgressBar.setSilent()
+del _ProgressBar
+
 from . import runner
