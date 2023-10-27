@@ -752,7 +752,10 @@ class Config:
     def max_threads(self, max_threads):
         import os as _os
 
-        if max_threads is None or max_threads.lower().replace(" ", "") == "none":
+        if max_threads is None or (
+            isinstance(max_threads, str)
+            and max_threads.lower().replace(" ", "") == "none"
+        ):
             self._max_threads = _os.cpu_count()
 
         else:
@@ -773,7 +776,9 @@ class Config:
     def max_gpus(self, max_gpus):
         import os as _os
 
-        if max_gpus is None or max_gpus.lower().replace(" ", "") == "none":
+        if max_gpus is None or (
+            isinstance(max_gpus, str) and max_gpus.lower().replace(" ", "") == "none"
+        ):
             if "CUDA_VISIBLE_DEVICES" in _os.environ:
                 self._max_gpus = len(_os.environ["CUDA_VISIBLE_DEVICES"].split(","))
             else:
