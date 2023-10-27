@@ -755,6 +755,7 @@ class Config:
     @platform.setter
     def platform(self, platform):
         import os as _os
+        import sys as _sys
 
         if not isinstance(platform, str):
             raise TypeError("'platform' must be of type 'str'")
@@ -765,9 +766,24 @@ class Config:
             )
         if platform == "cuda" and _os.environ.get("CUDA_VISIBLE_DEVICES") is None:
             raise ValueError("CUDA platform requested but CUDA_VISIBLE_DEVICES not set")
+        elif platform == "opencl" and _os.environ.get("OPENCL_VISIBLE_DEVICES") is None:
+            raise ValueError(
+                "OpenCL platform requested but OPENCL_VISIBLE_DEVICES not set"
+            )
         else:
             if platform in ["cuda", "auto"] and "CUDA_VISIBLE_DEVICES" in _os.environ:
                 self._platform = "cuda"
+            elif (
+                platform in ["opencl", "auto"]
+                and "OPENCL_VISIBLE_DEVICES" in _os.environ
+            ):
+                self._platform = "cuda"
+            elif platform in ["auto", "metal"]:
+                if _sys.platform == "darwin":
+                    self._platform = "metal"
+                else:
+                    if platform == "metal":
+                        raise ValueError("Metal platform is only available on macOS")
             else:
                 self._platform = "cpu"
 

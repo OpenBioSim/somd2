@@ -135,12 +135,12 @@ class Runner:
         if self._config.platform == "cuda":
             if self._config.max_gpus is None:
                 self._gpu_pool = self._manager.list(
-                    self.zero_cuda_devices(self.get_cuda_devices())
+                    self.zero_gpu_devices(self.get_gpu_devices())
                 )
             else:
                 self._gpu_pool = self._manager.list(
-                    self.zero_cuda_devices(
-                        self.get_cuda_devices()[: self._config.max_gpus]
+                    self.zero_gpu_devices(
+                        self.get_gpu_devices()[: self._config.max_gpus]
                     )
                 )
 
@@ -204,9 +204,9 @@ class Runner:
         self._config.lambda_schedule = schedule
 
     @staticmethod
-    def get_cuda_devices():
+    def get_gpu_devices(is_cuda=True):
         """
-        Get list of available GPUs from CUDA_VISIBLE_DEVICES.
+        Get list of available GPUs from CUDA_VISIBLE_DEVICES or OPENCL_VISIBLE_DEVICES.
 
         Returns
         --------
@@ -216,17 +216,26 @@ class Runner:
         """
         import os as _os
 
-        if _os.environ.get("CUDA_VISIBLE_DEVICES") is None:
-            raise ValueError("CUDA_VISIBLE_DEVICES not set")
+        if is_cuda:
+            if _os.environ.get("CUDA_VISIBLE_DEVICES") is None:
+                raise ValueError("CUDA_VISIBLE_DEVICES not set")
+            else:
+                available_devices = _os.environ.get("CUDA_VISIBLE_DEVICES").split(",")
+                print("CUDA_VISIBLE_DEVICES set to", available_devices)
         else:
-            available_devices = _os.environ.get("CUDA_VISIBLE_DEVICES").split(",")
-            print("CUDA_VISIBLE_DEVICES set to", available_devices)
-            num_gpus = len(available_devices)
-            print("Number of GPUs available:", num_gpus)
-            return available_devices
+            if _os.environ.get("OPENCL_VISIBLE_DEVICES") is None:
+                raise ValueError("OPENCL_VISIBLE_DEVICES not set")
+            else:
+                available_devices = _os.environ.get("OPENCL_VISIBLE_DEVICES").split(",")
+                print("OPENCL_VISIBLE_DEVICES set to", available_devices)
+
+        num_gpus = len(available_devices)
+        print("Number of GPUs available:", num_gpus)
+
+        return available_devices
 
     @staticmethod
-    def zero_cuda_devices(devices):
+    def zero_gpu_devices(devices):
         """
         Set all device numbers relative to the lowest
         (the device number becomes equal to its index in the list).

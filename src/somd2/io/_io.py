@@ -145,7 +145,7 @@ def parquet_append(filepath: _Path or str, df: _pd.DataFrame) -> None:
         _shutil.move(temp_file, filepath)
 
     except Exception as e:
-        raise(f"Error occurred append to Parquet file: {e}")
+        raise (f"Error occurred append to Parquet file: {e}")
 
 
 @staticmethod
