@@ -40,11 +40,11 @@ class Config:
     # the Sire options module to get the valid choices. This allows us to be
     # forwards compatible with new options.
     _choices = {
-        "constraint": [x.value for x in _sr.options.Constraint],
-        "perturbable_constraint": [x.value for x in _sr.options.PerturbableConstraint],
-        "integrator": [x.value for x in _sr.options.Integrator],
-        "cutoff_type": [x.value for x in _sr.options.Cutoff],
-        "platform": [x.value for x in _sr.options.Platform],
+        "constraint": _sr.options.Constraint.options(),
+        "perturbable_constraint": _sr.options.PerturbableConstraint.options(),
+        "integrator": _sr.options.Integrator.options(),
+        "cutoff_type": _sr.options.Cutoff.options(),
+        "platform": _sr.options.Platform.options(),
         "lambda_schedule": [
             "standard_morph",
             "charge_scaled_morph",
