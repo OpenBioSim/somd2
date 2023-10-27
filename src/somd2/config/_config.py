@@ -84,7 +84,7 @@ class Config:
         coulomb_power=0.0,
         shift_delta="2A",
         constraint="h-bonds",
-        perturbable_constraint="none",
+        perturbable_constraint=None,
         minimise=True,
         equilibration_time="0ps",
         equilibration_timestep="1fs",
@@ -95,8 +95,8 @@ class Config:
         checkpoint=True,
         checkpoint_frequency="100ps",
         platform="auto",
-        max_threads="none",
-        max_gpus="none",
+        max_threads=None,
+        max_gpus=None,
         run_parallel=True,
         output_directory="output",
         write_config=True,
@@ -910,11 +910,14 @@ class Config:
             # Convert underscores to hyphens for the command line.
             cli_param = param.replace("_", "-")
 
+            # Get the type of the parameter. If None, then use str.
+            typ = str if params[param].default is None else type(params[param].default)
+
             # This parameter has choices.
             if param in cls._choices:
                 parser.add_argument(
                     f"--{cli_param}",
-                    type=type(params[param].default),
+                    type=typ,
                     default=params[param].default,
                     choices=cls._choices[param],
                     help=help[param],
@@ -924,7 +927,7 @@ class Config:
             else:
                 parser.add_argument(
                     f"--{cli_param}",
-                    type=type(params[param].default),
+                    type=typ,
                     default=params[param].default,
                     help=help[param],
                     required=False,
