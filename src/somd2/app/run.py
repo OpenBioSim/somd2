@@ -35,8 +35,12 @@ def cli():
     SOMD2: Command-line interface.
     """
 
+    from argparse import Namespace
+
     from somd2.config import Config
     from somd2.runner import Runner
+
+    from somd2.io import yaml_to_dict
 
     # Generate the parser.
     parser = Config._create_parser()
@@ -51,13 +55,23 @@ def cli():
     # Parse the arguments into a dictionary.
     args = vars(parser.parse_args())
 
-    # Pop the YAML config and system from the arguments dictionary. The YAML
-    # config isn't required since, when specified, it is only used to set
-    # configuration options that are not set by the command line. The "system"
-    # is a path to a Sire/BioSimSpace stream file containing a perturbable
-    # system and is passed separately to the Runner constructor.
-    args.pop("config")
+    # Pop the YAML config and system from the arguments dictionary.
+    config = args.pop("config")
     system = args.pop("system")
+
+    # If set, read the YAML config file.
+    if config is not None:
+        # Convert the YAML config to a dictionary.
+        config = yaml_to_dict(config)
+
+        # Reparse the command-line arguments using the existing config
+        # as a Namespace. Any non-default arguments from the command-line
+        # will override those in the config.
+        args = vars(parser.parse_args(namespace=Namespace(**config)))
+
+        # Re-pop the YAML config and system from the arguments dictionary.
+        args.pop("config")
+        args.pop("system")
 
     # Instantiate a Config object to validate the arguments.
     config = Config(**args)

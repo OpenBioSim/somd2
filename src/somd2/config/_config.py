@@ -272,19 +272,10 @@ class Config:
         path: str
             Path to YAML file.
         """
-        import os as _os
-        import yaml as _yaml
 
-        if not isinstance(path, str):
-            raise TypeError("'path' must be of type 'str'")
-        if not _os.path.exists(path):
-            raise ValueError(f"File does not exist: {path}")
+        from ..io import yaml_to_dict as _yaml_to_dict
 
-        try:
-            with open(path, "r") as f:
-                d = _yaml.safe_load(f)
-        except Exception as e:
-            raise ValueError(f"Could not load YAML file: {e}")
+        d = _yaml_to_dict(path)
 
         return Config(**d)
 
@@ -915,7 +906,7 @@ class Config:
         Internal method to create a argparse parser for the config object.
         """
 
-        import configargparse
+        import argparse
         import inspect
 
         # Inspect this object to get the default parameters and docstrings.
@@ -953,19 +944,17 @@ class Config:
             help[param] = string
 
         # Initialise the parser.
-        parser = configargparse.ArgParser(
+        parser = argparse.ArgumentParser(
             description="SOMD2: GPU accelerated alchemical free-energy engine.",
-            formatter_class=configargparse.ArgumentDefaultsHelpFormatter,
-            config_file_parser_class=configargparse.YAMLConfigFileParser,
-            add_config_file_help=True,
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         )
 
         # Add a YAML config file option.
-        parser.add(
+        parser.add_argument(
             "--config",
+            type=str,
             required=False,
-            is_config_file=True,
-            help="YAML config file path",
+            help="YAML config file path. Other command-line options will override the config file.",
         )
 
         # Add the parameters.
@@ -988,12 +977,21 @@ class Config:
                 )
             # This is a standard parameter.
             else:
-                parser.add_argument(
-                    f"--{cli_param}",
-                    type=typ,
-                    default=params[param].default,
-                    help=help[param],
-                    required=False,
-                )
+                if typ == bool:
+                    parser.add_argument(
+                        f"--{cli_param}",
+                        action=argparse.BooleanOptionalAction,
+                        default=params[param].default,
+                        help=help[param],
+                        required=False,
+                    )
+                else:
+                    parser.add_argument(
+                        f"--{cli_param}",
+                        type=typ,
+                        default=params[param].default,
+                        help=help[param],
+                        required=False,
+                    )
 
         return parser

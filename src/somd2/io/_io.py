@@ -22,17 +22,19 @@
 __all__ = [
     "dataframe_to_parquet",
     "dict_to_yaml",
+    "yaml_to_dict",
     "parquet_append",
     "parquet_to_dataframe",
 ]
 
 from pathlib import Path as _Path
 
-import json
-import pyarrow
+import json as _json
+import os as _os
 import pyarrow as _pa
 import pyarrow.parquet as _pq
 import pandas as _pd
+import yaml as _yaml
 
 
 def dataframe_to_parquet(df, metadata, filepath=None, filename=None):
@@ -61,7 +63,7 @@ def dataframe_to_parquet(df, metadata, filepath=None, filename=None):
         filepath = _Path(filepath)
     custom_meta_key = "somd2"
     table = _pa.Table.from_pandas(df)
-    custom_meta_json = json.dumps(metadata)
+    custom_meta_json = _json.dumps(metadata)
     existing_meta = table.schema.metadata
     combined_meta = {
         custom_meta_key.encode(): custom_meta_json.encode(),
@@ -79,16 +81,17 @@ def dataframe_to_parquet(df, metadata, filepath=None, filename=None):
     return filepath / filename
 
 
-def dict_to_yaml(data_dict, file_path, filename="config.yaml"):
+def dict_to_yaml(data_dict, path, filename="config.yaml"):
     """
     Write a dictionary to a YAML file.
 
-    Parameter:
+    Parameters
     ----------
+
     data_dict: dict
         The dictionary to be written to a YAML file.
 
-    file_path: str or pathlib.PosixPath
+    path: str or pathlib.PosixPath
         The path to the YAML file to be written.
 
     filename: str
@@ -97,17 +100,43 @@ def dict_to_yaml(data_dict, file_path, filename="config.yaml"):
     import yaml as _yaml
 
     try:
-        file_path = _Path(file_path) / filename
+        path = _Path(path) / filename
         # Ensure the parent directory for the file exists
-        file_path.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
         # Open the file in write mode and write the dictionary as YAML
-        with file_path.open("w") as yaml_file:
+        with path.open("w") as yaml_file:
             _yaml.dump(
                 data_dict,
                 yaml_file,
             )
     except Exception as e:
-        print(f"Error writing the dictionary to {file_path}: {e}")
+        print(f"Error writing the dictionary to {path}: {e}")
+
+
+def yaml_to_dict(path):
+    """
+    Read a YAML file and return the contents as a dictionary.
+
+    Parameters
+    ----------
+
+    path: str
+        The path to the YAML file to be read.
+    """
+
+    if not isinstance(path, str):
+        raise TypeError("'path' must be of type 'str'")
+
+    if not _os.path.isfile(path):
+        raise FileNotFoundError(f"File not found: {path}")
+
+    try:
+        with open(path, "r") as f:
+            d = _yaml.safe_load(f)
+    except Exception as e:
+        raise ValueError(f"Could not load YAML file: {e}")
+
+    return d
 
 
 def parquet_append(filepath: _Path or str, df: _pd.DataFrame) -> None:
@@ -171,9 +200,6 @@ def parquet_to_dataframe(filepath, meta_key="somd2"):
 
     restored_meta : dict
         Dictionary containing the metadata for the simulation"""
-
-    import pyarrow.parquet as _pq
-    import json as _json
 
     try:
         restored_table = _pq.read_table(filepath)
