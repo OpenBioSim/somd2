@@ -31,9 +31,7 @@ from ..io import parquet_append as _parquet_append
 class Dynamics:
     """
     Class for controlling the running and bookkeeping of a single lambda value
-    simulation.Currently just a wrapper around sire dynamics
-
-    Simulation options are held within a Config object
+    simulation.Currently just a wrapper around Sire dynamics.
     """
 
     def __init__(
