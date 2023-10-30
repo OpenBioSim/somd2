@@ -32,7 +32,7 @@ Usage:
 
 def cli():
     """
-    SOMD2: Command-line interface.
+    SOMD2: Command line interface.
     """
 
     from argparse import Namespace
@@ -65,7 +65,7 @@ def cli():
         config = yaml_to_dict(config)
 
         # Reparse the command-line arguments using the existing config
-        # as a Namespace. Any non-default arguments from the command-line
+        # as a Namespace. Any non-default arguments from the command line
         # will override those in the config.
         args = vars(parser.parse_args(namespace=Namespace(**config)))
 

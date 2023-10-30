@@ -7,7 +7,6 @@ from somd2.runner import Runner
 
 def test_dynamics_options():
     """Validate that dynamics options are set correctly."""
-
     with tempfile.TemporaryDirectory() as tmpdir:
         # Load the demo stream file.
         mols = sr.load(sr.expand(sr.tutorial_url, "merged_molecule.s3"))
