@@ -25,10 +25,24 @@ Configuration class for SOMD2 runner.
 
 __all__ = ["Config"]
 
+from openmm import Platform as _Platform
 from pathlib import Path as _Path
 from loguru import logger as _logger
 
 import sire as _sr
+
+
+# List of supported Sire platforms.
+_sire_platforms = _sr.options.Platform.options()
+
+# List of registered OpenMM platforms.
+_omm_platforms = [
+    _Platform.getPlatform(x).getName().lower()
+    for x in range(0, _Platform.getNumPlatforms())
+]
+
+# List of available and supported platforms.
+_platforms = ["auto"] + [x for x in _sire_platforms if x in _omm_platforms]
 
 
 class Config:
@@ -44,7 +58,7 @@ class Config:
         "perturbable_constraint": _sr.options.PerturbableConstraint.options(),
         "integrator": _sr.options.Integrator.options(),
         "cutoff_type": _sr.options.Cutoff.options(),
-        "platform": _sr.options.Platform.options(),
+        "platform": _platforms,
         "lambda_schedule": [
             "standard_morph",
             "charge_scaled_morph",
@@ -770,20 +784,38 @@ class Config:
             raise ValueError(
                 "OpenCL platform requested but OPENCL_VISIBLE_DEVICES not set"
             )
+        elif platform == "hip" and _os.environ.get("HIP_VISIBLE_DEVICES") is None:
+            raise ValueError("HIP platform requested but HIP_VISIBLE_DEVICES not set")
         else:
-            if platform in ["cuda", "auto"] and "CUDA_VISIBLE_DEVICES" in _os.environ:
+            # Set platform in order of priority.
+
+            # CUDA.
+            if "cuda" in self._choices["platform"] and platform in ["cuda", "auto"]:
                 self._platform = "cuda"
-            elif (
-                platform in ["opencl", "auto"]
-                and "OPENCL_VISIBLE_DEVICES" in _os.environ
-            ):
-                self._platform = "cuda"
-            elif platform in ["auto", "metal"]:
-                if _sys.platform == "darwin":
-                    self._platform = "metal"
-                else:
-                    if platform == "metal":
-                        raise ValueError("Metal platform is only available on macOS")
+
+            # OpenCL.
+            elif "opencl" in self._choices["platform"] and platform in [
+                "opencl",
+                "auto",
+            ]:
+                self._platform = "opencl"
+
+            # HIP.
+            elif "hip" in self._choices["platform"] and platform in ["hip", "auto"]:
+                self._platform = "hip"
+
+            # Metal.
+            elif "metal" in self._choices["platform"] and platform in ["auto", "metal"]:
+                self._platform = "metal"
+
+            # Reference.
+            elif "reference" in self._choices["platform"] and platform in [
+                "auto",
+                "reference",
+            ]:
+                self._platform = "reference"
+
+            # CPU. (Fallback.)
             else:
                 self._platform = "cpu"
 

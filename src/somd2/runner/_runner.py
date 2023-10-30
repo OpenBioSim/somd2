@@ -119,6 +119,9 @@ class Runner:
         if self._config.write_config:
             _dict_to_yaml(self._config.as_dict(), self._config.output_directory)
 
+        # Flag whether this is a GPU simulation.
+        self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]
+
     def __str__(self):
         """Return a string representation of the object."""
         return f"Runner(system={self._system}, config={self._config})"
@@ -132,15 +135,17 @@ class Runner:
         Creates shared list that holds currently available GPUs.
         Also intialises the list with all available GPUs.
         """
-        if self._config.platform == "cuda":
+        if self._is_gpu:
             if self._config.max_gpus is None:
                 self._gpu_pool = self._manager.list(
-                    self.zero_gpu_devices(self.get_gpu_devices())
+                    self.zero_gpu_devices(self.get_gpu_devices(self._config.platform))
                 )
             else:
                 self._gpu_pool = self._manager.list(
                     self.zero_gpu_devices(
-                        self.get_gpu_devices()[: self._config.max_gpus]
+                        self.get_gpu_devices(self._config.platform)[
+                            : self._config.max_gpus
+                        ]
                     )
                 )
 
@@ -204,9 +209,16 @@ class Runner:
         self._config.lambda_schedule = schedule
 
     @staticmethod
-    def get_gpu_devices(is_cuda=True):
+    def get_gpu_devices(plafform):
         """
-        Get list of available GPUs from CUDA_VISIBLE_DEVICES or OPENCL_VISIBLE_DEVICES.
+        Get list of available GPUs from CUDA_VISIBLE_DEVICES,
+        OPENCL_VISIBLE_DEVICES, or HIP_VISIBLE_DEVICES.
+
+        Parameters
+        ----------
+
+        platform: str
+            The GPU platform to be used for simulations.
 
         Returns
         --------
@@ -214,20 +226,35 @@ class Runner:
         available_devices : [int]
             List of available device numbers.
         """
+
+        if not isinstance(plafform, str):
+            raise TypeError("'platform' must be of type 'str'")
+
+        platform = plafform.lower().replace(" ", "")
+
+        if platform not in ["cuda", "opencl", "hip"]:
+            raise ValueError("'platform' must be one of 'cuda', 'opencl', or 'hip'.")
+
         import os as _os
 
-        if is_cuda:
+        if platform == "cuda":
             if _os.environ.get("CUDA_VISIBLE_DEVICES") is None:
                 raise ValueError("CUDA_VISIBLE_DEVICES not set")
             else:
                 available_devices = _os.environ.get("CUDA_VISIBLE_DEVICES").split(",")
                 print("CUDA_VISIBLE_DEVICES set to", available_devices)
-        else:
+        elif platform == "opencl":
             if _os.environ.get("OPENCL_VISIBLE_DEVICES") is None:
                 raise ValueError("OPENCL_VISIBLE_DEVICES not set")
             else:
                 available_devices = _os.environ.get("OPENCL_VISIBLE_DEVICES").split(",")
                 print("OPENCL_VISIBLE_DEVICES set to", available_devices)
+        elif platform == "hip":
+            if _os.environ.get("HIP_VISIBLE_DEVICES") is None:
+                raise ValueError("HIP_VISIBLE_DEVICES not set")
+            else:
+                available_devices = _os.environ.get("HIP_VISIBLE_DEVICES").split(",")
+                print("HIP_VISIBLE_DEVICES set to", available_devices)
 
         num_gpus = len(available_devices)
         print("Number of GPUs available:", num_gpus)
@@ -311,22 +338,37 @@ class Runner:
         """
         results = []
         if self._config.run_parallel and (self._config.num_lambda is not None):
+            # Create shared resources.
             self._create_shared_resources()
-            import concurrent.futures as _futures
 
-            # figure out max workers and number of CPUs depending on platform and number of lambda windows
+            # Work out the number of workers and the resources for each.
+
+            # CPU platform.
             if self._config.platform == "cpu":
-                # Finding number of CPUs per worker is done here rather than in config due to platform dependency
+                # If the number of lambda windows is greater than the number of threads, then
+                # the number of threads per worker is set to 1.
                 if self._config.num_lambda > self._config.max_threads:
                     self.max_workers = self._config.max_threads
-                    cpu_per_worker = 1
+                    threads_per_worker = 1
+                # Otherwise, divide the number of threads equally between workers.
                 else:
                     self.max_workers = self._config.num_lambda
-                    cpu_per_worker = self._config.max_threads // self._config.num_lambda
-                self._config.extra_args = {"threads": cpu_per_worker}
-            else:
+                    threads_per_worker = (
+                        self._config.max_threads // self._config.num_lambda
+                    )
+                self._config.extra_args = {"threads": threads_per_worker}
+
+            # (Multi-)GPU platform.
+            elif self._is_gpu:
                 self.max_workers = len(self._gpu_pool)
                 self._config.extra_args = {}
+
+            # All other platforms.
+            else:
+                self._max_workers = 1
+                self._config.extra_args = {}
+
+            import concurrent.futures as _futures
 
             with _futures.ProcessPoolExecutor(max_workers=self.max_workers) as executor:
                 for lambda_value in self._lambda_values:
@@ -342,11 +384,12 @@ class Runner:
                             pass
                         else:
                             results.append(result)
-                # Kill all current and future jobs if keyboard interrupt
+                # Kill all current and future jobs if keyboard interrupt.
                 except KeyboardInterrupt:
                     for pid in executor._processes:
                         executor._processes[pid].terminate()
 
+        # Serial configuration.
         elif self._config.num_lambda is not None:
             if self._config.platform == "cpu":
                 self._config.extra_args = {"threads": self._config.max_threads}
@@ -398,7 +441,8 @@ class Runner:
                     return df, lambda_grad, speed
                 except Exception as e:
                     _logger.warning(
-                        f"Minimisation/dynamics at Lambda = {lambda_value} failed with the following exception {e}, trying again with minimsation at Lambda = 0."
+                        f"Minimisation/dynamics at lambda = {lambda_value} failed with the "
+                        f"following exception {e}, trying again with minimsation at lambda = 0."
                     )
                     try:
                         df = sim._run(lambda_minimisation=0.0)
@@ -407,7 +451,8 @@ class Runner:
                         return df, lambda_grad, speed
                     except Exception as e:
                         _logger.error(
-                            f"Minimisation/dynamics at Lambda = {lambda_value} failed, even after minimisation at Lambda = 0. The following warning was raised: {e}."
+                            f"Minimisation/dynamics at lambda = {lambda_value} failed, even after "
+                            f"minimisation at lambda = 0. The following warning was raised: {e}."
                         )
                         raise
             else:
@@ -418,20 +463,14 @@ class Runner:
                     return df, lambda_grad, speed
                 except Exception as e:
                     _logger.error(
-                        f"Dynamics at Lambda = {lambda_value} failed. The following warning was raised: {e}. This may be due to a lack of minimisation."
+                        f"Dynamics at lambda = {lambda_value} failed. The following warning was "
+                        f"raised: {e}. This may be due to a lack of minimisation."
                     )
 
         system = self._system.clone()
 
-        if self._config.platform == "cpu":
-            self._initialise_simulation(system, lambda_value)
-            try:
-                df, lambda_grad, speed = _run(self._sim)
-            except:
-                raise
-            self._sim._cleanup()
-
-        elif self._config.platform == "cuda":
+        # GPU platform.
+        if self._is_gpu:
             if self._config.run_parallel:
                 with self._lock:
                     gpu_num = self._gpu_pool[0]
@@ -453,6 +492,15 @@ class Runner:
                 if self._config.run_parallel:
                     with self._lock:
                         self._update_gpu_pool(gpu_num)
+            self._sim._cleanup()
+
+        # All other platforms.
+        else:
+            self._initialise_simulation(system, lambda_value)
+            try:
+                df, lambda_grad, speed = _run(self._sim)
+            except:
+                raise
             self._sim._cleanup()
 
         _ = _dataframe_to_parquet(

@@ -83,13 +83,10 @@ class Dynamics:
             raise KeyError("No perturbable molecules in the system")
 
         self._system = system
-        try:
-            self._system.molecules("property is_perturbable")
-        except KeyError:
-            raise KeyError("No perturbable molecules in the system")
 
         if not isinstance(config, _Config):
             raise TypeError("config must be a Config object")
+
         self._config = config
         self._lambda_val = lambda_val
         self._lambda_array = lambda_array
@@ -149,8 +146,8 @@ class Dynamics:
         ----------
 
         lambda_min : float
-            Lambda value at which to run minimisation,
-            if None run at pre-set lambda_val
+            Lambda value at which to run minimisation, if None run at pre-set
+            lambda_val.
         """
         if lambda_min is None:
             try:
@@ -274,7 +271,7 @@ class Dynamics:
                     _stream.save(self._system, str(sire_checkpoint_name))
                     df = self._system.energy_trajectory(to_alchemlyb=True)
                     if _ == 0:
-                        # Not inlcuding speed in checkpoints for now
+                        # Not including speed in checkpoints for now.
 
                         f = _dataframe_to_parquet(
                             df,
@@ -294,7 +291,7 @@ class Dynamics:
                         )
                 except:
                     raise
-            # No need to checkpoint here as it is the final block
+            # No need to checkpoint here as it is the final block.
             if rem > 0:
                 try:
                     self._dyn.run(
