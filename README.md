@@ -45,8 +45,10 @@ You can then run a simulation with:
 somd2 perturtbable_system.bss
 ```
 
-(The help message provides information on all of the supported options, along
-with their default values.)
+The help message provides information on all of the supported options, along
+with their default values. Options can be specified on the command line, or
+using a YAML configuration file, passed with the `--config` option. Any options
+explicity set on the command line with override those set via the config file.
 
 ## Analysis
 
