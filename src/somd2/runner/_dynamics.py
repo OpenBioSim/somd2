@@ -235,7 +235,7 @@ class Dynamics:
         else:
             lam_arr = self._lambda_array + self._lambda_grad
 
-        if self._config.checkpoint:
+        if self._config.checkpoint_frequency.value() > 0.0:
             ### Calc number of blocks and remainder (surely there's a better way?)###
             num_blocks = 0
             rem = self._config.runtime

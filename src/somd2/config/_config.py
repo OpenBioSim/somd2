@@ -89,7 +89,6 @@ class Config:
         save_trajectories=True,
         frame_frequency="20ps",
         save_velocities=False,
-        checkpoint=True,
         checkpoint_frequency="100ps",
         platform="auto",
         max_threads=None,
@@ -172,11 +171,9 @@ class Config:
         save_velocities: bool
             Whether to save velocities in trajectory frames.
 
-        checkpoint: bool
-            Whether to checkpoint.
-
         checkpoint_frequency: str
             Frequency at which to save checkpoint files, should be larger than min(energy_frequency, frame_frequency).
+            If zero, then no checkpointing will be performed.
 
         platform: str
             Platform to run simulation on.
@@ -221,7 +218,6 @@ class Config:
         self.save_trajectories = save_trajectories
         self.frame_frequency = frame_frequency
         self.save_velocities = save_velocities
-        self.checkpoint = checkpoint
         self.checkpoint_frequency = checkpoint_frequency
         self.platform = platform
         self.max_threads = max_threads
@@ -716,16 +712,6 @@ class Config:
         if not isinstance(save_velocities, bool):
             raise ValueError("'save_velocities' must be of type 'bool'")
         self._save_velocities = save_velocities
-
-    @property
-    def checkpoint(self):
-        return self._checkpoint
-
-    @checkpoint.setter
-    def checkpoint(self, checkpoint):
-        if not isinstance(checkpoint, bool):
-            raise ValueError("'checkpoint' must be of type 'bool'")
-        self._checkpoint = checkpoint
 
     @property
     def checkpoint_frequency(self):
