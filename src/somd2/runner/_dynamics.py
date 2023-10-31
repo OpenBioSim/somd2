@@ -251,7 +251,7 @@ class Dynamics:
             )
             sire_checkpoint_name = (
                 _Path(self._config.output_directory)
-                / f"checkpoint_{self._lambda_val}.s3"
+                / f"checkpoint_{self._lambda_array.index(self._lambda_val)}.s3"
             )
             # Run num_blocks dynamics and then run a final block if rem > 0
             for _ in range(int(num_blocks)):
@@ -283,7 +283,9 @@ class Dynamics:
                                 "temperature": str(self._config.temperature.value()),
                             },
                             filepath=self._config.output_directory,
+                            filename=f"energy_traj_{self._lambda_array.index(self._lambda_val)}.parquet",
                         )
+                        print(f)
                     else:
                         _parquet_append(
                             f,
@@ -320,10 +322,15 @@ class Dynamics:
             self._system = self._dyn.commit()
 
         if self._config.save_trajectories:
-            traj_filename = self._config.output_directory / f"traj_{self._lambda_val}"
+            traj_filename = (
+                self._config.output_directory
+                / f"traj_{self._lambda_array.index(self._lambda_val)}.dcd"
+            )
             from sire import save as _save
 
             _save(self._system.trajectory(), traj_filename, format=["DCD"])
+            # dump final system to checkpoint file
+            _stream.save(self._system, str(sire_checkpoint_name))
         df = self._system.energy_trajectory(to_alchemlyb=True)
         return df
 

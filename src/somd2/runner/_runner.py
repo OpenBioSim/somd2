@@ -247,22 +247,22 @@ class Runner:
                 raise ValueError("CUDA_VISIBLE_DEVICES not set")
             else:
                 available_devices = _os.environ.get("CUDA_VISIBLE_DEVICES").split(",")
-                _logger.info("CUDA_VISIBLE_DEVICES set to", available_devices)
+                _logger.info(f"CUDA_VISIBLE_DEVICES set to {available_devices}")
         elif platform == "opencl":
             if _os.environ.get("OPENCL_VISIBLE_DEVICES") is None:
                 raise ValueError("OPENCL_VISIBLE_DEVICES not set")
             else:
                 available_devices = _os.environ.get("OPENCL_VISIBLE_DEVICES").split(",")
-                _logger.info("OPENCL_VISIBLE_DEVICES set to", available_devices)
+                _logger.info(f"OPENCL_VISIBLE_DEVICES set to {available_devices}")
         elif platform == "hip":
             if _os.environ.get("HIP_VISIBLE_DEVICES") is None:
                 raise ValueError("HIP_VISIBLE_DEVICES not set")
             else:
                 available_devices = _os.environ.get("HIP_VISIBLE_DEVICES").split(",")
-                _logger.info("HIP_VISIBLE_DEVICES set to", available_devices)
+                _logger.info(f"HIP_VISIBLE_DEVICES set to {available_devices}")
 
         num_gpus = len(available_devices)
-        _logger.info("Number of GPUs available:", num_gpus)
+        _logger.info(f"Number of GPUs available: {num_gpus}")
 
         return available_devices
 
@@ -519,6 +519,7 @@ class Runner:
                 "temperature": str(self._config.temperature.value()),
             },
             filepath=self._config.output_directory,
+            filename=f"energy_traj_{self._lambda_values.index(lambda_value)}.parquet",
         )
         del system
         _logger.success("Lambda = {} complete".format(lambda_value))
