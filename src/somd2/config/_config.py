@@ -63,6 +63,7 @@ class Config:
             "standard_morph",
             "charge_scaled_morph",
         ],
+        "log_level": [level.lower() for level in _logger._core.levels],
     }
 
     def __init__(
@@ -96,6 +97,7 @@ class Config:
         run_parallel=True,
         output_directory="output",
         write_config=True,
+        log_level="info",
     ):
         """
         Constructor.
@@ -225,6 +227,7 @@ class Config:
         self.run_parallel = run_parallel
         self.output_directory = output_directory
         self.write_config = write_config
+        self.log_level = log_level
 
     def __str__(self):
         """Return a string representation of this object."""
@@ -885,6 +888,21 @@ class Config:
         if not isinstance(write_config, bool):
             raise ValueError("'write_config' must be of type 'bool'")
         self._write_config = write_config
+
+    @property
+    def log_level(self):
+        return self._log_level
+
+    @log_level.setter
+    def log_level(self, log_level):
+        if not isinstance(log_level, str):
+            raise TypeError("'log_level' must be of type 'str'")
+        log_level = log_level.lower().replace(" ", "")
+        if log_level not in self._choices["log_level"]:
+            raise ValueError(
+                f"Log level not recognised. Valid log levels are: {', '.join(self._choices['log_level'])}"
+            )
+        self._log_level = log_level
 
     @classmethod
     def _create_parser(cls):

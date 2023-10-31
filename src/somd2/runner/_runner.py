@@ -28,6 +28,9 @@ from ..config import Config as _Config
 from ..io import dataframe_to_parquet as _dataframe_to_parquet
 from ..io import dict_to_yaml as _dict_to_yaml
 
+# Can't create a self.log variable in this class as it causes errors when passed to a processpool
+from ..log import loguru_setup as _loguru_setup
+
 
 class Runner:
     """
@@ -39,6 +42,7 @@ class Runner:
 
     _manager = Manager()
     _lock = _manager.Lock()
+    _queue = _manager.Queue()
 
     def __init__(self, system, config):
         """
@@ -209,7 +213,7 @@ class Runner:
         self._config.lambda_schedule = schedule
 
     @staticmethod
-    def get_gpu_devices(plafform):
+    def get_gpu_devices(platform, _log_level="INFO"):
         """
         Get list of available GPUs from CUDA_VISIBLE_DEVICES,
         OPENCL_VISIBLE_DEVICES, or HIP_VISIBLE_DEVICES.
@@ -226,11 +230,12 @@ class Runner:
         available_devices : [int]
             List of available device numbers.
         """
+        _logger = _loguru_setup(level=_log_level)
 
-        if not isinstance(plafform, str):
+        if not isinstance(platform, str):
             raise TypeError("'platform' must be of type 'str'")
 
-        platform = plafform.lower().replace(" ", "")
+        platform = platform.lower().replace(" ", "")
 
         if platform not in ["cuda", "opencl", "hip"]:
             raise ValueError("'platform' must be one of 'cuda', 'opencl', or 'hip'.")
@@ -242,22 +247,22 @@ class Runner:
                 raise ValueError("CUDA_VISIBLE_DEVICES not set")
             else:
                 available_devices = _os.environ.get("CUDA_VISIBLE_DEVICES").split(",")
-                print("CUDA_VISIBLE_DEVICES set to", available_devices)
+                _logger.info("CUDA_VISIBLE_DEVICES set to", available_devices)
         elif platform == "opencl":
             if _os.environ.get("OPENCL_VISIBLE_DEVICES") is None:
                 raise ValueError("OPENCL_VISIBLE_DEVICES not set")
             else:
                 available_devices = _os.environ.get("OPENCL_VISIBLE_DEVICES").split(",")
-                print("OPENCL_VISIBLE_DEVICES set to", available_devices)
+                _logger.info("OPENCL_VISIBLE_DEVICES set to", available_devices)
         elif platform == "hip":
             if _os.environ.get("HIP_VISIBLE_DEVICES") is None:
                 raise ValueError("HIP_VISIBLE_DEVICES not set")
             else:
                 available_devices = _os.environ.get("HIP_VISIBLE_DEVICES").split(",")
-                print("HIP_VISIBLE_DEVICES set to", available_devices)
+                _logger.info("HIP_VISIBLE_DEVICES set to", available_devices)
 
         num_gpus = len(available_devices)
-        print("Number of GPUs available:", num_gpus)
+        _logger.info("Number of GPUs available:", num_gpus)
 
         return available_devices
 
@@ -305,8 +310,8 @@ class Runner:
             The GPU device number to be used for the simulation.
         """
         from ._dynamics import Dynamics
-        from loguru import logger as _logger
 
+        _logger = _loguru_setup(level=self._config.log_level)
         try:
             self._sim = Dynamics(
                 system,
@@ -336,6 +341,7 @@ class Runner:
         results : [str]
             List of simulation results.
         """
+        # self._logger = _loguru_setup(level=self._config.log_level)
         results = []
         if self._config.run_parallel and (self._config.num_lambda is not None):
             # Create shared resources.
@@ -427,8 +433,7 @@ class Runner:
         result: str
             The result of the simulation.
         """
-        from loguru import logger as _logger
-
+        _logger = _loguru_setup(level=self._config.log_level)
         _logger.info(f"Running lambda = {lambda_value}")
 
         def _run(sim):

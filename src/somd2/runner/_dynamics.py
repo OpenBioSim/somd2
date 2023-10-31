@@ -26,6 +26,7 @@ from pathlib import Path as _Path
 from ..config import Config as _Config
 from ..io import dataframe_to_parquet as _dataframe_to_parquet
 from ..io import parquet_append as _parquet_append
+from ..log import loguru_setup as _loguru_setup
 
 
 class Dynamics:
@@ -91,6 +92,7 @@ class Dynamics:
         self._increment = increment
         self._device = device
         self._has_space = has_space
+        self._logger = _loguru_setup(level=self._config.log_level)
 
     def _setup_dynamics(self, equilibration=False):
         """
