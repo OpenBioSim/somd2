@@ -329,8 +329,8 @@ class Dynamics:
             from sire import save as _save
 
             _save(self._system.trajectory(), traj_filename, format=["DCD"])
-            # dump final system to checkpoint file
-            _stream.save(self._system, str(sire_checkpoint_name))
+        # dump final system to checkpoint file
+        _stream.save(self._system, str(sire_checkpoint_name))
         df = self._system.energy_trajectory(to_alchemlyb=True)
         return df
 
