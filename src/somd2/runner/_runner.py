@@ -126,6 +126,18 @@ class Runner:
         # Flag whether this is a GPU simulation.
         self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]
 
+        # Setup proper logging level
+        import sys
+
+        _logger.remove()
+        _logger.add(sys.stderr, level=self._config.log_level.upper(), enqueue=True)
+        if self._config.log_file is not None:
+            _logger.add(
+                self._config.output_directory / self._config.log_file,
+                level=self._config.log_level.upper(),
+                enqueue=True,
+            )
+
     def __str__(self):
         """Return a string representation of the object."""
         return f"Runner(system={self._system}, config={self._config})"

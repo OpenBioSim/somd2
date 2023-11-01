@@ -206,6 +206,8 @@ class Dynamics:
         from sire import u as _u
         from sire import stream as _stream
 
+        _logger.debug("LOG TEST")
+
         def generate_lam_vals(lambda_base, increment):
             """Generate lambda values for a given lambda_base and increment"""
             if lambda_base + increment > 1.0 and lambda_base - increment < 0.0:

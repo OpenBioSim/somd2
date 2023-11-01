@@ -98,6 +98,7 @@ class Config:
         output_directory="output",
         write_config=True,
         log_level="info",
+        log_file=None,
     ):
         """
         Constructor.
@@ -196,6 +197,12 @@ class Config:
 
         write_config: bool
             Whether to write the configuration options to a YAML file in the output directory.
+
+        log_level: str
+            Log level to use.
+
+        log_file: str
+            Name of log file, will be saved in output directory.
         """
 
         self.runtime = runtime
@@ -228,6 +235,7 @@ class Config:
         self.output_directory = output_directory
         self.write_config = write_config
         self.log_level = log_level
+        self.log_file = log_file
 
     def __str__(self):
         """Return a string representation of this object."""
@@ -903,6 +911,16 @@ class Config:
                 f"Log level not recognised. Valid log levels are: {', '.join(self._choices['log_level'])}"
             )
         self._log_level = log_level
+
+    @property
+    def log_file(self):
+        return self._log_file
+
+    @log_file.setter
+    def log_file(self, log_file):
+        if log_file is not None and not isinstance(log_file, str):
+            raise TypeError("'log_file' must be of type 'str'")
+        self._log_file = log_file
 
     @classmethod
     def _create_parser(cls):
