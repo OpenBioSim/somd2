@@ -29,7 +29,7 @@ from ..io import dataframe_to_parquet as _dataframe_to_parquet
 from ..io import dict_to_yaml as _dict_to_yaml
 
 # Can't create a self.log variable in this class as it causes errors when passed to a processpool
-from ..log import loguru_setup as _loguru_setup
+from somd2 import _logger
 
 
 class Runner:
@@ -165,6 +165,22 @@ class Runner:
         else:
             self._has_space = False
 
+    def _check_directory(self):
+        """
+        Check if the output directory has files already present.
+        Paired with the 'overwrite' option.
+        """
+        import os as _os
+        import glob as _glob
+
+        if self._config.overwrite:
+            return True
+        else:
+            if _glob.glob(_os.path.join(self._config.output_directory, "*.parquet")):
+                return False
+            else:
+                return True
+
     def get_options(self):
         """
         Returns a dictionary of simulation options.
@@ -230,7 +246,6 @@ class Runner:
         available_devices : [int]
             List of available device numbers.
         """
-        _logger = _loguru_setup(level=_log_level)
 
         if not isinstance(platform, str):
             raise TypeError("'platform' must be of type 'str'")
@@ -311,7 +326,7 @@ class Runner:
         """
         from ._dynamics import Dynamics
 
-        _logger = _loguru_setup(level=self._config.log_level)
+        _logger.debug(f"Initialising simulation at lambda = {lambda_value}")
         try:
             self._sim = Dynamics(
                 system,
@@ -341,7 +356,6 @@ class Runner:
         results : [str]
             List of simulation results.
         """
-        # self._logger = _loguru_setup(level=self._config.log_level)
         results = []
         if self._config.run_parallel and (self._config.num_lambda is not None):
             # Create shared resources.
@@ -386,7 +400,7 @@ class Runner:
                         try:
                             result = job.result()
                         except Exception as e:
-                            print(e)
+                            _logger.warning(f"Lambda = {lam} failed with {e}")
                             pass
                         else:
                             results.append(result)
@@ -411,7 +425,7 @@ class Runner:
             raise ValueError(
                 "Vanilla MD not currently supported. Please set num_lambda > 1."
             )
-
+        # Results as boolean list - window finished
         return results
 
     def run_window(self, lambda_value):
@@ -433,7 +447,6 @@ class Runner:
         result: str
             The result of the simulation.
         """
-        _logger = _loguru_setup(level=self._config.log_level)
         _logger.info(f"Running lambda = {lambda_value}")
 
         def _run(sim):

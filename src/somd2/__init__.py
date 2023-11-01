@@ -27,4 +27,6 @@ from sire.legacy.Base import ProgressBar as _ProgressBar
 _ProgressBar.setSilent()
 del _ProgressBar
 
+from loguru import logger as _logger
+
 from . import runner

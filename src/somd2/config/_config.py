@@ -27,7 +27,7 @@ __all__ = ["Config"]
 
 from openmm import Platform as _Platform
 from pathlib import Path as _Path
-from loguru import logger as _logger
+from somd2 import _logger
 
 import sire as _sr
 
