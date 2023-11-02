@@ -274,7 +274,6 @@ class Dynamics:
                     df = self._system.energy_trajectory(to_alchemlyb=True)
                     if _ == 0:
                         # Not including speed in checkpoints for now.
-
                         f = _dataframe_to_parquet(
                             df,
                             metadata={
@@ -287,7 +286,6 @@ class Dynamics:
                             filepath=self._config.output_directory,
                             filename=f"energy_traj_{self._lambda_array.index(self._lambda_val)}.parquet",
                         )
-                        print(f)
                     else:
                         _parquet_append(
                             f,

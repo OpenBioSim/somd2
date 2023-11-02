@@ -365,10 +365,11 @@ class Runner:
         Returns
         --------
 
-        results : [str]
-            List of simulation results.
+        results : [bool]
+            List of simulation results. (Currently whether the simulation finished
+            successfully or not.)
         """
-        results = []
+        results = self._manager.list()
         if self._config.run_parallel and (self._config.num_lambda is not None):
             # Create shared resources.
             self._create_shared_resources()
@@ -403,18 +404,20 @@ class Runner:
             import concurrent.futures as _futures
 
             with _futures.ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+                jobs = {}
                 for lambda_value in self._lambda_values:
-                    kwargs = {"lambda_value": lambda_value}
-                    jobs = {executor.submit(self.run_window, **kwargs): lambda_value}
+                    jobs[executor.submit(self.run_window, lambda_value)] = lambda_value
                 try:
                     for job in _futures.as_completed(jobs):
-                        lam = jobs[job]
+                        lambda_value = jobs[job]
                         try:
                             result = job.result()
                         except Exception as e:
-                            _logger.warning(f"Lambda = {lam} failed with {e}")
-                            pass
-                        else:
+                            result = False
+                            _logger.error(
+                                f"Exception raised for lambda = {lambda_value}: {e}"
+                            )
+                        with self._lock:
                             results.append(result)
                 # Kill all current and future jobs if keyboard interrupt.
                 except KeyboardInterrupt:
@@ -430,14 +433,17 @@ class Runner:
                 for i in range(0, self._config.num_lambda)
             ]
             for lambda_value in self._lambda_values:
-                result = self.run_window(lambda_value)
+                try:
+                    result = self.run_window(lambda_value)
+                except:
+                    result = False
                 results.append(result)
 
         else:
             raise ValueError(
                 "Vanilla MD not currently supported. Please set num_lambda > 1."
             )
-        # Results as boolean list - window finished
+
         return results
 
     def run_window(self, lambda_value):
@@ -459,7 +465,6 @@ class Runner:
         result: str
             The result of the simulation.
         """
-        _logger.info(f"Running lambda = {lambda_value}")
 
         def _run(sim):
             # This function is complex due to the mixture of options for minimisation and dynamics
@@ -506,10 +511,13 @@ class Runner:
                     gpu_num = self._gpu_pool[0]
                     self._remove_gpu_from_pool(gpu_num)
                     if lambda_value is not None:
-                        print(f"Running lambda = {lambda_value} on GPU {gpu_num}")
+                        _logger.info(
+                            f"Running lambda = {lambda_value} on GPU {gpu_num}"
+                        )
             # Assumes that device for non-parallel GPU jobs is 0
             else:
                 gpu_num = 0
+                _logger.info("Running lambda = {lambda_value} on GPU 0")
             self._initialise_simulation(system, lambda_value, device=gpu_num)
             try:
                 df, lambda_grad, speed = _run(self._sim)
@@ -526,6 +534,8 @@ class Runner:
 
         # All other platforms.
         else:
+            _logger.info(f"Running lambda = {lambda_value}")
+
             self._initialise_simulation(system, lambda_value)
             try:
                 df, lambda_grad, speed = _run(self._sim)
@@ -548,4 +558,4 @@ class Runner:
         )
         del system
         _logger.success("Lambda = {} complete".format(lambda_value))
-        return f"Lambda = {lambda_value} complete"
+        return True
