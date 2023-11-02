@@ -12,7 +12,8 @@ def test_dynamics_options():
         mols = sr.load(sr.expand(sr.tutorial_url, "merged_molecule.s3"))
 
         # Instantiate a runner using the default config.
-        runner = Runner(mols, Config())
+        # (All default options, other than platform="cpu".)
+        runner = Runner(mols, Config(platform="cpu"))
 
         # Initalise a fake simulation.
         runner._initialise_simulation(runner._system.clone(), 0.0)
