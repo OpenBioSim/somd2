@@ -110,7 +110,7 @@ class Config:
             Simulation length for each lambda window.
 
         timestep: str
-            Integration timestep.
+            Integration time step.
 
         temperature: str
             Simulation temperature.
@@ -953,7 +953,8 @@ class Config:
 
             # Loop over all lines in the docstring until we find the parameter.
             for line in doc:
-                if param in line:
+                line = line.strip()
+                if line.startswith(param):
                     found_param = True
                 elif found_param:
                     if line == "":
