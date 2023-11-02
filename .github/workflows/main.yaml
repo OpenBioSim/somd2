@@ -46,6 +46,7 @@ jobs:
           miniforge-version: latest
           miniforge-variant: Mambaforge
           use-mamba: true
+          run-post: ${{ matrix.platform.name != 'windows' }}
 #
       - name: Install pytest
         run: mamba install pytest
@@ -55,7 +56,3 @@ jobs:
 #
       - name: Run the tests
         run: python -m pytest -svvv --color=yes tests
-#
-      - name: Rename conda package cache to avoid absysmal teardown speed on Windows
-        run: mv "${CONDA_PKGS_DIR}" "${CONDA_PKGS_DIR}_do_not_cache"
-        if: matrix.platform.name == 'windows'
