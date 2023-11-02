@@ -53,6 +53,10 @@ with their default values. Options can be specified on the command line, or
 using a YAML configuration file, passed with the `--config` option. Any options
 explicity set on the command line with override those set via the config file.
 
+An example perturbable system for a methane to ethanol perturbation in solvent
+can be found [here](https://sire.openbiosim.org/m/merged_molecule.s3.bz2).
+This is a `bzip2` compressed file that will need to be extracted before use.
+
 ## Analysis
 
 Simulation output will be written to the directory specified using the
