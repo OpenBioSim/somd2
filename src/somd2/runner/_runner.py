@@ -22,13 +22,13 @@
 __all__ = ["Runner"]
 
 
-import sire as _sr
+from sire import stream as _stream
+from sire.system import System as _System
 
 from ..config import Config as _Config
 from ..io import dataframe_to_parquet as _dataframe_to_parquet
 from ..io import dict_to_yaml as _dict_to_yaml
 
-# Can't create a self.log variable in this class as it causes errors when passed to a processpool
 from somd2 import _logger
 
 
@@ -63,13 +63,13 @@ class Runner:
 
         """
 
-        if not isinstance(system, (str, _sr.system.System)):
+        if not isinstance(system, (str, _System)):
             raise TypeError("'system' must be of type 'str' or 'sire.system.System'")
 
         if isinstance(system, str):
             # Try to load the stream file.
             try:
-                self._system = _sr.stream.load(system)
+                self._system = _stream.load(system)
             except:
                 raise IOError(f"Unable to load system from stream file: '{system}'")
         else:
