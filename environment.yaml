@@ -2,7 +2,7 @@ name: somd2
 
 channels:
   - conda-forge
-  - openbiosim
+  - openbiosim/label/dev
 
 dependencies:
   - biosimspace
