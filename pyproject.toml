@@ -19,6 +19,9 @@ dynamic = ["version"]
 [tool.setuptools]
 license-files = ["LICENSE"]
 
+[project.scripts]
+somd2 = "somd2.app:cli"
+
 [project.urls]
 repository = "https://github.com/OpenBioSim/somd2"
 
@@ -27,4 +30,3 @@ where = ["src"]
 
 [tool.setuptools_scm]
 write_to = "src/somd2/_version.py"
-
