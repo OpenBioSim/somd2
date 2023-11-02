@@ -4,7 +4,6 @@ from somd2.io import (
     parquet_append,
     parquet_to_dataframe,
 )
-import pytest
 
 
 def test_parquet():
