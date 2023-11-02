@@ -22,9 +22,9 @@
 # Disable Sire progress bars until we work out the best way to handle
 # them for the SOMD2 runner, i.e. when running multiple dynamics objects
 # in parallel.
-from sire.legacy.Base import ProgressBar as _ProgressBar
+from sire.base import ProgressBar as _ProgressBar
 
-_ProgressBar.setSilent()
+_ProgressBar.set_silent()
 del _ProgressBar
 
 from loguru import logger as _logger
