@@ -96,7 +96,7 @@ class Dynamics:
 
     def _setup_dynamics(self, equilibration=False):
         """
-        Minimise if needed and then setup dynamics object
+        Setup the dynamics object.
 
         Parameters
         ----------
