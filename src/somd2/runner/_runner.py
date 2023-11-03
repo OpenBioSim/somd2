@@ -348,7 +348,6 @@ class Runner:
         """
         from ._dynamics import Dynamics
 
-        _logger.debug(f"Initialising simulation at lambda = {lambda_value}")
         try:
             self._sim = Dynamics(
                 system,
