@@ -316,6 +316,8 @@ class Runner:
             repartition_hydrogen_masses as _repartition_hydrogen_masses,
         )
 
+        _logger.info(f"Repartitioning hydrogen masses with factor {self._config.h_mass_factor}")
+
         self._system = _repartition_hydrogen_masses(
             self._system, mass_factor=self._config.h_mass_factor
         )
