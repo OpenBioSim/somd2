@@ -138,6 +138,8 @@ class Runner:
                 enqueue=True,
             )
 
+        self._check_directory()
+
     def __str__(self):
         """Return a string representation of the object."""
         return f"Runner(system={self._system}, config={self._config})"
@@ -179,19 +181,35 @@ class Runner:
 
     def _check_directory(self):
         """
-        Check if the output directory has files already present.
-        Paired with the 'overwrite' option.
+        Find the name of the file from which simulations will be started.
+        Paired with the 'restart' option.
         """
-        import os as _os
-        import glob as _glob
+        from pathlib import Path as __Path
+        from ._dynamics import Dynamics
 
-        if self._config.overwrite:
-            return True
-        else:
-            if _glob.glob(_os.path.join(self._config.output_directory, "*.parquet")):
-                return False
-            else:
-                return True
+        fnames = {}
+        deleted = []
+        for lambda_value in self._lambda_values:
+            files = Dynamics.create_filenames(
+                self._lambda_values,
+                lambda_value,
+                self._config.output_directory,
+                self._config.restart,
+            )
+            fnames[lambda_value] = files
+            if not self._config.restart:
+                for file in files.values():
+                    fullpath = self._config.output_directory / file
+                    if __Path.exists(fullpath):
+                        deleted.append(fullpath)
+        if len(deleted) > 0:
+            _logger.warning(
+                f"The following files already exist and will be overwritten: {deleted}"
+            )
+            input("Press Enter to erase and continue...")
+            for file in deleted:
+                file.unlink()
+        self._fnames = fnames
 
     def get_options(self):
         """
@@ -502,8 +520,24 @@ class Runner:
                         f"raised: {e}. This may be due to a lack of minimisation."
                     )
 
-        system = self._system.clone()
-
+        if self._config.restart:
+            system = _stream.load(
+                str(
+                    self._config.output_directory
+                    / self._fnames[lambda_value]["checkpoint"]
+                )
+            ).clone()
+        else:
+            system = self._system.clone()
+        if self._config.restart:
+            acc_time = system.time()
+            if acc_time > self._config.runtime - self._config.timestep:
+                _logger.success(f"Lambda = {lambda_value} already complete. Skipping.")
+                return True
+            else:
+                _logger.debug(
+                    f"Restarting lambda = {lambda_value} at time {acc_time}, time remaining = {self._config.runtime - acc_time}"
+                )
         # GPU platform.
         if self._is_gpu:
             if self._config.run_parallel:
@@ -543,6 +577,8 @@ class Runner:
                 raise
             self._sim._cleanup()
 
+        # Write final dataframe for the system to the energy trajectory file.
+        # Note that sire s3 checkpoint files contain energy trajectory data, so this works even for restarts.
         _ = _dataframe_to_parquet(
             df,
             metadata={
@@ -554,7 +590,7 @@ class Runner:
                 "temperature": str(self._config.temperature.value()),
             },
             filepath=self._config.output_directory,
-            filename=f"energy_traj_{self._lambda_values.index(lambda_value)}.parquet",
+            filename=self._fnames[lambda_value]["energy_traj"],
         )
         del system
         _logger.success("Lambda = {} complete".format(lambda_value))

@@ -96,9 +96,11 @@ class Config:
         max_gpus=None,
         run_parallel=True,
         output_directory="output",
+        restart=True,
         write_config=True,
         log_level="info",
         log_file=None,
+        supress_overwrite_warning=False,
     ):
         """
         Constructor.
@@ -195,6 +197,9 @@ class Config:
         output_directory: str
             Path to a directory to store output files.
 
+        restart: bool
+            Whether to restart from a previous simulation - files found in {output-directory}.
+
         write_config: bool
             Whether to write the configuration options to a YAML file in the output directory.
 
@@ -232,10 +237,12 @@ class Config:
         self.max_threads = max_threads
         self.max_gpus = max_gpus
         self.run_parallel = run_parallel
+        self.restart = restart
         self.output_directory = output_directory
         self.write_config = write_config
         self.log_level = log_level
         self.log_file = log_file
+        self.supress_overwrite_warning = supress_overwrite_warning
 
     def __str__(self):
         """Return a string representation of this object."""
@@ -868,6 +875,16 @@ class Config:
         self._run_parallel = run_parallel
 
     @property
+    def restart(self):
+        return self._restart
+
+    @restart.setter
+    def restart(self, restart):
+        if not isinstance(restart, bool):
+            raise ValueError("'restart' must be of type 'bool'")
+        self._restart = restart
+
+    @property
     def output_directory(self):
         return self._output_directory
 
@@ -885,6 +902,10 @@ class Config:
                 raise ValueError(
                     f"Output directory {output_directory} does not exist and cannot be created"
                 )
+        elif not self.restart:
+            _logger.warning(
+                f"Output directory {output_directory} already exists files may be overwritten"
+            )
         self._output_directory = output_directory
 
     @property
@@ -921,6 +942,16 @@ class Config:
         if log_file is not None and not isinstance(log_file, str):
             raise TypeError("'log_file' must be of type 'str'")
         self._log_file = log_file
+
+    @property
+    def supress_overwrite_warning(self):
+        return self._supress_overwrite_warning
+
+    @supress_overwrite_warning.setter
+    def supress_overwrite_warning(self, supress_overwrite_warning):
+        if not isinstance(supress_overwrite_warning, bool):
+            raise ValueError("'supress_overwrite_warning' must be of type 'bool'")
+        self._supress_overwrite_warning = supress_overwrite_warning
 
     @classmethod
     def _create_parser(cls):
