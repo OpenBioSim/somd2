@@ -14,7 +14,7 @@ First create a conda environment using the provided environment file:
 mamba create -f environment.yaml
 ```
 
-(We recommend using [Mambaforge](https://github.com/conda-forge/miniforge#mambaforge).)
+(We recommend using [Miniforge](https://github.com/conda-forge/miniforge).)
 
 Now install `somd2` into the environment:
 
