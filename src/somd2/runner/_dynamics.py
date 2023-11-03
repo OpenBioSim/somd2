@@ -110,7 +110,11 @@ class Dynamics:
             file_number = 0
             file_path = _Path(output_directory)
             while True:
-                filename = f"{base_filename}_{file_number}.{suffix}"
+                filename = (
+                    f"{base_filename}_{file_number}.{suffix}"
+                    if file_number > 0
+                    else f"{base_filename}.{suffix}"
+                )
                 full_path = file_path / filename
                 if not full_path.exists():
                     return filename
@@ -124,8 +128,10 @@ class Dynamics:
         filenames["energy_traj"] = f"energy_traj_{index}.parquet"
         if restart:
             filenames["trajectory"] = increment_filename(f"traj_{index}", "dcd")
+            filenames["config"] = increment_filename("config", "yaml")
         else:
-            filenames["trajectory"] = f"traj_{index}_0.dcd"
+            filenames["trajectory"] = f"traj_{index}.dcd"
+            filenames["config"] = "config.yaml"
         return filenames
 
     def _setup_dynamics(self, equilibration=False):
