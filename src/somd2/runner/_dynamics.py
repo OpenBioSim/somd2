@@ -141,7 +141,7 @@ class Dynamics:
 
     def _minimisation(self, lambda_min=None):
         """
-        Minimisation of self._system
+        Minimisation of self._system.
 
         Parameters
         ----------
@@ -151,6 +151,7 @@ class Dynamics:
             lambda_val.
         """
         if lambda_min is None:
+            _logger.info(f"Minimising at λ = {self._lambda_val}")
             try:
                 m = self._system.minimisation(
                     cutoff_type=self._config.cutoff_type,
@@ -165,6 +166,7 @@ class Dynamics:
             except:
                 raise
         else:
+            _logger.info(f"Minimising at λ = {lambda_min}")
             try:
                 m = self._system.minimisation(
                     cutoff_type=self._config.cutoff_type,
@@ -186,6 +188,8 @@ class Dynamics:
         Per-window equilibration.
         Currently just runs dynamics without any saving
         """
+
+        _logger.info(f"Equilibrating at λ = {self._lambda_val}")
         self._setup_dynamics(equilibration=True)
         self._dyn.run(
             self._config.equilibration_time,
@@ -238,6 +242,8 @@ class Dynamics:
         else:
             lam_arr = self._lambda_array + self._lambda_grad
 
+        _logger.info(f"Running dynamics at λ = {self._lambda_val}")
+
         if self._config.checkpoint_frequency.value() > 0.0:
             ### Calc number of blocks and remainder (surely there's a better way?)###
             num_blocks = 0
@@ -257,7 +263,7 @@ class Dynamics:
                 / f"checkpoint_{self._lambda_array.index(self._lambda_val)}.s3"
             )
             # Run num_blocks dynamics and then run a final block if rem > 0
-            for _ in range(int(num_blocks)):
+            for x in range(int(num_blocks)):
                 try:
                     self._dyn.run(
                         self._config.checkpoint_frequency,
@@ -273,7 +279,7 @@ class Dynamics:
                     self._system = self._dyn.commit()
                     _stream.save(self._system, str(sire_checkpoint_name))
                     df = self._system.energy_trajectory(to_alchemlyb=True)
-                    if _ == 0:
+                    if x == 0:
                         # Not including speed in checkpoints for now.
                         f = _dataframe_to_parquet(
                             df,
@@ -292,6 +298,9 @@ class Dynamics:
                             f,
                             df.iloc[-int(energy_per_block) :],
                         )
+                    _logger.info(
+                        f"Finished block {x+1} of {num_blocks} for λ = {self._lambda_val}"
+                    )
                 except:
                     raise
             # No need to checkpoint here as it is the final block.
