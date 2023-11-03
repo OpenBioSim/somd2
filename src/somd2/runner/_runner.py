@@ -85,13 +85,13 @@ class Runner:
         for mol in self._system.molecules("molecule property is_perturbable"):
             self._system.update(mol.perturbation().link_to_reference().commit())
 
-        # Check for a periodic space.
-        self._check_space()
-
         # Validate the configuration.
         if not isinstance(config, _Config):
             raise TypeError("'config' must be of type 'somd2.config.Config'")
         self._config = config
+
+        # Check for a periodic space.
+        self._check_space()
 
         # Set the lambda values.
         self._lambda_values = [
@@ -176,6 +176,12 @@ class Runner:
             self._has_space = True
         else:
             self._has_space = False
+            _logger.info("No periodic space detected. Assuming vacuum simulation.")
+            if self._config.cutoff_type == "pme":
+                _logger.info(
+                    "Cannot use PME for non-periodic simulations. Using RF cutoff instead."
+                )
+                self._config.cutoff_type = "rf"
 
     def _check_directory(self):
         """
@@ -316,7 +322,9 @@ class Runner:
             repartition_hydrogen_masses as _repartition_hydrogen_masses,
         )
 
-        _logger.info(f"Repartitioning hydrogen masses with factor {self._config.h_mass_factor}")
+        _logger.info(
+            f"Repartitioning hydrogen masses with factor {self._config.h_mass_factor}"
+        )
 
         self._system = _repartition_hydrogen_masses(
             self._system, mass_factor=self._config.h_mass_factor

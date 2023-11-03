@@ -135,6 +135,7 @@ class Dynamics:
             perturbable_constraint="none"
             if equilibration
             else self._config.perturbable_constraint,
+            vacuum=not self._has_space,
             map=map,
         )
 
@@ -156,6 +157,7 @@ class Dynamics:
                     schedule=self._config.lambda_schedule,
                     lambda_value=self._lambda_val,
                     platform=self._config.platform,
+                    vacuum=not self._has_space,
                     map=self._config.extra_args,
                 )
                 m.run()
@@ -169,6 +171,7 @@ class Dynamics:
                     schedule=self._config.lambda_schedule,
                     lambda_value=lambda_min,
                     platform=self._config.platform,
+                    vacuum=not self._has_space,
                     map=self._config.extra_args,
                 )
                 m.run()
