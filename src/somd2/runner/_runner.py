@@ -247,7 +247,7 @@ class Runner:
         self._config.lambda_schedule = schedule
 
     @staticmethod
-    def get_gpu_devices(platform, _log_level="INFO"):
+    def get_gpu_devices(platform):
         """
         Get list of available GPUs from CUDA_VISIBLE_DEVICES,
         OPENCL_VISIBLE_DEVICES, or HIP_VISIBLE_DEVICES.
