@@ -119,9 +119,16 @@ class Runner:
         if self._config.h_mass_factor > 1:
             self._repartition_h_mass()
 
+        # Check the output directories and create names of output files.
+        self._check_directory()
+
         # Save config whenever 'configure' is called to keep it up to date
         if self._config.write_config:
-            _dict_to_yaml(self._config.as_dict(), self._config.output_directory)
+            _dict_to_yaml(
+                self._config.as_dict(),
+                self._config.output_directory,
+                self._fnames[self._lambda_values[0]]["config"],
+            )
 
         # Flag whether this is a GPU simulation.
         self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]
@@ -137,8 +144,6 @@ class Runner:
                 level=self._config.log_level.upper(),
                 enqueue=True,
             )
-
-        self._check_directory()
 
     def __str__(self):
         """Return a string representation of the object."""
@@ -203,13 +208,32 @@ class Runner:
                     if __Path.exists(fullpath):
                         deleted.append(fullpath)
         if len(deleted) > 0:
-            _logger.warning(
-                f"The following files already exist and will be overwritten: {deleted}"
-            )
-            input("Press Enter to erase and continue...")
+            if not self._config.supress_overwrite_warning:
+                _logger.warning(
+                    f"The following files already exist and will be overwritten: {deleted}"
+                )
+                input("Press Enter to erase and continue...")
             for file in deleted:
                 file.unlink()
         self._fnames = fnames
+
+    def _verify_restart_config(self):
+        """
+        Verify that the config file matches the config file used to create the
+        checkpoint file.
+        """
+        import yaml as _yaml
+
+        with open(
+            self._config.output_directory
+            / self._fnames[self._lambda_values[0]]["config"]
+        ) as file:
+            config = _yaml.safe_load(file)
+        if config != self._config.as_dict():
+            raise ValueError(
+                "The configuration file does not match the configuration used to create the "
+                "checkpoint file."
+            )
 
     def get_options(self):
         """
