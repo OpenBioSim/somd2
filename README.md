@@ -76,7 +76,7 @@ To compute the relative free-energy difference between two legs, e.g.
 legs 1 and 2, you can use:
 
 ```python
-pmf2, overlap2 = BSS.FreeEnergy.Relative.analyse("output2)
+pmf2, overlap2 = BSS.FreeEnergy.Relative.analyse("output2")
 
 free_nrg = BSS.FreeEnergy.Relative.difference(pmf1, pmf2)
 ```
