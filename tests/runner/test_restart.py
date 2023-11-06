@@ -140,10 +140,13 @@ def test_restart():
 
         config_diffoutputdirectory = config_new.copy()
         config_diffoutputdirectory["runtime"] = "36fs"
-        config_diffoutputdirectory["output_directory"] = "test"
+        with tempfile.TemporaryDirectory() as tmpdir2:
+            config_diffoutputdirectory["output_directory"] = tmpdir2
 
-        with pytest.raises(IndexError):
-            runner_outputdirectory = Runner(mols, Config(**config_diffoutputdirectory))
+            with pytest.raises(IndexError):
+                runner_outputdirectory = Runner(
+                    mols, Config(**config_diffoutputdirectory)
+                )
 
         config_diffperturbableconstraint = config_new.copy()
         config_diffperturbableconstraint["runtime"] = "36fs"
@@ -174,8 +177,3 @@ def test_restart():
 
         with pytest.raises(ValueError):
             runner_swapendstates = Runner(mols, Config(**config_diffswapendstates))
-
-
-if __name__ == "__main__":
-    test_restart()
-    print("test_restart.py: All tests passed.")

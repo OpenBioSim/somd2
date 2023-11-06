@@ -96,7 +96,7 @@ class Config:
         max_gpus=None,
         run_parallel=True,
         output_directory="output",
-        restart=True,
+        restart=False,
         write_config=True,
         log_level="info",
         log_file=None,

@@ -13,7 +13,7 @@ def test_dynamics_options():
 
         # Instantiate a runner using the default config.
         # (All default options, other than platform="cpu".)
-        runner = Runner(mols, Config(platform="cpu"))
+        runner = Runner(mols, Config(platform="cpu", output_directory=tmpdir))
 
         # Initalise a fake simulation.
         runner._initialise_simulation(runner._system.clone(), 0.0)
