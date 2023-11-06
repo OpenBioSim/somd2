@@ -14,7 +14,7 @@ First create a conda environment using the provided environment file:
 mamba create -f environment.yaml
 ```
 
-(We recommend using [Mambaforge](https://github.com/conda-forge/miniforge#mambaforge).)
+(We recommend using [Miniforge](https://github.com/conda-forge/miniforge).)
 
 Now install `somd2` into the environment:
 
@@ -67,7 +67,16 @@ processed using [BioSimSpace](https://github.com/OpenBioSim/biosimspace) as foll
 ```python
 import BioSimSpace as BSS
 
-pmf, overlap = BSS.FreeEnergy.Relative.analyse("output")
+pmf1, overlap1 = BSS.FreeEnergy.Relative.analyse("output1")
 ```
 
-(Here we assume that the output directory is called `output`.)
+(Here we assume that the output directory is called `output1`.)
+
+To compute the relative free-energy difference between two legs, e.g.
+legs 1 and 2, you can use:
+
+```python
+pmf2, overlap2 = BSS.FreeEnergy.Relative.analyse("output2")
+
+free_nrg = BSS.FreeEnergy.Relative.difference(pmf1, pmf2)
+```
