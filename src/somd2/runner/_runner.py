@@ -555,12 +555,17 @@ class Runner:
                     )
 
         if self._config.restart:
-            system = _stream.load(
-                str(
-                    self._config.output_directory
-                    / self._fnames[lambda_value]["checkpoint"]
+            try:
+                system = _stream.load(
+                    str(
+                        self._config.output_directory
+                        / self._fnames[lambda_value]["checkpoint"]
+                    )
+                ).clone()
+            except:
+                _logger.warning(
+                    f"Unable to load checkpoint file for λ={lambda_value}, starting from scratch."
                 )
-            ).clone()
         else:
             system = self._system.clone()
         if self._config.restart:
