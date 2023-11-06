@@ -216,10 +216,11 @@ class Runner:
         if len(deleted) > 0:
             if not self._config.supress_overwrite_warning:
                 _logger.warning(
-                    f"The following files already exist and will be overwritten: {deleted}"
+                    f"The following files already exist and will be overwritten: {list(set((deleted)))}"
                 )
                 input("Press Enter to erase and continue...")
-            for file in deleted:
+            # Loop over files to be deleted, ignoring duplicates
+            for file in list(set(deleted)):
                 file.unlink()
         self._fnames = fnames
 
