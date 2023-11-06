@@ -119,19 +119,12 @@ class Runner:
         if self._config.h_mass_factor > 1:
             self._repartition_h_mass()
 
-        # Check the output directories and create names of output files.
-        self._check_directory()
-
-        # Save config whenever 'configure' is called to keep it up to date
-        if self._config.write_config:
-            _dict_to_yaml(
-                self._config.as_dict(),
-                self._config.output_directory,
-                self._fnames[self._lambda_values[0]]["config"],
-            )
-
         # Flag whether this is a GPU simulation.
         self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]
+
+        # Need to verify before doing any directory checks
+        if self._config.restart:
+            self._verify_restart_config()
 
         # Setup proper logging level
         import sys
@@ -143,6 +136,17 @@ class Runner:
                 self._config.output_directory / self._config.log_file,
                 level=self._config.log_level.upper(),
                 enqueue=True,
+            )
+
+        # Check the output directories and create names of output files.
+        self._check_directory()
+
+        # Save config whenever 'configure' is called to keep it up to date
+        if self._config.write_config:
+            _dict_to_yaml(
+                self._config.as_dict(),
+                self._config.output_directory,
+                self._fnames[self._lambda_values[0]]["config"],
             )
 
     def __str__(self):
@@ -231,16 +235,65 @@ class Runner:
         """
         import yaml as _yaml
 
-        with open(
-            self._config.output_directory
-            / self._fnames[self._lambda_values[0]]["config"]
-        ) as file:
-            config = _yaml.safe_load(file)
-        if config != self._config.as_dict():
-            raise ValueError(
-                "The configuration file does not match the configuration used to create the "
-                "checkpoint file."
+        def get_last_config(output_directory):
+            """
+            Returns the last config file in the output directory.
+            """
+            import os as _os
+
+            config_files = [
+                file
+                for file in _os.listdir(output_directory)
+                if file.endswith(".yaml") and file.startswith("config")
+            ]
+            config_files.sort()
+            return config_files[-1]
+
+        try:
+            last_config = get_last_config(self._config.output_directory)
+        except IndexError:
+            raise IndexError(
+                f"No config files found in {self._config.output_directory}"
             )
+        with open(self._config.output_directory / last_config) as file:
+            _logger.debug(f"Opening config file {last_config}")
+            config = _yaml.safe_load(file)
+        # Define the subset of settings that are allowed to change after restart
+        allowed_diffs = [
+            "runtime",
+            "restart",
+            "temperature",
+            "minimise",
+            "max_threads",
+            "equilibration_time",
+            "equilibration_timestep",
+            "energy_frequency",
+            "save_trajectory",
+            "frame_frequency",
+            "save_velocities",
+            "checkpoint_frequency",
+            "platform",
+            "max_threads",
+            "max_gpus",
+            "run_parallel",
+            "restart",
+            "save_trajectories",
+            "write_config",
+            "log_level",
+            "log_file",
+            "supress_overwrite_warning",
+        ]
+        for key in config.keys():
+            if key not in allowed_diffs:
+                _logger.debug(f"Checking {key}")
+                _logger.debug(
+                    f"""old value: {config[key]}
+                                  new value: {self._config.as_dict()[key]}"""
+                )
+                if config[key] != self._config.as_dict()[key]:
+                    raise ValueError(
+                        f"{key} has changed since the last run. This is not allowed when using the restart option."
+                    )
 
     def get_options(self):
         """

@@ -4,6 +4,7 @@ from somd2.config import Config
 from somd2.io import *
 from pathlib import Path
 import sire as sr
+import pytest
 
 
 def test_restart():
@@ -52,6 +53,7 @@ def test_restart():
             "max_threads": 1,
             "num_lambda": 2,
             "supress_overwrite_warning": True,
+            "log_level": "DEBUG",
         }
 
         runner2 = Runner(mols, Config(**config_new))
@@ -71,6 +73,107 @@ def test_restart():
         # Check that a second trajectory was written and that the first still exists
         assert Path.exists(Path(tmpdir) / "traj_0.dcd")
         assert Path.exists(Path(tmpdir) / "traj_0_1.dcd")
+
+        config_difftimestep = config_new.copy()
+        config_difftimestep["runtime"] = "36fs"
+        config_difftimestep["timestep"] = "2fs"
+
+        with pytest.raises(ValueError):
+            runner_timestep = Runner(mols, Config(**config_difftimestep))
+
+        config_diffscalefactor = config_new.copy()
+        config_diffscalefactor["runtime"] = "36fs"
+        config_diffscalefactor["charge_scale_factor"] = 0.5
+
+        with pytest.raises(ValueError):
+            runner_scalefactor = Runner(mols, Config(**config_diffscalefactor))
+
+        config_diffconstraint = config_new.copy()
+        config_diffconstraint["runtime"] = "36fs"
+        config_diffconstraint["constraint"] = "bonds"
+
+        with pytest.raises(ValueError):
+            runner_constraints = Runner(mols, Config(**config_diffconstraint))
+
+        config_diffcoulombpower = config_new.copy()
+        config_diffcoulombpower["runtime"] = "36fs"
+        config_diffcoulombpower["coulomb_power"] = 0.5
+
+        with pytest.raises(ValueError):
+            runner_coulombpower = Runner(mols, Config(**config_diffcoulombpower))
+
+        config_diffcutofftype = config_new.copy()
+        config_diffcutofftype["runtime"] = "36fs"
+        config_diffcutofftype["cutoff_type"] = "rf"
+
+        with pytest.raises(ValueError):
+            runner_cutofftype = Runner(mols, Config(**config_diffcutofftype))
+
+        config_diffhmassfactor = config_new.copy()
+        config_diffhmassfactor["runtime"] = "36fs"
+        config_diffhmassfactor["h_mass_factor"] = 2.0
+
+        with pytest.raises(ValueError):
+            runner_hmassfactor = Runner(mols, Config(**config_diffhmassfactor))
+
+        config_diffintegrator = config_new.copy()
+        config_diffintegrator["runtime"] = "36fs"
+        config_diffintegrator["integrator"] = "verlet"
+
+        with pytest.raises(ValueError):
+            runner_integrator = Runner(mols, Config(**config_diffintegrator))
+
+        config_difflambdaschedule = config_new.copy()
+        config_difflambdaschedule["runtime"] = "36fs"
+        config_difflambdaschedule["charge_scale_factor"] = 0.5
+        config_difflambdaschedule["lambda_schedule"] = "charge_scaled_morph"
+
+        with pytest.raises(ValueError):
+            runner_lambdaschedule = Runner(mols, Config(**config_difflambdaschedule))
+
+        config_diffnumlambda = config_new.copy()
+        config_diffnumlambda["runtime"] = "36fs"
+        config_diffnumlambda["num_lambda"] = 3
+
+        with pytest.raises(ValueError):
+            runner_numlambda = Runner(mols, Config(**config_diffnumlambda))
+
+        config_diffoutputdirectory = config_new.copy()
+        config_diffoutputdirectory["runtime"] = "36fs"
+        config_diffoutputdirectory["output_directory"] = "test"
+
+        with pytest.raises(IndexError):
+            runner_outputdirectory = Runner(mols, Config(**config_diffoutputdirectory))
+
+        config_diffperturbableconstraint = config_new.copy()
+        config_diffperturbableconstraint["runtime"] = "36fs"
+        config_diffperturbableconstraint["perturbable_constraint"] = "bonds"
+
+        with pytest.raises(ValueError):
+            runner_perturbableconstraint = Runner(
+                mols, Config(**config_diffperturbableconstraint)
+            )
+
+        config_diffpressure = config_new.copy()
+        config_diffpressure["runtime"] = "36fs"
+        config_diffpressure["pressure"] = "1.5 atm"
+
+        with pytest.raises(ValueError):
+            runner_pressure = Runner(mols, Config(**config_diffpressure))
+
+        config_diffshiftdelta = config_new.copy()
+        config_diffshiftdelta["runtime"] = "36fs"
+        config_diffshiftdelta["shift_delta"] = "3 Angstrom"
+
+        with pytest.raises(ValueError):
+            runner_shiftdelta = Runner(mols, Config(**config_diffshiftdelta))
+
+        config_diffswapendstates = config_new.copy()
+        config_diffswapendstates["runtime"] = "36fs"
+        config_diffswapendstates["swap_end_states"] = True
+
+        with pytest.raises(ValueError):
+            runner_swapendstates = Runner(mols, Config(**config_diffswapendstates))
 
 
 if __name__ == "__main__":
