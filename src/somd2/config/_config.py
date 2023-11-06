@@ -492,9 +492,7 @@ class Config:
                 if lambda_schedule == "standard_morph":
                     self._lambda_schedule = _LambdaSchedule.standard_morph()
                 elif lambda_schedule == "charge_scaled_morph":
-                    self._lambda_schedule = _LambdaSchedule.charge_scaled_morph(
-                        self._charge_scale_factor
-                    )
+                    self._lambda_schedule = _LambdaSchedule.charge_scaled_morph(0.2)
             else:
                 self._lambda_schedule = lambda_schedule
         else:
