@@ -310,13 +310,13 @@ class Config:
             this simply converts any options with a value of None to a
             boolean with the value False.
         """
-        from pathlib import PosixPath as _PosixPath
+        from pathlib import Path as _Path
         from sire.cas import LambdaSchedule as _LambdaSchedule
 
         d = {}
         for attr, value in self.__dict__.items():
             attr_l = attr[1:]
-            if isinstance(value, _PosixPath):
+            if isinstance(value, _Path):
                 d[attr_l] = str(value)
             else:
                 try:

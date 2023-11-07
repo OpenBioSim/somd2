@@ -21,7 +21,7 @@
 
 __all__ = ["Runner"]
 
-
+import os as _os
 from sire import stream as _stream
 from sire.system import System as _System
 
@@ -30,6 +30,11 @@ from ..io import dataframe_to_parquet as _dataframe_to_parquet
 from ..io import dict_to_yaml as _dict_to_yaml
 
 from somd2 import _logger
+
+if _os.platform == "win32":
+    lam_sym = "lambda"
+else:
+    lam_sym = "λ"
 
 
 class Runner:
@@ -456,7 +461,7 @@ class Runner:
                 has_space=self._has_space,
             )
         except:
-            _logger.warning(f"System creation at λ = {lambda_value} failed")
+            _logger.warning(f"System creation at {lam_sym} = {lambda_value} failed")
             raise
 
     def _cleanup_simulation(self):
@@ -521,8 +526,9 @@ class Runner:
                             result = job.result()
                         except Exception as e:
                             result = False
+
                             _logger.error(
-                                f"Exception raised for λ = {lambda_value}: {e}"
+                                f"Exception raised for {lam_sym} = {lambda_value}: {e}"
                             )
                         with self._lock:
                             results.append(result)
@@ -583,8 +589,8 @@ class Runner:
                     return df, lambda_grad, speed
                 except Exception as e:
                     _logger.warning(
-                        f"Minimisation/dynamics at λ = {lambda_value} failed with the "
-                        f"following exception {e}, trying again with minimsation at λ = 0."
+                        f"Minimisation/dynamics at {lam_sym} = {lambda_value} failed with the "
+                        f"following exception {e}, trying again with minimsation at {lam_sym} = 0."
                     )
                     try:
                         df = sim._run(lambda_minimisation=0.0)
@@ -593,8 +599,8 @@ class Runner:
                         return df, lambda_grad, speed
                     except Exception as e:
                         _logger.error(
-                            f"Minimisation/dynamics at λ = {lambda_value} failed, even after "
-                            f"minimisation at λ = 0. The following warning was raised: {e}."
+                            f"Minimisation/dynamics at {lam_sym} = {lambda_value} failed, even after "
+                            f"minimisation at {lam_sym} = 0. The following warning was raised: {e}."
                         )
                         raise
             else:
@@ -605,7 +611,7 @@ class Runner:
                     return df, lambda_grad, speed
                 except Exception as e:
                     _logger.error(
-                        f"Dynamics at λ = {lambda_value} failed. The following warning was "
+                        f"Dynamics at {lam_sym} = {lambda_value} failed. The following warning was "
                         f"raised: {e}. This may be due to a lack of minimisation."
                     )
 
@@ -619,18 +625,20 @@ class Runner:
                 ).clone()
             except:
                 _logger.warning(
-                    f"Unable to load checkpoint file for λ={lambda_value}, starting from scratch."
+                    f"Unable to load checkpoint file for {lam_sym}={lambda_value}, starting from scratch."
                 )
         else:
             system = self._system.clone()
         if self._config.restart:
             acc_time = system.time()
             if acc_time > self._config.runtime - self._config.timestep:
-                _logger.success(f"λ = {lambda_value} already complete. Skipping.")
+                _logger.success(
+                    f"{lam_sym} = {lambda_value} already complete. Skipping."
+                )
                 return True
             else:
                 _logger.debug(
-                    f"Restarting λ = {lambda_value} at time {acc_time}, time remaining = {self._config.runtime - acc_time}"
+                    f"Restarting {lam_sym} = {lambda_value} at time {acc_time}, time remaining = {self._config.runtime - acc_time}"
                 )
         # GPU platform.
         if self._is_gpu:
@@ -639,11 +647,13 @@ class Runner:
                     gpu_num = self._gpu_pool[0]
                     self._remove_gpu_from_pool(gpu_num)
                     if lambda_value is not None:
-                        _logger.info(f"Running λ = {lambda_value} on GPU {gpu_num}")
+                        _logger.info(
+                            f"Running {lam_sym} = {lambda_value} on GPU {gpu_num}"
+                        )
             # Assumes that device for non-parallel GPU jobs is 0
             else:
                 gpu_num = 0
-                _logger.info("Running λ = {lambda_value} on GPU 0")
+                _logger.info("Running {lam_sym} = {lambda_value} on GPU 0")
             self._initialise_simulation(system, lambda_value, device=gpu_num)
             try:
                 df, lambda_grad, speed = _run(self._sim)
@@ -660,7 +670,7 @@ class Runner:
 
         # All other platforms.
         else:
-            _logger.info(f"Running λ = {lambda_value}")
+            _logger.info(f"Running {lam_sym} = {lambda_value}")
 
             self._initialise_simulation(system, lambda_value)
             try:
@@ -685,5 +695,5 @@ class Runner:
             filename=self._fnames[lambda_value]["energy_traj"],
         )
         del system
-        _logger.success(f"λ = {lambda_value} complete")
+        _logger.success(f"{lam_sym} = {lambda_value} complete")
         return True

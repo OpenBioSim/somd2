@@ -20,7 +20,7 @@
 #####################################################################
 
 __all__ = ["Dynamics"]
-
+import os as _os
 from pathlib import Path as _Path
 
 from ..config import Config as _Config
@@ -28,6 +28,11 @@ from ..io import dataframe_to_parquet as _dataframe_to_parquet
 from ..io import parquet_append as _parquet_append
 
 from somd2 import _logger
+
+if _os.platform == "win32":
+    lam_sym = "lambda"
+else:
+    lam_sym = "λ"
 
 
 class Dynamics:
@@ -191,7 +196,7 @@ class Dynamics:
             lambda_val.
         """
         if lambda_min is None:
-            _logger.info(f"Minimising at λ = {self._lambda_val}")
+            _logger.info(f"Minimising at {lam_sym} = {self._lambda_val}")
             try:
                 m = self._system.minimisation(
                     cutoff_type=self._config.cutoff_type,
@@ -206,7 +211,7 @@ class Dynamics:
             except:
                 raise
         else:
-            _logger.info(f"Minimising at λ = {lambda_min}")
+            _logger.info(f"Minimising at {lam_sym} = {lambda_min}")
             try:
                 m = self._system.minimisation(
                     cutoff_type=self._config.cutoff_type,
@@ -229,7 +234,7 @@ class Dynamics:
         Currently just runs dynamics without any saving
         """
 
-        _logger.info(f"Equilibrating at λ = {self._lambda_val}")
+        _logger.info(f"Equilibrating at {lam_sym} = {self._lambda_val}")
         self._setup_dynamics(equilibration=True)
         self._dyn.run(
             self._config.equilibration_time,
@@ -282,7 +287,7 @@ class Dynamics:
         else:
             lam_arr = self._lambda_array + self._lambda_grad
 
-        _logger.info(f"Running dynamics at λ = {self._lambda_val}")
+        _logger.info(f"Running dynamics at {lam_sym} = {self._lambda_val}")
 
         if self._config.checkpoint_frequency.value() > 0.0:
             ### Calc number of blocks and remainder (surely there's a better way?)###
@@ -343,7 +348,7 @@ class Dynamics:
                             df.iloc[-int(energy_per_block) :],
                         )
                     _logger.info(
-                        f"Finished block {x+1} of {num_blocks} for λ = {self._lambda_val}"
+                        f"Finished block {x+1} of {num_blocks} for {lam_sym} = {self._lambda_val}"
                     )
                 except:
                     raise
