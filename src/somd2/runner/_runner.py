@@ -21,7 +21,7 @@
 
 __all__ = ["Runner"]
 
-import os as _os
+import platform as _platform
 from sire import stream as _stream
 from sire.system import System as _System
 
@@ -31,7 +31,7 @@ from ..io import dict_to_yaml as _dict_to_yaml
 
 from somd2 import _logger
 
-if _os.platform == "win32":
+if _platform == "win32":
     lam_sym = "lambda"
 else:
     lam_sym = "λ"

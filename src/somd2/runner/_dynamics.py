@@ -20,7 +20,7 @@
 #####################################################################
 
 __all__ = ["Dynamics"]
-import os as _os
+import platform as _platform
 from pathlib import Path as _Path
 
 from ..config import Config as _Config
@@ -29,7 +29,7 @@ from ..io import parquet_append as _parquet_append
 
 from somd2 import _logger
 
-if _os.platform == "win32":
+if _platform == "win32":
     lam_sym = "lambda"
 else:
     lam_sym = "λ"
