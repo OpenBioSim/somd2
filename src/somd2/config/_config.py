@@ -68,6 +68,8 @@ class Config:
 
     def __init__(
         self,
+        log_level="info",
+        log_file=None,
         runtime="1ns",
         timestep="4fs",
         temperature="300K",
@@ -98,8 +100,6 @@ class Config:
         output_directory="output",
         restart=False,
         write_config=True,
-        log_level="info",
-        log_file=None,
         supress_overwrite_warning=False,
     ):
         """
@@ -208,7 +208,15 @@ class Config:
 
         log_file: str
             Name of log file, will be saved in output directory.
+
+        supress_overwrite_warning: bool
+            Whether to supress the warning when overwriting files in the output directory.
         """
+
+        # Setup logger before doing anything else
+        self.log_level = log_level
+        self.log_file = log_file
+        self.output_directory = output_directory
 
         self.runtime = runtime
         self.temperature = temperature
@@ -238,10 +246,9 @@ class Config:
         self.max_gpus = max_gpus
         self.run_parallel = run_parallel
         self.restart = restart
-        self.output_directory = output_directory
+
         self.write_config = write_config
-        self.log_level = log_level
-        self.log_file = log_file
+
         self.supress_overwrite_warning = supress_overwrite_warning
 
     def __str__(self):
@@ -880,6 +887,10 @@ class Config:
     def restart(self, restart):
         if not isinstance(restart, bool):
             raise ValueError("'restart' must be of type 'bool'")
+        if not restart and self.directory_existed:
+            _logger.warning(
+                f"Output directory {self.output_directory} already exists files may be overwritten"
+            )
         self._restart = restart
 
     @property
@@ -888,6 +899,7 @@ class Config:
 
     @output_directory.setter
     def output_directory(self, output_directory):
+        self.cirectory_existed = False
         if not isinstance(output_directory, _Path):
             try:
                 output_directory = _Path(output_directory)
@@ -900,10 +912,12 @@ class Config:
                 raise ValueError(
                     f"Output directory {output_directory} does not exist and cannot be created"
                 )
-        elif not self.restart:
-            _logger.warning(
-                f"Output directory {output_directory} already exists files may be overwritten"
-            )
+        else:
+            self.directory_existed = True
+        if self.log_file is not None:
+            # Can now add the log file
+            _logger.add(output_directory / self.log_file, level=self.log_level.upper())
+            _logger.debug(f"Logging to {output_directory / self.log_file}")
         self._output_directory = output_directory
 
     @property
@@ -929,6 +943,11 @@ class Config:
             raise ValueError(
                 f"Log level not recognised. Valid log levels are: {', '.join(self._choices['log_level'])}"
             )
+        # Do logging setup here for use in the rest of the ocnfig and all other modules.
+        import sys
+
+        _logger.remove()
+        _logger.add(sys.stderr, level=log_level.upper(), enqueue=True)
         self._log_level = log_level
 
     @property
@@ -939,6 +958,7 @@ class Config:
     def log_file(self, log_file):
         if log_file is not None and not isinstance(log_file, str):
             raise TypeError("'log_file' must be of type 'str'")
+        # Can't add the logfile to the logger here as we don't know the output directory yet.
         self._log_file = log_file
 
     @property

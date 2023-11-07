@@ -68,3 +68,24 @@ def test_dynamics_options():
         assert config_inp.integrator.lower().replace(
             "_", ""
         ) == d.integrator().__class__.__name__.lower().replace("integrator", "")
+
+
+def test_logfile_creation():
+    # Test that the logfile is created by either the initialisation of the runner or of a config
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Load the demo stream file.
+        mols = sr.load(sr.expand(sr.tutorial_url, "merged_molecule.s3"))
+        from pathlib import Path
+
+        # Instantiate a runner using the default config.
+        # (All default options, other than platform="cpu".)
+        config = Config(output_directory=tmpdir, log_file="test.log")
+        assert config.log_file is not None
+        assert Path.exists(config.output_directory / config.log_file)
+        Path.unlink(config.output_directory / config.log_file)
+
+        # Instantiate a runner using the default config.
+        # (All default options, other than platform="cpu".)
+        runner = Runner(mols, Config(output_directory=tmpdir, log_file="test.log"))
+        assert runner._config.log_file is not None
+        assert Path.exists(runner._config.output_directory / runner._config.log_file)
