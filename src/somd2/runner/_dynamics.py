@@ -332,6 +332,11 @@ class Dynamics:
                             filepath=self._config.output_directory,
                             filename=self._filenames["energy_traj"],
                         )
+                        # Also want to add the simulation config to the
+                        # system properties once a block has been succsessfully run.
+                        self._system.set_property(
+                            "config", self._config.as_dict(sire_compatible=True)
+                        )
                     else:
                         _parquet_append(
                             f,

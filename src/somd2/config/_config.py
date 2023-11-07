@@ -300,8 +300,16 @@ class Config:
 
         return Config(**d)
 
-    def as_dict(self):
-        """Convert config object to dictionary"""
+    def as_dict(self, sire_compatible=False):
+        """Convert config object to dictionary
+
+        Parameters
+        ----------
+        sire_compatible: bool
+            Whether to convert to a dictionary compatible with Sire,
+            this simply converts any options with a value of None to a
+            boolean with the value False.
+        """
         from pathlib import PosixPath as _PosixPath
         from sire.cas import LambdaSchedule as _LambdaSchedule
 
@@ -315,6 +323,8 @@ class Config:
                     d[attr_l] = value.to_string()
                 except AttributeError:
                     d[attr_l] = value
+            if value is None and sire_compatible:
+                d[attr_l] = False
 
         # Handle the lambda schedule separately so that we can use simplified
         # keyword options.

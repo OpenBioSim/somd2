@@ -143,7 +143,7 @@ def test_restart():
         with tempfile.TemporaryDirectory() as tmpdir2:
             config_diffoutputdirectory["output_directory"] = tmpdir2
 
-            with pytest.raises(IndexError):
+            with pytest.raises(OSError):
                 runner_outputdirectory = Runner(
                     mols, Config(**config_diffoutputdirectory)
                 )

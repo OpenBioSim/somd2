@@ -126,18 +126,6 @@ class Runner:
         if self._config.restart:
             self._verify_restart_config()
 
-        # Setup proper logging level
-        import sys
-
-        _logger.remove()
-        _logger.add(sys.stderr, level=self._config.log_level.upper(), enqueue=True)
-        if self._config.log_file is not None:
-            _logger.add(
-                self._config.output_directory / self._config.log_file,
-                level=self._config.log_level.upper(),
-                enqueue=True,
-            )
-
         # Check the output directories and create names of output files.
         self._check_directory()
 
@@ -250,14 +238,28 @@ class Runner:
             return config_files[-1]
 
         try:
-            last_config = get_last_config(self._config.output_directory)
-        except IndexError:
-            raise IndexError(
-                f"No config files found in {self._config.output_directory}"
+            last_config_file = get_last_config(self._config.output_directory)
+            with open(self._config.output_directory / last_config_file) as file:
+                _logger.debug(f"Opening config file {last_config_file}")
+                last_config = _yaml.safe_load(file)
+        except:
+            _logger.info(
+                f"""No config files found in {self._config.output_directory},
+                attempting to retrieve config from lambda = 0 checkpoint file."""
             )
-        with open(self._config.output_directory / last_config) as file:
-            _logger.debug(f"Opening config file {last_config}")
-            config = _yaml.safe_load(file)
+            try:
+                system_temp = _stream.load(
+                    str(self._config.output_directory / "checkpoint_0.s3")
+                )
+            except:
+                _logger.error(
+                    f"Unable to load checkpoint file from {self._config.output_directory}."
+                )
+                raise
+            else:
+                last_config = dict(system_temp.property("config"))
+                del system_temp
+
         # Define the subset of settings that are allowed to change after restart
         allowed_diffs = [
             "runtime",
@@ -283,14 +285,14 @@ class Runner:
             "log_file",
             "supress_overwrite_warning",
         ]
-        for key in config.keys():
+        for key in last_config.keys():
             if key not in allowed_diffs:
                 _logger.debug(f"Checking {key}")
                 _logger.debug(
-                    f"""old value: {config[key]}
+                    f"""old value: {last_config[key]}
                                   new value: {self._config.as_dict()[key]}"""
                 )
-                if config[key] != self._config.as_dict()[key]:
+                if last_config[key] != self._config.as_dict()[key]:
                     raise ValueError(
                         f"{key} has changed since the last run. This is not allowed when using the restart option."
                     )
@@ -624,11 +626,11 @@ class Runner:
         if self._config.restart:
             acc_time = system.time()
             if acc_time > self._config.runtime - self._config.timestep:
-                _logger.success(f"Lambda = {lambda_value} already complete. Skipping.")
+                _logger.success(f"λ = {lambda_value} already complete. Skipping.")
                 return True
             else:
                 _logger.debug(
-                    f"Restarting lambda = {lambda_value} at time {acc_time}, time remaining = {self._config.runtime - acc_time}"
+                    f"Restarting λ = {lambda_value} at time {acc_time}, time remaining = {self._config.runtime - acc_time}"
                 )
         # GPU platform.
         if self._is_gpu:
