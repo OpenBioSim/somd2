@@ -31,7 +31,7 @@ from ..io import dict_to_yaml as _dict_to_yaml
 
 from somd2 import _logger
 
-if _platform == "win32":
+if _platform.system() == "Windows":
     lam_sym = "lambda"
 else:
     lam_sym = "λ"

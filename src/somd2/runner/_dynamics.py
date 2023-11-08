@@ -29,7 +29,7 @@ from ..io import parquet_append as _parquet_append
 
 from somd2 import _logger
 
-if _platform == "win32":
+if _platform.system() == "Windows":
     lam_sym = "lambda"
 else:
     lam_sym = "λ"
