@@ -257,9 +257,8 @@ class Runner:
                     str(self._config.output_directory / "checkpoint_0.s3")
                 )
             except:
-                _logger.error(
-                    f"Unable to load checkpoint file from {self._config.output_directory}."
-                )
+                expdir = self._config.output_directory / "checkpoint_0.s3"
+                _logger.error(f"Unable to load checkpoint file from {expdir}.")
                 raise
             else:
                 last_config = dict(system_temp.property("config"))

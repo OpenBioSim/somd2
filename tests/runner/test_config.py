@@ -82,9 +82,11 @@ def test_logfile_creation():
         config = Config(output_directory=tmpdir, log_file="test.log")
         assert config.log_file is not None
         assert Path.exists(config.output_directory / config.log_file)
+        del config
 
         # Instantiate a runner using the default config.
         # (All default options, other than platform="cpu".)
         runner = Runner(mols, Config(output_directory=tmpdir, log_file="test1.log"))
         assert runner._config.log_file is not None
         assert Path.exists(runner._config.output_directory / runner._config.log_file)
+        del runner
