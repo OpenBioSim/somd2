@@ -74,9 +74,9 @@ def test_dynamics_options():
 
 
 # Skip on windows due to file permission issues
-# @pytest.mark.skipif(
-#    platform.system() == "Windows", reason="File permission issues on Windows"
-# )
+@pytest.mark.skipif(
+    platform.system() == "Windows", reason="File permission issues on Windows"
+)
 def test_logfile_creation():
     # Test that the logfile is created by either the initialisation of the runner or of a config
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -89,10 +89,9 @@ def test_logfile_creation():
         config = Config(output_directory=tmpdir, log_file="test.log")
         assert config.log_file is not None
         assert Path.exists(config.output_directory / config.log_file)
-        """
+
         # Instantiate a runner using the default config.
         # (All default options, other than platform="cpu".)
         runner = Runner(mols, Config(output_directory=tmpdir, log_file="test1.log"))
         assert runner._config.log_file is not None
         assert Path.exists(runner._config.output_directory / runner._config.log_file)
-        """
