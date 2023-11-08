@@ -4,6 +4,9 @@ import sire as sr
 from somd2.config import Config
 from somd2.runner import Runner
 
+import platform
+import pytest
+
 
 def test_dynamics_options():
     """Validate that dynamics options are set correctly."""
@@ -70,6 +73,10 @@ def test_dynamics_options():
         ) == d.integrator().__class__.__name__.lower().replace("integrator", "")
 
 
+# Skip on windows due to file permission issues
+@pytest.mark.skipif(
+    platform.system() == "Windows", reason="File permission issues on Windows"
+)
 def test_logfile_creation():
     # Test that the logfile is created by either the initialisation of the runner or of a config
     with tempfile.TemporaryDirectory() as tmpdir:
