@@ -1,6 +1,6 @@
 import tempfile
 import sire as sr
-
+import somd2
 from somd2.config import Config
 from somd2.runner import Runner
 
@@ -74,9 +74,9 @@ def test_dynamics_options():
 
 
 # Skip on windows due to file permission issues
-@pytest.mark.skipif(
-    platform.system() == "Windows", reason="File permission issues on Windows"
-)
+# @pytest.mark.skipif(
+#    platform.system() == "Windows", reason="File permission issues on Windows"
+# )
 def test_logfile_creation():
     # Test that the logfile is created by either the initialisation of the runner or of a config
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -95,3 +95,5 @@ def test_logfile_creation():
         runner = Runner(mols, Config(output_directory=tmpdir, log_file="test1.log"))
         assert runner._config.log_file is not None
         assert Path.exists(runner._config.output_directory / runner._config.log_file)
+
+        somd2._logger.remove()
