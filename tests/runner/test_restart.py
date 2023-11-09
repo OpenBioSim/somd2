@@ -177,3 +177,30 @@ def test_restart():
 
         with pytest.raises(ValueError):
             runner_swapendstates = Runner(mols, Config(**config_diffswapendstates))
+
+        # Need to test restart from sire checkpoint file
+        # this needs to be done last as it requires unlinking the config files
+        for file in Path(tmpdir).glob("*.yaml"):
+            file.unlink()
+
+        # This should work as the config is read from the lambda=0 checkpoint file
+        runner_noconfig = Runner(mols, Config(**config_new))
+
+        # remove config again
+        for file in Path(tmpdir).glob("*.yaml"):
+            file.unlink()
+
+        # Load the checkpoint file using sire and change the pressure option
+        sire_checkpoint = sr.stream.load(str(Path(tmpdir) / "checkpoint_0.s3"))
+        cfg = sire_checkpoint.property("config")
+        cfg["pressure"] = "0.5 atm"
+        sire_checkpoint.set_property("config", cfg)
+        sr.stream.save(sire_checkpoint, str(Path(tmpdir) / "checkpoint_0.s3"))
+
+        # Load the new checkpoint file and make sure the restart fails
+        with pytest.raises(ValueError):
+            runner_badconfig = Runner(mols, Config(**config_new))
+
+
+if __name__ == "__main__":
+    test_restart()

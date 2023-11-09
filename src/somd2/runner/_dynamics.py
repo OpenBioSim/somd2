@@ -338,7 +338,7 @@ class Dynamics:
                             filename=self._filenames["energy_traj"],
                         )
                         # Also want to add the simulation config to the
-                        # system properties once a block has been succsessfully run.
+                        # system properties once a block has been successfully run.
                         self._system.set_property(
                             "config", self._config.as_dict(sire_compatible=True)
                         )

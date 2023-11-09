@@ -221,48 +221,12 @@ class Runner:
                 file.unlink()
         self._fnames = fnames
 
-    def _verify_restart_config(self):
-        """
-        Verify that the config file matches the config file used to create the
-        checkpoint file.
-        """
-        import yaml as _yaml
-
-        def get_last_config(output_directory):
-            """
-            Returns the last config file in the output directory.
-            """
-            import os as _os
-
-            config_files = [
-                file
-                for file in _os.listdir(output_directory)
-                if file.endswith(".yaml") and file.startswith("config")
-            ]
-            config_files.sort()
-            return config_files[-1]
-
-        try:
-            last_config_file = get_last_config(self._config.output_directory)
-            with open(self._config.output_directory / last_config_file) as file:
-                _logger.debug(f"Opening config file {last_config_file}")
-                last_config = _yaml.safe_load(file)
-        except:
-            _logger.info(
-                f"""No config files found in {self._config.output_directory},
-                attempting to retrieve config from lambda = 0 checkpoint file."""
-            )
-            try:
-                system_temp = _stream.load(
-                    str(self._config.output_directory / "checkpoint_0.s3")
-                )
-            except:
-                expdir = self._config.output_directory / "checkpoint_0.s3"
-                _logger.error(f"Unable to load checkpoint file from {expdir}.")
-                raise
-            else:
-                last_config = dict(system_temp.property("config"))
-                del system_temp
+    @staticmethod
+    def _compare_configs(config1, config2):
+        if not isinstance(config1, dict):
+            raise TypeError("'config1' must be of type 'dict'")
+        if not isinstance(config2, dict):
+            raise TypeError("'config2' must be of type 'dict'")
 
         # Define the subset of settings that are allowed to change after restart
         allowed_diffs = [
@@ -288,18 +252,66 @@ class Runner:
             "log_level",
             "log_file",
             "supress_overwrite_warning",
+            "xtra_args",
         ]
-        for key in last_config.keys():
+        for key in config1.keys():
             if key not in allowed_diffs:
-                _logger.debug(f"Checking {key}")
-                _logger.debug(
-                    f"""old value: {last_config[key]}
-                                  new value: {self._config.as_dict()[key]}"""
-                )
-                if last_config[key] != self._config.as_dict()[key]:
+                # If one is from sire and the other is not, will raise error even though they are the same
+                if (config1[key] == None and config2[key] == False) or (
+                    config2[key] == None and config1[key] == False
+                ):
+                    continue
+                elif config1[key] != config2[key]:
                     raise ValueError(
                         f"{key} has changed since the last run. This is not allowed when using the restart option."
                     )
+
+    def _verify_restart_config(self):
+        """
+        Verify that the config file matches the config file used to create the
+        checkpoint file.
+        """
+        import yaml as _yaml
+
+        def get_last_config(output_directory):
+            """
+            Returns the last config file in the output directory.
+            """
+            import os as _os
+
+            config_files = [
+                file
+                for file in _os.listdir(output_directory)
+                if file.endswith(".yaml") and file.startswith("config")
+            ]
+            config_files.sort()
+            return config_files[-1]
+
+        try:
+            last_config_file = get_last_config(self._config.output_directory)
+            with open(self._config.output_directory / last_config_file) as file:
+                _logger.debug(f"Opening config file {last_config_file}")
+                self.last_config = _yaml.safe_load(file)
+            cfg_curr = self._config.as_dict()
+        except:
+            _logger.info(
+                f"""No config files found in {self._config.output_directory},
+                attempting to retrieve config from lambda = 0 checkpoint file."""
+            )
+            try:
+                system_temp = _stream.load(
+                    str(self._config.output_directory / "checkpoint_0.s3")
+                )
+            except:
+                expdir = self._config.output_directory / "checkpoint_0.s3"
+                _logger.error(f"Unable to load checkpoint file from {expdir}.")
+                raise
+            else:
+                self.last_config = dict(system_temp.property("config"))
+                cfg_curr = self._config.as_dict(sire_compatible=True)
+                del system_temp
+
+        self._compare_configs(self.last_config, cfg_curr)
 
     def get_options(self):
         """
@@ -626,6 +638,20 @@ class Runner:
                 _logger.warning(
                     f"Unable to load checkpoint file for {lam_sym}={lambda_value}, starting from scratch."
                 )
+            else:
+                try:
+                    self._compare_configs(
+                        self.last_config, dict(system.property("config"))
+                    )
+                except:
+                    cfg_here = dict(system.property("config"))
+                    _logger.debug(
+                        f"last config: {self.last_config}, current config: {cfg_here}"
+                    )
+                    _logger.error(
+                        f"Config for {lam_sym}={lambda_value} does not match previous config."
+                    )
+                    raise
         else:
             system = self._system.clone()
         if self._config.restart:
