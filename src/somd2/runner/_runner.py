@@ -213,7 +213,7 @@ class Runner:
         if len(deleted) > 0:
             if not self._config.supress_overwrite_warning:
                 _logger.warning(
-                    f"The following files already exist and will be overwritten: {list(set((deleted)))}"
+                    f"The following files already exist and will be overwritten: {list(set((deleted)))} \n"
                 )
                 input("Press Enter to erase and continue...")
             # Loop over files to be deleted, ignoring duplicates
@@ -652,6 +652,16 @@ class Runner:
                         f"Config for {lam_sym}={lambda_value} does not match previous config."
                     )
                     raise
+                else:
+                    lambda_encoded = system.property("lambda")
+                    try:
+                        lambda_encoded == lambda_value
+                    except:
+                        fname = self._fnames[lambda_value]["checkpoint"]
+                        raise ValueError(
+                            f"Lambda value from checkpoint file {fname} ({lambda_encoded}) does not match expected value ({lambda_value})."
+                        )
+
         else:
             system = self._system.clone()
         if self._config.restart:
