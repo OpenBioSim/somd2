@@ -84,14 +84,12 @@ def test_logfile_creation():
         mols = sr.load(sr.expand(sr.tutorial_url, "merged_molecule.s3"))
         from pathlib import Path
 
-        # Instantiate a runner using the default config.
-        # (All default options, other than platform="cpu".)
+        # Test that a logfile is created once a config object is initialised
         config = Config(output_directory=tmpdir, log_file="test.log")
         assert config.log_file is not None
         assert Path.exists(config.output_directory / config.log_file)
 
-        # Instantiate a runner using the default config.
-        # (All default options, other than platform="cpu".)
+        # Test that a logfile is created once a runner object is initialised
         runner = Runner(mols, Config(output_directory=tmpdir, log_file="test1.log"))
         assert runner._config.log_file is not None
         assert Path.exists(runner._config.output_directory / runner._config.log_file)

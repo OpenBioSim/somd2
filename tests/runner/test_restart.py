@@ -81,6 +81,13 @@ def test_restart():
         with pytest.raises(ValueError):
             runner_timestep = Runner(mols, Config(**config_difftimestep))
 
+        config_difftemperature = config_new.copy()
+        config_difftemperature["runtime"] = "36fs"
+        config_difftemperature["temperature"] = "200K"
+
+        with pytest.raises(ValueError):
+            runner_temperature = Runner(mols, Config(**config_difftemperature))
+
         config_diffscalefactor = config_new.copy()
         config_diffscalefactor["runtime"] = "36fs"
         config_diffscalefactor["charge_scale_factor"] = 0.5

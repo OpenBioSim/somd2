@@ -30,11 +30,12 @@ from ..io import dataframe_to_parquet as _dataframe_to_parquet
 from ..io import dict_to_yaml as _dict_to_yaml
 
 from somd2 import _logger
+import platform as _platform
 
 if _platform.system() == "Windows":
-    lam_sym = "lambda"
+    _lam_sym = "lambda"
 else:
-    lam_sym = "λ"
+    _lam_sym = "λ"
 
 
 class Runner:
@@ -232,7 +233,6 @@ class Runner:
         allowed_diffs = [
             "runtime",
             "restart",
-            "temperature",
             "minimise",
             "max_threads",
             "equilibration_time",
@@ -252,7 +252,6 @@ class Runner:
             "log_level",
             "log_file",
             "supress_overwrite_warning",
-            "xtra_args",
         ]
         for key in config1.keys():
             if key not in allowed_diffs:
@@ -472,7 +471,7 @@ class Runner:
                 has_space=self._has_space,
             )
         except:
-            _logger.warning(f"System creation at {lam_sym} = {lambda_value} failed")
+            _logger.warning(f"System creation at {_lam_sym} = {lambda_value} failed")
             raise
 
     def _cleanup_simulation(self):
@@ -512,17 +511,17 @@ class Runner:
                     threads_per_worker = (
                         self._config.max_threads // self._config.num_lambda
                     )
-                self._config.extra_args = {"threads": threads_per_worker}
+                self._config._extra_args = {"threads": threads_per_worker}
 
             # (Multi-)GPU platform.
             elif self._is_gpu:
                 self.max_workers = len(self._gpu_pool)
-                self._config.extra_args = {}
+                self._config._extra_args = {}
 
             # All other platforms.
             else:
                 self._max_workers = 1
-                self._config.extra_args = {}
+                self._config._extra_args = {}
 
             import concurrent.futures as _futures
 
@@ -539,7 +538,7 @@ class Runner:
                             result = False
 
                             _logger.error(
-                                f"Exception raised for {lam_sym} = {lambda_value}: {e}"
+                                f"Exception raised for {_lam_sym} = {lambda_value}: {e}"
                             )
                         with self._lock:
                             results.append(result)
@@ -600,8 +599,8 @@ class Runner:
                     return df, lambda_grad, speed
                 except Exception as e:
                     _logger.warning(
-                        f"Minimisation/dynamics at {lam_sym} = {lambda_value} failed with the "
-                        f"following exception {e}, trying again with minimsation at {lam_sym} = 0."
+                        f"Minimisation/dynamics at {_lam_sym} = {lambda_value} failed with the "
+                        f"following exception {e}, trying again with minimsation at {_lam_sym} = 0."
                     )
                     try:
                         df = sim._run(lambda_minimisation=0.0)
@@ -610,8 +609,8 @@ class Runner:
                         return df, lambda_grad, speed
                     except Exception as e:
                         _logger.error(
-                            f"Minimisation/dynamics at {lam_sym} = {lambda_value} failed, even after "
-                            f"minimisation at {lam_sym} = 0. The following warning was raised: {e}."
+                            f"Minimisation/dynamics at {_lam_sym} = {lambda_value} failed, even after "
+                            f"minimisation at {_lam_sym} = 0. The following warning was raised: {e}."
                         )
                         raise
             else:
@@ -622,7 +621,7 @@ class Runner:
                     return df, lambda_grad, speed
                 except Exception as e:
                     _logger.error(
-                        f"Dynamics at {lam_sym} = {lambda_value} failed. The following warning was "
+                        f"Dynamics at {_lam_sym} = {lambda_value} failed. The following warning was "
                         f"raised: {e}. This may be due to a lack of minimisation."
                     )
 
@@ -636,7 +635,7 @@ class Runner:
                 ).clone()
             except:
                 _logger.warning(
-                    f"Unable to load checkpoint file for {lam_sym}={lambda_value}, starting from scratch."
+                    f"Unable to load checkpoint file for {_lam_sym}={lambda_value}, starting from scratch."
                 )
             else:
                 try:
@@ -649,7 +648,7 @@ class Runner:
                         f"last config: {self.last_config}, current config: {cfg_here}"
                     )
                     _logger.error(
-                        f"Config for {lam_sym}={lambda_value} does not match previous config."
+                        f"Config for {_lam_sym}={lambda_value} does not match previous config."
                     )
                     raise
                 else:
@@ -668,12 +667,12 @@ class Runner:
             acc_time = system.time()
             if acc_time > self._config.runtime - self._config.timestep:
                 _logger.success(
-                    f"{lam_sym} = {lambda_value} already complete. Skipping."
+                    f"{_lam_sym} = {lambda_value} already complete. Skipping."
                 )
                 return True
             else:
                 _logger.debug(
-                    f"Restarting {lam_sym} = {lambda_value} at time {acc_time}, time remaining = {self._config.runtime - acc_time}"
+                    f"Restarting {_lam_sym} = {lambda_value} at time {acc_time}, time remaining = {self._config.runtime - acc_time}"
                 )
         # GPU platform.
         if self._is_gpu:
@@ -683,12 +682,12 @@ class Runner:
                     self._remove_gpu_from_pool(gpu_num)
                     if lambda_value is not None:
                         _logger.info(
-                            f"Running {lam_sym} = {lambda_value} on GPU {gpu_num}"
+                            f"Running {_lam_sym} = {lambda_value} on GPU {gpu_num}"
                         )
             # Assumes that device for non-parallel GPU jobs is 0
             else:
                 gpu_num = 0
-                _logger.info("Running {lam_sym} = {lambda_value} on GPU 0")
+                _logger.info("Running {_lam_sym} = {lambda_value} on GPU 0")
             self._initialise_simulation(system, lambda_value, device=gpu_num)
             try:
                 df, lambda_grad, speed = _run(self._sim)
@@ -705,7 +704,7 @@ class Runner:
 
         # All other platforms.
         else:
-            _logger.info(f"Running {lam_sym} = {lambda_value}")
+            _logger.info(f"Running {_lam_sym} = {lambda_value}")
 
             self._initialise_simulation(system, lambda_value)
             try:
@@ -730,5 +729,5 @@ class Runner:
             filename=self._fnames[lambda_value]["energy_traj"],
         )
         del system
-        _logger.success(f"{lam_sym} = {lambda_value} complete")
+        _logger.success(f"{_lam_sym} = {lambda_value} complete")
         return True

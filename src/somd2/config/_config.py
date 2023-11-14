@@ -198,7 +198,7 @@ class Config:
             Path to a directory to store output files.
 
         restart: bool
-            Whether to restart from a previous simulation - files found in {output-directory}.
+            Whether to restart from a previous simulation - files found in `output-directory`.
 
         write_config: bool
             Whether to write the configuration options to a YAML file in the output directory.
@@ -319,6 +319,8 @@ class Config:
 
         d = {}
         for attr, value in self.__dict__.items():
+            if attr.startswith("_extra") or attr.startswith("extra"):
+                continue
             attr_l = attr[1:]
             if isinstance(value, _Path):
                 d[attr_l] = str(value)
@@ -913,7 +915,6 @@ class Config:
 
     @output_directory.setter
     def output_directory(self, output_directory):
-        self.cirectory_existed = False
         if not isinstance(output_directory, _Path):
             try:
                 output_directory = _Path(output_directory)

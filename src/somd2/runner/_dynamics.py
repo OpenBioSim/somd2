@@ -28,11 +28,9 @@ from ..io import dataframe_to_parquet as _dataframe_to_parquet
 from ..io import parquet_append as _parquet_append
 
 from somd2 import _logger
+import platform as _platform
 
-if _platform.system() == "Windows":
-    lam_sym = "lambda"
-else:
-    lam_sym = "λ"
+from ._runner import _lam_sym
 
 
 class Dynamics:
@@ -161,7 +159,7 @@ class Dynamics:
             pressure = None
 
         try:
-            map = self._config.extra_args
+            map = self._config._extra_args
         except:
             map = None
 
@@ -196,7 +194,7 @@ class Dynamics:
             lambda_val.
         """
         if lambda_min is None:
-            _logger.info(f"Minimising at {lam_sym} = {self._lambda_val}")
+            _logger.info(f"Minimising at {_lam_sym} = {self._lambda_val}")
             try:
                 m = self._system.minimisation(
                     cutoff_type=self._config.cutoff_type,
@@ -204,14 +202,14 @@ class Dynamics:
                     lambda_value=self._lambda_val,
                     platform=self._config.platform,
                     vacuum=not self._has_space,
-                    map=self._config.extra_args,
+                    map=self._config._extra_args,
                 )
                 m.run()
                 self._system = m.commit()
             except:
                 raise
         else:
-            _logger.info(f"Minimising at {lam_sym} = {lambda_min}")
+            _logger.info(f"Minimising at {_lam_sym} = {lambda_min}")
             try:
                 m = self._system.minimisation(
                     cutoff_type=self._config.cutoff_type,
@@ -219,7 +217,7 @@ class Dynamics:
                     lambda_value=lambda_min,
                     platform=self._config.platform,
                     vacuum=not self._has_space,
-                    map=self._config.extra_args,
+                    map=self._config._extra_args,
                 )
                 m.run()
                 self._system = m.commit()
@@ -234,7 +232,7 @@ class Dynamics:
         Currently just runs dynamics without any saving
         """
 
-        _logger.info(f"Equilibrating at {lam_sym} = {self._lambda_val}")
+        _logger.info(f"Equilibrating at {_lam_sym} = {self._lambda_val}")
         self._setup_dynamics(equilibration=True)
         self._dyn.run(
             self._config.equilibration_time,
@@ -287,7 +285,7 @@ class Dynamics:
         else:
             lam_arr = self._lambda_array + self._lambda_grad
 
-        _logger.info(f"Running dynamics at {lam_sym} = {self._lambda_val}")
+        _logger.info(f"Running dynamics at {_lam_sym} = {self._lambda_val}")
 
         if self._config.checkpoint_frequency.value() > 0.0:
             ### Calc number of blocks and remainder (surely there's a better way?)###
@@ -342,13 +340,15 @@ class Dynamics:
                         self._system.set_property(
                             "config", self._config.as_dict(sire_compatible=True)
                         )
+                        # Finally, encode lambda value in to properties.
+                        self._system.set_property("lambda", self._lambda_val)
                     else:
                         _parquet_append(
                             f,
                             df.iloc[-int(energy_per_block) :],
                         )
                     _logger.info(
-                        f"Finished block {x+1} of {num_blocks} for {lam_sym} = {self._lambda_val}"
+                        f"Finished block {x+1} of {num_blocks} for {_lam_sym} = {self._lambda_val}"
                     )
                 except:
                     raise
