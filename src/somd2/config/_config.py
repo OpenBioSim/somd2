@@ -903,10 +903,6 @@ class Config:
     def restart(self, restart):
         if not isinstance(restart, bool):
             raise ValueError("'restart' must be of type 'bool'")
-        if not restart and self.directory_existed:
-            _logger.warning(
-                f"Output directory {self.output_directory} already exists files may be overwritten"
-            )
         self._restart = restart
 
     @property
@@ -927,8 +923,6 @@ class Config:
                 raise ValueError(
                     f"Output directory {output_directory} does not exist and cannot be created"
                 )
-        else:
-            self.directory_existed = True
         if self.log_file is not None:
             # Can now add the log file
             _logger.add(output_directory / self.log_file, level=self.log_level.upper())
