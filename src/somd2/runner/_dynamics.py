@@ -20,7 +20,7 @@
 #####################################################################
 
 __all__ = ["Dynamics"]
-
+import platform as _platform
 from pathlib import Path as _Path
 
 from ..config import Config as _Config
@@ -28,6 +28,9 @@ from ..io import dataframe_to_parquet as _dataframe_to_parquet
 from ..io import parquet_append as _parquet_append
 
 from somd2 import _logger
+import platform as _platform
+
+from ._runner import _lam_sym
 
 
 class Dynamics:
@@ -88,11 +91,51 @@ class Dynamics:
             raise TypeError("config must be a Config object")
 
         self._config = config
+        # If resarting, subtract the time already run from the total runtime
+        if self._config.restart:
+            self._config.runtime = str(self._config.runtime - self._system.time())
         self._lambda_val = lambda_val
         self._lambda_array = lambda_array
         self._increment = increment
         self._device = device
         self._has_space = has_space
+        self._filenames = self.create_filenames(
+            self._lambda_array,
+            self._lambda_val,
+            self._config.output_directory,
+            self._config.restart,
+        )
+
+    @staticmethod
+    def create_filenames(lambda_array, lambda_value, output_directory, restart=False):
+        # Create incremental file - used for writing trajectory files
+        def increment_filename(base_filename, suffix):
+            file_number = 0
+            file_path = _Path(output_directory)
+            while True:
+                filename = (
+                    f"{base_filename}_{file_number}.{suffix}"
+                    if file_number > 0
+                    else f"{base_filename}.{suffix}"
+                )
+                full_path = file_path / filename
+                if not full_path.exists():
+                    return filename
+                file_number += 1
+
+        if lambda_value not in lambda_array:
+            raise ValueError("lambda_value not in lambda_array")
+        filenames = {}
+        index = lambda_array.index(lambda_value)
+        filenames["checkpoint"] = f"checkpoint_{index}.s3"
+        filenames["energy_traj"] = f"energy_traj_{index}.parquet"
+        if restart:
+            filenames["trajectory"] = increment_filename(f"traj_{index}", "dcd")
+            filenames["config"] = increment_filename("config", "yaml")
+        else:
+            filenames["trajectory"] = f"traj_{index}.dcd"
+            filenames["config"] = "config.yaml"
+        return filenames
 
     def _setup_dynamics(self, equilibration=False):
         """
@@ -116,7 +159,7 @@ class Dynamics:
             pressure = None
 
         try:
-            map = self._config.extra_args
+            map = self._config._extra_args
         except:
             map = None
 
@@ -151,7 +194,7 @@ class Dynamics:
             lambda_val.
         """
         if lambda_min is None:
-            _logger.info(f"Minimising at λ = {self._lambda_val}")
+            _logger.info(f"Minimising at {_lam_sym} = {self._lambda_val}")
             try:
                 m = self._system.minimisation(
                     cutoff_type=self._config.cutoff_type,
@@ -159,14 +202,14 @@ class Dynamics:
                     lambda_value=self._lambda_val,
                     platform=self._config.platform,
                     vacuum=not self._has_space,
-                    map=self._config.extra_args,
+                    map=self._config._extra_args,
                 )
                 m.run()
                 self._system = m.commit()
             except:
                 raise
         else:
-            _logger.info(f"Minimising at λ = {lambda_min}")
+            _logger.info(f"Minimising at {_lam_sym} = {lambda_min}")
             try:
                 m = self._system.minimisation(
                     cutoff_type=self._config.cutoff_type,
@@ -174,7 +217,7 @@ class Dynamics:
                     lambda_value=lambda_min,
                     platform=self._config.platform,
                     vacuum=not self._has_space,
-                    map=self._config.extra_args,
+                    map=self._config._extra_args,
                 )
                 m.run()
                 self._system = m.commit()
@@ -189,7 +232,7 @@ class Dynamics:
         Currently just runs dynamics without any saving
         """
 
-        _logger.info(f"Equilibrating at λ = {self._lambda_val}")
+        _logger.info(f"Equilibrating at {_lam_sym} = {self._lambda_val}")
         self._setup_dynamics(equilibration=True)
         self._dyn.run(
             self._config.equilibration_time,
@@ -242,7 +285,7 @@ class Dynamics:
         else:
             lam_arr = self._lambda_array + self._lambda_grad
 
-        _logger.info(f"Running dynamics at λ = {self._lambda_val}")
+        _logger.info(f"Running dynamics at {_lam_sym} = {self._lambda_val}")
 
         if self._config.checkpoint_frequency.value() > 0.0:
             ### Calc number of blocks and remainder (surely there's a better way?)###
@@ -258,9 +301,8 @@ class Dynamics:
             energy_per_block = (
                 self._config.checkpoint_frequency / self._config.energy_frequency
             )
-            sire_checkpoint_name = (
-                _Path(self._config.output_directory)
-                / f"checkpoint_{self._lambda_array.index(self._lambda_val)}.s3"
+            sire_checkpoint_name = str(
+                _Path(self._config.output_directory) / self._filenames["checkpoint"]
             )
             # Run num_blocks dynamics and then run a final block if rem > 0
             for x in range(int(num_blocks)):
@@ -291,15 +333,22 @@ class Dynamics:
                                 "temperature": str(self._config.temperature.value()),
                             },
                             filepath=self._config.output_directory,
-                            filename=f"energy_traj_{self._lambda_array.index(self._lambda_val)}.parquet",
+                            filename=self._filenames["energy_traj"],
                         )
+                        # Also want to add the simulation config to the
+                        # system properties once a block has been successfully run.
+                        self._system.set_property(
+                            "config", self._config.as_dict(sire_compatible=True)
+                        )
+                        # Finally, encode lambda value in to properties.
+                        self._system.set_property("lambda", self._lambda_val)
                     else:
                         _parquet_append(
                             f,
                             df.iloc[-int(energy_per_block) :],
                         )
                     _logger.info(
-                        f"Finished block {x+1} of {num_blocks} for λ = {self._lambda_val}"
+                        f"Finished block {x+1} of {num_blocks} for {_lam_sym} = {self._lambda_val}"
                     )
                 except:
                     raise
@@ -332,15 +381,14 @@ class Dynamics:
             self._system = self._dyn.commit()
 
         if self._config.save_trajectories:
-            traj_filename = (
-                self._config.output_directory
-                / f"traj_{self._lambda_array.index(self._lambda_val)}.dcd"
+            traj_filename = str(
+                self._config.output_directory / self._filenames["trajectory"]
             )
             from sire import save as _save
 
             _save(self._system.trajectory(), traj_filename, format=["DCD"])
         # dump final system to checkpoint file
-        _stream.save(self._system, str(sire_checkpoint_name))
+        _stream.save(self._system, sire_checkpoint_name)
         df = self._system.energy_trajectory(to_alchemlyb=True)
         return df
 

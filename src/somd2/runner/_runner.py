@@ -21,7 +21,7 @@
 
 __all__ = ["Runner"]
 
-
+import platform as _platform
 from sire import stream as _stream
 from sire.system import System as _System
 
@@ -30,6 +30,12 @@ from ..io import dataframe_to_parquet as _dataframe_to_parquet
 from ..io import dict_to_yaml as _dict_to_yaml
 
 from somd2 import _logger
+import platform as _platform
+
+if _platform.system() == "Windows":
+    _lam_sym = "lambda"
+else:
+    _lam_sym = "λ"
 
 
 class Runner:
@@ -119,23 +125,22 @@ class Runner:
         if self._config.h_mass_factor > 1:
             self._repartition_h_mass()
 
-        # Save config whenever 'configure' is called to keep it up to date
-        if self._config.write_config:
-            _dict_to_yaml(self._config.as_dict(), self._config.output_directory)
-
         # Flag whether this is a GPU simulation.
         self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]
 
-        # Setup proper logging level
-        import sys
+        # Need to verify before doing any directory checks
+        if self._config.restart:
+            self._verify_restart_config()
 
-        _logger.remove()
-        _logger.add(sys.stderr, level=self._config.log_level.upper(), enqueue=True)
-        if self._config.log_file is not None:
-            _logger.add(
-                self._config.output_directory / self._config.log_file,
-                level=self._config.log_level.upper(),
-                enqueue=True,
+        # Check the output directories and create names of output files.
+        self._check_directory()
+
+        # Save config whenever 'configure' is called to keep it up to date
+        if self._config.write_config:
+            _dict_to_yaml(
+                self._config.as_dict(),
+                self._config.output_directory,
+                self._fnames[self._lambda_values[0]]["config"],
             )
 
     def __str__(self):
@@ -185,19 +190,166 @@ class Runner:
 
     def _check_directory(self):
         """
-        Check if the output directory has files already present.
-        Paired with the 'overwrite' option.
+        Find the name of the file from which simulations will be started.
+        Paired with the 'restart' option.
         """
-        import os as _os
-        import glob as _glob
+        from pathlib import Path as __Path
+        from ._dynamics import Dynamics
 
-        if self._config.overwrite:
-            return True
-        else:
-            if _glob.glob(_os.path.join(self._config.output_directory, "*.parquet")):
-                return False
+        fnames = {}
+        deleted = []
+        for lambda_value in self._lambda_values:
+            files = Dynamics.create_filenames(
+                self._lambda_values,
+                lambda_value,
+                self._config.output_directory,
+                self._config.restart,
+            )
+            fnames[lambda_value] = files
+            if not self._config.restart:
+                for file in files.values():
+                    fullpath = self._config.output_directory / file
+                    if __Path.exists(fullpath):
+                        deleted.append(fullpath)
+        if len(deleted) > 0:
+            if not self._config.supress_overwrite_warning:
+                _logger.warning(
+                    f"The following files already exist and will be overwritten: {list(set((deleted)))} \n"
+                )
+                input("Press Enter to erase and continue...")
+            # Loop over files to be deleted, ignoring duplicates
+            for file in list(set(deleted)):
+                file.unlink()
+        self._fnames = fnames
+
+    @staticmethod
+    def _compare_configs(config1, config2):
+        if not isinstance(config1, dict):
+            raise TypeError("'config1' must be of type 'dict'")
+        if not isinstance(config2, dict):
+            raise TypeError("'config2' must be of type 'dict'")
+
+        # Define the subset of settings that are allowed to change after restart
+        allowed_diffs = [
+            "runtime",
+            "restart",
+            "minimise",
+            "max_threads",
+            "equilibration_time",
+            "equilibration_timestep",
+            "energy_frequency",
+            "save_trajectory",
+            "frame_frequency",
+            "save_velocities",
+            "checkpoint_frequency",
+            "platform",
+            "max_threads",
+            "max_gpus",
+            "run_parallel",
+            "restart",
+            "save_trajectories",
+            "write_config",
+            "log_level",
+            "log_file",
+            "supress_overwrite_warning",
+        ]
+        for key in config1.keys():
+            if key not in allowed_diffs:
+                # If one is from sire and the other is not, will raise error even though they are the same
+                if (config1[key] == None and config2[key] == False) or (
+                    config2[key] == None and config1[key] == False
+                ):
+                    continue
+                elif config1[key] != config2[key]:
+                    raise ValueError(
+                        f"{key} has changed since the last run. This is not allowed when using the restart option."
+                    )
+
+    def _verify_restart_config(self):
+        """
+        Verify that the config file matches the config file used to create the
+        checkpoint file.
+        """
+        import yaml as _yaml
+
+        def get_last_config(output_directory):
+            """
+            Returns the last config file in the output directory.
+            """
+            import os as _os
+
+            config_files = [
+                file
+                for file in _os.listdir(output_directory)
+                if file.endswith(".yaml") and file.startswith("config")
+            ]
+            config_files.sort()
+            return config_files[-1]
+
+        try:
+            last_config_file = get_last_config(self._config.output_directory)
+            with open(self._config.output_directory / last_config_file) as file:
+                _logger.debug(f"Opening config file {last_config_file}")
+                self.last_config = _yaml.safe_load(file)
+            cfg_curr = self._config.as_dict()
+        except:
+            _logger.info(
+                f"""No config files found in {self._config.output_directory},
+                attempting to retrieve config from lambda = 0 checkpoint file."""
+            )
+            try:
+                system_temp = _stream.load(
+                    str(self._config.output_directory / "checkpoint_0.s3")
+                )
+            except:
+                expdir = self._config.output_directory / "checkpoint_0.s3"
+                _logger.error(f"Unable to load checkpoint file from {expdir}.")
+                raise
             else:
-                return True
+                self.last_config = dict(system_temp.property("config"))
+                cfg_curr = self._config.as_dict(sire_compatible=True)
+                del system_temp
+
+        self._compare_configs(self.last_config, cfg_curr)
+
+    @staticmethod
+    def _systems_are_same(system0, system1):
+        """Check for equivalence between a pair of sire systems.
+
+        Parameters
+        ----------
+        system0: sire.system.System
+            The first system to be compared.
+
+        system1: sire.system.System
+            The second system to be compared.
+        """
+        if not isinstance(system0, _System):
+            raise TypeError("'system0' must be of type 'sire.system.System'")
+        if not isinstance(system1, _System):
+            raise TypeError("'system1' must be of type 'sire.system.System'")
+
+        # Check for matching uids
+        if not system0._system.uid() == system1._system.uid():
+            reason = "uids do not match"
+            return False, reason
+
+        # Check for matching number of molecules
+        if not len(system0.molecules()) == len(system1.molecules()):
+            reason = "number of molecules do not match"
+            return False, reason
+
+        # Check for matching number of residues
+        if not len(system0.residues()) == len(system1.residues()):
+            reason = "number of residues do not match"
+            return False, reason
+
+        # Check for matching number of atoms
+        if not len(system0.atoms()) == len(system1.atoms()):
+            reason = "number of atoms do not match"
+            return False, reason
+
+        return True, None
 
     def get_options(self):
         """
@@ -358,7 +510,7 @@ class Runner:
                 has_space=self._has_space,
             )
         except:
-            _logger.warning(f"System creation at λ = {lambda_value} failed")
+            _logger.warning(f"System creation at {_lam_sym} = {lambda_value} failed")
             raise
 
     def _cleanup_simulation(self):
@@ -398,17 +550,17 @@ class Runner:
                     threads_per_worker = (
                         self._config.max_threads // self._config.num_lambda
                     )
-                self._config.extra_args = {"threads": threads_per_worker}
+                self._config._extra_args = {"threads": threads_per_worker}
 
             # (Multi-)GPU platform.
             elif self._is_gpu:
                 self.max_workers = len(self._gpu_pool)
-                self._config.extra_args = {}
+                self._config._extra_args = {}
 
             # All other platforms.
             else:
                 self._max_workers = 1
-                self._config.extra_args = {}
+                self._config._extra_args = {}
 
             import concurrent.futures as _futures
 
@@ -423,8 +575,9 @@ class Runner:
                             result = job.result()
                         except Exception as e:
                             result = False
+
                             _logger.error(
-                                f"Exception raised for λ = {lambda_value}: {e}"
+                                f"Exception raised for {_lam_sym} = {lambda_value}: {e}"
                             )
                         with self._lock:
                             results.append(result)
@@ -485,8 +638,8 @@ class Runner:
                     return df, lambda_grad, speed
                 except Exception as e:
                     _logger.warning(
-                        f"Minimisation/dynamics at λ = {lambda_value} failed with the "
-                        f"following exception {e}, trying again with minimsation at λ = 0."
+                        f"Minimisation/dynamics at {_lam_sym} = {lambda_value} failed with the "
+                        f"following exception {e}, trying again with minimsation at {_lam_sym} = 0."
                     )
                     try:
                         df = sim._run(lambda_minimisation=0.0)
@@ -495,8 +648,8 @@ class Runner:
                         return df, lambda_grad, speed
                     except Exception as e:
                         _logger.error(
-                            f"Minimisation/dynamics at λ = {lambda_value} failed, even after "
-                            f"minimisation at λ = 0. The following warning was raised: {e}."
+                            f"Minimisation/dynamics at {_lam_sym} = {lambda_value} failed, even after "
+                            f"minimisation at {_lam_sym} = 0. The following warning was raised: {e}."
                         )
                         raise
             else:
@@ -507,12 +660,64 @@ class Runner:
                     return df, lambda_grad, speed
                 except Exception as e:
                     _logger.error(
-                        f"Dynamics at λ = {lambda_value} failed. The following warning was "
+                        f"Dynamics at {_lam_sym} = {lambda_value} failed. The following warning was "
                         f"raised: {e}. This may be due to a lack of minimisation."
                     )
 
-        system = self._system.clone()
+        if self._config.restart:
+            try:
+                system = _stream.load(
+                    str(
+                        self._config.output_directory
+                        / self._fnames[lambda_value]["checkpoint"]
+                    )
+                ).clone()
+            except:
+                _logger.warning(
+                    f"Unable to load checkpoint file for {_lam_sym}={lambda_value}, starting from scratch."
+                )
+            else:
+                aresame, reason = self._systems_are_same(self._system, system)
+                if not aresame:
+                    raise ValueError(
+                        f"Checkpoint file does not match system for the following reason: {reason}."
+                    )
+                try:
+                    self._compare_configs(
+                        self.last_config, dict(system.property("config"))
+                    )
+                except:
+                    cfg_here = dict(system.property("config"))
+                    _logger.debug(
+                        f"last config: {self.last_config}, current config: {cfg_here}"
+                    )
+                    _logger.error(
+                        f"Config for {_lam_sym}={lambda_value} does not match previous config."
+                    )
+                    raise
+                else:
+                    lambda_encoded = system.property("lambda")
+                    try:
+                        lambda_encoded == lambda_value
+                    except:
+                        fname = self._fnames[lambda_value]["checkpoint"]
+                        raise ValueError(
+                            f"Lambda value from checkpoint file {fname} ({lambda_encoded}) does not match expected value ({lambda_value})."
+                        )
 
+        else:
+            system = self._system.clone()
+        if self._config.restart:
+            acc_time = system.time()
+            if acc_time > self._config.runtime - self._config.timestep:
+                _logger.success(
+                    f"{_lam_sym} = {lambda_value} already complete. Skipping."
+                )
+                return True
+            else:
+                _logger.debug(
+                    f"Restarting {_lam_sym} = {lambda_value} at time {acc_time}, time remaining = {self._config.runtime - acc_time}"
+                )
         # GPU platform.
         if self._is_gpu:
             if self._config.run_parallel:
@@ -520,11 +725,13 @@ class Runner:
                     gpu_num = self._gpu_pool[0]
                     self._remove_gpu_from_pool(gpu_num)
                     if lambda_value is not None:
-                        _logger.info(f"Running λ = {lambda_value} on GPU {gpu_num}")
+                        _logger.info(
+                            f"Running {_lam_sym} = {lambda_value} on GPU {gpu_num}"
+                        )
             # Assumes that device for non-parallel GPU jobs is 0
             else:
                 gpu_num = 0
-                _logger.info("Running λ = {lambda_value} on GPU 0")
+                _logger.info("Running {_lam_sym} = {lambda_value} on GPU 0")
             self._initialise_simulation(system, lambda_value, device=gpu_num)
             try:
                 df, lambda_grad, speed = _run(self._sim)
@@ -541,7 +748,7 @@ class Runner:
 
         # All other platforms.
         else:
-            _logger.info(f"Running λ = {lambda_value}")
+            _logger.info(f"Running {_lam_sym} = {lambda_value}")
 
             self._initialise_simulation(system, lambda_value)
             try:
@@ -550,6 +757,8 @@ class Runner:
                 raise
             self._sim._cleanup()
 
+        # Write final dataframe for the system to the energy trajectory file.
+        # Note that sire s3 checkpoint files contain energy trajectory data, so this works even for restarts.
         _ = _dataframe_to_parquet(
             df,
             metadata={
@@ -561,8 +770,8 @@ class Runner:
                 "temperature": str(self._config.temperature.value()),
             },
             filepath=self._config.output_directory,
-            filename=f"energy_traj_{self._lambda_values.index(lambda_value)}.parquet",
+            filename=self._fnames[lambda_value]["energy_traj"],
         )
         del system
-        _logger.success(f"λ = {lambda_value} complete")
+        _logger.success(f"{_lam_sym} = {lambda_value} complete")
         return True

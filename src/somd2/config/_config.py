@@ -68,6 +68,8 @@ class Config:
 
     def __init__(
         self,
+        log_level="info",
+        log_file=None,
         runtime="1ns",
         timestep="4fs",
         temperature="300K",
@@ -96,9 +98,9 @@ class Config:
         max_gpus=None,
         run_parallel=True,
         output_directory="output",
+        restart=False,
         write_config=True,
-        log_level="info",
-        log_file=None,
+        supress_overwrite_warning=False,
     ):
         """
         Constructor.
@@ -195,6 +197,9 @@ class Config:
         output_directory: str
             Path to a directory to store output files.
 
+        restart: bool
+            Whether to restart from a previous simulation - files found in `output-directory`.
+
         write_config: bool
             Whether to write the configuration options to a YAML file in the output directory.
 
@@ -203,7 +208,15 @@ class Config:
 
         log_file: str
             Name of log file, will be saved in output directory.
+
+        supress_overwrite_warning: bool
+            Whether to supress the warning when overwriting files in the output directory.
         """
+
+        # Setup logger before doing anything else
+        self.log_level = log_level
+        self.log_file = log_file
+        self.output_directory = output_directory
 
         self.runtime = runtime
         self.temperature = temperature
@@ -232,10 +245,11 @@ class Config:
         self.max_threads = max_threads
         self.max_gpus = max_gpus
         self.run_parallel = run_parallel
-        self.output_directory = output_directory
+        self.restart = restart
+
         self.write_config = write_config
-        self.log_level = log_level
-        self.log_file = log_file
+
+        self.supress_overwrite_warning = supress_overwrite_warning
 
     def __str__(self):
         """Return a string representation of this object."""
@@ -268,6 +282,10 @@ class Config:
         """Equality operator."""
         return self.as_dict() == other.as_dict()
 
+    def __del__(self):
+        """Destructor."""
+        _logger.remove()
+
     @staticmethod
     def from_yaml(path):
         """
@@ -286,21 +304,33 @@ class Config:
 
         return Config(**d)
 
-    def as_dict(self):
-        """Convert config object to dictionary"""
-        from pathlib import PosixPath as _PosixPath
+    def as_dict(self, sire_compatible=False):
+        """Convert config object to dictionary
+
+        Parameters
+        ----------
+        sire_compatible: bool
+            Whether to convert to a dictionary compatible with Sire,
+            this simply converts any options with a value of None to a
+            boolean with the value False.
+        """
+        from pathlib import Path as _Path
         from sire.cas import LambdaSchedule as _LambdaSchedule
 
         d = {}
         for attr, value in self.__dict__.items():
+            if attr.startswith("_extra") or attr.startswith("extra"):
+                continue
             attr_l = attr[1:]
-            if isinstance(value, _PosixPath):
+            if isinstance(value, _Path):
                 d[attr_l] = str(value)
             else:
                 try:
                     d[attr_l] = value.to_string()
                 except AttributeError:
                     d[attr_l] = value
+            if value is None and sire_compatible:
+                d[attr_l] = False
 
         # Handle the lambda schedule separately so that we can use simplified
         # keyword options.
@@ -485,9 +515,7 @@ class Config:
                 if lambda_schedule == "standard_morph":
                     self._lambda_schedule = _LambdaSchedule.standard_morph()
                 elif lambda_schedule == "charge_scaled_morph":
-                    self._lambda_schedule = _LambdaSchedule.charge_scaled_morph(
-                        self._charge_scale_factor
-                    )
+                    self._lambda_schedule = _LambdaSchedule.charge_scaled_morph(0.2)
             else:
                 self._lambda_schedule = lambda_schedule
         else:
@@ -868,6 +896,16 @@ class Config:
         self._run_parallel = run_parallel
 
     @property
+    def restart(self):
+        return self._restart
+
+    @restart.setter
+    def restart(self, restart):
+        if not isinstance(restart, bool):
+            raise ValueError("'restart' must be of type 'bool'")
+        self._restart = restart
+
+    @property
     def output_directory(self):
         return self._output_directory
 
@@ -885,6 +923,10 @@ class Config:
                 raise ValueError(
                     f"Output directory {output_directory} does not exist and cannot be created"
                 )
+        if self.log_file is not None:
+            # Can now add the log file
+            _logger.add(output_directory / self.log_file, level=self.log_level.upper())
+            _logger.debug(f"Logging to {output_directory / self.log_file}")
         self._output_directory = output_directory
 
     @property
@@ -910,6 +952,11 @@ class Config:
             raise ValueError(
                 f"Log level not recognised. Valid log levels are: {', '.join(self._choices['log_level'])}"
             )
+        # Do logging setup here for use in the rest of the ocnfig and all other modules.
+        import sys
+
+        _logger.remove()
+        _logger.add(sys.stderr, level=log_level.upper(), enqueue=True)
         self._log_level = log_level
 
     @property
@@ -920,7 +967,18 @@ class Config:
     def log_file(self, log_file):
         if log_file is not None and not isinstance(log_file, str):
             raise TypeError("'log_file' must be of type 'str'")
+        # Can't add the logfile to the logger here as we don't know the output directory yet.
         self._log_file = log_file
+
+    @property
+    def supress_overwrite_warning(self):
+        return self._supress_overwrite_warning
+
+    @supress_overwrite_warning.setter
+    def supress_overwrite_warning(self, supress_overwrite_warning):
+        if not isinstance(supress_overwrite_warning, bool):
+            raise ValueError("'supress_overwrite_warning' must be of type 'bool'")
+        self._supress_overwrite_warning = supress_overwrite_warning
 
     @classmethod
     def _create_parser(cls):
