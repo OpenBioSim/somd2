@@ -313,7 +313,7 @@ class Runner:
         self._compare_configs(self.last_config, cfg_curr)
 
     @staticmethod
-    def systems_are_same(system0, system1):
+    def _systems_are_same(system0, system1):
         """Check for equivalence between a pair of sire systems.
 
         Parameters
@@ -677,7 +677,7 @@ class Runner:
                     f"Unable to load checkpoint file for {_lam_sym}={lambda_value}, starting from scratch."
                 )
             else:
-                aresame, reason = self.systems_are_same(self._system, system)
+                aresame, reason = self._systems_are_same(self._system, system)
                 if not aresame:
                     raise ValueError(
                         f"Checkpoint file does not match system for the following reason: {reason}."
