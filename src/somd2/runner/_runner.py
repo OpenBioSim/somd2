@@ -22,6 +22,7 @@
 __all__ = ["Runner"]
 
 import platform as _platform
+
 from sire import stream as _stream
 from sire.system import System as _System
 
@@ -30,7 +31,6 @@ from ..io import dataframe_to_parquet as _dataframe_to_parquet
 from ..io import dict_to_yaml as _dict_to_yaml
 
 from somd2 import _logger
-import platform as _platform
 
 if _platform.system() == "Windows":
     _lam_sym = "lambda"
