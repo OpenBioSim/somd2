@@ -312,6 +312,45 @@ class Runner:
 
         self._compare_configs(self.last_config, cfg_curr)
 
+    @staticmethod
+    def systems_are_same(system0, system1):
+        """Check for equivalence between a pair of sire systems.
+
+        Parameters
+        ----------
+        system0: sire.system.System
+            The first system to be compared.
+
+        system1: sire.system.System
+            The second system to be compared.
+        """
+        if not isinstance(system0, _System):
+            raise TypeError("'system0' must be of type 'sire.system.System'")
+        if not isinstance(system1, _System):
+            raise TypeError("'system1' must be of type 'sire.system.System'")
+
+        # Check for matching uids
+        if not system0._system.uid() == system1._system.uid():
+            reason = "uids do not match"
+            return False, reason
+
+        # Check for matching number of molecules
+        if not len(system0.molecules()) == len(system1.molecules()):
+            reason = "number of molecules do not match"
+            return False, reason
+
+        # Check for matching number of residues
+        if not len(system0.residues()) == len(system1.residues()):
+            reason = "number of residues do not match"
+            return False, reason
+
+        # Check for matching number of atoms
+        if not len(system0.atoms()) == len(system1.atoms()):
+            reason = "number of atoms do not match"
+            return False, reason
+
+        return True, None
+
     def get_options(self):
         """
         Returns a dictionary of simulation options.
@@ -638,6 +677,11 @@ class Runner:
                     f"Unable to load checkpoint file for {_lam_sym}={lambda_value}, starting from scratch."
                 )
             else:
+                aresame, reason = self.systems_are_same(self._system, system)
+                if not aresame:
+                    raise ValueError(
+                        f"Checkpoint file does not match system for the following reason: {reason}."
+                    )
                 try:
                     self._compare_configs(
                         self.last_config, dict(system.property("config"))
