@@ -116,14 +116,26 @@ class Runner:
             0
         ].mass()
 
-        if not isclose(h_mass.value(), expected_h_mass, rel_tol=1e-3):
-            raise ValueError(
-                "The hydrogen mass in the system is not the expected value of 1.008 g/mol"
+        # Work out the current hydrogen mass factor.
+        h_mass_factor = h_mass.value() / expected_h_mass
+
+        # HMR has already been applied.
+        if not isclose(h_mass_factor, 1.0, rel_tol=1e-5):
+            _logger.info(
+                f"Detected existing hydrogen mass repartioning factor of {h_mass_factor}."
             )
 
-        # Repartition hydrogen masses if required.
-        if self._config.h_mass_factor > 1:
-            self._repartition_h_mass()
+            if not isclose(h_mass_factor, self._config.h_mass_factor, rel_tol=1e-5):
+                _logger.warning(
+                    f"Existing hydrogen mass repartitioning factor of {h_mass_factor} "
+                    f"does not match the requested value of {self._config.h_mass_factor}. "
+                    "Inverting exsting HMR before re-applying new factor."
+                )
+                self._repartition_h_mass(factor=1.0 / h_mass_factor)
+                self._repartition_h_mass(self._config.h_mass_factor)
+
+        else:
+            self._repartition_h_mass(self._config.h_mass_factor)
 
         # Flag whether this is a GPU simulation.
         self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]
@@ -465,21 +477,33 @@ class Runner:
         """
         return [str(devices.index(value)) for value in devices]
 
-    def _repartition_h_mass(self):
+    def _repartition_h_mass(self, factor=1.0):
         """
-        Reprartition hydrogen masses.
+        Repartition hydrogen masses.
+
+        Parameters
+        ----------
+
+        factor: float
+            The factor by which hydrogen masses will be scaled.
         """
+
+        if not isinstance(factor, float):
+            raise TypeError("'factor' must be of type 'float'")
+
+        # Early exit if no repartitioning is required.
+        if factor == 1.0:
+            return
 
         from sire.morph import (
             repartition_hydrogen_masses as _repartition_hydrogen_masses,
         )
 
-        _logger.info(
-            f"Repartitioning hydrogen masses with factor {self._config.h_mass_factor}"
-        )
+        _logger.info(f"Repartitioning hydrogen masses with factor {factor:.5f}")
 
         self._system = _repartition_hydrogen_masses(
-            self._system, mass_factor=self._config.h_mass_factor
+            self._system,
+            mass_factor=factor,
         )
 
     def _initialise_simulation(self, system, lambda_value, device=None):
