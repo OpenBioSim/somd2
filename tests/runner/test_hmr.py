@@ -20,6 +20,3 @@ def test_hmr(ethane_methanol, ethane_methanol_hmr):
 
     # Make sure the HMR factor is 1.0 again.
     assert math.isclose(hmr_factor2, 1.0, abs_tol=1e-4)
-
-
-
