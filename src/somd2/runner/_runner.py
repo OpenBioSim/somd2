@@ -521,7 +521,7 @@ class Runner:
 
         # Early exit if no repartitioning is required.
         if isclose(factor, 1.0, abs_tol=1e-4):
-            return
+            return system
 
         from sire.morph import (
             repartition_hydrogen_masses as _repartition_hydrogen_masses,
