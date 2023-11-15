@@ -1,19 +1,23 @@
+from pathlib import Path
+
 import tempfile
+import pytest
+
+import sire as sr
+
 from somd2.runner import Runner
 from somd2.config import Config
 from somd2.io import *
-from pathlib import Path
-import sire as sr
-import pytest
 
 
-def test_restart():
-    """Validate that a simulation can be run from a checkpoint file,
+@pytest.mark.parametrize("mols", ["ethane_methanol", "ethane_methanol_hmr"])
+def test_restart(mols, request):
+    """
+    Validate that a simulation can be run from a checkpoint file,
     with all trajcetories preserved.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Load the demo stream file.
-        mols = sr.load(sr.expand(sr.tutorial_url, "merged_molecule.s3"))
+        mols = request.getfixturevalue(mols)
 
         config = {
             "runtime": "12fs",
@@ -207,7 +211,3 @@ def test_restart():
         # Load the new checkpoint file and make sure the restart fails
         with pytest.raises(ValueError):
             runner_badconfig = Runner(mols, Config(**config_new))
-
-
-if __name__ == "__main__":
-    test_restart()

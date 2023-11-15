@@ -27,10 +27,10 @@ __all__ = ["Config"]
 
 from openmm import Platform as _Platform
 from pathlib import Path as _Path
-from somd2 import _logger
 
 import sire as _sr
 
+from somd2 import _logger
 
 # List of supported Sire platforms.
 _sire_platforms = _sr.options.Platform.options()
