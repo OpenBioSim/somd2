@@ -105,37 +105,34 @@ class Runner:
             for i in range(0, self._config.num_lambda)
         ]
 
-        from sire.mol import Element
-        from math import isclose
-
-        # Store the expected hydrogen mass.
-        expected_h_mass = Element("H").mass().value()
-
-        # Get the hydrogen mass.
-        h_mass = self._system.molecules("property is_perturbable")["element H"][
-            0
-        ].mass()
-
         # Work out the current hydrogen mass factor.
-        h_mass_factor = h_mass.value() / expected_h_mass
+        h_mass_factor = self._get_h_mass_factor(self._system)
 
         # HMR has already been applied.
-        if not isclose(h_mass_factor, 1.0, rel_tol=1e-5):
+        from math import isclose
+
+        if not isclose(h_mass_factor, 1.0, abs_tol=1e-4):
             _logger.info(
                 f"Detected existing hydrogen mass repartioning factor of {h_mass_factor}."
             )
 
-            if not isclose(h_mass_factor, self._config.h_mass_factor, rel_tol=1e-5):
+            if not isclose(h_mass_factor, self._config.h_mass_factor, abs_tol=1e-4):
                 _logger.warning(
                     f"Existing hydrogen mass repartitioning factor of {h_mass_factor} "
                     f"does not match the requested value of {self._config.h_mass_factor}. "
                     "Inverting exsting HMR before re-applying new factor."
                 )
-                self._repartition_h_mass(factor=1.0 / h_mass_factor)
-                self._repartition_h_mass(self._config.h_mass_factor)
+                self._system = self._repartition_h_mass(
+                    self._system, factor=1.0 / h_mass_factor
+                )
+                self._system = self._repartition_h_mass(
+                    self._system, self._config.h_mass_factor
+                )
 
         else:
-            self._repartition_h_mass(self._config.h_mass_factor)
+            self._system = self._repartition_h_mass(
+                self._system, self._config.h_mass_factor
+            )
 
         # Flag whether this is a GPU simulation.
         self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]
@@ -477,15 +474,49 @@ class Runner:
         """
         return [str(devices.index(value)) for value in devices]
 
-    def _repartition_h_mass(self, factor=1.0):
+    @staticmethod
+    def _get_h_mass_factor(system):
+        """
+        Get the current hydrogen mass factor.
+
+        Parameters
+        ----------
+
+        system : :class: `System <sire.system.System>`
+            The system of interest.
+        """
+
+        from sire.mol import Element
+
+        # Store the expected hydrogen mass.
+        expected_h_mass = Element("H").mass().value()
+
+        # Get the hydrogen mass.
+        h_mass = system.molecules("property is_perturbable")["element H"][0].mass()
+
+        # Work out the current hydrogen mass factor. We round to 3dp due to
+        # the precision of atomic masses loaded from text files.
+        return round(h_mass.value() / expected_h_mass, 3)
+
+    @staticmethod
+    def _repartition_h_mass(system, factor=1.0):
         """
         Repartition hydrogen masses.
 
         Parameters
         ----------
 
-        factor: float
+        system : :class: `System <sire.system.System>`
+            The system to be repartitioned.
+
+        factor :float
             The factor by which hydrogen masses will be scaled.
+
+        Returns
+        -------
+
+        system : :class: `System <sire.system.System>`
+            The repartitioned system.
         """
 
         if not isinstance(factor, float):
@@ -499,10 +530,10 @@ class Runner:
             repartition_hydrogen_masses as _repartition_hydrogen_masses,
         )
 
-        _logger.info(f"Repartitioning hydrogen masses with factor {factor:.5f}")
+        _logger.info(f"Repartitioning hydrogen masses with factor {factor:.3f}")
 
-        self._system = _repartition_hydrogen_masses(
-            self._system,
+        return _repartition_hydrogen_masses(
+            system,
             mass_factor=factor,
         )
 
