@@ -522,8 +522,10 @@ class Runner:
         if not isinstance(factor, float):
             raise TypeError("'factor' must be of type 'float'")
 
+        from math import isclose
+
         # Early exit if no repartitioning is required.
-        if factor == 1.0:
+        if isclose(factor, 1.0, abs_tol=1e-4):
             return
 
         from sire.morph import (
