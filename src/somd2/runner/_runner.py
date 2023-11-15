@@ -66,7 +66,6 @@ class Runner:
 
         platform: str
             The platform to be used for simulations.
-
         """
 
         if not isinstance(system, (str, _System)):
