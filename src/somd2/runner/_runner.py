@@ -112,21 +112,17 @@ class Runner:
 
         if not isclose(h_mass_factor, 1.0, abs_tol=1e-4):
             _logger.info(
-                f"Detected existing hydrogen mass repartioning factor of {h_mass_factor}."
+                f"Detected existing hydrogen mass repartioning factor of {h_mass_factor:.3f}."
             )
 
             if not isclose(h_mass_factor, self._config.h_mass_factor, abs_tol=1e-4):
+                new_factor = self._config.h_mass_factor / h_mass_factor
                 _logger.warning(
-                    f"Existing hydrogen mass repartitioning factor of {h_mass_factor} "
-                    f"does not match the requested value of {self._config.h_mass_factor}. "
-                    "Inverting exsting HMR before re-applying new factor."
+                    f"Existing hydrogen mass repartitioning factor of {h_mass_factor:.3f} "
+                    f"does not match the requested value of {self._config.h_mass_factor:.3f}. "
+                    f"Applying new factor of {new_factor:.3f}."
                 )
-                self._system = self._repartition_h_mass(
-                    self._system, factor=1.0 / h_mass_factor
-                )
-                self._system = self._repartition_h_mass(
-                    self._system, self._config.h_mass_factor
-                )
+                self._system = self._repartition_h_mass(self._system, new_factor)
 
         else:
             self._system = self._repartition_h_mass(
