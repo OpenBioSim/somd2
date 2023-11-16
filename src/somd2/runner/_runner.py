@@ -221,7 +221,8 @@ class Runner:
                 _logger.warning(
                     f"The following files already exist and will be overwritten: {list(set((deleted_str)))} \n"
                 )
-                input("Press Enter to erase and continue...")
+                _logger.warning("Press Enter to continue or Ctrl-C to cancel...")
+                input()
             # Loop over files to be deleted, ignoring duplicates
             for file in list(set(deleted)):
                 file.unlink()
