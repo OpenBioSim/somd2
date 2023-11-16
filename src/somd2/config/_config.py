@@ -282,10 +282,6 @@ class Config:
         """Equality operator."""
         return self.as_dict() == other.as_dict()
 
-    def __del__(self):
-        """Destructor."""
-        _logger.remove()
-
     @staticmethod
     def from_yaml(path):
         """
