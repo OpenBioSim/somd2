@@ -356,13 +356,14 @@ class Runner:
 
         return True, None
 
-    def get_options(self):
+    def get_config(self):
         """
-        Returns a dictionary of simulation options.
+        Returns a dictionary of configuration options.
 
-        returns:
-        --------
-        options: dict
+        Returns
+        -------
+
+        config: dict
             Dictionary of simulation options.
         """
         return self._config.as_dict()
