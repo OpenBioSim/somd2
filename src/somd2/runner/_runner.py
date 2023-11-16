@@ -217,8 +217,9 @@ class Runner:
                         deleted.append(fullpath)
         if len(deleted) > 0:
             if not self._config.supress_overwrite_warning:
+                deleted_str = [str(file) for file in deleted]
                 _logger.warning(
-                    f"The following files already exist and will be overwritten: {list(set((deleted)))} \n"
+                    f"The following files already exist and will be overwritten: {list(set((deleted_str)))} \n"
                 )
                 input("Press Enter to erase and continue...")
             # Loop over files to be deleted, ignoring duplicates
