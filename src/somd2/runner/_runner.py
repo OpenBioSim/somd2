@@ -163,12 +163,12 @@ class Runner:
         if self._is_gpu:
             if self._config.max_gpus is None:
                 self._gpu_pool = self._manager.list(
-                    self.zero_gpu_devices(self.get_gpu_devices(self._config.platform))
+                    self._zero_gpu_devices(self._get_gpu_devices(self._config.platform))
                 )
             else:
                 self._gpu_pool = self._manager.list(
-                    self.zero_gpu_devices(
-                        self.get_gpu_devices(self._config.platform)[
+                    self._zero_gpu_devices(
+                        self._get_gpu_devices(self._config.platform)[
                             : self._config.max_gpus
                         ]
                     )
@@ -403,7 +403,7 @@ class Runner:
         self._config.lambda_schedule = schedule
 
     @staticmethod
-    def get_gpu_devices(platform):
+    def _get_gpu_devices(platform):
         """
         Get list of available GPUs from CUDA_VISIBLE_DEVICES,
         OPENCL_VISIBLE_DEVICES, or HIP_VISIBLE_DEVICES.
@@ -456,7 +456,7 @@ class Runner:
         return available_devices
 
     @staticmethod
-    def zero_gpu_devices(devices):
+    def _zero_gpu_devices(devices):
         """
         Set all device numbers relative to the lowest
         (the device number becomes equal to its index in the list).
