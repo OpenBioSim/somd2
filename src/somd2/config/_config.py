@@ -989,7 +989,7 @@ class Config:
         import argparse
         import inspect
 
-        # Inspect this object to get the default parameters and docstrings.
+        # Inspect the signature to get the parameters.
         sig = inspect.signature(Config.__init__)
         params = sig.parameters
         params = {
@@ -998,13 +998,13 @@ class Config:
             if key not in ["self", "args", "kwargs"]
         }
 
-        # Get the docstrings for each parameter.
+        # Get the docstring.
         doc = inspect.getdoc(Config.__init__).split("\n")
 
         # Create a dictionary to map the parameter name to the help string.
         help = {}
 
-        # Loop over all parameters.
+        # Loop to find the docstring for each parameter.
         for param in params:
             found_param = False
             string = ""
