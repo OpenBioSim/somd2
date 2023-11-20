@@ -899,6 +899,11 @@ class Config:
     def restart(self, restart):
         if not isinstance(restart, bool):
             raise ValueError("'restart' must be of type 'bool'")
+        if restart and (self.equilibration_time > 0.0):
+            _logger.warning(
+                f"Restarting from a previous simulation"
+                f"- equilibration will be skipped for systems starting from checkpoint files."
+            )
         self._restart = restart
 
     @property

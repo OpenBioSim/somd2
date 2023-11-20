@@ -122,12 +122,6 @@ class Runner:
                     f"does not match the requested value of {self._config.h_mass_factor:.3f}. "
                     f"A new factor of {new_factor:.3f} will be applied."
                 )
-                # self._system = self._repartition_h_mass(self._system, new_factor)
-
-        # else:
-        #    self._system = self._repartition_h_mass(
-        #        self._system, self._config.h_mass_factor
-        #    )
 
         # Flag whether this is a GPU simulation.
         self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]
@@ -683,7 +677,7 @@ class Runner:
             The result of the simulation.
         """
 
-        def _run(sim):
+        def _run(sim, is_restart=False):
             # This function is complex due to the mixture of options for minimisation and dynamics
             if self._config.minimise:
                 try:
@@ -759,9 +753,11 @@ class Runner:
                         raise ValueError(
                             f"Lambda value from checkpoint file {fname} ({lambda_encoded}) does not match expected value ({lambda_value})."
                         )
+            is_restart = True
 
         else:
             system = self._system.clone()
+            is_restart = False
         if self._config.restart:
             acc_time = system.time()
             if acc_time > self._config.runtime - self._config.timestep:
@@ -789,7 +785,7 @@ class Runner:
                 _logger.info("Running {_lam_sym} = {lambda_value} on GPU 0")
             self._initialise_simulation(system, lambda_value, device=gpu_num)
             try:
-                df, lambda_grad, speed = _run(self._sim)
+                df, lambda_grad, speed = _run(self._sim, is_restart)
             except:
                 if self._config.run_parallel:
                     with self._lock:
@@ -807,7 +803,7 @@ class Runner:
 
             self._initialise_simulation(system, lambda_value)
             try:
-                df, lambda_grad, speed = _run(self._sim)
+                df, lambda_grad, speed = _run(self._sim, is_restart)
             except:
                 raise
             self._sim._cleanup()

@@ -245,7 +245,7 @@ class Dynamics:
         # Run minimisation at the end of equilibration as the timestep may be changing
         self._minimisation()
 
-    def _run(self, lambda_minimisation=None):
+    def _run(self, lambda_minimisation=None, is_restart=False):
         """
         Run the simulation with bookkeeping.
 
@@ -273,7 +273,7 @@ class Dynamics:
         if self._config.minimise:
             self._minimisation(lambda_minimisation)
 
-        if self._config.equilibration_time.value() > 0.0:
+        if (self._config.equilibration_time.value() > 0.0) and not is_restart:
             self._equilibration()
             # Reset the timer to zero
             self._system.set_time(_u("0ps"))
