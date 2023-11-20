@@ -112,7 +112,7 @@ class Runner:
 
         if not isclose(h_mass_factor, 1.0, abs_tol=1e-4):
             _logger.info(
-                f"Detected existing hydrogen mass repartioning factor of {h_mass_factor:.3f}."
+                f"Detected existing hydrogen mass repartioning factor of {h_mass_factor:.3f} in the base system."
             )
 
             if not isclose(h_mass_factor, self._config.h_mass_factor, abs_tol=1e-4):
@@ -120,14 +120,14 @@ class Runner:
                 _logger.warning(
                     f"Existing hydrogen mass repartitioning factor of {h_mass_factor:.3f} "
                     f"does not match the requested value of {self._config.h_mass_factor:.3f}. "
-                    f"Applying new factor of {new_factor:.3f}."
+                    f"A new factor of {new_factor:.3f} will be applied."
                 )
-                self._system = self._repartition_h_mass(self._system, new_factor)
+                # self._system = self._repartition_h_mass(self._system, new_factor)
 
-        else:
-            self._system = self._repartition_h_mass(
-                self._system, self._config.h_mass_factor
-            )
+        # else:
+        #    self._system = self._repartition_h_mass(
+        #        self._system, self._config.h_mass_factor
+        #    )
 
         # Flag whether this is a GPU simulation.
         self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]

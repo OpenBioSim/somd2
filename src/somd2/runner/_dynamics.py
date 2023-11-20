@@ -242,6 +242,8 @@ class Dynamics:
             auto_fix_minimise=False,
         )
         self._system = self._dyn.commit()
+        # Run minimisation at the end of equilibration as the timestep may be changing
+        self._minimisation()
 
     def _run(self, lambda_minimisation=None):
         """
@@ -276,6 +278,29 @@ class Dynamics:
             # Reset the timer to zero
             self._system.set_time(_u("0ps"))
 
+        # Perform HMR after minimisation and equilibration
+        from ._runner import Runner
+        from math import isclose
+
+        h_mass_factor = Runner._get_h_mass_factor(self._system)
+
+        if not isclose(h_mass_factor, 1.0, abs_tol=1e-4):
+            _logger.debug(
+                f"Existing repartitioning found in the {_lam_sym}={self._lambda_val} system"
+            )
+            if not isclose(h_mass_factor, self._config.h_mass_factor, abs_tol=1e-4):
+                new_factor = self._config.h_mass_factor / h_mass_factor
+                _logger.warning(
+                    f"Existing hydrogen mass repartitioning factor of {h_mass_factor:.3f} "
+                    f"does not match the requested value of {self._config.h_mass_factor:.3f}. "
+                    f"A new factor of {new_factor:.3f} will be applied to the {_lam_sym} = {self._lambda_val} system."
+                )
+                self._system = Runner._repartition_h_mass(self._system, new_factor)
+
+        else:
+            self._system = Runner._repartition_h_mass(
+                self._system, self._config.h_mass_factor
+            )
         self._setup_dynamics(equilibration=False)
         # Work out the lambda values for finite-difference gradient analysis.
         self._lambda_grad = generate_lam_vals(self._lambda_val, self._increment)
