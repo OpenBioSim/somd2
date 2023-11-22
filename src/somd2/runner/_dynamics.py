@@ -45,9 +45,11 @@ class Dynamics:
         lambda_val,
         lambda_array,
         config,
+        system_noHMR=None,
         increment=0.001,
         device=None,
         has_space=True,
+        is_restart=False,
     ):
         """
         Constructor
@@ -85,6 +87,7 @@ class Dynamics:
         except KeyError:
             raise KeyError("No perturbable molecules in the system")
 
+        self._system_noHMR = system_noHMR
         self._system = system
 
         if not isinstance(config, _Config):
@@ -105,6 +108,7 @@ class Dynamics:
             self._config.output_directory,
             self._config.restart,
         )
+        self._is_restart = is_restart
 
     @staticmethod
     def create_filenames(lambda_array, lambda_value, output_directory, restart=False):
@@ -163,26 +167,41 @@ class Dynamics:
         except:
             map = None
 
-        self._dyn = self._system.dynamics(
-            temperature=self._config.temperature,
-            pressure=pressure,
-            timestep=self._config.equilibration_timestep
-            if equilibration
-            else self._config.timestep,
-            lambda_value=self._lambda_val,
-            cutoff_type=self._config.cutoff_type,
-            schedule=self._config.lambda_schedule,
-            platform=self._config.platform,
-            device=self._device,
-            constraint=None if equilibration else self._config.constraint,
-            perturbable_constraint=None
-            if equilibration
-            else self._config.perturbable_constraint,
-            vacuum=not self._has_space,
-            map=map,
-        )
+        # Need a separate case for equilibration because it uses the pre-HMR system
+        if equilibration:
+            if self._system_noHMR is None:
+                raise ValueError("No system_noHMR provided for equilibration")
+            self._dyn = self._system_noHMR.dynamics(
+                temperature=self._config.temperature,
+                pressure=pressure,
+                timestep=self._config.equilibration_timestep,
+                lambda_value=self._lambda_val,
+                cutoff_type=self._config.cutoff_type,
+                schedule=self._config.lambda_schedule,
+                platform=self._config.platform,
+                device=self._device,
+                constraint=None,
+                perturbable_constraint=None,
+                vacuum=not self._has_space,
+                map=map,
+            )
+        else:
+            self._dyn = self._system.dynamics(
+                temperature=self._config.temperature,
+                pressure=pressure,
+                timestep=self._config.timestep,
+                lambda_value=self._lambda_val,
+                cutoff_type=self._config.cutoff_type,
+                schedule=self._config.lambda_schedule,
+                platform=self._config.platform,
+                device=self._device,
+                constraint=self._config.constraint,
+                perturbable_constraint=self._config.perturbable_constraint,
+                vacuum=not self._has_space,
+                map=map,
+            )
 
-    def _minimisation(self, lambda_min=None):
+    def _minimisation(self, lambda_min=None, is_preHMR=True):
         """
         Minimisation of self._system.
 
@@ -192,37 +211,76 @@ class Dynamics:
         lambda_min : float
             Lambda value at which to run minimisation, if None run at pre-set
             lambda_val.
+
+        is_preHMR : bool
+            Are we minimising the pre-HMR system?
         """
-        if lambda_min is None:
-            _logger.info(f"Minimising at {_lam_sym} = {self._lambda_val}")
-            try:
-                m = self._system.minimisation(
-                    cutoff_type=self._config.cutoff_type,
-                    schedule=self._config.lambda_schedule,
-                    lambda_value=self._lambda_val,
-                    platform=self._config.platform,
-                    vacuum=not self._has_space,
-                    map=self._config._extra_args,
-                )
-                m.run()
-                self._system = m.commit()
-            except:
-                raise
+        # Need a separate case for pre-HMR minimisation
+        if is_preHMR:
+            if self._system_noHMR is None:
+                raise ValueError("No system_noHMR provided for minimisation")
+            if lambda_min is None:
+                _logger.info(f"Minimising at {_lam_sym} = {self._lambda_val}")
+                try:
+                    m = self._system.minimisation(
+                        cutoff_type=self._config.cutoff_type,
+                        schedule=self._config.lambda_schedule,
+                        lambda_value=self._lambda_val,
+                        platform=self._config.platform,
+                        vacuum=not self._has_space,
+                        map=self._config._extra_args,
+                    )
+                    m.run()
+                    self._system_noHMR = m.commit()
+                except:
+                    raise
+            else:
+                _logger.info(f"Minimising at {_lam_sym} = {lambda_min}")
+                try:
+                    m = self._system_noHMR.minimisation(
+                        cutoff_type=self._config.cutoff_type,
+                        schedule=self._config.lambda_schedule,
+                        lambda_value=lambda_min,
+                        platform=self._config.platform,
+                        vacuum=not self._has_space,
+                        map=self._config._extra_args,
+                    )
+                    m.run()
+                    self._system_noHMR = m.commit()
+                except:
+                    raise
+        # Minimisation of system from checkpoint
         else:
-            _logger.info(f"Minimising at {_lam_sym} = {lambda_min}")
-            try:
-                m = self._system.minimisation(
-                    cutoff_type=self._config.cutoff_type,
-                    schedule=self._config.lambda_schedule,
-                    lambda_value=lambda_min,
-                    platform=self._config.platform,
-                    vacuum=not self._has_space,
-                    map=self._config._extra_args,
-                )
-                m.run()
-                self._system = m.commit()
-            except:
-                raise
+            if lambda_min is None:
+                _logger.info(f"Minimising at {_lam_sym} = {self._lambda_val}")
+                try:
+                    m = self._system.minimisation(
+                        cutoff_type=self._config.cutoff_type,
+                        schedule=self._config.lambda_schedule,
+                        lambda_value=self._lambda_val,
+                        platform=self._config.platform,
+                        vacuum=not self._has_space,
+                        map=self._config._extra_args,
+                    )
+                    m.run()
+                    self._system = m.commit()
+                except:
+                    raise
+            else:
+                _logger.info(f"Minimising at {_lam_sym} = {lambda_min}")
+                try:
+                    m = self._system.minimisation(
+                        cutoff_type=self._config.cutoff_type,
+                        schedule=self._config.lambda_schedule,
+                        lambda_value=lambda_min,
+                        platform=self._config.platform,
+                        vacuum=not self._has_space,
+                        map=self._config._extra_args,
+                    )
+                    m.run()
+                    self._system = m.commit()
+                except:
+                    raise
 
     # combine these - just equil time
     # reset timer to zero when bookeeping starts
@@ -231,7 +289,8 @@ class Dynamics:
         Per-window equilibration.
         Currently just runs dynamics without any saving
         """
-
+        if self._system_noHMR is None:
+            raise ValueError("No system_noHMR provided for equilibration")
         _logger.info(f"Equilibrating at {_lam_sym} = {self._lambda_val}")
         self._setup_dynamics(equilibration=True)
         self._dyn.run(
@@ -241,11 +300,41 @@ class Dynamics:
             save_velocities=False,
             auto_fix_minimise=False,
         )
-        self._system = self._dyn.commit()
+        self._system_noHMR = self._dyn.commit()
         # Run minimisation at the end of equilibration as the timestep may be changing
-        self._minimisation()
+        self._minimisation(is_restart=False)
 
-    def _run(self, lambda_minimisation=None, is_restart=False):
+    def _copy_to_system(self):
+        """
+        Copy the coordinates and velocities of system_noHMR to the system.
+        Designed for use after the noHMR system has been minimised and equilibrated.
+        """
+        from sire.legacy.IO import updateCoordinatesAndVelocities
+
+        # First need to link coordinates and coordinates0
+        for mol_noHMR, mol_HMR in zip(
+            self._system_noHMR.molecules("molecule has property is_perturbable"),
+            self._system.molecules("molecule has property is_perturbable"),
+        ):
+            mol1 = mol_noHMR.edit().add_link("coordinates", "coordinates0")
+            self._system_noHMR.update(mol1)
+            mol2 = mol_HMR.edit().add_link("coordinates", "coordinates0")
+            self._system.update(mol2)
+
+        # Now copy coordinates and velocities (uses old sire API, hence system._system)
+        from sire.legacy.IO import updateCoordinatesAndVelocities
+
+        self._system._system = updateCoordinatesAndVelocities(
+            self._system._system,
+            self._system._system,
+            self._system_noHMR._system,
+            {},
+            False,
+            {},
+            {},
+        )
+
+    def _run(self, lambda_minimisation=None):
         """
         Run the simulation with bookkeeping.
 
@@ -270,37 +359,41 @@ class Dynamics:
                 lam_vals = [lambda_base - increment, lambda_base + increment]
             return lam_vals
 
-        if self._config.minimise:
-            self._minimisation(lambda_minimisation)
+        # HMR check on systems starting from a checkpoint, needs to be done before minimisation
+        if self._is_restart:
+            from ._runner import Runner
+            from math import isclose
 
-        if (self._config.equilibration_time.value() > 0.0) and not is_restart:
-            self._equilibration()
-            # Reset the timer to zero
-            self._system.set_time(_u("0ps"))
+            h_mass_factor = Runner._get_h_mass_factor(self._system)
 
-        # Perform HMR after minimisation and equilibration
-        from ._runner import Runner
-        from math import isclose
-
-        h_mass_factor = Runner._get_h_mass_factor(self._system)
-
-        if not isclose(h_mass_factor, 1.0, abs_tol=1e-4):
-            _logger.debug(
-                f"Existing repartitioning found in the {_lam_sym}={self._lambda_val} system"
-            )
-            if not isclose(h_mass_factor, self._config.h_mass_factor, abs_tol=1e-4):
-                new_factor = self._config.h_mass_factor / h_mass_factor
-                _logger.warning(
-                    f"Existing hydrogen mass repartitioning factor of {h_mass_factor:.3f} "
-                    f"does not match the requested value of {self._config.h_mass_factor:.3f}. "
-                    f"A new factor of {new_factor:.3f} will be applied to the {_lam_sym} = {self._lambda_val} system."
+            if not isclose(h_mass_factor, 1.0, abs_tol=1e-4):
+                _logger.debug(
+                    f"Existing repartitioning found in the {_lam_sym}={self._lambda_val} system"
                 )
-                self._system = Runner._repartition_h_mass(self._system, new_factor)
+                if not isclose(h_mass_factor, self._config.h_mass_factor, abs_tol=1e-4):
+                    new_factor = self._config.h_mass_factor / h_mass_factor
+                    _logger.warning(
+                        f"Existing hydrogen mass repartitioning factor of {h_mass_factor:.3f} "
+                        f"does not match the requested value of {self._config.h_mass_factor:.3f}. "
+                        f"A new factor of {new_factor:.3f} will be applied to the {_lam_sym} = {self._lambda_val} system."
+                    )
+                    self._system = Runner._repartition_h_mass(self._system, new_factor)
 
-        else:
-            self._system = Runner._repartition_h_mass(
-                self._system, self._config.h_mass_factor
-            )
+            else:
+                self._system = Runner._repartition_h_mass(
+                    self._system, self._config.h_mass_factor
+                )
+
+        if self._config.minimise:
+            self._minimisation(lambda_minimisation, is_preHMR=not self._is_restart)
+
+        if (self._config.equilibration_time.value() > 0.0) and not self._is_restart:
+            self._equilibration()
+
+        if not self._is_restart:
+            # Copy coordinates and velocities from system_noHMR to system
+            self._copy_to_system()
+
         self._setup_dynamics(equilibration=False)
         # Work out the lambda values for finite-difference gradient analysis.
         self._lambda_grad = generate_lam_vals(self._lambda_val, self._increment)

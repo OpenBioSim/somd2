@@ -19,8 +19,10 @@ def test_dynamics_options():
         # (All default options, other than platform="cpu".)
         runner = Runner(mols, Config(platform="cpu", output_directory=tmpdir))
 
-        # Initalise a fake simulation.
-        runner._initialise_simulation(runner._system.clone(), 0.0)
+        # Initalise a fake simulation. Give another copy of the system as the noHMR version
+        runner._initialise_simulation(
+            runner._system.clone(), 0.0, system_noHMR=runner._system.clone()
+        )
 
         # Setup a dynamics object for equilibration.
         runner._sim._setup_dynamics(equilibration=True)
