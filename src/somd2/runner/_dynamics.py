@@ -301,38 +301,50 @@ class Dynamics:
             auto_fix_minimise=False,
         )
         self._system_noHMR = self._dyn.commit()
-        # Run minimisation at the end of equilibration as the timestep may be changing
-        self._minimisation(is_restart=False)
 
-    def _copy_to_system(self):
+    @staticmethod
+    def _copy_to_system(system_to_copy, target_system):
         """
         Copy the coordinates and velocities of system_noHMR to the system.
         Designed for use after the noHMR system has been minimised and equilibrated.
+
+        Parameters
+        ----------
+        system_to_copy : Sire System
+            System to copy coordinates and velocities from
+
+        target_system : Sire System
+            System to copy coordinates and velocities to
         """
         from sire.legacy.IO import updateCoordinatesAndVelocities
 
-        # First need to link coordinates and coordinates0
-        for mol_noHMR, mol_HMR in zip(
-            self._system_noHMR.molecules("molecule property is_perturbable"),
-            self._system.molecules("molecule property is_perturbable"),
-        ):
-            mol1 = mol_noHMR.edit().add_link("coordinates", "coordinates0")
-            self._system_noHMR.update(mol1)
-            mol2 = mol_HMR.edit().add_link("coordinates", "coordinates0")
-            self._system.update(mol2)
-
+        _logger.debug(target_system[0].atoms())
+        try:
+            # First need to link coordinates and coordinates0
+            for mol_to_copy, target_mol in zip(
+                system_to_copy.molecules("molecule property is_perturbable"),
+                target_system.molecules("molecule property is_perturbable"),
+            ):
+                mol1 = mol_to_copy.edit().add_link("coordinates", "coordinates0")
+                system_to_copy.update(mol1)
+                mol2 = target_mol.edit().add_link("coordinates", "coordinates0")
+                target_system.update(mol2)
+        except KeyError:
+            _logger.debug("Coordinates and coordinates0 already linked")
         # Now copy coordinates and velocities (uses old sire API, hence system._system)
-        from sire.legacy.IO import updateCoordinatesAndVelocities
-
-        self._system._system, _ = updateCoordinatesAndVelocities(
-            self._system._system,
-            self._system._system,
-            self._system_noHMR._system,
+        target_system._system, _ = updateCoordinatesAndVelocities(
+            target_system._system,
+            target_system._system,
+            system_to_copy._system,
             {},
             False,
             {},
             {},
         )
+        _logger.debug("Coordinates and velocities of pre-HMR system:")
+        _logger.debug(system_to_copy[0].atoms())
+        _logger.debug("Coordinates and velocities of post-HMR system:")
+        _logger.debug(target_system[0].atoms())
 
     def _run(self, lambda_minimisation=None):
         """
@@ -392,7 +404,11 @@ class Dynamics:
 
         if not self._is_restart:
             # Copy coordinates and velocities from system_noHMR to system
-            self._copy_to_system()
+            self._copy_to_system(
+                system_to_copy=self._system_noHMR, target_system=self._system
+            )
+            # Post-movement minimisation
+            self._minimisation(lambda_minimisation, is_preHMR=False)
 
         self._setup_dynamics(equilibration=False)
         # Work out the lambda values for finite-difference gradient analysis.
