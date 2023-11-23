@@ -129,6 +129,10 @@ class Runner:
                 self._system, self._config.h_mass_factor
             )
 
+        # Link properties to the lambda = 0 end state for the HMR system.
+        for mol in self._system_HMR.molecules("molecule property is_perturbable"):
+            self._system_HMR.update(mol.perturbation().link_to_reference().commit())
+
         # Flag whether this is a GPU simulation.
         self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]
 

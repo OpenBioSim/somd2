@@ -313,8 +313,8 @@ class Dynamics:
 
         # First need to link coordinates and coordinates0
         for mol_noHMR, mol_HMR in zip(
-            self._system_noHMR.molecules("molecule has property is_perturbable"),
-            self._system.molecules("molecule has property is_perturbable"),
+            self._system_noHMR.molecules("molecule property is_perturbable"),
+            self._system.molecules("molecule property is_perturbable"),
         ):
             mol1 = mol_noHMR.edit().add_link("coordinates", "coordinates0")
             self._system_noHMR.update(mol1)
@@ -324,7 +324,7 @@ class Dynamics:
         # Now copy coordinates and velocities (uses old sire API, hence system._system)
         from sire.legacy.IO import updateCoordinatesAndVelocities
 
-        self._system._system = updateCoordinatesAndVelocities(
+        self._system._system, _ = updateCoordinatesAndVelocities(
             self._system._system,
             self._system._system,
             self._system_noHMR._system,
