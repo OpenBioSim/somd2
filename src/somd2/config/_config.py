@@ -594,12 +594,10 @@ class Config:
                 raise ValueError(
                     f"'constraint' not recognised. Valid constraints are: {', '.join(self._choices['constraint'])}"
                 )
-            if constraint == "none":
-                self._constraint = None
             else:
                 self._constraint = constraint
         else:
-            self._constraint = None
+            self._constraint = "none"
 
     @property
     def perturbable_constraint(self):
@@ -615,12 +613,10 @@ class Config:
                 raise ValueError(
                     f"'perturbable_constrant' not recognised. Valid constraints are: {', '.join(self._choices['constraint'])}"
                 )
-            if perturbable_constraint == "none":
-                self._perturbable_constraint = None
             else:
                 self._perturbable_constraint = perturbable_constraint
         else:
-            self._perturbable_constraint = None
+            self._perturbable_constraint = "none"
 
     @property
     def minimise(self):
