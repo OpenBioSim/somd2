@@ -174,8 +174,8 @@ class Dynamics:
             schedule=self._config.lambda_schedule,
             platform=self._config.platform,
             device=self._device,
-            constraint=None if equilibration else self._config.constraint,
-            perturbable_constraint=None
+            constraint="none" if equilibration else self._config.constraint,
+            perturbable_constraint="none"
             if equilibration
             else self._config.perturbable_constraint,
             vacuum=not self._has_space,
