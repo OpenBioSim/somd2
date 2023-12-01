@@ -180,8 +180,8 @@ class Dynamics:
                 schedule=self._config.lambda_schedule,
                 platform=self._config.platform,
                 device=self._device,
-                constraint=None,
-                perturbable_constraint=None,
+                constraint="none",
+                perturbable_constraint="none",
                 vacuum=not self._has_space,
                 map=map,
             )
