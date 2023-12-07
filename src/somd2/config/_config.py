@@ -153,7 +153,9 @@ class Config:
             Constraint type to use for non-perturbable molecules.
 
         perturbable_constraint: str
-            Constraint type to use for perturbable molecules.
+            Constraint type to use for perturbable molecules. If None, then
+            this will be set according to what is chosen for the
+            non-perturbable constraint.
 
         minimise: bool
             Whether to minimise the system before simulation.
@@ -616,7 +618,7 @@ class Config:
             else:
                 self._perturbable_constraint = perturbable_constraint
         else:
-            self._perturbable_constraint = "none"
+            self._perturbable_constraint = None
 
     @property
     def minimise(self):
