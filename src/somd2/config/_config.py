@@ -200,7 +200,7 @@ class Config:
             Path to a directory to store output files.
 
         restart: bool
-            Whether to restart from a previous simulation - files found in `output-directory`.
+            Whether to restart from a previous simulation using files found in 'output-directory'.
 
         write_config: bool
             Whether to write the configuration options to a YAML file in the output directory.
@@ -1013,7 +1013,7 @@ class Config:
                         found_param = False
                         break
                     else:
-                        string += line
+                        string += f" {line}"
 
             # Store the help string for this parameter.
             help[param] = string
