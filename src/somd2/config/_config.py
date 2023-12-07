@@ -616,7 +616,7 @@ class Config:
             else:
                 self._perturbable_constraint = perturbable_constraint
         else:
-            self._perturbable_constraint = "none"
+            self._perturbable_constraint = None
 
     @property
     def minimise(self):
