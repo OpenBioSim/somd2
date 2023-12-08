@@ -161,7 +161,8 @@ class Config:
             Whether to minimise the system before simulation.
 
         equilibration_time: str
-            Time interval for equilibration.
+            Time interval for equilibration. Only simulations starting from
+            scratch will be equilibrated.
 
         equilibration_timestep: str
             Equilibration timestep. (Can be different to simulation timestep.)
