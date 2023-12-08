@@ -182,7 +182,7 @@ class Dynamics:
             map=map,
         )
 
-    def _minimisation(self, lambda_min=None):
+    def _minimisation(self, lambda_min=None, perturbable_constraint="none"):
         """
         Minimisation of self._system.
 
@@ -202,6 +202,7 @@ class Dynamics:
                     lambda_value=self._lambda_val,
                     platform=self._config.platform,
                     vacuum=not self._has_space,
+                    perturbable_constraint=perturbable_constraint,
                     map=self._config._extra_args,
                 )
                 m.run()
@@ -217,6 +218,7 @@ class Dynamics:
                     lambda_value=lambda_min,
                     platform=self._config.platform,
                     vacuum=not self._has_space,
+                    perturbable_constraint=perturbable_constraint,
                     map=self._config._extra_args,
                 )
                 m.run()
@@ -242,6 +244,13 @@ class Dynamics:
             auto_fix_minimise=False,
         )
         self._system = self._dyn.commit()
+        # Perform brief minimisation at the end of equilibration only if the
+        # timestep is increasing
+        if self._config.timestep > self._config.equilibration_timestep:
+            self._minimisation(
+                lambda_min=self._lambda_val,
+                perturbable_constraint=self._config.perturbable_constraint,
+            )
 
     def _run(self, lambda_minimisation=None):
         """
