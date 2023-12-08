@@ -56,7 +56,7 @@ def test_restart(mols, request):
             "platform": "CPU",
             "max_threads": 1,
             "num_lambda": 2,
-            "supress_overwrite_warning": True,
+            "overwrite": True,
             "log_level": "DEBUG",
         }
 

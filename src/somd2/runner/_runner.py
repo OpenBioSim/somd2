@@ -216,13 +216,12 @@ class Runner:
                     if __Path.exists(fullpath):
                         deleted.append(fullpath)
         if len(deleted) > 0:
-            if not self._config.supress_overwrite_warning:
+            if not self._config.overwrite:
                 deleted_str = [str(file) for file in deleted]
                 _logger.warning(
-                    f"The following files already exist and will be overwritten: {list(set((deleted_str)))} \n"
+                    f"The following files already exist, use --overwrite to overwrite them: {list(set((deleted_str)))} \n"
                 )
-                _logger.warning("Press Enter to continue or Ctrl-C to cancel...")
-                input()
+                exit(1)
             # Loop over files to be deleted, ignoring duplicates
             for file in list(set(deleted)):
                 file.unlink()
@@ -257,7 +256,7 @@ class Runner:
             "write_config",
             "log_level",
             "log_file",
-            "supress_overwrite_warning",
+            "overwrite",
         ]
         for key in config1.keys():
             if key not in allowed_diffs:
