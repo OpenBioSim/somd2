@@ -171,6 +171,7 @@ class Dynamics:
             else self._config.timestep,
             lambda_value=self._lambda_val,
             cutoff_type=self._config.cutoff_type,
+            cutoff=self._config.cutoff,
             schedule=self._config.lambda_schedule,
             platform=self._config.platform,
             device=self._device,
@@ -198,6 +199,7 @@ class Dynamics:
             try:
                 m = self._system.minimisation(
                     cutoff_type=self._config.cutoff_type,
+                    cutoff=self._config.cutoff,
                     schedule=self._config.lambda_schedule,
                     lambda_value=self._lambda_val,
                     platform=self._config.platform,
@@ -214,6 +216,7 @@ class Dynamics:
             try:
                 m = self._system.minimisation(
                     cutoff_type=self._config.cutoff_type,
+                    cutoff=self._config.cutoff,
                     schedule=self._config.lambda_schedule,
                     lambda_value=lambda_min,
                     platform=self._config.platform,
