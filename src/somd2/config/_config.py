@@ -100,7 +100,7 @@ class Config:
         output_directory="output",
         restart=False,
         write_config=True,
-        supress_overwrite_warning=False,
+        overwrite=False,
     ):
         """
         Constructor.
@@ -161,7 +161,8 @@ class Config:
             Whether to minimise the system before simulation.
 
         equilibration_time: str
-            Time interval for equilibration.
+            Time interval for equilibration. Only simulations starting from
+            scratch will be equilibrated.
 
         equilibration_timestep: str
             Equilibration timestep. (Can be different to simulation timestep.)
@@ -211,8 +212,9 @@ class Config:
         log_file: str
             Name of log file, will be saved in output directory.
 
-        supress_overwrite_warning: bool
-            Whether to supress the warning when overwriting files in the output directory.
+        overwrite: bool
+            Whether to overwrite files in the output directory, if files are detected and
+            this is false, SOMD2 will exit without overwriting.
         """
 
         # Setup logger before doing anything else
@@ -251,7 +253,7 @@ class Config:
 
         self.write_config = write_config
 
-        self.supress_overwrite_warning = supress_overwrite_warning
+        self.overwrite = overwrite
 
     def __str__(self):
         """Return a string representation of this object."""
@@ -965,14 +967,14 @@ class Config:
         self._log_file = log_file
 
     @property
-    def supress_overwrite_warning(self):
-        return self._supress_overwrite_warning
+    def overwrite(self):
+        return self._overwrite
 
-    @supress_overwrite_warning.setter
-    def supress_overwrite_warning(self, supress_overwrite_warning):
-        if not isinstance(supress_overwrite_warning, bool):
-            raise ValueError("'supress_overwrite_warning' must be of type 'bool'")
-        self._supress_overwrite_warning = supress_overwrite_warning
+    @overwrite.setter
+    def overwrite(self, overwrite):
+        if not isinstance(overwrite, bool):
+            raise ValueError("'overwrite' must be of type 'bool'")
+        self._overwrite = overwrite
 
     @classmethod
     def _create_parser(cls):

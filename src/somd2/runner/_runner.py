@@ -216,13 +216,12 @@ class Runner:
                     if __Path.exists(fullpath):
                         deleted.append(fullpath)
         if len(deleted) > 0:
-            if not self._config.supress_overwrite_warning:
+            if not self._config.overwrite:
                 deleted_str = [str(file) for file in deleted]
                 _logger.warning(
-                    f"The following files already exist and will be overwritten: {list(set((deleted_str)))} \n"
+                    f"The following files already exist, use --overwrite to overwrite them: {list(set((deleted_str)))} \n"
                 )
-                _logger.warning("Press Enter to continue or Ctrl-C to cancel...")
-                input()
+                exit(1)
             # Loop over files to be deleted, ignoring duplicates
             for file in list(set(deleted)):
                 file.unlink()
@@ -257,7 +256,7 @@ class Runner:
             "write_config",
             "log_level",
             "log_file",
-            "supress_overwrite_warning",
+            "overwrite",
         ]
         for key in config1.keys():
             if key not in allowed_diffs:
@@ -683,11 +682,11 @@ class Runner:
             The result of the simulation.
         """
 
-        def _run(sim):
+        def _run(sim, is_restart=False):
             # This function is complex due to the mixture of options for minimisation and dynamics
             if self._config.minimise:
                 try:
-                    df = sim._run()
+                    df = sim._run(is_restart=is_restart)
                     lambda_grad = sim._lambda_grad
                     speed = sim.get_timing()
                     return df, lambda_grad, speed
@@ -697,7 +696,7 @@ class Runner:
                         f"following exception {e}, trying again with minimsation at {_lam_sym} = 0."
                     )
                     try:
-                        df = sim._run(lambda_minimisation=0.0)
+                        df = sim._run(lambda_minimisation=0.0, is_restart=is_restart)
                         lambda_grad = sim._lambda_grad
                         speed = sim.get_timing()
                         return df, lambda_grad, speed
@@ -709,7 +708,7 @@ class Runner:
                         raise
             else:
                 try:
-                    df = sim._run()
+                    df = sim._run(is_restart)
                     lambda_grad = sim._lambda_grad
                     speed = sim.get_timing()
                     return df, lambda_grad, speed
@@ -759,9 +758,11 @@ class Runner:
                         raise ValueError(
                             f"Lambda value from checkpoint file {fname} ({lambda_encoded}) does not match expected value ({lambda_value})."
                         )
+                is_restart = True
 
         else:
             system = self._system.clone()
+            is_restart = False
         if self._config.restart:
             acc_time = system.time()
             if acc_time > self._config.runtime - self._config.timestep:
@@ -789,7 +790,7 @@ class Runner:
                 _logger.info("Running {_lam_sym} = {lambda_value} on GPU 0")
             self._initialise_simulation(system, lambda_value, device=gpu_num)
             try:
-                df, lambda_grad, speed = _run(self._sim)
+                df, lambda_grad, speed = _run(self._sim, is_restart=is_restart)
             except:
                 if self._config.run_parallel:
                     with self._lock:
@@ -807,7 +808,7 @@ class Runner:
 
             self._initialise_simulation(system, lambda_value)
             try:
-                df, lambda_grad, speed = _run(self._sim)
+                df, lambda_grad, speed = _run(self._sim, is_restart=is_restart)
             except:
                 raise
             self._sim._cleanup()
