@@ -461,16 +461,20 @@ class Config:
         from sire.units import angstrom
 
         if cutoff is not None:
-            try:
-                c = _sr.u(cutoff)
-            except:
-                raise ValueError(
-                    f"Unable to parse 'cutoff' as a Sire GeneralUnit: {cutoff}"
-                )
-            if not c.has_same_units(angstrom):
-                raise ValueError("'cutoff' units are invalid.")
+            # Handle special case of cutoff = "infinite"
+            if cutoff.lower().replace(" ", "") == "infinite":
+                self._cutoff = "infinite"
+            else:
+                try:
+                    c = _sr.u(cutoff)
+                except:
+                    raise ValueError(
+                        f"Unable to parse 'cutoff' as a Sire GeneralUnit: {cutoff}"
+                    )
+                if not c.has_same_units(angstrom):
+                    raise ValueError("'cutoff' units are invalid.")
 
-            self._cutoff = c
+                self._cutoff = c
 
         else:
             self._cutoff = cutoff
