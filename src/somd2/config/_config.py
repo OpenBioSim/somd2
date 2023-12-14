@@ -128,7 +128,7 @@ class Config:
             Cutoff type to use for simulation.
 
         cutoff: str
-            Non-bonded cutoff distance.
+            Non-bonded cutoff distance. Use "infinite" for no cutoff.
 
         h_mass_factor: float
             Factor by which to scale hydrogen masses.
