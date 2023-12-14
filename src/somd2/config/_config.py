@@ -76,6 +76,7 @@ class Config:
         pressure="1 atm",
         integrator="langevin_middle",
         cutoff_type="pme",
+        cutoff="7.5A",
         h_mass_factor=1.5,
         num_lambda=11,
         lambda_schedule="standard_morph",
@@ -125,6 +126,9 @@ class Config:
 
         cutoff_type: str
             Cutoff type to use for simulation.
+
+        cutoff: str
+            Non-bonded cutoff distance.
 
         h_mass_factor: float
             Factor by which to scale hydrogen masses.
@@ -227,6 +231,7 @@ class Config:
         self.pressure = pressure
         self.integrator = integrator
         self.cutoff_type = cutoff_type
+        self.cutoff = cutoff
         self.h_mass_factor = h_mass_factor
         self.timestep = timestep
         self.num_lambda = num_lambda
@@ -437,12 +442,42 @@ class Config:
     def cutoff_type(self, cutoff_type):
         if not isinstance(cutoff_type, str):
             raise TypeError("'cutoff_type' must be of type 'str'")
-        cutoff = cutoff_type.lower().replace(" ", "")
+        cutoff_type = cutoff_type.lower().replace(" ", "")
         if cutoff_type not in self._choices["cutoff_type"]:
             raise ValueError(
                 f"Cutoff type not recognised. Valid cutoff types are: {', '.join(self._choices['cutoff_type'])}"
             )
         self._cutoff_type = cutoff_type
+
+    @property
+    def cutoff(self):
+        return self._cutoff
+
+    @cutoff.setter
+    def cutoff(self, cutoff):
+        if not isinstance(cutoff, str):
+            raise TypeError("'cutoff' must be of type 'str'")
+
+        from sire.units import angstrom
+
+        if cutoff is not None:
+            # Handle special case of cutoff = "infinite"
+            if cutoff.lower().replace(" ", "") == "infinite":
+                self._cutoff = "infinite"
+            else:
+                try:
+                    c = _sr.u(cutoff)
+                except:
+                    raise ValueError(
+                        f"Unable to parse 'cutoff' as a Sire GeneralUnit: {cutoff}"
+                    )
+                if not c.has_same_units(angstrom):
+                    raise ValueError("'cutoff' units are invalid.")
+
+                self._cutoff = c
+
+        else:
+            self._cutoff = cutoff
 
     @property
     def h_mass_factor(self):
