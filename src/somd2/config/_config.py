@@ -442,7 +442,7 @@ class Config:
     def cutoff_type(self, cutoff_type):
         if not isinstance(cutoff_type, str):
             raise TypeError("'cutoff_type' must be of type 'str'")
-        cutoff = cutoff_type.lower().replace(" ", "")
+        cutoff_type = cutoff_type.lower().replace(" ", "")
         if cutoff_type not in self._choices["cutoff_type"]:
             raise ValueError(
                 f"Cutoff type not recognised. Valid cutoff types are: {', '.join(self._choices['cutoff_type'])}"
