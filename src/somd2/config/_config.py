@@ -453,7 +453,7 @@ class Config:
     def cutoff(self):
         return self._cutoff
 
-    @cutoff_type.setter
+    @cutoff.setter
     def cutoff(self, cutoff):
         if not isinstance(cutoff, str):
             raise TypeError("'cutoff' must be of type 'str'")
