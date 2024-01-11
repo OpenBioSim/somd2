@@ -25,10 +25,10 @@ Configuration class for SOMD2 runner.
 
 __all__ = ["Config"]
 
-from openmm import Platform as _Platform
 from pathlib import Path as _Path
 
 import sire as _sr
+from openmm import Platform as _Platform
 
 from somd2 import _logger
 
@@ -84,6 +84,7 @@ class Config:
         swap_end_states=False,
         coulomb_power=0.0,
         shift_delta="2A",
+        restraints=None,
         constraint="h_bonds",
         perturbable_constraint=None,
         minimise=True,
@@ -152,6 +153,11 @@ class Config:
         shift_delta : str
             The soft-core shift-delta parameter. This is used to soften the
             Lennard-Jones interaction.
+
+        restraints: sire.mm.Restraints or list[sire.mm.Restraints], optional, default=None
+            A single set of restraints, or a list of sets of
+            restraints that will be applied to the atoms during
+            the simulation.
 
         constraint: str
             Constraint type to use for non-perturbable molecules.
@@ -240,6 +246,7 @@ class Config:
         self.swap_end_states = swap_end_states
         self.coulomb_power = coulomb_power
         self.shift_delta = shift_delta
+        self.restraints = restraints
         self.constraint = constraint
         self.perturbable_constraint = perturbable_constraint
         self.minimise = minimise
@@ -320,6 +327,7 @@ class Config:
             boolean with the value False.
         """
         from pathlib import Path as _Path
+
         from sire.cas import LambdaSchedule as _LambdaSchedule
 
         d = {}
@@ -618,6 +626,28 @@ class Config:
             raise ValueError("'shift_delta' units are invalid.")
 
         self._shift_delta = sd
+
+    @property
+    def restraints(self):
+        return self._restraints
+
+    @restraints.setter
+    def restraints(self, restraints):
+        # If not supplied as a list, convert to a list.
+        if restraints is not None:
+            if not isinstance(restraints, (list, tuple)):
+                restraints = [restraints]
+
+            # Check that all restraints are of the correct type.
+            for restraint in restraints:
+                if not isinstance(
+                    restraint, _sr.mm.BoreschRestraint
+                ) and not isinstance(restraint, _sr.mm.BoreschRestraints):
+                    raise ValueError(
+                        "'restraints' must be a list of sire.mm.Restraint objects"
+                    )
+
+        self._restraints = restraints
 
     @property
     def constraint(self):

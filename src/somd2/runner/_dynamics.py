@@ -24,12 +24,11 @@ __all__ = ["Dynamics"]
 import platform as _platform
 from pathlib import Path as _Path
 
+from somd2 import _logger
+
 from ..config import Config as _Config
 from ..io import dataframe_to_parquet as _dataframe_to_parquet
 from ..io import parquet_append as _parquet_append
-
-from somd2 import _logger
-
 from ._runner import _lam_sym
 
 
@@ -166,6 +165,7 @@ class Dynamics:
         self._dyn = self._system.dynamics(
             temperature=self._config.temperature,
             pressure=pressure,
+            restraints=self._config.restraints,
             timestep=self._config.equilibration_timestep
             if equilibration
             else self._config.timestep,
@@ -265,8 +265,8 @@ class Dynamics:
         df : pandas dataframe
             Dataframe containing the sire energy trajectory.
         """
-        from sire import u as _u
         from sire import stream as _stream
+        from sire import u as _u
 
         def generate_lam_vals(lambda_base, increment):
             """Generate lambda values for a given lambda_base and increment"""
