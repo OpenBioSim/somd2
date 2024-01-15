@@ -68,6 +68,9 @@ def test_dynamics_options():
         # Constraint.
         assert config_inp.constraint.lower() == d.constraint().lower()
 
+        # Perturbable_constraint.
+        assert config_inp.perturbable_constraint.lower() == d.perturbable_constraint().lower()
+
         # Integrator.
         assert config_inp.integrator.lower().replace(
             "_", ""
