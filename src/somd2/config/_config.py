@@ -85,7 +85,8 @@ class Config:
         coulomb_power=0.0,
         shift_delta="2A",
         constraint="h_bonds",
-        perturbable_constraint=None,
+        perturbable_constraint="h_bonds_not_perturbed",
+        include_constrained_energies=False,
         minimise=True,
         equilibration_time="0ps",
         equilibration_timestep="1fs",
@@ -160,6 +161,9 @@ class Config:
             Constraint type to use for perturbable molecules. If None, then
             this will be set according to what is chosen for the
             non-perturbable constraint.
+
+        include_constrained_energies: bool
+            Whether to include constrained energies in the potential.
 
         minimise: bool
             Whether to minimise the system before simulation.
@@ -242,6 +246,7 @@ class Config:
         self.shift_delta = shift_delta
         self.constraint = constraint
         self.perturbable_constraint = perturbable_constraint
+        self.include_constrained_energies = include_constrained_energies
         self.minimise = minimise
         self.equilibration_time = equilibration_time
         self.equilibration_timestep = equilibration_timestep
@@ -656,6 +661,16 @@ class Config:
                 self._perturbable_constraint = perturbable_constraint
         else:
             self._perturbable_constraint = None
+
+    @property
+    def include_constrained_energies(self):
+        return self._include_constrained_energies
+
+    @include_constrained_energies.setter
+    def include_constrained_energies(self, include_constrained_energies):
+        if not isinstance(include_constrained_energies, bool):
+            raise ValueError("'include_constrained_energies' must be of type 'bool'")
+        self._include_constrained_energies = include_constrained_energies
 
     @property
     def minimise(self):

@@ -179,6 +179,7 @@ class Dynamics:
             perturbable_constraint="none"
             if equilibration
             else self._config.perturbable_constraint,
+            include_constrained_energies=self._config.include_constrained_energies,
             vacuum=not self._has_space,
             map=map,
         )
@@ -205,6 +206,7 @@ class Dynamics:
                     platform=self._config.platform,
                     vacuum=not self._has_space,
                     perturbable_constraint=perturbable_constraint,
+                    include_constrained_energies=self._config.include_constrained_energies,
                     map=self._config._extra_args,
                 )
                 m.run()
@@ -222,6 +224,7 @@ class Dynamics:
                     platform=self._config.platform,
                     vacuum=not self._has_space,
                     perturbable_constraint=perturbable_constraint,
+                    include_constrained_energies=self._config.include_constrained_energies,
                     map=self._config._extra_args,
                 )
                 m.run()
