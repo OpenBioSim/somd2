@@ -87,6 +87,7 @@ class Config:
         constraint="h_bonds",
         perturbable_constraint="h_bonds_not_perturbed",
         include_constrained_energies=False,
+        com_reset_frequency=10,
         minimise=True,
         equilibration_time="0ps",
         equilibration_timestep="1fs",
@@ -164,6 +165,9 @@ class Config:
 
         include_constrained_energies: bool
             Whether to include constrained energies in the potential.
+
+        com_reset_frequency: int
+            Frequency at which to reset the centre of mass of the system.
 
         minimise: bool
             Whether to minimise the system before simulation.
@@ -247,6 +251,7 @@ class Config:
         self.constraint = constraint
         self.perturbable_constraint = perturbable_constraint
         self.include_constrained_energies = include_constrained_energies
+        self.com_reset_frequency = com_reset_frequency
         self.minimise = minimise
         self.equilibration_time = equilibration_time
         self.equilibration_timestep = equilibration_timestep
@@ -671,6 +676,19 @@ class Config:
         if not isinstance(include_constrained_energies, bool):
             raise ValueError("'include_constrained_energies' must be of type 'bool'")
         self._include_constrained_energies = include_constrained_energies
+
+    @property
+    def com_reset_frequency(self):
+        return self._com_reset_frequency
+
+    @com_reset_frequency.setter
+    def com_reset_frequency(self, com_reset_frequency):
+        if not isinstance(com_reset_frequency, int):
+            try:
+                com_reset_frequency = int(com_reset_frequency)
+            except Exception:
+                raise ValueError("'com_reset_frequency' must of type 'int'")
+        self._com_reset_frequency = com_reset_frequency
 
     @property
     def minimise(self):
