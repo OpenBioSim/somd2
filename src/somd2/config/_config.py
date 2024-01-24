@@ -87,6 +87,7 @@ class Config:
         constraint="h_bonds",
         perturbable_constraint="h_bonds_not_perturbed",
         include_constrained_energies=False,
+        dynamic_constraints=True,
         com_reset_frequency=10,
         minimise=True,
         equilibration_time="0ps",
@@ -165,6 +166,13 @@ class Config:
 
         include_constrained_energies: bool
             Whether to include constrained energies in the potential.
+
+        dynamic_constraints: bool
+            Whether or not to update the length of constraints of perturbable
+            bonds with lambda. This defaults to True, meaning that changing
+            lambda will change any constraint on a perturbable bond to equal
+            to the value of r0 at that lambda value. If this is False, then
+            the constraint is set based on the current length.
 
         com_reset_frequency: int
             Frequency at which to reset the centre of mass of the system.
@@ -251,6 +259,7 @@ class Config:
         self.constraint = constraint
         self.perturbable_constraint = perturbable_constraint
         self.include_constrained_energies = include_constrained_energies
+        self.dynamic_constraints = dynamic_constraints
         self.com_reset_frequency = com_reset_frequency
         self.minimise = minimise
         self.equilibration_time = equilibration_time
@@ -676,6 +685,16 @@ class Config:
         if not isinstance(include_constrained_energies, bool):
             raise ValueError("'include_constrained_energies' must be of type 'bool'")
         self._include_constrained_energies = include_constrained_energies
+
+    @property
+    def dynamic_constraints(self):
+        return self._dynamic_constraints
+
+    @dynamic_constraints.setter
+    def dynamic_constraints(self, dynamic_constraints):
+        if not isinstance(dynamic_constraints, bool):
+            raise ValueError("'dynamic_constraints' must be of type 'bool'")
+        self._dynamic_constraints = dynamic_constraints
 
     @property
     def com_reset_frequency(self):

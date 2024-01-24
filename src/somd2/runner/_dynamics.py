@@ -180,7 +180,9 @@ class Dynamics:
             if equilibration
             else self._config.perturbable_constraint,
             include_constrained_energies=self._config.include_constrained_energies,
+            dynamic_constraints=self._config.dynamic_constraints,
             swap_end_states=self._config.swap_end_states,
+            com_reset_frequency=self._config.com_reset_frequency,
             vacuum=not self._has_space,
             map=map,
         )
@@ -208,6 +210,7 @@ class Dynamics:
                     vacuum=not self._has_space,
                     perturbable_constraint=perturbable_constraint,
                     include_constrained_energies=self._config.include_constrained_energies,
+                    dynamic_constraints=self._config.dynamic_constraints,
                     swap_end_states=self._config.swap_end_states,
                     map=self._config._extra_args,
                 )
@@ -227,6 +230,7 @@ class Dynamics:
                     vacuum=not self._has_space,
                     perturbable_constraint=perturbable_constraint,
                     include_constrained_energies=self._config.include_constrained_energies,
+                    dynamic_constraints=self._config.dynamic_constraints,
                     swap_end_states=self._config.swap_end_states,
                     map=self._config._extra_args,
                 )
