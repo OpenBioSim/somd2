@@ -342,7 +342,9 @@ class Dynamics:
                 try:
                     self._system = self._dyn.commit()
                     _stream.save(self._system, str(sire_checkpoint_name))
-                    df = self._system.energy_trajectory(to_alchemlyb=True)
+                    df = self._system.energy_trajectory(
+                        to_alchemlyb=True, energy_unit="kT"
+                    )
                     if x == 0:
                         # Not including speed in checkpoints for now.
                         f = _dataframe_to_parquet(
@@ -411,7 +413,7 @@ class Dynamics:
             _save(self._system.trajectory(), traj_filename, format=["DCD"])
         # dump final system to checkpoint file
         _stream.save(self._system, sire_checkpoint_name)
-        df = self._system.energy_trajectory(to_alchemlyb=True)
+        df = self._system.energy_trajectory(to_alchemlyb=True, energy_unit="kT")
         return df
 
     def get_timing(self):
