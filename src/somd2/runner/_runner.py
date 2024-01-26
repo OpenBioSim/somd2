@@ -95,6 +95,12 @@ class Runner:
             raise TypeError("'config' must be of type 'somd2.config.Config'")
         self._config = config
 
+        # If we're running with somd1 compatibility, then modify the merged molecule.
+        if self._config.somd1_compatibility:
+            from ._somd1 import _apply_somd1_pert
+
+            self._system = _apply_somd1_pert(self._system)
+
         # Check for a periodic space.
         self._check_space()
 

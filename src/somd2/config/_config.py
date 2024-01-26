@@ -105,6 +105,7 @@ class Config:
         restart=False,
         write_config=True,
         overwrite=False,
+        somd1_compatibility=False,
     ):
         """
         Constructor.
@@ -235,6 +236,9 @@ class Config:
         overwrite: bool
             Whether to overwrite files in the output directory, if files are detected and
             this is false, SOMD2 will exit without overwriting.
+
+        somd1_compatibility: bool
+            Whether to run using a SOMD1 compatible perturbation.
         """
 
         # Setup logger before doing anything else
@@ -274,6 +278,7 @@ class Config:
         self.max_gpus = max_gpus
         self.run_parallel = run_parallel
         self.restart = restart
+        self.somd1_compatibility = somd1_compatibility
 
         self.write_config = write_config
 
@@ -987,6 +992,16 @@ class Config:
         if not isinstance(restart, bool):
             raise ValueError("'restart' must be of type 'bool'")
         self._restart = restart
+
+    @property
+    def somd1_compatibility(self):
+        return self._somd1_compatibility
+
+    @somd1_compatibility.setter
+    def somd1_compatibility(self, somd1_compatibility):
+        if not isinstance(somd1_compatibility, bool):
+            raise ValueError("'somd1_compatibility' must be of type 'bool'")
+        self._somd1_compatibility = somd1_compatibility
 
     @property
     def output_directory(self):
