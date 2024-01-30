@@ -23,6 +23,7 @@ __all__ = ["Runner"]
 
 import platform as _platform
 
+from sire import morph as _morph
 from sire import stream as _stream
 from sire.system import System as _System
 
@@ -87,8 +88,7 @@ class Runner:
             raise KeyError("No perturbable molecules in the system")
 
         # Link properties to the lambda = 0 end state.
-        for mol in self._system.molecules("molecule property is_perturbable"):
-            self._system.update(mol.perturbation().link_to_reference().commit())
+        self._system = _morph.link_to_reference(self._system)
 
         # Validate the configuration.
         if not isinstance(config, _Config):
