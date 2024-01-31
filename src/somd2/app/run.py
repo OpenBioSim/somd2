@@ -57,15 +57,25 @@ def cli():
     parser.add_argument(
         "system",
         type=str,
-        help="Path to a stream file containing the perturbable system.",
+        help="Path to a stream file containing the perturbable system, "
+        "or the reference system. If a reference system, then this must be "
+        "combined with a perturbation file via the --pert-file argument.",
+    )
+    parser.add_argument(
+        "--pert-file",
+        type=str,
+        required=False,
+        help="Path to a file containing the perturbation to apply "
+        "to the reference system.",
     )
 
     # Parse the arguments into a dictionary.
     args = vars(parser.parse_args())
 
-    # Pop the YAML config and system from the arguments dictionary.
+    # Pop the YAML config, system, and pert file from the arguments dictionary.
     config = args.pop("config")
     system = args.pop("system")
+    pert_file = args.pop("pert_file")
 
     # If set, read the YAML config file.
     if config is not None:
@@ -77,9 +87,12 @@ def cli():
         # will override those in the config.
         args = vars(parser.parse_args(namespace=Namespace(**config)))
 
-        # Re-pop the YAML config and system from the arguments dictionary.
+        # Re-pop the YAML config, system, and pert file from the arguments
+        # dictionary.
         args.pop("config")
         args.pop("system")
+        if pert_file is None:
+            pert_file = args.pop("pert_file")
 
     # Instantiate a Config object to validate the arguments.
     config = Config(**args)
@@ -88,8 +101,80 @@ def cli():
     _logger.info(f"somd2 version: {__version__}")
     _logger.info(f"sire version: {sire_version}+{sire_revisionid}")
 
+    # Try to apply the perturbation to the reference system.
+    if pert_file is not None:
+        _logger.info(f"Applying perturbation to reference system: {pert_file}")
+        system = apply_pert(system, pert_file)
+
     # Instantiate a Runner object to run the simulation.
     runner = Runner(system, config)
 
     # Run the simulation.
     runner.run()
+
+
+def apply_pert(system, pert_file):
+    """
+    Helper function to apply a perturbation to a reference system.
+
+    Parameters
+    ----------
+
+    system: str
+        Path to a stream file containing the reference system.
+
+    pert_file: str
+        Path to a stream file containing the perturbation to apply to the
+        reference system.
+
+    Returns
+    -------
+
+    system: sire.system.System
+        The perturbable system.
+    """
+
+    if not isinstance(system, str):
+        raise TypeError("'system' must be of type 'str'.")
+
+    if not isinstance(pert_file, str):
+        raise TypeError("'pert_file' must be of type 'str'.")
+
+    import os as _os
+
+    if not _os.path.isfile(system):
+        raise FileNotFoundError(f"'{system}' does not exist.")
+
+    if not _os.path.isfile(pert_file):
+        raise FileNotFoundError(f"'{pert_file}' does not exist.")
+
+    from sire import stream as _stream
+    from sire import morph as _morph
+
+    # Load the reference system.
+    try:
+        system = _stream.load(system)
+    except Exception as e:
+        raise ValueError(f"Failed to load the reference 'system': {e}")
+
+    # Get the non-water molecules in the system.
+    non_waters = system["not water"]
+
+    # Try to apply the perturbation to each non-water molecule.
+    is_pert = False
+    for mol in non_waters:
+        try:
+            pert_mol = _morph.create_from_pertfile(mol, pert_file)
+            is_pert = True
+            break
+        except:
+            pass
+
+    if not is_pert:
+        raise ValueError(f"Failed to apply the perturbation in '{pert_file}'.")
+
+    # Replace the reference molecule with the perturbed molecule.
+    system.remove(mol)
+    system.add(pert_mol)
+
+    return system
