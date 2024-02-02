@@ -99,6 +99,7 @@ class Runner:
         if self._config.somd1_compatibility:
             from ._somd1 import _apply_somd1_pert
 
+            _logger.info("Applying SOMD1 perturbation compatibility.")
             self._system = _apply_somd1_pert(self._system)
 
         # Check for a periodic space.
