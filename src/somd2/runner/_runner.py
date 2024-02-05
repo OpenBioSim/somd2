@@ -95,12 +95,48 @@ class Runner:
             raise TypeError("'config' must be of type 'somd2.config.Config'")
         self._config = config
 
-        # If we're running with somd1 compatibility, then modify the merged molecule.
+        # We're running in SOMD1 compatibility mode.
         if self._config.somd1_compatibility:
             from ._somd1 import _apply_somd1_pert
 
+            # First, try to make the perturbation SOMD1 compatible.
+
             _logger.info("Applying SOMD1 perturbation compatibility.")
             self._system = _apply_somd1_pert(self._system)
+
+            # Next, swap the water topology so that it is in AMBER format.
+
+            try:
+                waters = self._system["water"]
+            except:
+                waters = []
+
+            if len(waters) > 0:
+                from sire.legacy.IO import isAmberWater as _isAmberWater
+                from sire.legacy.IO import setAmberWater as _setAmberWater
+
+                if not _isAmberWater(waters[0]):
+                    num_atoms = waters[0].num_atoms()
+
+                    if num_atoms == 3:
+                        # Here we assume tip3p no SPC/E.
+                        model = "tip3p"
+                    elif num_atoms == 4:
+                        model = "tip4p"
+                    elif num_atoms == 5:
+                        model = "tip5p"
+
+                    try:
+                        self._system = _System(
+                            _setAmberWater(self._system._system, model)
+                        )
+                        _logger.info(
+                            "Converting water topology to AMBER format for SOMD1 compatibility."
+                        )
+                    except:
+                        _logger.error(
+                            "Unable to convert water topology to AMBER format for SOMD1 compatibility."
+                        )
 
         # Check for a periodic space.
         self._check_space()
