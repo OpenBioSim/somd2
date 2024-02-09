@@ -277,6 +277,8 @@ class Runner:
         if not isinstance(config2, dict):
             raise TypeError("'config2' must be of type 'dict'")
 
+        from sire.units import GeneralUnit as _GeneralUnit
+
         # Define the subset of settings that are allowed to change after restart
         allowed_diffs = [
             "runtime",
@@ -303,12 +305,20 @@ class Runner:
         ]
         for key in config1.keys():
             if key not in allowed_diffs:
+                # Extract the config values.
+                v1 = config1[key]
+                v2 = config2[key]
+
+                # Convert GeneralUnits to strings for comparison.
+                if isinstance(v1, _GeneralUnit):
+                    v1 = str(v1)
+                if isinstance(v2, _GeneralUnit):
+                    v2 = str(v2)
+
                 # If one is from sire and the other is not, will raise error even though they are the same
-                if (config1[key] == None and config2[key] == False) or (
-                    config2[key] == None and config1[key] == False
-                ):
+                if (v1 == None and v2 == False) or (v2 == None and v1 == False):
                     continue
-                elif config1[key] != config2[key]:
+                elif v1 != v2:
                     raise ValueError(
                         f"{key} has changed since the last run. This is not allowed when using the restart option."
                     )
