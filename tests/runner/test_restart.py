@@ -44,6 +44,13 @@ def test_restart(mols, request):
 
         num_entries = len(energy_traj_1.index)
 
+        # Check that both config and lambda have been written
+        # as properties to the streamed checkpoint file.
+        checkpoint = sr.stream.load(str(Path(tmpdir) / "checkpoint_0.s3"))
+        props = checkpoint.property_keys()
+        assert "config" in props
+        assert "lambda" in props
+
         del runner
 
         config_new = {
