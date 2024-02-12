@@ -1,7 +1,7 @@
 ######################################################################
 # SOMD2: GPU accelerated alchemical free-energy engine.
 #
-# Copyright: 2023
+# Copyright: 2023-2024
 #
 # Authors: The OpenBioSim Team <team@openbiosim.org>
 #
@@ -23,6 +23,7 @@ __all__ = ["Runner"]
 
 import platform as _platform
 
+from sire import morph as _morph
 from sire import stream as _stream
 from sire.system import System as _System
 
@@ -87,13 +88,55 @@ class Runner:
             raise KeyError("No perturbable molecules in the system")
 
         # Link properties to the lambda = 0 end state.
-        for mol in self._system.molecules("molecule property is_perturbable"):
-            self._system.update(mol.perturbation().link_to_reference().commit())
+        self._system = _morph.link_to_reference(self._system)
 
         # Validate the configuration.
         if not isinstance(config, _Config):
             raise TypeError("'config' must be of type 'somd2.config.Config'")
         self._config = config
+
+        # We're running in SOMD1 compatibility mode.
+        if self._config.somd1_compatibility:
+            from ._somd1 import _apply_somd1_pert
+
+            # First, try to make the perturbation SOMD1 compatible.
+
+            _logger.info("Applying SOMD1 perturbation compatibility.")
+            self._system = _apply_somd1_pert(self._system)
+
+            # Next, swap the water topology so that it is in AMBER format.
+
+            try:
+                waters = self._system["water"]
+            except:
+                waters = []
+
+            if len(waters) > 0:
+                from sire.legacy.IO import isAmberWater as _isAmberWater
+                from sire.legacy.IO import setAmberWater as _setAmberWater
+
+                if not _isAmberWater(waters[0]):
+                    num_atoms = waters[0].num_atoms()
+
+                    if num_atoms == 3:
+                        # Here we assume tip3p no SPC/E.
+                        model = "tip3p"
+                    elif num_atoms == 4:
+                        model = "tip4p"
+                    elif num_atoms == 5:
+                        model = "tip5p"
+
+                    try:
+                        self._system = _System(
+                            _setAmberWater(self._system._system, model)
+                        )
+                        _logger.info(
+                            "Converting water topology to AMBER format for SOMD1 compatibility."
+                        )
+                    except:
+                        _logger.error(
+                            "Unable to convert water topology to AMBER format for SOMD1 compatibility."
+                        )
 
         # Check for a periodic space.
         self._check_space()
@@ -234,6 +277,8 @@ class Runner:
         if not isinstance(config2, dict):
             raise TypeError("'config2' must be of type 'dict'")
 
+        from sire.units import GeneralUnit as _GeneralUnit
+
         # Define the subset of settings that are allowed to change after restart
         allowed_diffs = [
             "runtime",
@@ -260,12 +305,20 @@ class Runner:
         ]
         for key in config1.keys():
             if key not in allowed_diffs:
+                # Extract the config values.
+                v1 = config1[key]
+                v2 = config2[key]
+
+                # Convert GeneralUnits to strings for comparison.
+                if isinstance(v1, _GeneralUnit):
+                    v1 = str(v1)
+                if isinstance(v2, _GeneralUnit):
+                    v2 = str(v2)
+
                 # If one is from sire and the other is not, will raise error even though they are the same
-                if (config1[key] == None and config2[key] == False) or (
-                    config2[key] == None and config1[key] == False
-                ):
+                if (v1 == None and v2 == False) or (v2 == None and v1 == False):
                     continue
-                elif config1[key] != config2[key]:
+                elif v1 != v2:
                     raise ValueError(
                         f"{key} has changed since the last run. This is not allowed when using the restart option."
                     )

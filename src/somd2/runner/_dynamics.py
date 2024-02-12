@@ -1,7 +1,7 @@
 ######################################################################
 # SOMD2: GPU accelerated alchemical free-energy engine.
 #
-# Copyright: 2023
+# Copyright: 2023-2024
 #
 # Authors: The OpenBioSim Team <team@openbiosim.org>
 #
@@ -179,6 +179,10 @@ class Dynamics:
             perturbable_constraint="none"
             if equilibration
             else self._config.perturbable_constraint,
+            include_constrained_energies=self._config.include_constrained_energies,
+            dynamic_constraints=self._config.dynamic_constraints,
+            swap_end_states=self._config.swap_end_states,
+            com_reset_frequency=self._config.com_reset_frequency,
             vacuum=not self._has_space,
             map=map,
         )
@@ -205,6 +209,9 @@ class Dynamics:
                     platform=self._config.platform,
                     vacuum=not self._has_space,
                     perturbable_constraint=perturbable_constraint,
+                    include_constrained_energies=self._config.include_constrained_energies,
+                    dynamic_constraints=self._config.dynamic_constraints,
+                    swap_end_states=self._config.swap_end_states,
                     map=self._config._extra_args,
                 )
                 m.run()
@@ -222,6 +229,9 @@ class Dynamics:
                     platform=self._config.platform,
                     vacuum=not self._has_space,
                     perturbable_constraint=perturbable_constraint,
+                    include_constrained_energies=self._config.include_constrained_energies,
+                    dynamic_constraints=self._config.dynamic_constraints,
+                    swap_end_states=self._config.swap_end_states,
                     map=self._config._extra_args,
                 )
                 m.run()
@@ -332,7 +342,9 @@ class Dynamics:
                 try:
                     self._system = self._dyn.commit()
                     _stream.save(self._system, str(sire_checkpoint_name))
-                    df = self._system.energy_trajectory(to_alchemlyb=True)
+                    df = self._system.energy_trajectory(
+                        to_alchemlyb=True, energy_unit="kT"
+                    )
                     if x == 0:
                         # Not including speed in checkpoints for now.
                         f = _dataframe_to_parquet(
@@ -401,7 +413,7 @@ class Dynamics:
             _save(self._system.trajectory(), traj_filename, format=["DCD"])
         # dump final system to checkpoint file
         _stream.save(self._system, sire_checkpoint_name)
-        df = self._system.energy_trajectory(to_alchemlyb=True)
+        df = self._system.energy_trajectory(to_alchemlyb=True, energy_unit="kT")
         return df
 
     def get_timing(self):
