@@ -539,10 +539,10 @@ def _has_dummy(mol, idxs, is_lambda1=False):
     Parameters
     ----------
 
-    mol : Sire.Mol.Molecule
+    mol : sire.legacy.Mol.Molecule
         The molecule.
 
-    idxs : [AtomIdx]
+    idxs : [sire.legacy.Mol.AtomIdx]
         A list of atom indices.
 
     is_lambda1 : bool
@@ -578,10 +578,10 @@ def _is_dummy(mol, idxs, is_lambda1=False):
     Parameters
     ----------
 
-    mol : Sire.Mol.Molecule
+    mol : sire.legacy.Mol.Molecule
         The molecule.
 
-    idxs : [AtomIdx]
+    idxs : [sire.legacy.Mol.AtomIdx]
         A list of atom indices.
 
     is_lambda1 : bool
