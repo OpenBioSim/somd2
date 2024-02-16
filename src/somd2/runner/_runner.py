@@ -772,6 +772,7 @@ class Runner:
                     )
 
         if self._config.restart:
+            _logger.debug(f"Restarting {_lam_sym} = {lambda_value} from file")
             try:
                 system = _stream.load(
                     str(
@@ -812,7 +813,6 @@ class Runner:
                             f"Lambda value from checkpoint file {fname} ({lambda_encoded}) does not match expected value ({lambda_value})."
                         )
                 is_restart = True
-
         else:
             system = self._system.clone()
             is_restart = False

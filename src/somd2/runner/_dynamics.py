@@ -166,9 +166,11 @@ class Dynamics:
         self._dyn = self._system.dynamics(
             temperature=self._config.temperature,
             pressure=pressure,
-            timestep=self._config.equilibration_timestep
-            if equilibration
-            else self._config.timestep,
+            timestep=(
+                self._config.equilibration_timestep
+                if equilibration
+                else self._config.timestep
+            ),
             lambda_value=self._lambda_val,
             cutoff_type=self._config.cutoff_type,
             cutoff=self._config.cutoff,
@@ -176,9 +178,9 @@ class Dynamics:
             platform=self._config.platform,
             device=self._device,
             constraint="none" if equilibration else self._config.constraint,
-            perturbable_constraint="none"
-            if equilibration
-            else self._config.perturbable_constraint,
+            perturbable_constraint=(
+                "none" if equilibration else self._config.perturbable_constraint
+            ),
             include_constrained_energies=self._config.include_constrained_energies,
             dynamic_constraints=self._config.dynamic_constraints,
             swap_end_states=self._config.swap_end_states,
@@ -411,8 +413,14 @@ class Dynamics:
             from sire import save as _save
 
             _save(self._system.trajectory(), traj_filename, format=["DCD"])
+        # Add config and lambda value to the system properties
+        self._system.add_shared_property(
+            "config", self._config.as_dict(sire_compatible=True)
+        )
+        self._system.add_shared_property("lambda", self._lambda_val)
         # dump final system to checkpoint file
         _stream.save(self._system, sire_checkpoint_name)
+        _logger.debug(f"Properties on system: {self._system.property_keys()}")
         df = self._system.energy_trajectory(to_alchemlyb=True, energy_unit="kT")
         return df
 
