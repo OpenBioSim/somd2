@@ -782,8 +782,10 @@ class Runner:
                 ).clone()
             except:
                 _logger.warning(
-                    f"Unable to load checkpoint file for {_lam_sym}={lambda_value}, starting from scratch."
+                    f"Unable to load checkpoint file for {_lam_sym}={lambda_value}, starting from scratch. HERE"
                 )
+                system = self._system.clone()
+                is_restart = False
             else:
                 aresame, reason = self._systems_are_same(self._system, system)
                 if not aresame:
@@ -816,7 +818,7 @@ class Runner:
         else:
             system = self._system.clone()
             is_restart = False
-        if self._config.restart:
+        if is_restart:
             acc_time = system.time()
             if acc_time > self._config.runtime - self._config.timestep:
                 _logger.success(
