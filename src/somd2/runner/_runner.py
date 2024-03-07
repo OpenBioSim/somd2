@@ -782,7 +782,7 @@ class Runner:
                 ).clone()
             except:
                 _logger.warning(
-                    f"Unable to load checkpoint file for {_lam_sym}={lambda_value}, starting from scratch. HERE"
+                    f"Unable to load checkpoint file for {_lam_sym}={lambda_value}, starting from scratch."
                 )
                 system = self._system.clone()
                 is_restart = False
