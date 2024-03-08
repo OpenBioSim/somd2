@@ -158,11 +158,6 @@ class Dynamics:
         else:
             pressure = None
 
-        try:
-            map = self._config._extra_args
-        except:
-            map = None
-
         self._dyn = self._system.dynamics(
             temperature=self._config.temperature,
             pressure=pressure,
@@ -186,7 +181,7 @@ class Dynamics:
             swap_end_states=self._config.swap_end_states,
             com_reset_frequency=self._config.com_reset_frequency,
             vacuum=not self._has_space,
-            map=map,
+            map=self._config._extra_args,
         )
 
     def _minimisation(self, lambda_min=None, perturbable_constraint="none"):
@@ -200,6 +195,7 @@ class Dynamics:
             Lambda value at which to run minimisation, if None run at pre-set
             lambda_val.
         """
+
         if lambda_min is None:
             _logger.info(f"Minimising at {_lam_sym} = {self._lambda_val}")
             try:
@@ -210,6 +206,7 @@ class Dynamics:
                     lambda_value=self._lambda_val,
                     platform=self._config.platform,
                     vacuum=not self._has_space,
+                    constraint=self._config.constraint,
                     perturbable_constraint=perturbable_constraint,
                     include_constrained_energies=self._config.include_constrained_energies,
                     dynamic_constraints=self._config.dynamic_constraints,
@@ -230,6 +227,7 @@ class Dynamics:
                     lambda_value=lambda_min,
                     platform=self._config.platform,
                     vacuum=not self._has_space,
+                    constraint=self._config.constraint,
                     perturbable_constraint=perturbable_constraint,
                     include_constrained_energies=self._config.include_constrained_energies,
                     dynamic_constraints=self._config.dynamic_constraints,
