@@ -161,6 +161,7 @@ class Dynamics:
         self._dyn = self._system.dynamics(
             temperature=self._config.temperature,
             pressure=pressure,
+            barostat_frequency=self._config.barostat_frequency,
             timestep=(
                 self._config.equilibration_timestep
                 if equilibration
