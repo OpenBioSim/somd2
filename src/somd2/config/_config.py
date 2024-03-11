@@ -432,6 +432,10 @@ class Config:
             try:
                 p = _sr.u(pressure)
             except:
+                # Handle special case of pressure = "none"
+                if pressure.lower().replace(" ", "") == "none":
+                    self._pressure = None
+                    return
                 raise ValueError(
                     f"Unable to parse 'pressure' as a Sire GeneralUnit: {pressure}"
                 )
