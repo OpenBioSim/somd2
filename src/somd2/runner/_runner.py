@@ -254,32 +254,34 @@ class Runner:
         end states.
         """
 
-        # Assume a single perturbable molecule for now.
-        pert_mol = self._system.molecules("property is_perturbable")[0]
+        # Find all perturbable molecules in the system..
+        pert_mols = self._system.molecules("property is_perturbable")
 
-        # Create a dynamics object.
-        d = pert_mol.dynamics(
-            constraint=self._config.constraint,
-            perturbable_constraint=self._config.perturbable_constraint,
-            platform="cpu",
-            map=self._config._extra_args,
-        )
+        # Check constraints at lambda = 0 and lambda = 1 for each perturbable molecule.
+        for mol in pert_mols:
+            # Create a dynamics object.
+            d = mol.dynamics(
+                constraint=self._config.constraint,
+                perturbable_constraint=self._config.perturbable_constraint,
+                platform="cpu",
+                map=self._config._extra_args,
+            )
 
-        # Get the constraints at lambda = 0.
-        constraints0 = d.get_constraints()
+            # Get the constraints at lambda = 0.
+            constraints0 = d.get_constraints()
 
-        # Update to lambda = 1.
-        d.set_lambda(1)
+            # Update to lambda = 1.
+            d.set_lambda(1)
 
-        # Get the constraints at lambda = 1.
-        constraints1 = d.get_constraints()
+            # Get the constraints at lambda = 1.
+            constraints1 = d.get_constraints()
 
-        # Check for equivalence.
-        for c0, c1 in zip(constraints0, constraints1):
-            if c0 != c1:
-                _logger.info(
-                    f"Constraints are at not the same at {_lam_sym} = 0 and {_lam_sym} = 1."
-                )
+            # Check for equivalence.
+            for c0, c1 in zip(constraints0, constraints1):
+                if c0 != c1:
+                    _logger.info(
+                        f"Constraints are at not the same at {_lam_sym} = 0 and {_lam_sym} = 1."
+                    )
 
     def _check_directory(self):
         """
