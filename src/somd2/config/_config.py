@@ -74,6 +74,7 @@ class Config:
         timestep="4fs",
         temperature="300K",
         pressure="1 atm",
+        barostat_frequency=25,
         integrator="langevin_middle",
         cutoff_type="pme",
         cutoff="7.5A",
@@ -124,6 +125,9 @@ class Config:
 
         pressure: str
             Simulation pressure. (Simulations will run in the NVT ensemble unless a pressure is specified.)
+
+        barostat_frequency: int
+            The number of integration steps between barostat updates.
 
         integrator: str
             Integrator to use for simulation.
@@ -249,6 +253,7 @@ class Config:
         self.runtime = runtime
         self.temperature = temperature
         self.pressure = pressure
+        self.barostat_frequency = barostat_frequency
         self.integrator = integrator
         self.cutoff_type = cutoff_type
         self.cutoff = cutoff
@@ -432,6 +437,10 @@ class Config:
             try:
                 p = _sr.u(pressure)
             except:
+                # Handle special case of pressure = "none"
+                if pressure.lower().replace(" ", "") == "none":
+                    self._pressure = None
+                    return
                 raise ValueError(
                     f"Unable to parse 'pressure' as a Sire GeneralUnit: {pressure}"
                 )
@@ -442,6 +451,20 @@ class Config:
 
         else:
             self._pressure = pressure
+
+    @property
+    def barostat_frequency(self):
+        return self._barostat_frequency
+
+    @barostat_frequency.setter
+    def barostat_frequency(self, barostat_frequency):
+        if not isinstance(barostat_frequency, int):
+            raise TypeError("'barostat_frequency' must be of type 'int'")
+
+        if barostat_frequency <= 0:
+            raise ValueError("'barostat_frequency' must be a positive integer")
+
+        self._barostat_frequency = barostat_frequency
 
     @property
     def integrator(self):

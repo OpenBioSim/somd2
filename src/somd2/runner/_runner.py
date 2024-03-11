@@ -94,6 +94,7 @@ class Runner:
         if not isinstance(config, _Config):
             raise TypeError("'config' must be of type 'somd2.config.Config'")
         self._config = config
+        self._config._extra_args = {}
 
         # We're running in SOMD1 compatibility mode.
         if self._config.somd1_compatibility:
@@ -138,8 +139,20 @@ class Runner:
                             "Unable to convert water topology to AMBER format for SOMD1 compatibility."
                         )
 
+            # Only check for light atoms by the maxium end state mass if running
+            # in SOMD1 compatibility mode.
+            if self._config.somd1_compatibility:
+                self._config._extra_args["check_for_h_by_max_mass"] = True
+                self._config._extra_args["check_for_h_by_mass"] = False
+                self._config._extra_args["check_for_h_by_mass"] = False
+                self._config._extra_args["check_for_h_by_element"] = False
+                self._config._extra_args["check_for_h_by_ambertype"] = False
+
         # Check for a periodic space.
         self._check_space()
+
+        # Check the end state contraints.
+        self._check_end_state_constraints()
 
         # Set the lambda values.
         self._lambda_values = [
@@ -234,6 +247,41 @@ class Runner:
                     "Cannot use PME for non-periodic simulations. Using RF cutoff instead."
                 )
                 self._config.cutoff_type = "rf"
+
+    def _check_end_state_constraints(self):
+        """
+        Internal function to check whether the constrants are the same at the two
+        end states.
+        """
+
+        # Find all perturbable molecules in the system..
+        pert_mols = self._system.molecules("property is_perturbable")
+
+        # Check constraints at lambda = 0 and lambda = 1 for each perturbable molecule.
+        for mol in pert_mols:
+            # Create a dynamics object.
+            d = mol.dynamics(
+                constraint=self._config.constraint,
+                perturbable_constraint=self._config.perturbable_constraint,
+                platform="cpu",
+                map=self._config._extra_args,
+            )
+
+            # Get the constraints at lambda = 0.
+            constraints0 = d.get_constraints()
+
+            # Update to lambda = 1.
+            d.set_lambda(1)
+
+            # Get the constraints at lambda = 1.
+            constraints1 = d.get_constraints()
+
+            # Check for equivalence.
+            for c0, c1 in zip(constraints0, constraints1):
+                if c0 != c1:
+                    _logger.info(
+                        f"Constraints are at not the same at {_lam_sym} = 0 and {_lam_sym} = 1."
+                    )
 
     def _check_directory(self):
         """
@@ -657,17 +705,15 @@ class Runner:
                     threads_per_worker = (
                         self._config.max_threads // self._config.num_lambda
                     )
-                self._config._extra_args = {"threads": threads_per_worker}
+                self._config._extra_args["threads"] = threads_per_worker
 
             # (Multi-)GPU platform.
             elif self._is_gpu:
                 self.max_workers = len(self._gpu_pool)
-                self._config._extra_args = {}
 
             # All other platforms.
             else:
                 self._max_workers = 1
-                self._config._extra_args = {}
 
             import concurrent.futures as _futures
 
@@ -696,7 +742,7 @@ class Runner:
         # Serial configuration.
         elif self._config.num_lambda is not None:
             if self._config.platform == "cpu":
-                self._config.extra_args = {"threads": self._config.max_threads}
+                self._config._extra_args = {"threads": self._config.max_threads}
             self._lambda_values = [
                 round(i / (self._config.num_lambda - 1), 5)
                 for i in range(0, self._config.num_lambda)
