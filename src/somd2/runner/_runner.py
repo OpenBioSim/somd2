@@ -81,6 +81,25 @@ class Runner:
         else:
             self._system = system
 
+        # Validate the configuration.
+        if not isinstance(config, _Config):
+            raise TypeError("'config' must be of type 'somd2.config.Config'")
+        self._config = config
+        self._config._extra_args = {}
+
+        # Check whether we need to apply a perturbation to the reference system.
+        if self._config.pert_file is not None:
+            _logger.info(
+                f"Applying perturbation to reference system: {self._config.pert_file}"
+            )
+            try:
+                from ._somd1 import _apply_pert
+
+                self._system = _apply_pert(self._system, self._config.pert_file)
+                self._config.somd1_compatibility = True
+            except Exception as e:
+                raise IOError(f"Unable to apply perturbation to reference system: {e}")
+
         # Make sure the system contains perturbable molecules.
         try:
             self._system.molecules("property is_perturbable")
@@ -90,20 +109,14 @@ class Runner:
         # Link properties to the lambda = 0 end state.
         self._system = _morph.link_to_reference(self._system)
 
-        # Validate the configuration.
-        if not isinstance(config, _Config):
-            raise TypeError("'config' must be of type 'somd2.config.Config'")
-        self._config = config
-        self._config._extra_args = {}
-
         # We're running in SOMD1 compatibility mode.
         if self._config.somd1_compatibility:
-            from ._somd1 import _apply_somd1_pert
+            from ._somd1 import _make_compatible
 
             # First, try to make the perturbation SOMD1 compatible.
 
             _logger.info("Applying SOMD1 perturbation compatibility.")
-            self._system = _apply_somd1_pert(self._system)
+            self._system = _make_compatible(self._system)
 
             # Next, swap the water topology so that it is in AMBER format.
 

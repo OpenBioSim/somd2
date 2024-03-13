@@ -107,6 +107,7 @@ class Config:
         write_config=True,
         overwrite=False,
         somd1_compatibility=False,
+        pert_file=None,
     ):
         """
         Constructor.
@@ -243,6 +244,10 @@ class Config:
 
         somd1_compatibility: bool
             Whether to run using a SOMD1 compatible perturbation.
+
+        pert_file: str
+            The path to a SOMD1 perturbation file to apply to the reference system.
+            When set, this will automatically set 'somd1_compatibility' to True.
         """
 
         # Setup logger before doing anything else
@@ -284,6 +289,7 @@ class Config:
         self.run_parallel = run_parallel
         self.restart = restart
         self.somd1_compatibility = somd1_compatibility
+        self.pert_file = pert_file
 
         self.write_config = write_config
 
@@ -1025,6 +1031,25 @@ class Config:
         if not isinstance(somd1_compatibility, bool):
             raise ValueError("'somd1_compatibility' must be of type 'bool'")
         self._somd1_compatibility = somd1_compatibility
+
+    @property
+    def pert_file(self):
+        return self._pert_file
+
+    @pert_file.setter
+    def pert_file(self, pert_file):
+        import os
+
+        if pert_file is not None and not isinstance(pert_file, str):
+            raise TypeError("'pert_file' must be of type 'str'")
+
+        if pert_file is not None and not os.path.exists(pert_file):
+            raise ValueError(f"Perturbation file does not exist: {pert_file}")
+
+        self._pert_file = pert_file
+
+        if pert_file is not None:
+            self._somd1_compatibility = True
 
     @property
     def output_directory(self):

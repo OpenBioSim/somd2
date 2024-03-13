@@ -27,9 +27,9 @@ import sire.legacy.MM as _SireMM
 import sire.legacy.Mol as _SireMol
 
 
-def _apply_somd1_pert(system):
+def _make_compatible(system):
     """
-    Applies the somd1 perturbation to the system.
+    Makes a perturbation SOMD1 compatible.
 
     Parameters
     ----------
@@ -611,3 +611,55 @@ def _is_dummy(mol, idxs, is_lambda1=False):
         is_dummy.append(mol.atom(idx).property(prop) == dummy)
 
     return is_dummy
+
+
+def _apply_pert(system, pert_file):
+    """
+    Helper function to apply a perturbation to a reference system.
+
+    Parameters
+    ----------
+
+    system: sr.system.System
+        The reference system.
+
+    pert_file: str
+        Path to a stream file containing the perturbation to apply to the
+        reference system.
+
+    Returns
+    -------
+
+    system: sire.system.System
+        The perturbable system.
+    """
+
+    if not isinstance(system, _System):
+        raise TypeError("'system' must be of type 'sr.system.System'.")
+
+    if not isinstance(pert_file, str):
+        raise TypeError("'pert_file' must be of type 'str'.")
+
+    from sire import morph as _morph
+
+    # Get the non-water molecules in the system.
+    non_waters = system["not water"]
+
+    # Try to apply the perturbation to each non-water molecule.
+    is_pert = False
+    for mol in non_waters:
+        try:
+            pert_mol = _morph.create_from_pertfile(mol, pert_file)
+            is_pert = True
+            break
+        except:
+            pass
+
+    if not is_pert:
+        raise ValueError(f"Failed to apply the perturbation in '{pert_file}'.")
+
+    # Replace the reference molecule with the perturbed molecule.
+    system.remove(mol)
+    system.add(pert_mol)
+
+    return system
