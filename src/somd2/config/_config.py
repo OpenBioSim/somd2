@@ -86,7 +86,7 @@ class Config:
         coulomb_power=0.0,
         shift_delta="2A",
         constraint="h_bonds",
-        perturbable_constraint="h_bonds_not_perturbed",
+        perturbable_constraint="bonds_not_heavy_perturbed",
         include_constrained_energies=False,
         dynamic_constraints=True,
         com_reset_frequency=10,
