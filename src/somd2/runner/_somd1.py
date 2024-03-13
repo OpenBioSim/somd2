@@ -648,12 +648,14 @@ def _apply_pert(system, pert_file):
     # Try to apply the perturbation to each non-water molecule.
     is_pert = False
     for mol in non_waters:
-        try:
-            pert_mol = _morph.create_from_pertfile(mol, pert_file)
-            is_pert = True
-            break
-        except:
-            pass
+        # Exclude ions.
+        if mol.num_atoms() > 1:
+            try:
+                pert_mol = _morph.create_from_pertfile(mol, pert_file)
+                is_pert = True
+                break
+            except:
+                pass
 
     if not is_pert:
         raise ValueError(f"Failed to apply the perturbation in '{pert_file}'.")
