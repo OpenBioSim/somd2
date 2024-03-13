@@ -703,7 +703,7 @@ class Config:
             perturbable_constraint = perturbable_constraint.lower().replace(" ", "")
             if perturbable_constraint not in self._choices["perturbable_constraint"]:
                 raise ValueError(
-                    f"'perturbable_constrant' not recognised. Valid constraints are: {', '.join(self._choices['constraint'])}"
+                    f"'perturbable_constraint' not recognised. Valid constraints are: {', '.join(self._choices['perturbable_constraint'])}"
                 )
             else:
                 self._perturbable_constraint = perturbable_constraint
