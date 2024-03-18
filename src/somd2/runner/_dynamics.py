@@ -127,6 +127,7 @@ class Dynamics:
             raise ValueError("lambda_value not in lambda_array")
         filenames = {}
         index = lambda_array.index(lambda_value)
+        filenames["topology"] = f"system.prm7"
         filenames["checkpoint"] = f"checkpoint_{index}.s3"
         filenames["energy_traj"] = f"energy_traj_{index}.parquet"
         if restart:
@@ -277,8 +278,13 @@ class Dynamics:
         df : pandas dataframe
             Dataframe containing the sire energy trajectory.
         """
-        from sire import u as _u
-        from sire import stream as _stream
+
+        import sire as sr
+
+        # Save the system topology to a hidden file so that we
+        # use it to reconstuct the trajectory.
+        topology = str(self._config.output_directory / self._filenames["topology"])
+        sr.save(self._system, topology)
 
         def generate_lam_vals(lambda_base, increment):
             """Generate lambda values for a given lambda_base and increment"""
@@ -346,6 +352,9 @@ class Dynamics:
 
         _logger.info(f"Running dynamics at {_lam_sym} = {self._lambda_val}")
 
+        # Create a list to hold the trajectory chunks. Add the topology file to it.
+        traj_files = [topology]
+
         if self._config.checkpoint_frequency.value() > 0.0:
             ### Calc number of blocks and remainder (surely there's a better way?)###
             num_blocks = 0
@@ -377,8 +386,25 @@ class Dynamics:
                 except:
                     raise
                 try:
+                    # Commit the current system and save it to a checkpoint file.
                     self._system = self._dyn.commit()
-                    _stream.save(self._system, str(sire_checkpoint_name))
+                    sr.stream.save(self._system, str(sire_checkpoint_name))
+
+                    # Save the current trajectory chunk to file.
+                    if self._config.save_trajectories:
+                        traj_filename = str(
+                            self._config.output_directory
+                            / self._filenames["trajectory"]
+                        ).replace(".dcd", f"_{x}.dcd")
+                        sr.save(
+                            self._system.trajectory(), traj_filename, format=["DCD"]
+                        )
+                        traj_files.append(traj_filename)
+
+                        # Delete the trajectory from memory.
+                        self._system.delete_all_frames()
+
+                    # Save the energy trajectory to a parquet file.
                     df = self._system.energy_trajectory(
                         to_alchemlyb=True, energy_unit="kT"
                     )
@@ -441,20 +467,30 @@ class Dynamics:
                 raise
             self._system = self._dyn.commit()
 
+        # Assemble and save the final energy trajectory.
         if self._config.save_trajectories:
+            # Load the chunked trajectory files and concatenate them.
+            system = sr.load(traj_files)
             traj_filename = str(
                 self._config.output_directory / self._filenames["trajectory"]
             )
-            from sire import save as _save
+            sr.save(self._system.trajectory(), traj_filename, format=["DCD"])
 
-            _save(self._system.trajectory(), traj_filename, format=["DCD"])
-        # Add config and lambda value to the system properties
+            # Delete the trajectory from memory.
+            self._system.delete_all_frames()
+
+            # Now remove the chunked trajectory files.
+            for f in traj_files:
+                _Path(f).unlink()
+
+        # Add config and lambda value to the system properties.
         self._system.add_shared_property(
             "config", self._config.as_dict(sire_compatible=True)
         )
         self._system.add_shared_property("lambda", self._lambda_val)
-        # dump final system to checkpoint file
-        _stream.save(self._system, sire_checkpoint_name)
+
+        # Save the final system to checkpoint file.
+        sr.stream.save(self._system, sire_checkpoint_name)
         _logger.debug(f"Properties on system: {self._system.property_keys()}")
         df = self._system.energy_trajectory(to_alchemlyb=True, energy_unit="kT")
         return df
