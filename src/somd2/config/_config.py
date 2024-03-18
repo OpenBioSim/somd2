@@ -93,6 +93,7 @@ class Config:
         minimise=True,
         equilibration_time="0ps",
         equilibration_timestep="1fs",
+        equilibration_constraints=False,
         energy_frequency="1ps",
         save_trajectories=True,
         frame_frequency="20ps",
@@ -193,6 +194,9 @@ class Config:
         equilibration_timestep: str
             Equilibration timestep. (Can be different to simulation timestep.)
 
+        equilibration_constraints: bool
+            Whether to use constraints during equilibration.
+
         energy_frequency: str
             Frequency at which to output energy data.
 
@@ -278,6 +282,7 @@ class Config:
         self.minimise = minimise
         self.equilibration_time = equilibration_time
         self.equilibration_timestep = equilibration_timestep
+        self.equilibration_constraints = equilibration_constraints
         self.energy_frequency = energy_frequency
         self.save_trajectories = save_trajectories
         self.frame_frequency = frame_frequency
@@ -802,6 +807,16 @@ class Config:
             raise ValueError("'equilibration_timestep' units are invalid.")
 
         self._equilibration_timestep = t
+
+    @property
+    def equilibration_constraints(self):
+        return self._equilibration_constraints
+
+    @equilibration_constraints.setter
+    def equilibration_constraints(self, equilibration_constraints):
+        if not isinstance(equilibration_constraints, bool):
+            raise ValueError("'equilibration_constraints' must be of type 'bool'")
+        self._equilibration_constraints = equilibration_constraints
 
     @property
     def energy_frequency(self):

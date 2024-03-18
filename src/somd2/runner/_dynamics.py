@@ -173,9 +173,15 @@ class Dynamics:
             schedule=self._config.lambda_schedule,
             platform=self._config.platform,
             device=self._device,
-            constraint="none" if equilibration else self._config.constraint,
+            constraint=(
+                "none"
+                if equilibration and not self._config.equilibration_constraints
+                else self._config.constraint
+            ),
             perturbable_constraint=(
-                "none" if equilibration else self._config.perturbable_constraint
+                "none"
+                if equilibration and not self._config.equilibration_constraints
+                else self._config.perturbable_constraint
             ),
             include_constrained_energies=self._config.include_constrained_energies,
             dynamic_constraints=self._config.dynamic_constraints,
@@ -185,7 +191,9 @@ class Dynamics:
             map=self._config._extra_args,
         )
 
-    def _minimisation(self, lambda_min=None, perturbable_constraint="none"):
+    def _minimisation(
+        self, lambda_min=None, constraint="none", perturbable_constraint="none"
+    ):
         """
         Minimisation of self._system.
 
@@ -258,13 +266,6 @@ class Dynamics:
             auto_fix_minimise=False,
         )
         self._system = self._dyn.commit()
-        # Perform brief minimisation at the end of equilibration only if the
-        # timestep is increasing
-        if self._config.timestep > self._config.equilibration_timestep:
-            self._minimisation(
-                lambda_min=self._lambda_val,
-                perturbable_constraint=self._config.perturbable_constraint,
-            )
 
     def _run(self, lambda_minimisation=None, is_restart=False):
         """
@@ -292,14 +293,49 @@ class Dynamics:
             return lam_vals
 
         if self._config.minimise:
-            self._minimisation(lambda_minimisation)
+            # Set the constraint.
+            if self._config.equilibration_time.value() > 0.0 and not is_restart:
+                constraint = (
+                    "none"
+                    if not self._equilibrate_constraints
+                    else self._config.constraint
+                )
+                perturbable_constraint = (
+                    "none"
+                    if not self._equilibrate_constraints
+                    else self._config.perturbable_constraint
+                )
+            else:
+                constraint = self._config.constraint
+                perturbable_constraint = self._config.perturbable_constraint
+
+            self._minimisation(
+                lambda_minimisation,
+                constraint=constraint,
+                perturbable_constraint=perturbable_constraint,
+            )
 
         if self._config.equilibration_time.value() > 0.0 and not is_restart:
             self._equilibration()
+
             # Reset the timer to zero
             self._system.set_time(_u("0ps"))
 
+            # Perform minimisation at the end of equilibration only if the
+            # timestep is increasing, or the constraint is changing.
+            if (self._config.timestep > self._config.equilibration_timestep) or (
+                not self._config.equilibrate_constraints
+                and self._config.perturbable_constraint != "none"
+            ):
+                self._minimisation(
+                    lambda_min=self._lambda_val,
+                    constraint=self._config.constraint,
+                    perturbable_constraint=self._config.perturbable_constraint,
+                )
+
+        # Setup the dynamics object for production.
         self._setup_dynamics(equilibration=False)
+
         # Work out the lambda values for finite-difference gradient analysis.
         self._lambda_grad = generate_lam_vals(self._lambda_val, self._increment)
 
