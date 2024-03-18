@@ -356,15 +356,11 @@ class Dynamics:
         traj_files = [topology]
 
         if self._config.checkpoint_frequency.value() > 0.0:
-            ### Calc number of blocks and remainder (surely there's a better way?)###
-            num_blocks = 0
-            rem = self._config.runtime
-            while True:
-                if rem > self._config.checkpoint_frequency:
-                    num_blocks += 1
-                    rem -= self._config.checkpoint_frequency
-                else:
-                    break
+            # Calculate the number of blocks and the remaineder time.
+            frac = self._config.runtime.value() / self._config.checkpoint_frequency.value()
+            num_blocks = int(frac)
+            rem = frac - num_blocks
+
             # Append only this number of lines from the end of the dataframe during checkpointing
             energy_per_block = (
                 self._config.checkpoint_frequency / self._config.energy_frequency
@@ -435,7 +431,7 @@ class Dynamics:
                             df.iloc[-int(energy_per_block) :],
                         )
                     _logger.info(
-                        f"Finished block {x+1} of {num_blocks} for {_lam_sym} = {self._lambda_val}"
+                        f"Finished block {x+1} of {num_blocks + int(rem > 0)} for {_lam_sym} = {self._lambda_val}"
                     )
                 except:
                     raise
@@ -450,6 +446,8 @@ class Dynamics:
                         save_velocities=self._config.save_velocities,
                         auto_fix_minimise=False,
                     )
+
+                    f"Finished block {x+1} of {num_blocks + int(rem > 0)} for {_lam_sym} = {self._lambda_val}"
                 except:
                     raise
                 self._system = self._dyn.commit()
