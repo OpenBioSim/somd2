@@ -44,6 +44,11 @@ def test_restart(mols, request):
 
         num_entries = len(energy_traj_1.index)
 
+        # Load the trajectory.
+        traj_1 = sr.load(
+            [str(Path(tmpdir) / "system.prm7"), str(Path(tmpdir) / "traj_0.dcd")]
+        )
+
         # Check that both config and lambda have been written
         # as properties to the streamed checkpoint file.
         checkpoint = sr.stream.load(str(Path(tmpdir) / "checkpoint_0.s3"))
@@ -79,11 +84,17 @@ def test_restart(mols, request):
 
         # Check that first half of energy trajectory is the same
         assert energy_traj_1.equals(energy_traj_2.iloc[:num_entries])
+
         # Check that second energy trajectory is twice as long as the first
         assert len(energy_traj_2.index) == 2 * num_entries
-        # Check that a second trajectory was written and that the first still exists
-        assert Path.exists(Path(tmpdir) / "traj_0.dcd")
-        assert Path.exists(Path(tmpdir) / "traj_0_1.dcd")
+
+        # Reload the trajectory.
+        traj_2 = sr.load(
+            [str(Path(tmpdir) / "system.prm7"), str(Path(tmpdir) / "traj_0.dcd")]
+        )
+
+        # Check that the trajectory is twice as long as the first.
+        assert traj_2.num_frames() == 2 * traj_1.num_frames()
 
         config_difftimestep = config_new.copy()
         config_difftimestep["runtime"] = "36fs"
