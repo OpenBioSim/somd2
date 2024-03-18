@@ -349,6 +349,7 @@ class Runner:
             "max_threads",
             "equilibration_time",
             "equilibration_timestep",
+            "equilibration_constraints",
             "energy_frequency",
             "save_trajectory",
             "frame_frequency",
