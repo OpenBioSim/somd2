@@ -818,6 +818,12 @@ class Config:
             raise ValueError("'equilibration_constraints' must be of type 'bool'")
         self._equilibration_constraints = equilibration_constraints
 
+        if not equilibration_constraints and self.equilibration_timestep > _sr.u("1fs"):
+            _logger.warning(
+                "Equilibration constraints are recommeded for stability when "
+                "using a timestep greater than 2fs"
+            )
+
     @property
     def energy_frequency(self):
         return self._energy_frequency
