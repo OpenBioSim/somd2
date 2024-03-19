@@ -311,12 +311,12 @@ class Dynamics:
             if self._config.equilibration_time.value() > 0.0 and not is_restart:
                 constraint = (
                     "none"
-                    if not self._equilibration_constraints
+                    if not self._config.equilibration_constraints
                     else self._config.constraint
                 )
                 perturbable_constraint = (
                     "none"
-                    if not self._equilibration_constraints
+                    if not self._config.equilibration_constraints
                     else self._config.perturbable_constraint
                 )
             else:
