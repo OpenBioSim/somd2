@@ -1,7 +1,7 @@
 ######################################################################
 # SOMD2: GPU accelerated alchemical free-energy engine.
 #
-# Copyright: 2023
+# Copyright: 2023-2024
 #
 # Authors: The OpenBioSim Team <team@openbiosim.org>
 #
@@ -37,10 +37,18 @@ def cli():
 
     from argparse import Namespace
 
+    from somd2 import _logger
     from somd2.config import Config
     from somd2.runner import Runner
 
     from somd2.io import yaml_to_dict
+
+    # Store the somd2 version.
+    from somd2._version import __version__
+
+    # Store the sire version.
+    from sire import __version__ as sire_version
+    from sire import __revisionid__ as sire_revisionid
 
     # Generate the parser.
     parser = Config._create_parser()
@@ -49,7 +57,9 @@ def cli():
     parser.add_argument(
         "system",
         type=str,
-        help="Path to a stream file containing the perturbable system.",
+        help="Path to a stream file containing the perturbable system, "
+        "or the reference system. If a reference system, then this must be "
+        "combined with a perturbation file via the --pert-file argument.",
     )
 
     # Parse the arguments into a dictionary.
@@ -75,6 +85,10 @@ def cli():
 
     # Instantiate a Config object to validate the arguments.
     config = Config(**args)
+
+    # Log the versions of somd2 and sire.
+    _logger.info(f"somd2 version: {__version__}")
+    _logger.info(f"sire version: {sire_version}+{sire_revisionid}")
 
     # Instantiate a Runner object to run the simulation.
     runner = Runner(system, config)

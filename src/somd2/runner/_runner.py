@@ -1,7 +1,7 @@
 ######################################################################
 # SOMD2: GPU accelerated alchemical free-energy engine.
 #
-# Copyright: 2023
+# Copyright: 2023-2024
 #
 # Authors: The OpenBioSim Team <team@openbiosim.org>
 #
@@ -23,6 +23,7 @@ __all__ = ["Runner"]
 
 import platform as _platform
 
+from sire import morph as _morph
 from sire import stream as _stream
 from sire.system import System as _System
 
@@ -80,6 +81,25 @@ class Runner:
         else:
             self._system = system
 
+        # Validate the configuration.
+        if not isinstance(config, _Config):
+            raise TypeError("'config' must be of type 'somd2.config.Config'")
+        self._config = config
+        self._config._extra_args = {}
+
+        # Check whether we need to apply a perturbation to the reference system.
+        if self._config.pert_file is not None:
+            _logger.info(
+                f"Applying perturbation to reference system: {self._config.pert_file}"
+            )
+            try:
+                from ._somd1 import _apply_pert
+
+                self._system = _apply_pert(self._system, self._config.pert_file)
+                self._config.somd1_compatibility = True
+            except Exception as e:
+                raise IOError(f"Unable to apply perturbation to reference system: {e}")
+
         # Make sure the system contains perturbable molecules.
         try:
             self._system.molecules("property is_perturbable")
@@ -87,16 +107,65 @@ class Runner:
             raise KeyError("No perturbable molecules in the system")
 
         # Link properties to the lambda = 0 end state.
-        for mol in self._system.molecules("molecule property is_perturbable"):
-            self._system.update(mol.perturbation().link_to_reference().commit())
+        self._system = _morph.link_to_reference(self._system)
 
-        # Validate the configuration.
-        if not isinstance(config, _Config):
-            raise TypeError("'config' must be of type 'somd2.config.Config'")
-        self._config = config
+        # We're running in SOMD1 compatibility mode.
+        if self._config.somd1_compatibility:
+            from ._somd1 import _make_compatible
+
+            # First, try to make the perturbation SOMD1 compatible.
+
+            _logger.info("Applying SOMD1 perturbation compatibility.")
+            self._system = _make_compatible(self._system)
+
+            # Next, swap the water topology so that it is in AMBER format.
+
+            try:
+                waters = self._system["water"]
+            except:
+                waters = []
+
+            if len(waters) > 0:
+                from sire.legacy.IO import isAmberWater as _isAmberWater
+                from sire.legacy.IO import setAmberWater as _setAmberWater
+
+                if not _isAmberWater(waters[0]):
+                    num_atoms = waters[0].num_atoms()
+
+                    if num_atoms == 3:
+                        # Here we assume tip3p no SPC/E.
+                        model = "tip3p"
+                    elif num_atoms == 4:
+                        model = "tip4p"
+                    elif num_atoms == 5:
+                        model = "tip5p"
+
+                    try:
+                        self._system = _System(
+                            _setAmberWater(self._system._system, model)
+                        )
+                        _logger.info(
+                            "Converting water topology to AMBER format for SOMD1 compatibility."
+                        )
+                    except:
+                        _logger.error(
+                            "Unable to convert water topology to AMBER format for SOMD1 compatibility."
+                        )
+
+            # Only check for light atoms by the maxium end state mass if running
+            # in SOMD1 compatibility mode.
+            if self._config.somd1_compatibility:
+                self._config._extra_args["check_for_h_by_max_mass"] = True
+                self._config._extra_args["check_for_h_by_mass"] = False
+                self._config._extra_args["check_for_h_by_mass"] = False
+                self._config._extra_args["check_for_h_by_element"] = False
+                self._config._extra_args["check_for_h_by_ambertype"] = False
 
         # Check for a periodic space.
         self._check_space()
+
+        # Check the end state contraints.
+        self._check_end_state_constraints()
 
         # Set the lambda values.
         self._lambda_values = [
@@ -192,6 +261,41 @@ class Runner:
                 )
                 self._config.cutoff_type = "rf"
 
+    def _check_end_state_constraints(self):
+        """
+        Internal function to check whether the constrants are the same at the two
+        end states.
+        """
+
+        # Find all perturbable molecules in the system..
+        pert_mols = self._system.molecules("property is_perturbable")
+
+        # Check constraints at lambda = 0 and lambda = 1 for each perturbable molecule.
+        for mol in pert_mols:
+            # Create a dynamics object.
+            d = mol.dynamics(
+                constraint=self._config.constraint,
+                perturbable_constraint=self._config.perturbable_constraint,
+                platform="cpu",
+                map=self._config._extra_args,
+            )
+
+            # Get the constraints at lambda = 0.
+            constraints0 = d.get_constraints()
+
+            # Update to lambda = 1.
+            d.set_lambda(1)
+
+            # Get the constraints at lambda = 1.
+            constraints1 = d.get_constraints()
+
+            # Check for equivalence.
+            for c0, c1 in zip(constraints0, constraints1):
+                if c0 != c1:
+                    _logger.info(
+                        f"Constraints are at not the same at {_lam_sym} = 0 and {_lam_sym} = 1."
+                    )
+
     def _check_directory(self):
         """
         Find the name of the file from which simulations will be started.
@@ -234,6 +338,8 @@ class Runner:
         if not isinstance(config2, dict):
             raise TypeError("'config2' must be of type 'dict'")
 
+        from sire.units import GeneralUnit as _GeneralUnit
+
         # Define the subset of settings that are allowed to change after restart
         allowed_diffs = [
             "runtime",
@@ -260,12 +366,20 @@ class Runner:
         ]
         for key in config1.keys():
             if key not in allowed_diffs:
+                # Extract the config values.
+                v1 = config1[key]
+                v2 = config2[key]
+
+                # Convert GeneralUnits to strings for comparison.
+                if isinstance(v1, _GeneralUnit):
+                    v1 = str(v1)
+                if isinstance(v2, _GeneralUnit):
+                    v2 = str(v2)
+
                 # If one is from sire and the other is not, will raise error even though they are the same
-                if (config1[key] == None and config2[key] == False) or (
-                    config2[key] == None and config1[key] == False
-                ):
+                if (v1 == None and v2 == False) or (v2 == None and v1 == False):
                     continue
-                elif config1[key] != config2[key]:
+                elif v1 != v2:
                     raise ValueError(
                         f"{key} has changed since the last run. This is not allowed when using the restart option."
                     )
@@ -604,17 +718,15 @@ class Runner:
                     threads_per_worker = (
                         self._config.max_threads // self._config.num_lambda
                     )
-                self._config._extra_args = {"threads": threads_per_worker}
+                self._config._extra_args["threads"] = threads_per_worker
 
             # (Multi-)GPU platform.
             elif self._is_gpu:
                 self.max_workers = len(self._gpu_pool)
-                self._config._extra_args = {}
 
             # All other platforms.
             else:
                 self._max_workers = 1
-                self._config._extra_args = {}
 
             import concurrent.futures as _futures
 
@@ -643,7 +755,7 @@ class Runner:
         # Serial configuration.
         elif self._config.num_lambda is not None:
             if self._config.platform == "cpu":
-                self._config.extra_args = {"threads": self._config.max_threads}
+                self._config._extra_args = {"threads": self._config.max_threads}
             self._lambda_values = [
                 round(i / (self._config.num_lambda - 1), 5)
                 for i in range(0, self._config.num_lambda)
@@ -719,6 +831,7 @@ class Runner:
                     )
 
         if self._config.restart:
+            _logger.debug(f"Restarting {_lam_sym} = {lambda_value} from file")
             try:
                 system = _stream.load(
                     str(
@@ -730,6 +843,8 @@ class Runner:
                 _logger.warning(
                     f"Unable to load checkpoint file for {_lam_sym}={lambda_value}, starting from scratch."
                 )
+                system = self._system.clone()
+                is_restart = False
             else:
                 aresame, reason = self._systems_are_same(self._system, system)
                 if not aresame:
@@ -759,11 +874,10 @@ class Runner:
                             f"Lambda value from checkpoint file {fname} ({lambda_encoded}) does not match expected value ({lambda_value})."
                         )
                 is_restart = True
-
         else:
             system = self._system.clone()
             is_restart = False
-        if self._config.restart:
+        if is_restart:
             acc_time = system.time()
             if acc_time > self._config.runtime - self._config.timestep:
                 _logger.success(

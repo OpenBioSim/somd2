@@ -1,7 +1,7 @@
 ######################################################################
 # SOMD2: GPU accelerated alchemical free-energy engine.
 #
-# Copyright: 2023
+# Copyright: 2023-2024
 #
 # Authors: The OpenBioSim Team <team@openbiosim.org>
 #
@@ -157,18 +157,16 @@ class Dynamics:
         else:
             pressure = None
 
-        try:
-            map = self._config._extra_args
-        except:
-            map = None
-
         self._dyn = self._system.dynamics(
             temperature=self._config.temperature,
             pressure=pressure,
+            barostat_frequency=self._config.barostat_frequency,
+            timestep=(
+                self._config.equilibration_timestep
+                if equilibration
+                else self._config.timestep
+            ),
             restraints=self._config.restraints,
-            timestep=self._config.equilibration_timestep
-            if equilibration
-            else self._config.timestep,
             lambda_value=self._lambda_val,
             cutoff_type=self._config.cutoff_type,
             cutoff=self._config.cutoff,
@@ -176,11 +174,15 @@ class Dynamics:
             platform=self._config.platform,
             device=self._device,
             constraint="none" if equilibration else self._config.constraint,
-            perturbable_constraint="none"
-            if equilibration
-            else self._config.perturbable_constraint,
+            perturbable_constraint=(
+                "none" if equilibration else self._config.perturbable_constraint
+            ),
+            include_constrained_energies=self._config.include_constrained_energies,
+            dynamic_constraints=self._config.dynamic_constraints,
+            swap_end_states=self._config.swap_end_states,
+            com_reset_frequency=self._config.com_reset_frequency,
             vacuum=not self._has_space,
-            map=map,
+            map=self._config._extra_args,
         )
 
     def _minimisation(self, lambda_min=None, perturbable_constraint="none"):
@@ -194,6 +196,7 @@ class Dynamics:
             Lambda value at which to run minimisation, if None run at pre-set
             lambda_val.
         """
+
         if lambda_min is None:
             _logger.info(f"Minimising at {_lam_sym} = {self._lambda_val}")
             try:
@@ -204,7 +207,11 @@ class Dynamics:
                     lambda_value=self._lambda_val,
                     platform=self._config.platform,
                     vacuum=not self._has_space,
+                    constraint=self._config.constraint,
                     perturbable_constraint=perturbable_constraint,
+                    include_constrained_energies=self._config.include_constrained_energies,
+                    dynamic_constraints=self._config.dynamic_constraints,
+                    swap_end_states=self._config.swap_end_states,
                     map=self._config._extra_args,
                 )
                 m.run()
@@ -221,7 +228,11 @@ class Dynamics:
                     lambda_value=lambda_min,
                     platform=self._config.platform,
                     vacuum=not self._has_space,
+                    constraint=self._config.constraint,
                     perturbable_constraint=perturbable_constraint,
+                    include_constrained_energies=self._config.include_constrained_energies,
+                    dynamic_constraints=self._config.dynamic_constraints,
+                    swap_end_states=self._config.swap_end_states,
                     map=self._config._extra_args,
                 )
                 m.run()
@@ -332,7 +343,9 @@ class Dynamics:
                 try:
                     self._system = self._dyn.commit()
                     _stream.save(self._system, str(sire_checkpoint_name))
-                    df = self._system.energy_trajectory(to_alchemlyb=True)
+                    df = self._system.energy_trajectory(
+                        to_alchemlyb=True, energy_unit="kT"
+                    )
                     if x == 0:
                         # Not including speed in checkpoints for now.
                         f = _dataframe_to_parquet(
@@ -399,9 +412,15 @@ class Dynamics:
             from sire import save as _save
 
             _save(self._system.trajectory(), traj_filename, format=["DCD"])
+        # Add config and lambda value to the system properties
+        self._system.add_shared_property(
+            "config", self._config.as_dict(sire_compatible=True)
+        )
+        self._system.add_shared_property("lambda", self._lambda_val)
         # dump final system to checkpoint file
         _stream.save(self._system, sire_checkpoint_name)
-        df = self._system.energy_trajectory(to_alchemlyb=True)
+        _logger.debug(f"Properties on system: {self._system.property_keys()}")
+        df = self._system.energy_trajectory(to_alchemlyb=True, energy_unit="kT")
         return df
 
     def get_timing(self):

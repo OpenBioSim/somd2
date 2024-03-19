@@ -1,7 +1,7 @@
 ######################################################################
 # SOMD2: GPU accelerated alchemical free-energy engine.
 #
-# Copyright: 2023
+# Copyright: 2023-2024
 #
 # Authors: The OpenBioSim Team <team@openbiosim.org>
 #
@@ -74,6 +74,7 @@ class Config:
         timestep="4fs",
         temperature="300K",
         pressure="1 atm",
+        barostat_frequency=25,
         integrator="langevin_middle",
         cutoff_type="pme",
         cutoff="7.5A",
@@ -86,7 +87,10 @@ class Config:
         shift_delta="2A",
         restraints=None,
         constraint="h_bonds",
-        perturbable_constraint=None,
+        perturbable_constraint="bonds_not_heavy_perturbed",
+        include_constrained_energies=False,
+        dynamic_constraints=True,
+        com_reset_frequency=10,
         minimise=True,
         equilibration_time="0ps",
         equilibration_timestep="1fs",
@@ -103,6 +107,8 @@ class Config:
         restart=False,
         write_config=True,
         overwrite=False,
+        somd1_compatibility=False,
+        pert_file=None,
     ):
         """
         Constructor.
@@ -121,6 +127,9 @@ class Config:
 
         pressure: str
             Simulation pressure. (Simulations will run in the NVT ensemble unless a pressure is specified.)
+
+        barostat_frequency: int
+            The number of integration steps between barostat updates.
 
         integrator: str
             Integrator to use for simulation.
@@ -166,6 +175,19 @@ class Config:
             Constraint type to use for perturbable molecules. If None, then
             this will be set according to what is chosen for the
             non-perturbable constraint.
+
+        include_constrained_energies: bool
+            Whether to include constrained energies in the potential.
+
+        dynamic_constraints: bool
+            Whether or not to update the length of constraints of perturbable
+            bonds with lambda. This defaults to True, meaning that changing
+            lambda will change any constraint on a perturbable bond to equal
+            to the value of r0 at that lambda value. If this is False, then
+            the constraint is set based on the current length.
+
+        com_reset_frequency: int
+            Frequency at which to reset the centre of mass of the system.
 
         minimise: bool
             Whether to minimise the system before simulation.
@@ -225,6 +247,13 @@ class Config:
         overwrite: bool
             Whether to overwrite files in the output directory, if files are detected and
             this is false, SOMD2 will exit without overwriting.
+
+        somd1_compatibility: bool
+            Whether to run using a SOMD1 compatible perturbation.
+
+        pert_file: str
+            The path to a SOMD1 perturbation file to apply to the reference system.
+            When set, this will automatically set 'somd1_compatibility' to True.
         """
 
         # Setup logger before doing anything else
@@ -235,6 +264,7 @@ class Config:
         self.runtime = runtime
         self.temperature = temperature
         self.pressure = pressure
+        self.barostat_frequency = barostat_frequency
         self.integrator = integrator
         self.cutoff_type = cutoff_type
         self.cutoff = cutoff
@@ -249,6 +279,9 @@ class Config:
         self.restraints = restraints
         self.constraint = constraint
         self.perturbable_constraint = perturbable_constraint
+        self.include_constrained_energies = include_constrained_energies
+        self.dynamic_constraints = dynamic_constraints
+        self.com_reset_frequency = com_reset_frequency
         self.minimise = minimise
         self.equilibration_time = equilibration_time
         self.equilibration_timestep = equilibration_timestep
@@ -262,6 +295,8 @@ class Config:
         self.max_gpus = max_gpus
         self.run_parallel = run_parallel
         self.restart = restart
+        self.somd1_compatibility = somd1_compatibility
+        self.pert_file = pert_file
 
         self.write_config = write_config
 
@@ -416,6 +451,10 @@ class Config:
             try:
                 p = _sr.u(pressure)
             except:
+                # Handle special case of pressure = "none"
+                if pressure.lower().replace(" ", "") == "none":
+                    self._pressure = None
+                    return
                 raise ValueError(
                     f"Unable to parse 'pressure' as a Sire GeneralUnit: {pressure}"
                 )
@@ -426,6 +465,20 @@ class Config:
 
         else:
             self._pressure = pressure
+
+    @property
+    def barostat_frequency(self):
+        return self._barostat_frequency
+
+    @barostat_frequency.setter
+    def barostat_frequency(self, barostat_frequency):
+        if not isinstance(barostat_frequency, int):
+            raise TypeError("'barostat_frequency' must be of type 'int'")
+
+        if barostat_frequency <= 0:
+            raise ValueError("'barostat_frequency' must be a positive integer")
+
+        self._barostat_frequency = barostat_frequency
 
     @property
     def integrator(self):
@@ -680,12 +733,45 @@ class Config:
             perturbable_constraint = perturbable_constraint.lower().replace(" ", "")
             if perturbable_constraint not in self._choices["perturbable_constraint"]:
                 raise ValueError(
-                    f"'perturbable_constrant' not recognised. Valid constraints are: {', '.join(self._choices['constraint'])}"
+                    f"'perturbable_constraint' not recognised. Valid constraints are: {', '.join(self._choices['perturbable_constraint'])}"
                 )
             else:
                 self._perturbable_constraint = perturbable_constraint
         else:
             self._perturbable_constraint = None
+
+    @property
+    def include_constrained_energies(self):
+        return self._include_constrained_energies
+
+    @include_constrained_energies.setter
+    def include_constrained_energies(self, include_constrained_energies):
+        if not isinstance(include_constrained_energies, bool):
+            raise ValueError("'include_constrained_energies' must be of type 'bool'")
+        self._include_constrained_energies = include_constrained_energies
+
+    @property
+    def dynamic_constraints(self):
+        return self._dynamic_constraints
+
+    @dynamic_constraints.setter
+    def dynamic_constraints(self, dynamic_constraints):
+        if not isinstance(dynamic_constraints, bool):
+            raise ValueError("'dynamic_constraints' must be of type 'bool'")
+        self._dynamic_constraints = dynamic_constraints
+
+    @property
+    def com_reset_frequency(self):
+        return self._com_reset_frequency
+
+    @com_reset_frequency.setter
+    def com_reset_frequency(self, com_reset_frequency):
+        if not isinstance(com_reset_frequency, int):
+            try:
+                com_reset_frequency = int(com_reset_frequency)
+            except Exception:
+                raise ValueError("'com_reset_frequency' must of type 'int'")
+        self._com_reset_frequency = com_reset_frequency
 
     @property
     def minimise(self):
@@ -965,6 +1051,35 @@ class Config:
         if not isinstance(restart, bool):
             raise ValueError("'restart' must be of type 'bool'")
         self._restart = restart
+
+    @property
+    def somd1_compatibility(self):
+        return self._somd1_compatibility
+
+    @somd1_compatibility.setter
+    def somd1_compatibility(self, somd1_compatibility):
+        if not isinstance(somd1_compatibility, bool):
+            raise ValueError("'somd1_compatibility' must be of type 'bool'")
+        self._somd1_compatibility = somd1_compatibility
+
+    @property
+    def pert_file(self):
+        return self._pert_file
+
+    @pert_file.setter
+    def pert_file(self, pert_file):
+        import os
+
+        if pert_file is not None and not isinstance(pert_file, str):
+            raise TypeError("'pert_file' must be of type 'str'")
+
+        if pert_file is not None and not os.path.exists(pert_file):
+            raise ValueError(f"Perturbation file does not exist: {pert_file}")
+
+        self._pert_file = pert_file
+
+        if pert_file is not None:
+            self._somd1_compatibility = True
 
     @property
     def output_directory(self):
