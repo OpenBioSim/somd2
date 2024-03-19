@@ -307,18 +307,11 @@ class Dynamics:
             return lam_vals
 
         if self._config.minimise:
-            # Set the constraint.
+            # Minimise with no constraints if we need to equilibrate first.
+            # This seems to improve the stability of the equilibration.
             if self._config.equilibration_time.value() > 0.0 and not is_restart:
-                constraint = (
-                    "none"
-                    if not self._config.equilibration_constraints
-                    else self._config.constraint
-                )
-                perturbable_constraint = (
-                    "none"
-                    if not self._config.equilibration_constraints
-                    else self._config.perturbable_constraint
-                )
+                constraint = "none"
+                perturbable_constraint = "none"
             else:
                 constraint = self._config.constraint
                 perturbable_constraint = self._config.perturbable_constraint
