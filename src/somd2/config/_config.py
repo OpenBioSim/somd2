@@ -821,7 +821,7 @@ class Config:
         if not equilibration_constraints and self.equilibration_timestep > _sr.u("1fs"):
             _logger.warning(
                 "Equilibration constraints are recommeded for stability when "
-                "using a timestep greater than 2fs"
+                "using a timestep greater than 1fs."
             )
 
     @property
