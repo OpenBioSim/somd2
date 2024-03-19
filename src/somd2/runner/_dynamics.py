@@ -311,12 +311,12 @@ class Dynamics:
             if self._config.equilibration_time.value() > 0.0 and not is_restart:
                 constraint = (
                     "none"
-                    if not self._equilibrate_constraints
+                    if not self._equilibration_constraints
                     else self._config.constraint
                 )
                 perturbable_constraint = (
                     "none"
-                    if not self._equilibrate_constraints
+                    if not self._equilibration_constraints
                     else self._config.perturbable_constraint
                 )
             else:
@@ -338,7 +338,7 @@ class Dynamics:
             # Perform minimisation at the end of equilibration only if the
             # timestep is increasing, or the constraint is changing.
             if (self._config.timestep > self._config.equilibration_timestep) or (
-                not self._config.equilibrate_constraints
+                not self._config.equilibration_constraints
                 and self._config.perturbable_constraint != "none"
             ):
                 self._minimisation(
