@@ -13,8 +13,7 @@ from somd2.io import *
 @pytest.mark.parametrize("mols", ["ethane_methanol", "ethane_methanol_hmr"])
 def test_restart(mols, request):
     """
-    Validate that a simulation can be run from a checkpoint file,
-    with all trajcetories preserved.
+    Validate that a simulation can be run from a checkpoint file.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         mols = request.getfixturevalue(mols)
