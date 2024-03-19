@@ -548,10 +548,6 @@ class Dynamics:
             # Delete the trajectory from memory.
             self._system.delete_all_frames()
 
-            # Delete the system so that the file handles to the trajectory
-            # chunks are released.
-            del system
-
             # Now remove the chunked trajectory files.
             for chunk in traj_chunks:
                 if chunk != f"{traj_filename}.bak":
