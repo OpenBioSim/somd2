@@ -543,8 +543,7 @@ class Dynamics:
 
             # Now remove the chunked trajectory files.
             for chunk in traj_chunks:
-                if chunk != f"{traj_filename}.bak":
-                    _Path(chunk).unlink()
+                _Path(chunk).unlink()
 
         # Add config and lambda value to the system properties.
         self._system.add_shared_property(
