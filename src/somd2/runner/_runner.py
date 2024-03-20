@@ -763,8 +763,12 @@ class Runner:
             for lambda_value in self._lambda_values:
                 try:
                     result = self.run_window(lambda_value)
-                except:
+                except Exception as e:
                     result = False
+
+                    _logger.error(
+                        f"Exception raised for {_lam_sym} = {lambda_value}: {e}"
+                    )
                 results.append(result)
 
         else:
