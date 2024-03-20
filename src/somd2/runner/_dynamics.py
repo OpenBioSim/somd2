@@ -96,8 +96,12 @@ class Dynamics:
             self._config.runtime = str(self._config.runtime - self._system.time())
 
             # Work out the current block number.
-            self._current_block = 1 + int(
-                self._system.time().value() / self._config.checkpoint_frequency.value()
+            self._current_block = int(
+                round(
+                    self._system.time().value()
+                    / self._config.checkpoint_frequency.value(),
+                    12,
+                )
             )
         else:
             self._current_block = 0
