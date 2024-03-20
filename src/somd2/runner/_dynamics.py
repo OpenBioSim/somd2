@@ -328,7 +328,7 @@ class Dynamics:
             self._equilibration()
 
             # Reset the timer to zero
-            self._system.set_time(_u("0ps"))
+            self._system.set_time(sr.u("0ps"))
 
             # Perform minimisation at the end of equilibration only if the
             # timestep is increasing, or the constraint is changing.
