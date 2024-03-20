@@ -905,7 +905,7 @@ class Runner:
             # Assumes that device for non-parallel GPU jobs is 0
             else:
                 gpu_num = 0
-                _logger.info("Running {_lam_sym} = {lambda_value} on GPU 0")
+                _logger.info(f"Running {_lam_sym} = {lambda_value} on GPU 0")
             self._initialise_simulation(system, lambda_value, device=gpu_num)
             try:
                 df, lambda_grad, speed = _run(self._sim, is_restart=is_restart)
