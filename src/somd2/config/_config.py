@@ -29,6 +29,7 @@ from pathlib import Path as _Path
 
 import sire as _sr
 from openmm import Platform as _Platform
+from collections.abc import Iterable as _Iterable
 
 from somd2 import _logger
 
@@ -688,14 +689,14 @@ class Config:
     def restraints(self, restraints):
         # If not supplied as a list, convert to a list.
         if restraints is not None:
-            if not isinstance(restraints, (list, tuple)):
+            if not isinstance(restraints, _Iterable):
                 restraints = [restraints]
 
             # Check that all restraints are of the correct type.
             for restraint in restraints:
                 if not isinstance(restraint, _sr.mm._MM.Restraints):
                     raise ValueError(
-                        "'restraints' must be a list of sire.mm.Restraint objects"
+                        "'restraints' must be a sire.mm._MM.Restraints object, or a list of these objects."
                     )
 
         self._restraints = restraints
