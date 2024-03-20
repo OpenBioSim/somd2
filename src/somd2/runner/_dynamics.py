@@ -172,6 +172,7 @@ class Dynamics:
             pressure = None
 
         self._dyn = self._system.dynamics(
+            integrator=self._config.integrator,
             temperature=self._config.temperature,
             pressure=pressure,
             barostat_frequency=self._config.barostat_frequency,
