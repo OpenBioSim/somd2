@@ -116,7 +116,7 @@ class Dynamics:
 
     @staticmethod
     def create_filenames(lambda_array, lambda_value, output_directory, restart=False):
-        # Create incremental file - used for writing trajectory files
+        # Create incremental file name for current restart.
         def increment_filename(base_filename, suffix):
             file_number = 0
             file_path = _Path(output_directory)
@@ -257,8 +257,6 @@ class Dynamics:
             except:
                 raise
 
-    # combine these - just equil time
-    # reset timer to zero when bookeeping starts
     def _equilibration(self):
         """
         Per-window equilibration.
@@ -554,6 +552,7 @@ class Dynamics:
         # Save the final system to checkpoint file.
         sr.stream.save(self._system, sire_checkpoint_name)
         df = self._system.energy_trajectory(to_alchemlyb=True, energy_unit="kT")
+
         return df
 
     def get_timing(self):
