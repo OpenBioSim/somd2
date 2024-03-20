@@ -396,9 +396,8 @@ class Dynamics:
                     if x == 0:
                         x = self._current_block
 
-                    # Commit the current system and save it to a checkpoint file.
+                    # Commit the current system.
                     self._system = self._dyn.commit()
-                    sr.stream.save(self._system, str(sire_checkpoint_name))
 
                     # Save the current trajectory chunk to file.
                     if self._config.save_trajectories:
@@ -415,6 +414,9 @@ class Dynamics:
 
                         # Delete the trajectory from memory.
                         self._system.delete_all_frames()
+
+                    # Stream the checkpoint to file.
+                    sr.stream.save(self._system, str(sire_checkpoint_name))
 
                     # Save the energy trajectory to a parquet file.
                     df = self._system.energy_trajectory(
