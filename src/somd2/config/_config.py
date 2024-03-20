@@ -164,10 +164,10 @@ class Config:
             The soft-core shift-delta parameter. This is used to soften the
             Lennard-Jones interaction.
 
-        restraints: sire.mm._MM.Restraints or list[sire.mm._MM.Restraints], optional, default=None
-            A single set of restraints, or a list of sets of
-            restraints that will be applied to the atoms during
-            the simulation.
+        restraints: sire.mm._MM.Restraints
+            A single set of restraints, or a list of
+            sets of restraints that will be applied to
+            the atoms during the simulation.
 
         constraint: str
             Constraint type to use for non-perturbable molecules.
@@ -1170,7 +1170,7 @@ class Config:
         params = {
             key: value
             for key, value in params.items()
-            if key not in ["self", "args", "kwargs"]
+            if key not in ["self", "args", "kwargs", "restraints"]
         }
 
         # Get the docstring.
