@@ -163,7 +163,7 @@ class Config:
             The soft-core shift-delta parameter. This is used to soften the
             Lennard-Jones interaction.
 
-        restraints: sire.mm.Restraints or list[sire.mm.Restraints], optional, default=None
+        restraints: sire.mm._MM.Restraints or list[sire.mm._MM.Restraints], optional, default=None
             A single set of restraints, or a list of sets of
             restraints that will be applied to the atoms during
             the simulation.
@@ -693,9 +693,7 @@ class Config:
 
             # Check that all restraints are of the correct type.
             for restraint in restraints:
-                if not isinstance(
-                    restraint, _sr.mm.BoreschRestraint
-                ) and not isinstance(restraint, _sr.mm.BoreschRestraints):
+                if not isinstance(restraint, _sr.mm._MM.Restraints):
                     raise ValueError(
                         "'restraints' must be a list of sire.mm.Restraint objects"
                     )
