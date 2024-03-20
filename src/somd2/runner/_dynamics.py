@@ -289,8 +289,8 @@ class Dynamics:
 
         import sire as sr
 
-        # Save the system topology to a hidden file so that we
-        # use it to reconstuct the trajectory.
+        # Save the system topology to a PRM7 file that can be used to load the
+        # trajectory.
         topology = str(self._config.output_directory / self._filenames["topology"])
         sr.save(self._system, topology)
 
