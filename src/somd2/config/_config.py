@@ -405,8 +405,13 @@ class Config:
                 f"Unable to parse 'runtime' as a Sire GeneralUnit: {runtime}"
             )
 
-        if not t.has_same_units(picosecond):
+        if t.value() != 0 and not t.has_same_units(picosecond):
             raise ValueError("'runtime' units are invalid.")
+
+        if t.value() == 0:
+            _logger.warning(
+                "Runtime is zero - simulation will not run. Set 'runtime' to a non-zero value."
+            )
 
         self._runtime = t
 
@@ -567,8 +572,14 @@ class Config:
             raise ValueError(
                 f"Unable to parse 'timestep' as a Sire GeneralUnit: {timestep}"
             )
-        if not t.has_same_units(femtosecond):
+
+        if t.value() != 0 and not t.has_same_units(femtosecond):
             raise ValueError("'timestep' units are invalid.")
+
+        if t.value() == 0:
+            _logger.warning(
+                "Timestep is zero - simulation will not run. Set 'timestep' to a non-zero value."
+            )
 
         if t > _sr.u("2fs") and self.h_mass_factor <= 1.0:
             _logger.warning("Timestep is large - consider repartitioning hydrogen mass")
@@ -803,8 +814,13 @@ class Config:
                 f"Unable to parse 'equilibration_timestep' as a Sire GeneralUnit: {equilibration_timestep}"
             )
 
-        if not t.has_same_units(femtosecond):
+        if t.value() != 0 and not t.has_same_units(femtosecond):
             raise ValueError("'equilibration_timestep' units are invalid.")
+
+        if t.value() == 0:
+            _logger.warning(
+                "Equilibration timestep is zero - simulation will not run. Set 'equilibration_timestep' to a non-zero value."
+            )
 
         self._equilibration_timestep = t
 
@@ -842,7 +858,7 @@ class Config:
                 f"Unable to parse 'energy_frequency' as a Sire GeneralUnit: {energy_frequency}"
             )
 
-        if not t.has_same_units(picosecond):
+        if t.value() != 0 and not t.has_same_units(picosecond):
             raise ValueError("'energy_frequency' units are invalid.")
 
         self._energy_frequency = t
@@ -875,7 +891,7 @@ class Config:
                 f"Unable to parse 'frame_frequency' as a Sire GeneralUnit: {frame_frequency}"
             )
 
-        if not t.has_same_units(picosecond):
+        if t.value() != 0 and not t.has_same_units(picosecond):
             raise ValueError("'frame_frequency' units are invalid.")
 
         self._frame_frequency = t
@@ -908,11 +924,12 @@ class Config:
                 f"Unable to parse 'checkpoint_frequency' as a Sire GeneralUnit: {checkpoint_frequency}"
             )
 
-        if not t.has_same_units(picosecond):
+        if t.value() != 0 and not t.has_same_units(picosecond):
             raise ValueError("'checkpoint_frequency' units are invalid.")
-        if t < self._energy_frequency and t < self._frame_frequency:
+
+        if t.value() < self._energy_frequency.value() and t.value() < self._frame_frequency.value():
             _logger.warning(
-                "Checkpoint frequency is low - should be greater min(energy_frequency, frame_frequency)"
+                "Checkpoint frequency is low. Should be greater min(energy_frequency, frame_frequency)"
             )
         self._checkpoint_frequency = t
 
