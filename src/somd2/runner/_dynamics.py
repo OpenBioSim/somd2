@@ -24,12 +24,11 @@ __all__ = ["Dynamics"]
 import platform as _platform
 from pathlib import Path as _Path
 
+from somd2 import _logger
+
 from ..config import Config as _Config
 from ..io import dataframe_to_parquet as _dataframe_to_parquet
 from ..io import parquet_append as _parquet_append
-
-from somd2 import _logger
-
 from ._runner import _lam_sym
 
 
@@ -181,6 +180,7 @@ class Dynamics:
                 if equilibration
                 else self._config.timestep
             ),
+            restraints=self._config.restraints,
             lambda_value=self._lambda_val,
             cutoff_type=self._config.cutoff_type,
             cutoff=self._config.cutoff,
@@ -289,7 +289,6 @@ class Dynamics:
         df : pandas dataframe
             Dataframe containing the sire energy trajectory.
         """
-
         import sire as sr
 
         # Save the system topology to a PRM7 file that can be used to load the
