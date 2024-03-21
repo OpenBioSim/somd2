@@ -58,7 +58,11 @@ class Config:
     _choices = {
         "constraint": _sr.options.Constraint.options(),
         "perturbable_constraint": _sr.options.PerturbableConstraint.options(),
-        "integrator": _sr.options.Integrator.options(),
+        "integrator": [
+            x
+            for x in _sr.options.Integrator.options()
+            if x not in ["auto", "verlet", "leapfrog"]
+        ],
         "cutoff_type": _sr.options.Cutoff.options(),
         "platform": _platforms,
         "lambda_schedule": [
