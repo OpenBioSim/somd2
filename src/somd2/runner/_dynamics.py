@@ -24,12 +24,11 @@ __all__ = ["Dynamics"]
 import platform as _platform
 from pathlib import Path as _Path
 
+from somd2 import _logger
+
 from ..config import Config as _Config
 from ..io import dataframe_to_parquet as _dataframe_to_parquet
 from ..io import parquet_append as _parquet_append
-
-from somd2 import _logger
-
 from ._runner import _lam_sym
 
 
@@ -91,9 +90,21 @@ class Dynamics:
             raise TypeError("config must be a Config object")
 
         self._config = config
-        # If resarting, subtract the time already run from the total runtime
+        # If restarting, subtract the time already run from the total runtime
         if self._config.restart:
             self._config.runtime = str(self._config.runtime - self._system.time())
+
+            # Work out the current block number.
+            self._current_block = int(
+                round(
+                    self._system.time().value()
+                    / self._config.checkpoint_frequency.value(),
+                    12,
+                )
+            )
+        else:
+            self._current_block = 0
+
         self._lambda_val = lambda_val
         self._lambda_array = lambda_array
         self._increment = increment
@@ -108,7 +119,7 @@ class Dynamics:
 
     @staticmethod
     def create_filenames(lambda_array, lambda_value, output_directory, restart=False):
-        # Create incremental file - used for writing trajectory files
+        # Create incremental file name for current restart.
         def increment_filename(base_filename, suffix):
             file_number = 0
             file_path = _Path(output_directory)
@@ -127,13 +138,14 @@ class Dynamics:
             raise ValueError("lambda_value not in lambda_array")
         filenames = {}
         index = lambda_array.index(lambda_value)
+        filenames["topology"] = "system.prm7"
         filenames["checkpoint"] = f"checkpoint_{index}.s3"
         filenames["energy_traj"] = f"energy_traj_{index}.parquet"
+        filenames["trajectory"] = f"traj_{index}.dcd"
+        filenames["trajectory_chunk"] = f"traj_{index}_"
         if restart:
-            filenames["trajectory"] = increment_filename(f"traj_{index}", "dcd")
             filenames["config"] = increment_filename("config", "yaml")
         else:
-            filenames["trajectory"] = f"traj_{index}.dcd"
             filenames["config"] = "config.yaml"
         return filenames
 
@@ -159,6 +171,7 @@ class Dynamics:
             pressure = None
 
         self._dyn = self._system.dynamics(
+            integrator=self._config.integrator,
             temperature=self._config.temperature,
             pressure=pressure,
             barostat_frequency=self._config.barostat_frequency,
@@ -167,15 +180,22 @@ class Dynamics:
                 if equilibration
                 else self._config.timestep
             ),
+            restraints=self._config.restraints,
             lambda_value=self._lambda_val,
             cutoff_type=self._config.cutoff_type,
             cutoff=self._config.cutoff,
             schedule=self._config.lambda_schedule,
             platform=self._config.platform,
             device=self._device,
-            constraint="none" if equilibration else self._config.constraint,
+            constraint=(
+                "none"
+                if equilibration and not self._config.equilibration_constraints
+                else self._config.constraint
+            ),
             perturbable_constraint=(
-                "none" if equilibration else self._config.perturbable_constraint
+                "none"
+                if equilibration and not self._config.equilibration_constraints
+                else self._config.perturbable_constraint
             ),
             include_constrained_energies=self._config.include_constrained_energies,
             dynamic_constraints=self._config.dynamic_constraints,
@@ -185,7 +205,9 @@ class Dynamics:
             map=self._config._extra_args,
         )
 
-    def _minimisation(self, lambda_min=None, perturbable_constraint="none"):
+    def _minimisation(
+        self, lambda_min=None, constraint="none", perturbable_constraint="none"
+    ):
         """
         Minimisation of self._system.
 
@@ -207,7 +229,7 @@ class Dynamics:
                     lambda_value=self._lambda_val,
                     platform=self._config.platform,
                     vacuum=not self._has_space,
-                    constraint=self._config.constraint,
+                    constraint=constraint,
                     perturbable_constraint=perturbable_constraint,
                     include_constrained_energies=self._config.include_constrained_energies,
                     dynamic_constraints=self._config.dynamic_constraints,
@@ -228,7 +250,7 @@ class Dynamics:
                     lambda_value=lambda_min,
                     platform=self._config.platform,
                     vacuum=not self._has_space,
-                    constraint=self._config.constraint,
+                    constraint=constraint,
                     perturbable_constraint=perturbable_constraint,
                     include_constrained_energies=self._config.include_constrained_energies,
                     dynamic_constraints=self._config.dynamic_constraints,
@@ -240,8 +262,6 @@ class Dynamics:
             except:
                 raise
 
-    # combine these - just equil time
-    # reset timer to zero when bookeeping starts
     def _equilibration(self):
         """
         Per-window equilibration.
@@ -258,13 +278,6 @@ class Dynamics:
             auto_fix_minimise=False,
         )
         self._system = self._dyn.commit()
-        # Perform brief minimisation at the end of equilibration only if the
-        # timestep is increasing
-        if self._config.timestep > self._config.equilibration_timestep:
-            self._minimisation(
-                lambda_min=self._lambda_val,
-                perturbable_constraint=self._config.perturbable_constraint,
-            )
 
     def _run(self, lambda_minimisation=None, is_restart=False):
         """
@@ -276,8 +289,12 @@ class Dynamics:
         df : pandas dataframe
             Dataframe containing the sire energy trajectory.
         """
-        from sire import u as _u
-        from sire import stream as _stream
+        import sire as sr
+
+        # Save the system topology to a PRM7 file that can be used to load the
+        # trajectory.
+        topology = str(self._config.output_directory / self._filenames["topology"])
+        sr.save(self._system, topology)
 
         def generate_lam_vals(lambda_base, increment):
             """Generate lambda values for a given lambda_base and increment"""
@@ -292,14 +309,42 @@ class Dynamics:
             return lam_vals
 
         if self._config.minimise:
-            self._minimisation(lambda_minimisation)
+            # Minimise with no constraints if we need to equilibrate first.
+            # This seems to improve the stability of the equilibration.
+            if self._config.equilibration_time.value() > 0.0 and not is_restart:
+                constraint = "none"
+                perturbable_constraint = "none"
+            else:
+                constraint = self._config.constraint
+                perturbable_constraint = self._config.perturbable_constraint
+
+            self._minimisation(
+                lambda_minimisation,
+                constraint=constraint,
+                perturbable_constraint=perturbable_constraint,
+            )
 
         if self._config.equilibration_time.value() > 0.0 and not is_restart:
             self._equilibration()
-            # Reset the timer to zero
-            self._system.set_time(_u("0ps"))
 
+            # Reset the timer to zero
+            self._system.set_time(sr.u("0ps"))
+
+            # Perform minimisation at the end of equilibration only if the
+            # timestep is increasing, or the constraint is changing.
+            if (self._config.timestep > self._config.equilibration_timestep) or (
+                not self._config.equilibration_constraints
+                and self._config.perturbable_constraint != "none"
+            ):
+                self._minimisation(
+                    lambda_min=self._lambda_val,
+                    constraint=self._config.constraint,
+                    perturbable_constraint=self._config.perturbable_constraint,
+                )
+
+        # Setup the dynamics object for production.
         self._setup_dynamics(equilibration=False)
+
         # Work out the lambda values for finite-difference gradient analysis.
         self._lambda_grad = generate_lam_vals(self._lambda_val, self._increment)
 
@@ -310,25 +355,36 @@ class Dynamics:
 
         _logger.info(f"Running dynamics at {_lam_sym} = {self._lambda_val}")
 
+        # Create the checkpoint file name.
+        checkpoint_file = str(
+            _Path(self._config.output_directory) / self._filenames["checkpoint"]
+        )
+
         if self._config.checkpoint_frequency.value() > 0.0:
-            ### Calc number of blocks and remainder (surely there's a better way?)###
-            num_blocks = 0
-            rem = self._config.runtime
-            while True:
-                if rem > self._config.checkpoint_frequency:
-                    num_blocks += 1
-                    rem -= self._config.checkpoint_frequency
-                else:
-                    break
+            # Calculate the number of blocks and the remaineder time.
+            frac = (
+                self._config.runtime.value() / self._config.checkpoint_frequency.value()
+            )
+
+            # Handle the case where the runtime is less than the checkpoint frequency.
+            if frac < 1.0:
+                frac = 1.0
+                self._config.checkpoint_frequency = str(self._config.runtime)
+
+            num_blocks = int(frac)
+            rem = frac - num_blocks
+
             # Append only this number of lines from the end of the dataframe during checkpointing
             energy_per_block = (
                 self._config.checkpoint_frequency / self._config.energy_frequency
             )
-            sire_checkpoint_name = str(
-                _Path(self._config.output_directory) / self._filenames["checkpoint"]
-            )
+
             # Run num_blocks dynamics and then run a final block if rem > 0
             for x in range(int(num_blocks)):
+                # Add the current block number.
+                x += self._current_block
+
+                # Run the dynamics.
                 try:
                     self._dyn.run(
                         self._config.checkpoint_frequency,
@@ -340,15 +396,42 @@ class Dynamics:
                     )
                 except:
                     raise
+
+                # Checkpoint.
                 try:
+                    # Set to the current block number if this is a restart.
+                    if x == 0:
+                        x = self._current_block
+
+                    # Commit the current system.
                     self._system = self._dyn.commit()
-                    _stream.save(self._system, str(sire_checkpoint_name))
+
+                    # Save the current trajectory chunk to file.
+                    if self._config.save_trajectories:
+                        traj_filename = (
+                            str(
+                                self._config.output_directory
+                                / self._filenames["trajectory_chunk"]
+                            )
+                            + f"{x}.dcd"
+                        )
+                        sr.save(
+                            self._system.trajectory(), traj_filename, format=["DCD"]
+                        )
+
+                        # Delete the trajectory from memory.
+                        self._system.delete_all_frames()
+
+                    # Stream the checkpoint to file.
+                    sr.stream.save(self._system, str(checkpoint_file))
+
+                    # Save the energy trajectory to a parquet file.
                     df = self._system.energy_trajectory(
                         to_alchemlyb=True, energy_unit="kT"
                     )
-                    if x == 0:
+                    if x == self._current_block:
                         # Not including speed in checkpoints for now.
-                        f = _dataframe_to_parquet(
+                        parquet = _dataframe_to_parquet(
                             df,
                             metadata={
                                 "attrs": df.attrs,
@@ -369,16 +452,18 @@ class Dynamics:
                         self._system.set_property("lambda", self._lambda_val)
                     else:
                         _parquet_append(
-                            f,
+                            parquet,
                             df.iloc[-int(energy_per_block) :],
                         )
                     _logger.info(
-                        f"Finished block {x+1} of {num_blocks} for {_lam_sym} = {self._lambda_val}"
+                        f"Finished block {x+1} of {self._current_block + num_blocks + int(rem > 0)} "
+                        f"for {_lam_sym} = {self._lambda_val}"
                     )
                 except:
                     raise
             # No need to checkpoint here as it is the final block.
             if rem > 0:
+                x += 1
                 try:
                     self._dyn.run(
                         rem,
@@ -387,6 +472,27 @@ class Dynamics:
                         lambda_windows=lam_arr,
                         save_velocities=self._config.save_velocities,
                         auto_fix_minimise=False,
+                    )
+
+                    # Save the current trajectory chunk to file.
+                    if self._config.save_trajectories:
+                        traj_filename = (
+                            str(
+                                self._config.output_directory
+                                / self._filenames["trajectory_chunk"]
+                            )
+                            + f"{x}.dcd"
+                        )
+                        sr.save(
+                            self._system.trajectory(), traj_filename, format=["DCD"]
+                        )
+
+                        # Delete the trajectory from memory.
+                        self._system.delete_all_frames()
+
+                    _logger.info(
+                        f"Finished block {x+1} of {self._current_block + num_blocks + int(rem > 0)} "
+                        f"for {_lam_sym} = {self._lambda_val}"
                     )
                 except:
                     raise
@@ -405,22 +511,62 @@ class Dynamics:
                 raise
             self._system = self._dyn.commit()
 
+        # Assemble and save the final energy trajectory.
         if self._config.save_trajectories:
+            # Create the final trajectory file name.
             traj_filename = str(
                 self._config.output_directory / self._filenames["trajectory"]
             )
-            from sire import save as _save
 
-            _save(self._system.trajectory(), traj_filename, format=["DCD"])
-        # Add config and lambda value to the system properties
+            # Glob for the trajectory chunks.
+            from glob import glob
+
+            traj_chunks = sorted(
+                glob(
+                    str(
+                        self._config.output_directory
+                        / f"{self._filenames['trajectory_chunk']}*"
+                    )
+                )
+            )
+
+            # If this is a restart, then we need to check for an existing
+            # trajectory file with the same name. If it exists and is non-empty,
+            # then copy it to a backup file and prepend it to the list of chunks.
+            if self._config.restart:
+                path = _Path(traj_filename)
+                if path.exists() and path.stat().st_size > 0:
+                    from shutil import copyfile
+
+                    copyfile(traj_filename, f"{traj_filename}.bak")
+                    traj_chunks = [f"{traj_filename}.bak"] + traj_chunks
+
+            # Load the topology and chunked trajectory files.
+            system = sr.load([topology] + traj_chunks)
+
+            # Save the final trajectory to a single file.
+            traj_filename = str(
+                self._config.output_directory / self._filenames["trajectory"]
+            )
+            sr.save(system.trajectory(), traj_filename, format=["DCD"])
+
+            # Delete the trajectory from memory.
+            self._system.delete_all_frames()
+
+            # Now remove the chunked trajectory files.
+            for chunk in traj_chunks:
+                _Path(chunk).unlink()
+
+        # Add config and lambda value to the system properties.
         self._system.add_shared_property(
             "config", self._config.as_dict(sire_compatible=True)
         )
         self._system.add_shared_property("lambda", self._lambda_val)
-        # dump final system to checkpoint file
-        _stream.save(self._system, sire_checkpoint_name)
-        _logger.debug(f"Properties on system: {self._system.property_keys()}")
+
+        # Save the final system to checkpoint file.
+        sr.stream.save(self._system, checkpoint_file)
         df = self._system.energy_trajectory(to_alchemlyb=True, energy_unit="kT")
+
         return df
 
     def get_timing(self):

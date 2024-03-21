@@ -153,8 +153,10 @@ class Runner:
                         )
 
             # Only check for light atoms by the maxium end state mass if running
-            # in SOMD1 compatibility mode.
+            # in SOMD1 compatibility mode. Ghost atoms are considered light when
+            # adding bond constraints.
             if self._config.somd1_compatibility:
+                self._config._extra_args["ghosts_are_light"] = True
                 self._config._extra_args["check_for_h_by_max_mass"] = True
                 self._config._extra_args["check_for_h_by_mass"] = False
                 self._config._extra_args["check_for_h_by_mass"] = False
@@ -174,29 +176,30 @@ class Runner:
         ]
 
         # Work out the current hydrogen mass factor.
-        h_mass_factor = self._get_h_mass_factor(self._system)
+        h_mass_factor, has_hydrogen = self._get_h_mass_factor(self._system)
 
         # HMR has already been applied.
         from math import isclose
 
-        if not isclose(h_mass_factor, 1.0, abs_tol=1e-4):
-            _logger.info(
-                f"Detected existing hydrogen mass repartioning factor of {h_mass_factor:.3f}."
-            )
-
-            if not isclose(h_mass_factor, self._config.h_mass_factor, abs_tol=1e-4):
-                new_factor = self._config.h_mass_factor / h_mass_factor
-                _logger.warning(
-                    f"Existing hydrogen mass repartitioning factor of {h_mass_factor:.3f} "
-                    f"does not match the requested value of {self._config.h_mass_factor:.3f}. "
-                    f"Applying new factor of {new_factor:.3f}."
+        if has_hydrogen:
+            if not isclose(h_mass_factor, 1.0, abs_tol=1e-4):
+                _logger.info(
+                    f"Detected existing hydrogen mass repartioning factor of {h_mass_factor:.3f}."
                 )
-                self._system = self._repartition_h_mass(self._system, new_factor)
 
-        else:
-            self._system = self._repartition_h_mass(
-                self._system, self._config.h_mass_factor
-            )
+                if not isclose(h_mass_factor, self._config.h_mass_factor, abs_tol=1e-4):
+                    new_factor = self._config.h_mass_factor / h_mass_factor
+                    _logger.warning(
+                        f"Existing hydrogen mass repartitioning factor of {h_mass_factor:.3f} "
+                        f"does not match the requested value of {self._config.h_mass_factor:.3f}. "
+                        f"Applying new factor of {new_factor:.3f}."
+                    )
+                    self._system = self._repartition_h_mass(self._system, new_factor)
+
+            else:
+                self._system = self._repartition_h_mass(
+                    self._system, self._config.h_mass_factor
+                )
 
         # Flag whether this is a GPU simulation.
         self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]
@@ -348,6 +351,7 @@ class Runner:
             "max_threads",
             "equilibration_time",
             "equilibration_timestep",
+            "equilibration_constraints",
             "energy_frequency",
             "save_trajectory",
             "frame_frequency",
@@ -602,12 +606,15 @@ class Runner:
         # Store the expected hydrogen mass.
         expected_h_mass = Element("H").mass().value()
 
-        # Get the hydrogen mass.
-        h_mass = system.molecules("property is_perturbable")["element H"][0].mass()
+        # Get the mass of the first hydrogen atom.
+        try:
+            h_mass = system["element H"][0].mass()
+        except:
+            return expected_h_mass, False
 
         # Work out the current hydrogen mass factor. We round to 3dp due to
         # the precision of atomic masses loaded from text files.
-        return round(h_mass.value() / expected_h_mass, 3)
+        return round(h_mass.value() / expected_h_mass, 3), True
 
     @staticmethod
     def _repartition_h_mass(system, factor=1.0):
@@ -763,8 +770,12 @@ class Runner:
             for lambda_value in self._lambda_values:
                 try:
                     result = self.run_window(lambda_value)
-                except:
+                except Exception as e:
                     result = False
+
+                    _logger.error(
+                        f"Exception raised for {_lam_sym} = {lambda_value}: {e}"
+                    )
                 results.append(result)
 
         else:
@@ -885,7 +896,7 @@ class Runner:
                 )
                 return True
             else:
-                _logger.debug(
+                _logger.info(
                     f"Restarting {_lam_sym} = {lambda_value} at time {acc_time}, time remaining = {self._config.runtime - acc_time}"
                 )
         # GPU platform.
@@ -901,7 +912,7 @@ class Runner:
             # Assumes that device for non-parallel GPU jobs is 0
             else:
                 gpu_num = 0
-                _logger.info("Running {_lam_sym} = {lambda_value} on GPU 0")
+                _logger.info(f"Running {_lam_sym} = {lambda_value} on GPU 0")
             self._initialise_simulation(system, lambda_value, device=gpu_num)
             try:
                 df, lambda_grad, speed = _run(self._sim, is_restart=is_restart)

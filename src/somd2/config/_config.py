@@ -25,6 +25,8 @@ Configuration class for SOMD2 runner.
 
 __all__ = ["Config"]
 
+
+from collections.abc import Iterable as _Iterable
 from openmm import Platform as _Platform
 from pathlib import Path as _Path
 
@@ -56,7 +58,11 @@ class Config:
     _choices = {
         "constraint": _sr.options.Constraint.options(),
         "perturbable_constraint": _sr.options.PerturbableConstraint.options(),
-        "integrator": _sr.options.Integrator.options(),
+        "integrator": [
+            x
+            for x in _sr.options.Integrator.options()
+            if x not in ["auto", "verlet", "leapfrog"]
+        ],
         "cutoff_type": _sr.options.Cutoff.options(),
         "platform": _platforms,
         "lambda_schedule": [
@@ -85,14 +91,16 @@ class Config:
         swap_end_states=False,
         coulomb_power=0.0,
         shift_delta="2A",
+        restraints=None,
         constraint="h_bonds",
-        perturbable_constraint="bonds_not_heavy_perturbed",
+        perturbable_constraint="h_bonds_not_heavy_perturbed",
         include_constrained_energies=False,
         dynamic_constraints=True,
         com_reset_frequency=10,
         minimise=True,
         equilibration_time="0ps",
         equilibration_timestep="1fs",
+        equilibration_constraints=False,
         energy_frequency="1ps",
         save_trajectories=True,
         frame_frequency="20ps",
@@ -162,6 +170,11 @@ class Config:
             The soft-core shift-delta parameter. This is used to soften the
             Lennard-Jones interaction.
 
+        restraints: sire.mm._MM.Restraints
+            A single set of restraints, or a list of
+            sets of restraints that will be applied to
+            the atoms during the simulation.
+
         constraint: str
             Constraint type to use for non-perturbable molecules.
 
@@ -192,6 +205,9 @@ class Config:
 
         equilibration_timestep: str
             Equilibration timestep. (Can be different to simulation timestep.)
+
+        equilibration_constraints: bool
+            Whether to use constraints during equilibration.
 
         energy_frequency: str
             Frequency at which to output energy data.
@@ -270,6 +286,7 @@ class Config:
         self.swap_end_states = swap_end_states
         self.coulomb_power = coulomb_power
         self.shift_delta = shift_delta
+        self.restraints = restraints
         self.constraint = constraint
         self.perturbable_constraint = perturbable_constraint
         self.include_constrained_energies = include_constrained_energies
@@ -278,6 +295,7 @@ class Config:
         self.minimise = minimise
         self.equilibration_time = equilibration_time
         self.equilibration_timestep = equilibration_timestep
+        self.equilibration_constraints = equilibration_constraints
         self.energy_frequency = energy_frequency
         self.save_trajectories = save_trajectories
         self.frame_frequency = frame_frequency
@@ -355,6 +373,7 @@ class Config:
             boolean with the value False.
         """
         from pathlib import Path as _Path
+
         from sire.cas import LambdaSchedule as _LambdaSchedule
 
         d = {}
@@ -400,8 +419,13 @@ class Config:
                 f"Unable to parse 'runtime' as a Sire GeneralUnit: {runtime}"
             )
 
-        if not t.has_same_units(picosecond):
+        if t.value() != 0 and not t.has_same_units(picosecond):
             raise ValueError("'runtime' units are invalid.")
+
+        if t.value() == 0:
+            _logger.warning(
+                "Runtime is zero - simulation will not run. Set 'runtime' to a non-zero value."
+            )
 
         self._runtime = t
 
@@ -562,8 +586,14 @@ class Config:
             raise ValueError(
                 f"Unable to parse 'timestep' as a Sire GeneralUnit: {timestep}"
             )
-        if not t.has_same_units(femtosecond):
+
+        if t.value() != 0 and not t.has_same_units(femtosecond):
             raise ValueError("'timestep' units are invalid.")
+
+        if t.value() == 0:
+            _logger.warning(
+                "Timestep is zero - simulation will not run. Set 'timestep' to a non-zero value."
+            )
 
         if t > _sr.u("2fs") and self.h_mass_factor <= 1.0:
             _logger.warning("Timestep is large - consider repartitioning hydrogen mass")
@@ -671,6 +701,26 @@ class Config:
             raise ValueError("'shift_delta' units are invalid.")
 
         self._shift_delta = sd
+
+    @property
+    def restraints(self):
+        return self._restraints
+
+    @restraints.setter
+    def restraints(self, restraints):
+        # If not supplied as a list, convert to a list.
+        if restraints is not None:
+            if not isinstance(restraints, _Iterable):
+                restraints = [restraints]
+
+            # Check that all restraints are of the correct type.
+            for restraint in restraints:
+                if not isinstance(restraint, _sr.mm._MM.Restraints):
+                    raise ValueError(
+                        "'restraints' must be a sire.mm._MM.Restraints object, or a list of these objects."
+                    )
+
+        self._restraints = restraints
 
     @property
     def constraint(self):
@@ -798,10 +848,31 @@ class Config:
                 f"Unable to parse 'equilibration_timestep' as a Sire GeneralUnit: {equilibration_timestep}"
             )
 
-        if not t.has_same_units(femtosecond):
+        if t.value() != 0 and not t.has_same_units(femtosecond):
             raise ValueError("'equilibration_timestep' units are invalid.")
 
+        if t.value() == 0:
+            _logger.warning(
+                "Equilibration timestep is zero - simulation will not run. Set 'equilibration_timestep' to a non-zero value."
+            )
+
         self._equilibration_timestep = t
+
+    @property
+    def equilibration_constraints(self):
+        return self._equilibration_constraints
+
+    @equilibration_constraints.setter
+    def equilibration_constraints(self, equilibration_constraints):
+        if not isinstance(equilibration_constraints, bool):
+            raise ValueError("'equilibration_constraints' must be of type 'bool'")
+        self._equilibration_constraints = equilibration_constraints
+
+        if not equilibration_constraints and self.equilibration_timestep > _sr.u("1fs"):
+            _logger.warning(
+                "Equilibration constraints are recommeded for stability when "
+                "using a timestep greater than 1fs."
+            )
 
     @property
     def energy_frequency(self):
@@ -821,7 +892,7 @@ class Config:
                 f"Unable to parse 'energy_frequency' as a Sire GeneralUnit: {energy_frequency}"
             )
 
-        if not t.has_same_units(picosecond):
+        if t.value() != 0 and not t.has_same_units(picosecond):
             raise ValueError("'energy_frequency' units are invalid.")
 
         self._energy_frequency = t
@@ -854,7 +925,7 @@ class Config:
                 f"Unable to parse 'frame_frequency' as a Sire GeneralUnit: {frame_frequency}"
             )
 
-        if not t.has_same_units(picosecond):
+        if t.value() != 0 and not t.has_same_units(picosecond):
             raise ValueError("'frame_frequency' units are invalid.")
 
         self._frame_frequency = t
@@ -887,11 +958,15 @@ class Config:
                 f"Unable to parse 'checkpoint_frequency' as a Sire GeneralUnit: {checkpoint_frequency}"
             )
 
-        if not t.has_same_units(picosecond):
+        if t.value() != 0 and not t.has_same_units(picosecond):
             raise ValueError("'checkpoint_frequency' units are invalid.")
-        if t < self._energy_frequency and t < self._frame_frequency:
+
+        if (
+            t.value() < self._energy_frequency.value()
+            and t.value() < self._frame_frequency.value()
+        ):
             _logger.warning(
-                "Checkpoint frequency is low - should be greater min(energy_frequency, frame_frequency)"
+                "Checkpoint frequency is low. Should be greater min(energy_frequency, frame_frequency)"
             )
         self._checkpoint_frequency = t
 
@@ -1141,7 +1216,7 @@ class Config:
         params = {
             key: value
             for key, value in params.items()
-            if key not in ["self", "args", "kwargs"]
+            if key not in ["self", "args", "kwargs", "restraints"]
         }
 
         # Get the docstring.
