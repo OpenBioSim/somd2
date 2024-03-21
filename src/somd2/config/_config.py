@@ -131,7 +131,10 @@ class Config:
             The number of integration steps between barostat updates.
 
         integrator: str
-            Integrator to use for simulation.
+            Integrator to use for simulation. This option also controls the thermostat. "verlet" and
+            "leapfrog" both employ the OpenMM VerletIntegrator and do not set a thermostat (NVE only).
+            "andersen" employs the OpenMM VerletIntegrator with an Andersen thermostat. All remaining
+            options map to OpenMM integrators which include temperature control.
 
         cutoff_type: str
             Cutoff type to use for simulation.
