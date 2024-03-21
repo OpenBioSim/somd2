@@ -892,7 +892,7 @@ class Runner:
                 )
                 return True
             else:
-                _logger.debug(
+                _logger.info(
                     f"Restarting {_lam_sym} = {lambda_value} at time {acc_time}, time remaining = {self._config.runtime - acc_time}"
                 )
         # GPU platform.

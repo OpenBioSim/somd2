@@ -356,20 +356,28 @@ class Dynamics:
 
         _logger.info(f"Running dynamics at {_lam_sym} = {self._lambda_val}")
 
+        # Create the checkpoint file name.
+        checkpoint_file = str(
+            _Path(self._config.output_directory) / self._filenames["checkpoint"]
+        )
+
         if self._config.checkpoint_frequency.value() > 0.0:
             # Calculate the number of blocks and the remaineder time.
             frac = (
                 self._config.runtime.value() / self._config.checkpoint_frequency.value()
             )
+
+            # Handle the case where the runtime is less than the checkpoint frequency.
+            if frac < 1.0:
+                frac = 1.0
+                self._config.checkpoint_frequency = str(self._config.runtime)
+
             num_blocks = int(frac)
             rem = frac - num_blocks
 
             # Append only this number of lines from the end of the dataframe during checkpointing
             energy_per_block = (
                 self._config.checkpoint_frequency / self._config.energy_frequency
-            )
-            sire_checkpoint_name = str(
-                _Path(self._config.output_directory) / self._filenames["checkpoint"]
             )
 
             # Run num_blocks dynamics and then run a final block if rem > 0
@@ -416,7 +424,7 @@ class Dynamics:
                         self._system.delete_all_frames()
 
                     # Stream the checkpoint to file.
-                    sr.stream.save(self._system, str(sire_checkpoint_name))
+                    sr.stream.save(self._system, str(checkpoint_file))
 
                     # Save the energy trajectory to a parquet file.
                     df = self._system.energy_trajectory(
@@ -557,7 +565,7 @@ class Dynamics:
         self._system.add_shared_property("lambda", self._lambda_val)
 
         # Save the final system to checkpoint file.
-        sr.stream.save(self._system, sire_checkpoint_name)
+        sr.stream.save(self._system, checkpoint_file)
         df = self._system.energy_trajectory(to_alchemlyb=True, energy_unit="kT")
 
         return df

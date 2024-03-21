@@ -927,7 +927,10 @@ class Config:
         if t.value() != 0 and not t.has_same_units(picosecond):
             raise ValueError("'checkpoint_frequency' units are invalid.")
 
-        if t.value() < self._energy_frequency.value() and t.value() < self._frame_frequency.value():
+        if (
+            t.value() < self._energy_frequency.value()
+            and t.value() < self._frame_frequency.value()
+        ):
             _logger.warning(
                 "Checkpoint frequency is low. Should be greater min(energy_frequency, frame_frequency)"
             )
