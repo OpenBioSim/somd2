@@ -567,6 +567,12 @@ class Config:
                 h_mass_factor = float(h_mass_factor)
             except Exception:
                 raise ValueError("'h_mass_factor' must be a float")
+        if h_mass_factor < 1.0:
+            _logger.warning(
+                "Requested hydrogen mass repartitioning factor is less than 1.0. "
+                "This will result in a reduction of the mass of hydrogen atoms, "
+                "and will likely lead to undesired simulation behaviour."
+            )
         self._h_mass_factor = h_mass_factor
 
     @property
