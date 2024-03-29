@@ -30,3 +30,4 @@ del _ProgressBar
 from loguru import logger as _logger
 
 from . import runner
+from ._version import __version__, __version_tuple__

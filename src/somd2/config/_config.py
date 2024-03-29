@@ -27,12 +27,15 @@ __all__ = ["Config"]
 
 
 from collections.abc import Iterable as _Iterable
-from openmm import Platform as _Platform
 from pathlib import Path as _Path
 
 import sire as _sr
+from openmm import Platform as _Platform
+from sire import __revisionid__ as sire_revisionid
+from sire import __version__ as sire_version
 
 from somd2 import _logger
+from somd2._version import __version__
 
 # List of supported Sire platforms.
 _sire_platforms = _sr.options.Platform.options()
@@ -312,6 +315,10 @@ class Config:
         self.write_config = write_config
 
         self.overwrite = overwrite
+
+        # Log the versions of somd2 and sire.
+        _logger.info(f"somd2 version: {__version__}")
+        _logger.info(f"sire version: {sire_version}+{sire_revisionid}")
 
     def __str__(self):
         """Return a string representation of this object."""
