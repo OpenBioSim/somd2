@@ -30,3 +30,30 @@ del _ProgressBar
 from loguru import logger as _logger
 
 from . import runner
+
+# Store the somd2 version.
+from ._version import __version__
+
+# Store the sire version.
+from sire import __version__ as _sire_version
+from sire import __revisionid__ as _sire_revisionid
+
+# Determine whether we're being run interactively.
+try:
+    _shell = get_ipython().__class__.__name__
+    if _shell == "ZMQInteractiveShell":
+        _is_interactive = True  # Jupyter notebook or qtconsole
+    elif _shell == "TerminalInteractiveShell":
+        _is_interactive = True  # Terminal running IPython
+    else:
+        _is_interactive = False  # Other type (?)
+    del _shell
+except NameError:
+    _is_interactive = False  # Probably standard Python interpreter
+
+if not _is_interactive:
+    # Log the versions of somd2 and sire.
+    _logger.info(f"somd2 version: {__version__}")
+    _logger.info(f"sire version: {_sire_version}+{_sire_revisionid}")
+
+del _is_interactive

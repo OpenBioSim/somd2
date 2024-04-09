@@ -938,12 +938,16 @@ class Runner:
                 raise
             self._sim._cleanup()
 
+        from somd2 import __version__, _sire_version, _sire_revisionid
+
         # Write final dataframe for the system to the energy trajectory file.
         # Note that sire s3 checkpoint files contain energy trajectory data, so this works even for restarts.
         _ = _dataframe_to_parquet(
             df,
             metadata={
                 "attrs": df.attrs,
+                "somd2 version": __version__,
+                "sire version": f"{_sire_version}+{_sire_revisionid}",
                 "lambda": str(lambda_value),
                 "lambda_array": self._lambda_values,
                 "lambda_grad": lambda_grad,
