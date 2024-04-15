@@ -159,7 +159,6 @@ class Runner:
                 self._config._extra_args["ghosts_are_light"] = True
                 self._config._extra_args["check_for_h_by_max_mass"] = True
                 self._config._extra_args["check_for_h_by_mass"] = False
-                self._config._extra_args["check_for_h_by_mass"] = False
                 self._config._extra_args["check_for_h_by_element"] = False
                 self._config._extra_args["check_for_h_by_ambertype"] = False
 
