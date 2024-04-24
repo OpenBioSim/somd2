@@ -62,11 +62,8 @@ class Runner:
             The perturbable system to be simulated. This can be either a path
             to a stream file, or a Sire system object.
 
-        num_lambda: int
-            The number of lambda windows to be simulated.
-
-        platform: str
-            The platform to be used for simulations.
+        config: :class: `Config <somd2.config.Config>`
+            The configuration options for the simulation.
         """
 
         if not isinstance(system, (str, _System)):
@@ -169,10 +166,13 @@ class Runner:
         self._check_end_state_constraints()
 
         # Set the lambda values.
-        self._lambda_values = [
-            round(i / (self._config.num_lambda - 1), 5)
-            for i in range(0, self._config.num_lambda)
-        ]
+        if self._config.lambda_values:
+            self._lambda_values = self._config.lambda_values
+        else:
+            self._lambda_values = [
+                round(i / (self._config.num_lambda - 1), 5)
+                for i in range(0, self._config.num_lambda)
+            ]
 
         # Work out the current hydrogen mass factor.
         h_mass_factor, has_hydrogen = self._get_h_mass_factor(self._system)
