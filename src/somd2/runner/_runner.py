@@ -174,6 +174,12 @@ class Runner:
                 for i in range(0, self._config.num_lambda)
             ]
 
+        # Set the lambda energy list.
+        if self._config.lambda_energy is not None:
+            self._lambda_energy = self._config.lambda_energy
+        else:
+            self._lambda_energy = self._config.lambda_values
+
         # Work out the current hydrogen mass factor.
         h_mass_factor, has_hydrogen = self._get_h_mass_factor(self._system)
 
@@ -312,6 +318,7 @@ class Runner:
             files = Dynamics.create_filenames(
                 self._lambda_values,
                 lambda_value,
+                self._lambda_energy,
                 self._config.output_directory,
                 self._config.restart,
             )
@@ -679,6 +686,7 @@ class Runner:
                 system,
                 lambda_val=lambda_value,
                 lambda_array=self._lambda_values,
+                lambda_energy=self._lambda_energy,
                 config=self._config,
                 device=device,
                 has_space=self._has_space,
@@ -939,6 +947,12 @@ class Runner:
 
         from somd2 import __version__, _sire_version, _sire_revisionid
 
+        # Add the current lambda value to the list of lambda values and sort.
+        lambda_array = self._lambda_energy.copy()
+        if lambda_value not in lambda_array:
+            lambda_array.append(lambda_value)
+        lambda_array = sorted(lambda_array)
+
         # Write final dataframe for the system to the energy trajectory file.
         # Note that sire s3 checkpoint files contain energy trajectory data, so this works even for restarts.
         _ = _dataframe_to_parquet(
@@ -948,7 +962,7 @@ class Runner:
                 "somd2 version": __version__,
                 "sire version": f"{_sire_version}+{_sire_revisionid}",
                 "lambda": str(lambda_value),
-                "lambda_array": self._lambda_values,
+                "lambda_array": lambda_array,
                 "lambda_grad": lambda_grad,
                 "speed": speed,
                 "temperature": str(self._config.temperature.value()),

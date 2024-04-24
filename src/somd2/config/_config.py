@@ -75,6 +75,7 @@ class Config:
     # A dictionary of nargs for the various options.
     _nargs = {
         "lambda_values": "+",
+        "lambda_energy": "+",
     }
 
     def __init__(
@@ -92,6 +93,7 @@ class Config:
         h_mass_factor=1.5,
         num_lambda=11,
         lambda_values=None,
+        lambda_energy=None,
         lambda_schedule="standard_morph",
         charge_scale_factor=0.2,
         swap_end_states=False,
@@ -162,6 +164,11 @@ class Config:
         lambda_values: [float]
             A list of lambda values. When specified, this takes precedence over
             the 'num_lambda' option.
+
+        lambda_energy: [float]
+            A list of lambda values at which to output energy data. If not set,
+            then this will be set to the same as 'lambda_values', or the values
+            defined by 'num_lambda' if 'lambda_values' is not set.
 
         lambda_schedule: str
             Lambda schedule to use for alchemical free energy simulations.
@@ -292,6 +299,7 @@ class Config:
         self.timestep = timestep
         self.num_lambda = num_lambda
         self.lambda_values = lambda_values
+        self.lambda_energy = lambda_energy
         self.lambda_schedule = lambda_schedule
         self.charge_scale_factor = charge_scale_factor
         self.swap_end_states = swap_end_states
@@ -649,6 +657,27 @@ class Config:
             self._num_lambda = len(lambda_values)
 
         self._lambda_values = lambda_values
+
+    @property
+    def lambda_energy(self):
+        return self._lambda_energy
+
+    @lambda_energy.setter
+    def lambda_energy(self, lambda_energy):
+        if lambda_energy is not None:
+            if not isinstance(lambda_energy, _Iterable):
+                raise ValueError("'lambda_energy' must be an iterable")
+            try:
+                lambda_energy = [float(x) for x in lambda_energy]
+            except:
+                raise ValueError("'lambda_energy' must be an iterable of floats")
+
+            if not all(0 <= x <= 1 for x in lambda_energy):
+                raise ValueError(
+                    "All entries in 'lambda_energy' must be between 0 and 1"
+                )
+
+        self._lambda_energy = lambda_energy
 
     @property
     def lambda_schedule(self):

@@ -43,6 +43,7 @@ class Dynamics:
         system,
         lambda_val,
         lambda_array,
+        lambda_energy,
         config,
         increment=0.001,
         device=None,
@@ -61,8 +62,11 @@ class Dynamics:
             Lambda value for the simulation
 
         lambda_array : list
-            List of lambda values to be used for perturbation, if none won't return
-            reduced perturbed energies
+            List of lambda values to be used for simulation.
+
+        lambda_energy: list
+            List of lambda values to be used for sampling energies. If None, then we
+            won't return reduced perturbed energies.
 
         increment : float
             Increment of lambda value - used for calculating the gradient
@@ -107,18 +111,22 @@ class Dynamics:
 
         self._lambda_val = lambda_val
         self._lambda_array = lambda_array
+        self._lambda_energy = lambda_energy
         self._increment = increment
         self._device = device
         self._has_space = has_space
         self._filenames = self.create_filenames(
             self._lambda_array,
             self._lambda_val,
+            self._lambda_energy,
             self._config.output_directory,
             self._config.restart,
         )
 
     @staticmethod
-    def create_filenames(lambda_array, lambda_value, output_directory, restart=False):
+    def create_filenames(
+        lambda_array, lambda_value, lambda_energy, output_directory, restart=False
+    ):
         # Create incremental file name for current restart.
         def increment_filename(base_filename, suffix):
             file_number = 0
@@ -348,10 +356,10 @@ class Dynamics:
         # Work out the lambda values for finite-difference gradient analysis.
         self._lambda_grad = generate_lam_vals(self._lambda_val, self._increment)
 
-        if self._lambda_array is None:
+        if self._lambda_energy is None:
             lam_arr = self._lambda_grad
         else:
-            lam_arr = self._lambda_array + self._lambda_grad
+            lam_arr = self._lambda_energy + self._lambda_grad
 
         _logger.info(f"Running dynamics at {_lam_sym} = {self._lambda_val}")
 
