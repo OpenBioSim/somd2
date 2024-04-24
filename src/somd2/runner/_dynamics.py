@@ -109,6 +109,11 @@ class Dynamics:
         else:
             self._current_block = 0
 
+        lambda_energy = lambda_energy.copy()
+        if not lambda_val in lambda_energy:
+            lambda_energy.append(lambda_val)
+        lambda_energy = sorted(lambda_energy)
+
         self._lambda_val = lambda_val
         self._lambda_array = lambda_array
         self._lambda_energy = lambda_energy
@@ -444,7 +449,7 @@ class Dynamics:
                             metadata={
                                 "attrs": df.attrs,
                                 "lambda": str(self._lambda_val),
-                                "lambda_array": lam_arr,
+                                "lambda_array": self._lambda_energy,
                                 "lambda_grad": self._lambda_grad,
                                 "temperature": str(self._config.temperature.value()),
                             },
