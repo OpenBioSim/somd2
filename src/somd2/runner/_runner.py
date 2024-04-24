@@ -178,7 +178,7 @@ class Runner:
         if self._config.lambda_energy is not None:
             self._lambda_energy = self._config.lambda_energy
         else:
-            self._lambda_energy = self._config.lambda_values
+            self._lambda_energy = self._lambda_values
 
         # Work out the current hydrogen mass factor.
         h_mass_factor, has_hydrogen = self._get_h_mass_factor(self._system)
