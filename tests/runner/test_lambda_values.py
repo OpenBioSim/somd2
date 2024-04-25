@@ -37,7 +37,9 @@ def test_lambda_values(ethane_methanol):
         runner.run()
 
         # Load the energy trajectory.
-        energy_traj, meta = parquet_to_dataframe(Path(tmpdir) / "energy_traj_0.parquet")
+        energy_traj, meta = parquet_to_dataframe(
+            Path(tmpdir) / "energy_traj_0.00000.parquet"
+        )
 
         # Make sure the lambda_array in the metadata is correct. This is the
         # lambda_values list in the config.
@@ -78,7 +80,9 @@ def test_lambda_energy(ethane_methanol):
         runner.run()
 
         # Load the energy trajectory.
-        energy_traj, meta = parquet_to_dataframe(Path(tmpdir) / "energy_traj_0.parquet")
+        energy_traj, meta = parquet_to_dataframe(
+            Path(tmpdir) / "energy_traj_0.00000.parquet"
+        )
 
         # Make sure the lambda_array in the metadata is correct. This is the
         # sampled lambda plus the lambda_energy values in the config.

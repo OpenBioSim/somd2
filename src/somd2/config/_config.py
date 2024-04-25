@@ -654,6 +654,9 @@ class Config:
                     "All entries in 'lambda_values' must be between 0 and 1"
                 )
 
+            # Round to 5dp.
+            lambda_values = [round(x, 5) for x in lambda_values]
+
             self._num_lambda = len(lambda_values)
 
         self._lambda_values = lambda_values
@@ -676,6 +679,9 @@ class Config:
                 raise ValueError(
                     "All entries in 'lambda_energy' must be between 0 and 1"
                 )
+
+            # Round to 5dp.
+            lambda_energy = [round(x, 5) for x in lambda_energy]
 
         self._lambda_energy = lambda_energy
 

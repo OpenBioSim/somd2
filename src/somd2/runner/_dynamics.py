@@ -123,15 +123,12 @@ class Dynamics:
         self._filenames = self.create_filenames(
             self._lambda_array,
             self._lambda_val,
-            self._lambda_energy,
             self._config.output_directory,
             self._config.restart,
         )
 
     @staticmethod
-    def create_filenames(
-        lambda_array, lambda_value, lambda_energy, output_directory, restart=False
-    ):
+    def create_filenames(lambda_array, lambda_value, output_directory, restart=False):
         # Create incremental file name for current restart.
         def increment_filename(base_filename, suffix):
             file_number = 0
@@ -149,13 +146,13 @@ class Dynamics:
 
         if lambda_value not in lambda_array:
             raise ValueError("lambda_value not in lambda_array")
+        lam = f"{lambda_value:.5f}"
         filenames = {}
-        index = lambda_array.index(lambda_value)
         filenames["topology"] = "system.prm7"
-        filenames["checkpoint"] = f"checkpoint_{index}.s3"
-        filenames["energy_traj"] = f"energy_traj_{index}.parquet"
-        filenames["trajectory"] = f"traj_{index}.dcd"
-        filenames["trajectory_chunk"] = f"traj_{index}_"
+        filenames["checkpoint"] = f"checkpoint_{lam}.s3"
+        filenames["energy_traj"] = f"energy_traj_{lam}.parquet"
+        filenames["trajectory"] = f"traj_{lam}.dcd"
+        filenames["trajectory_chunk"] = f"traj_{lam}_"
         if restart:
             filenames["config"] = increment_filename("config", "yaml")
         else:

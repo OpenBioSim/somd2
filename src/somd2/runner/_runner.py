@@ -318,7 +318,6 @@ class Runner:
             files = Dynamics.create_filenames(
                 self._lambda_values,
                 lambda_value,
-                self._lambda_energy,
                 self._config.output_directory,
                 self._config.restart,
             )
@@ -428,10 +427,10 @@ class Runner:
             )
             try:
                 system_temp = _stream.load(
-                    str(self._config.output_directory / "checkpoint_0.s3")
+                    str(self._config.output_directory / "checkpoint_0.00000.s3")
                 )
             except:
-                expdir = self._config.output_directory / "checkpoint_0.s3"
+                expdir = self._config.output_directory / "checkpoint_0.00000.s3"
                 _logger.error(f"Unable to load checkpoint file from {expdir}.")
                 raise
             else:
