@@ -62,11 +62,8 @@ class Runner:
             The perturbable system to be simulated. This can be either a path
             to a stream file, or a Sire system object.
 
-        num_lambda: int
-            The number of lambda windows to be simulated.
-
-        platform: str
-            The platform to be used for simulations.
+        config: :class: `Config <somd2.config.Config>`
+            The configuration options for the simulation.
         """
 
         if not isinstance(system, (str, _System)):
@@ -169,10 +166,19 @@ class Runner:
         self._check_end_state_constraints()
 
         # Set the lambda values.
-        self._lambda_values = [
-            round(i / (self._config.num_lambda - 1), 5)
-            for i in range(0, self._config.num_lambda)
-        ]
+        if self._config.lambda_values:
+            self._lambda_values = self._config.lambda_values
+        else:
+            self._lambda_values = [
+                round(i / (self._config.num_lambda - 1), 5)
+                for i in range(0, self._config.num_lambda)
+            ]
+
+        # Set the lambda energy list.
+        if self._config.lambda_energy is not None:
+            self._lambda_energy = self._config.lambda_energy
+        else:
+            self._lambda_energy = self._lambda_values
 
         # Work out the current hydrogen mass factor.
         h_mass_factor, has_hydrogen = self._get_h_mass_factor(self._system)
@@ -421,10 +427,10 @@ class Runner:
             )
             try:
                 system_temp = _stream.load(
-                    str(self._config.output_directory / "checkpoint_0.s3")
+                    str(self._config.output_directory / "checkpoint_0.00000.s3")
                 )
             except:
-                expdir = self._config.output_directory / "checkpoint_0.s3"
+                expdir = self._config.output_directory / "checkpoint_0.00000.s3"
                 _logger.error(f"Unable to load checkpoint file from {expdir}.")
                 raise
             else:
@@ -679,6 +685,7 @@ class Runner:
                 system,
                 lambda_val=lambda_value,
                 lambda_array=self._lambda_values,
+                lambda_energy=self._lambda_energy,
                 config=self._config,
                 device=device,
                 has_space=self._has_space,
@@ -939,6 +946,12 @@ class Runner:
 
         from somd2 import __version__, _sire_version, _sire_revisionid
 
+        # Add the current lambda value to the list of lambda values and sort.
+        lambda_array = self._lambda_energy.copy()
+        if lambda_value not in lambda_array:
+            lambda_array.append(lambda_value)
+        lambda_array = sorted(lambda_array)
+
         # Write final dataframe for the system to the energy trajectory file.
         # Note that sire s3 checkpoint files contain energy trajectory data, so this works even for restarts.
         _ = _dataframe_to_parquet(
@@ -948,7 +961,7 @@ class Runner:
                 "somd2 version": __version__,
                 "sire version": f"{_sire_version}+{_sire_revisionid}",
                 "lambda": str(lambda_value),
-                "lambda_array": self._lambda_values,
+                "lambda_array": lambda_array,
                 "lambda_grad": lambda_grad,
                 "speed": speed,
                 "temperature": str(self._config.temperature.value()),

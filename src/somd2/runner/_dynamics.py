@@ -43,6 +43,7 @@ class Dynamics:
         system,
         lambda_val,
         lambda_array,
+        lambda_energy,
         config,
         increment=0.001,
         device=None,
@@ -61,8 +62,11 @@ class Dynamics:
             Lambda value for the simulation
 
         lambda_array : list
-            List of lambda values to be used for perturbation, if none won't return
-            reduced perturbed energies
+            List of lambda values to be used for simulation.
+
+        lambda_energy: list
+            List of lambda values to be used for sampling energies. If None, then we
+            won't return reduced perturbed energies.
 
         increment : float
             Increment of lambda value - used for calculating the gradient
@@ -105,8 +109,14 @@ class Dynamics:
         else:
             self._current_block = 0
 
+        lambda_energy = lambda_energy.copy()
+        if not lambda_val in lambda_energy:
+            lambda_energy.append(lambda_val)
+        lambda_energy = sorted(lambda_energy)
+
         self._lambda_val = lambda_val
         self._lambda_array = lambda_array
+        self._lambda_energy = lambda_energy
         self._increment = increment
         self._device = device
         self._has_space = has_space
@@ -136,13 +146,13 @@ class Dynamics:
 
         if lambda_value not in lambda_array:
             raise ValueError("lambda_value not in lambda_array")
+        lam = f"{lambda_value:.5f}"
         filenames = {}
-        index = lambda_array.index(lambda_value)
         filenames["topology"] = "system.prm7"
-        filenames["checkpoint"] = f"checkpoint_{index}.s3"
-        filenames["energy_traj"] = f"energy_traj_{index}.parquet"
-        filenames["trajectory"] = f"traj_{index}.dcd"
-        filenames["trajectory_chunk"] = f"traj_{index}_"
+        filenames["checkpoint"] = f"checkpoint_{lam}.s3"
+        filenames["energy_traj"] = f"energy_traj_{lam}.parquet"
+        filenames["trajectory"] = f"traj_{lam}.dcd"
+        filenames["trajectory_chunk"] = f"traj_{lam}_"
         if restart:
             filenames["config"] = increment_filename("config", "yaml")
         else:
@@ -348,10 +358,10 @@ class Dynamics:
         # Work out the lambda values for finite-difference gradient analysis.
         self._lambda_grad = generate_lam_vals(self._lambda_val, self._increment)
 
-        if self._lambda_array is None:
+        if self._lambda_energy is None:
             lam_arr = self._lambda_grad
         else:
-            lam_arr = self._lambda_array + self._lambda_grad
+            lam_arr = self._lambda_energy + self._lambda_grad
 
         _logger.info(f"Running dynamics at {_lam_sym} = {self._lambda_val}")
 
@@ -436,7 +446,7 @@ class Dynamics:
                             metadata={
                                 "attrs": df.attrs,
                                 "lambda": str(self._lambda_val),
-                                "lambda_array": lam_arr,
+                                "lambda_array": self._lambda_energy,
                                 "lambda_grad": self._lambda_grad,
                                 "temperature": str(self._config.temperature.value()),
                             },

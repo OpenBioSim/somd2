@@ -38,19 +38,19 @@ def test_restart(mols, request):
 
         # Load the energy trajectory.
         energy_traj_1, meta_1 = parquet_to_dataframe(
-            Path(tmpdir) / "energy_traj_0.parquet"
+            Path(tmpdir) / "energy_traj_0.00000.parquet"
         )
 
         num_entries = len(energy_traj_1.index)
 
         # Load the trajectory.
         traj_1 = sr.load(
-            [str(Path(tmpdir) / "system.prm7"), str(Path(tmpdir) / "traj_0.dcd")]
+            [str(Path(tmpdir) / "system.prm7"), str(Path(tmpdir) / "traj_0.00000.dcd")]
         )
 
         # Check that both config and lambda have been written
         # as properties to the streamed checkpoint file.
-        checkpoint = sr.stream.load(str(Path(tmpdir) / "checkpoint_0.s3"))
+        checkpoint = sr.stream.load(str(Path(tmpdir) / "checkpoint_0.00000.s3"))
         props = checkpoint.property_keys()
         assert "config" in props
         assert "lambda" in props
@@ -78,7 +78,7 @@ def test_restart(mols, request):
 
         # Load the energy trajectory.
         energy_traj_2, meta_2 = parquet_to_dataframe(
-            Path(tmpdir) / "energy_traj_0.parquet"
+            Path(tmpdir) / "energy_traj_0.00000.parquet"
         )
 
         # Check that first half of energy trajectory is the same
@@ -89,7 +89,7 @@ def test_restart(mols, request):
 
         # Reload the trajectory.
         traj_2 = sr.load(
-            [str(Path(tmpdir) / "system.prm7"), str(Path(tmpdir) / "traj_0.dcd")]
+            [str(Path(tmpdir) / "system.prm7"), str(Path(tmpdir) / "traj_0.00000.dcd")]
         )
 
         # Check that the trajectory is twice as long as the first.
@@ -219,11 +219,11 @@ def test_restart(mols, request):
             file.unlink()
 
         # Load the checkpoint file using sire and change the pressure option
-        sire_checkpoint = sr.stream.load(str(Path(tmpdir) / "checkpoint_0.s3"))
+        sire_checkpoint = sr.stream.load(str(Path(tmpdir) / "checkpoint_0.00000.s3"))
         cfg = sire_checkpoint.property("config")
         cfg["pressure"] = "0.5 atm"
         sire_checkpoint.set_property("config", cfg)
-        sr.stream.save(sire_checkpoint, str(Path(tmpdir) / "checkpoint_0.s3"))
+        sr.stream.save(sire_checkpoint, str(Path(tmpdir) / "checkpoint_0.00000.s3"))
 
         # Load the new checkpoint file and make sure the restart fails
         with pytest.raises(ValueError):
