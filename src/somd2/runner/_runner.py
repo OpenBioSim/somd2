@@ -152,12 +152,11 @@ class Runner:
             # Only check for light atoms by the maxium end state mass if running
             # in SOMD1 compatibility mode. Ghost atoms are considered light when
             # adding bond constraints.
-            if self._config.somd1_compatibility:
-                self._config._extra_args["ghosts_are_light"] = True
-                self._config._extra_args["check_for_h_by_max_mass"] = True
-                self._config._extra_args["check_for_h_by_mass"] = False
-                self._config._extra_args["check_for_h_by_element"] = False
-                self._config._extra_args["check_for_h_by_ambertype"] = False
+            self._config._extra_args["ghosts_are_light"] = True
+            self._config._extra_args["check_for_h_by_max_mass"] = True
+            self._config._extra_args["check_for_h_by_mass"] = False
+            self._config._extra_args["check_for_h_by_element"] = False
+            self._config._extra_args["check_for_h_by_ambertype"] = False
 
         # Check for a periodic space.
         self._check_space()
