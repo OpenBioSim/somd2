@@ -22,7 +22,6 @@
 from sire.system import System as _System
 from sire.legacy.System import System as _LegacySystem
 
-import sire.legacy.CAS as _SireCAS
 import sire.legacy.MM as _SireMM
 import sire.legacy.Mol as _SireMol
 
@@ -244,12 +243,9 @@ def _make_compatible(system):
             initial_dummy = _has_dummy(mol, [idx0, idx1, idx2])
             final_dummy = _has_dummy(mol, [idx0, idx1, idx2], True)
 
-            # If both end states contain a dummy, the use null potentials.
+            # If both end states contain a dummy, then don't add the potentials.
             if initial_dummy and final_dummy:
-                theta = _SireCAS.Symbol("theta")
-                null_angle = _SireMM.AmberAngle(0.0, theta).to_expression(theta)
-                new_angles0.set(idx0, idx1, idx2, null_angle)
-                new_angles1.set(idx0, idx1, idx2, null_angle)
+                continue
             # If the initial state contains a dummy, then use the potential from the final state.
             # This should already be the case, but we explicitly set it here.
             elif initial_dummy:
@@ -355,34 +351,25 @@ def _make_compatible(system):
             all_dummy_initial = all(_is_dummy(mol, [idx0, idx1, idx2, idx3]))
             all_dummy_final = all(_is_dummy(mol, [idx0, idx1, idx2, idx3], True))
 
-            # If both end states contain a dummy, the use null potentials.
+            # If both end states contain a dummy, then don't add the potentials.
             if has_dummy_initial and has_dummy_final:
-                phi = _SireCAS.Symbol("phi")
-                null_dihedral = _SireMM.AmberDihedral(0.0, phi).to_expression(phi)
-                new_dihedrals0.set(idx0, idx1, idx2, idx3, null_dihedral)
-                new_dihedrals1.set(idx0, idx1, idx2, idx3, null_dihedral)
+                continue
             elif has_dummy_initial:
                 # If all the atoms are dummy, then use the potential from the final state.
                 if all_dummy_initial:
                     new_dihedrals0.set(idx0, idx1, idx2, idx3, p1.function())
                     new_dihedrals1.set(idx0, idx1, idx2, idx3, p1.function())
-                # Otherwise, zero the potential.
+                # Otherwise, remove the potential from the initial state.
                 else:
-                    phi = _SireCAS.Symbol("phi")
-                    null_dihedral = _SireMM.AmberDihedral(0.0, phi).to_expression(phi)
-                    new_dihedrals0.set(idx0, idx1, idx2, idx3, null_dihedral)
                     new_dihedrals1.set(idx0, idx1, idx2, idx3, p1.function())
             elif has_dummy_final:
                 # If all the atoms are dummy, then use the potential from the initial state.
                 if all_dummy_final:
                     new_dihedrals0.set(idx0, idx1, idx2, idx3, p0.function())
                     new_dihedrals1.set(idx0, idx1, idx2, idx3, p0.function())
-                # Otherwise, zero the potential.
+                # Otherwise, remove the potential from the final state.
                 else:
-                    phi = _SireCAS.Symbol("phi")
-                    null_dihedral = _SireMM.AmberDihedral(0.0, phi).to_expression(phi)
                     new_dihedrals0.set(idx0, idx1, idx2, idx3, p0.function())
-                    new_dihedrals1.set(idx0, idx1, idx2, idx3, null_dihedral)
             else:
                 new_dihedrals0.set(idx0, idx1, idx2, idx3, p0.function())
                 new_dihedrals1.set(idx0, idx1, idx2, idx3, p1.function())
@@ -490,33 +477,25 @@ def _make_compatible(system):
             all_dummy_initial = all(_is_dummy(mol, [idx0, idx1, idx2, idx3]))
             all_dummy_final = all(_is_dummy(mol, [idx0, idx1, idx2, idx3], True))
 
+            # If both end states contain a dummy, then don't add the potentials.
             if has_dummy_initial and has_dummy_final:
-                phi = _SireCAS.Symbol("phi")
-                null_dihedral = _SireMM.AmberDihedral(0.0, phi).to_expression(phi)
-                new_impropers0.set(idx0, idx1, idx2, idx3, null_dihedral)
-                new_impropers1.set(idx0, idx1, idx2, idx3, null_dihedral)
+                continue
             elif has_dummy_initial:
                 # If all the atoms are dummy, then use the potential from the final state.
                 if all_dummy_initial:
                     new_impropers0.set(idx0, idx1, idx2, idx3, p1.function())
                     new_impropers1.set(idx0, idx1, idx2, idx3, p1.function())
-                # Otherwise, zero the potential.
+                # Otherwise, remove the potential from the initial state.
                 else:
-                    phi = _SireCAS.Symbol("phi")
-                    null_dihedral = _SireMM.AmberDihedral(0.0, phi).to_expression(phi)
-                    new_impropers0.set(idx0, idx1, idx2, idx3, null_dihedral)
                     new_impropers1.set(idx0, idx1, idx2, idx3, p1.function())
             elif has_dummy_final:
                 # If all the atoms are dummy, then use the potential from the initial state.
                 if all_dummy_final:
                     new_impropers0.set(idx0, idx1, idx2, idx3, p0.function())
                     new_impropers1.set(idx0, idx1, idx2, idx3, p0.function())
-                # Otherwise, zero the potential.
+                # Otherwise, remove the potential from the final state.
                 else:
-                    phi = _SireCAS.Symbol("phi")
-                    null_dihedral = _SireMM.AmberDihedral(0.0, phi).to_expression(phi)
                     new_impropers0.set(idx0, idx1, idx2, idx3, p0.function())
-                    new_impropers1.set(idx0, idx1, idx2, idx3, null_dihedral)
             else:
                 new_impropers0.set(idx0, idx1, idx2, idx3, p0.function())
                 new_impropers1.set(idx0, idx1, idx2, idx3, p1.function())
