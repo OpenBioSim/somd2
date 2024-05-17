@@ -969,5 +969,7 @@ class Runner:
             filename=self._fnames[lambda_value]["energy_traj"],
         )
         del system
-        _logger.success(f"{_lam_sym} = {lambda_value} complete, speed = {speed:.2f} ns day-1")
+        _logger.success(
+            f"{_lam_sym} = {lambda_value} complete, speed = {speed:.2f} ns day-1"
+        )
         return True

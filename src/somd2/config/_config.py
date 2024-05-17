@@ -124,6 +124,7 @@ class Config:
         overwrite=False,
         somd1_compatibility=False,
         pert_file=None,
+        save_energy_components=False,
     ):
         """
         Constructor.
@@ -281,6 +282,10 @@ class Config:
         pert_file: str
             The path to a SOMD1 perturbation file to apply to the reference system.
             When set, this will automatically set 'somd1_compatibility' to True.
+
+        save_energy_components: bool
+            Whether to save the energy contribution for each force when checkpointing.
+            This is useful when debugging crashes.
         """
 
         # Setup logger before doing anything else
@@ -327,6 +332,7 @@ class Config:
         self.restart = restart
         self.somd1_compatibility = somd1_compatibility
         self.pert_file = pert_file
+        self.save_energy_components = save_energy_components
 
         self.write_config = write_config
 
@@ -1200,6 +1206,16 @@ class Config:
 
         if pert_file is not None:
             self._somd1_compatibility = True
+
+    @property
+    def save_energy_components(self):
+        return self._save_energy_components
+
+    @save_energy_components.setter
+    def save_energy_components(self, save_energy_components):
+        if not isinstance(save_energy_components, bool):
+            raise ValueError("'save_energy_components' must be of type 'bool'")
+        self._save_energy_components = save_energy_components
 
     @property
     def output_directory(self):
