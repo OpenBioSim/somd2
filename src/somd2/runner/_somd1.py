@@ -61,7 +61,7 @@ def _make_compatible(system):
 
     # Store a dummy element and ambertype.
     element_dummy = _SireMol.Element("Xx")
-    amber_dummy = "du"
+    ambertype_dummy = "du"
 
     for mol in pert_mols:
         # Store the molecule info.
@@ -78,7 +78,7 @@ def _make_compatible(system):
             # Lambda = 0 state is a dummy, use sigma from the lambda = 1 state.
             if (
                 atom.property("element0") == element_dummy
-                or atom.property("ambertype0") == amber_dummy
+                or atom.property("ambertype0") == ambertype_dummy
             ):
                 lj0 = atom.property("LJ0")
                 lj1 = atom.property("LJ1")
@@ -92,7 +92,7 @@ def _make_compatible(system):
             # Lambda = 1 state is a dummy, use sigma from the lambda = 0 state.
             elif (
                 atom.property("element1") == element_dummy
-                or atom.property("ambertype1") == amber_dummy
+                or atom.property("ambertype1") == ambertype_dummy
             ):
                 lj0 = atom.property("LJ0")
                 lj1 = atom.property("LJ1")
