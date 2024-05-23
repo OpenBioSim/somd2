@@ -114,6 +114,7 @@ class Runner:
 
             _logger.info("Applying SOMD1 perturbation compatibility.")
             self._system = _make_compatible(self._system)
+            self._system = _morph.link_to_reference(self._system)
 
             # Next, swap the water topology so that it is in AMBER format.
 
