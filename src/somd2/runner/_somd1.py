@@ -681,7 +681,7 @@ def _apply_pert(system, pert_file):
     from sire import morph as _morph
 
     # Get the non-water molecules in the system.
-    non_waters = system["not water"]
+    non_waters = system["not water"].molecules()
 
     # Try to apply the perturbation to each non-water molecule.
     is_pert = False
