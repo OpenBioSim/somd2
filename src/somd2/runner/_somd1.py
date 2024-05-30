@@ -70,18 +70,21 @@ def _make_compatible(system):
         # Get an editable version of the molecule.
         edit_mol = mol.edit()
 
-        #####################################
-        # First fix the ghost atom LJ sigmas.
-        #####################################
+        ##################################
+        # First fix zero LJ sigmas values.
+        ##################################
+
+        # Create a null LJParameter.
+        null_lj = _SireMM.LJParameter()
 
         for atom in mol.atoms():
-            # Lambda = 0 state is a dummy, use sigma from the lambda = 1 state.
-            if (
-                atom.property("element0") == element_dummy
-                or atom.property("ambertype0") == ambertype_dummy
-            ):
-                lj0 = atom.property("LJ0")
-                lj1 = atom.property("LJ1")
+            # Get the end state LJ sigma values.
+            lj0 = atom.property("LJ0")
+            lj1 = atom.property("LJ1")
+
+            # Lambda = 0 state has a zero sigma value.
+            if lj0.sigma() == null_lj.sigma():
+                # Use the sigma value from the lambda = 1 state.
                 edit_mol = (
                     edit_mol.atom(atom.index())
                     .set_property(
@@ -89,13 +92,10 @@ def _make_compatible(system):
                     )
                     .molecule()
                 )
-            # Lambda = 1 state is a dummy, use sigma from the lambda = 0 state.
-            elif (
-                atom.property("element1") == element_dummy
-                or atom.property("ambertype1") == ambertype_dummy
-            ):
-                lj0 = atom.property("LJ0")
-                lj1 = atom.property("LJ1")
+
+            # Lambda = 1 state has a zero sigma value.
+            if lj1.sigma() == null_lj.sigma():
+                # Use the sigma value from the lambda = 0 state.
                 edit_mol = (
                     edit_mol.atom(atom.index())
                     .set_property(
