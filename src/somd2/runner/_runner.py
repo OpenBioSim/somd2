@@ -114,6 +114,7 @@ class Runner:
 
             _logger.info("Applying SOMD1 perturbation compatibility.")
             self._system = _make_compatible(self._system)
+            self._system = _morph.link_to_reference(self._system)
 
             # Next, swap the water topology so that it is in AMBER format.
 
@@ -151,12 +152,14 @@ class Runner:
 
             # Only check for light atoms by the maxium end state mass if running
             # in SOMD1 compatibility mode. Ghost atoms are considered light when
-            # adding bond constraints.
+            # adding bond constraints. Also fix the LJ sigma for ghost atoms so
+            # it isn't scaled to zero.
             self._config._extra_args["ghosts_are_light"] = True
             self._config._extra_args["check_for_h_by_max_mass"] = True
             self._config._extra_args["check_for_h_by_mass"] = False
             self._config._extra_args["check_for_h_by_element"] = False
             self._config._extra_args["check_for_h_by_ambertype"] = False
+            self._config._extra_args["fix_ghost_sigmas"] = True
 
         # Check for a periodic space.
         self._check_space()
@@ -969,5 +972,7 @@ class Runner:
             filename=self._fnames[lambda_value]["energy_traj"],
         )
         del system
-        _logger.success(f"{_lam_sym} = {lambda_value} complete, speed = {speed:.2f} ns day-1")
+        _logger.success(
+            f"{_lam_sym} = {lambda_value} complete, speed = {speed:.2f} ns day-1"
+        )
         return True

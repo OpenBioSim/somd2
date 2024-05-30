@@ -127,6 +127,9 @@ class Dynamics:
             self._config.restart,
         )
 
+        self._nrg_sample = 0
+        self._nrg_file = "energy_components.txt"
+
     @staticmethod
     def create_filenames(lambda_array, lambda_value, output_directory, restart=False):
         # Create incremental file name for current restart.
@@ -153,6 +156,7 @@ class Dynamics:
         filenames["energy_traj"] = f"energy_traj_{lam}.parquet"
         filenames["trajectory"] = f"traj_{lam}.dcd"
         filenames["trajectory_chunk"] = f"traj_{lam}_"
+        filenames["energy_components"] = f"energy_components_{lam}.txt"
         if restart:
             filenames["config"] = increment_filename("config", "yaml")
         else:
@@ -371,7 +375,7 @@ class Dynamics:
         )
 
         if self._config.checkpoint_frequency.value() > 0.0:
-            # Calculate the number of blocks and the remaineder time.
+            # Calculate the number of blocks and the remainder time.
             frac = (
                 self._config.runtime.value() / self._config.checkpoint_frequency.value()
             )
@@ -409,6 +413,10 @@ class Dynamics:
 
                 # Checkpoint.
                 try:
+                    # Save the energy contribution for each force.
+                    if self._config.save_energy_components:
+                        self._save_energy_components()
+
                     # Set to the current block number if this is a restart.
                     if x == 0:
                         x = self._current_block
@@ -584,3 +592,47 @@ class Dynamics:
 
     def _cleanup(self):
         del self._dyn
+
+    def _save_energy_components(self):
+
+        from copy import deepcopy
+        import openmm
+
+        # Get the current context and system.
+        context = self._dyn._d._omm_mols
+        system = deepcopy(context.getSystem())
+
+        # Add each force to a unique group.
+        for i, f in enumerate(system.getForces()):
+            f.setForceGroup(i)
+
+        # Create a new context.
+        new_context = openmm.Context(system, deepcopy(context.getIntegrator()))
+        new_context.setPositions(context.getState(getPositions=True).getPositions())
+
+        header = f"{'# Sample':>10}"
+        record = f"{self._nrg_sample:>10}"
+
+        # Process the records.
+        for i, f in enumerate(system.getForces()):
+            state = new_context.getState(getEnergy=True, groups={i})
+            header += f"{f.getName():>25}"
+            record += f"{state.getPotentialEnergy().value_in_unit(openmm.unit.kilocalories_per_mole):>25.2f}"
+
+        # Write to file.
+        if self._nrg_sample == 0:
+            with open(
+                self._config.output_directory / self._filenames["energy_components"],
+                "w",
+            ) as f:
+                f.write(header + "\n")
+                f.write(record + "\n")
+        else:
+            with open(
+                self._config.output_directory / self._filenames["energy_components"],
+                "a",
+            ) as f:
+                f.write(record + "\n")
+
+        # Increment the sample number.
+        self._nrg_sample += 1
