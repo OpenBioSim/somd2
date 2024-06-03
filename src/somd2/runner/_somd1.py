@@ -59,10 +59,6 @@ def _make_compatible(system):
     except KeyError:
         raise KeyError("No perturbable molecules in the system")
 
-    # Store a dummy element and ambertype.
-    element_dummy = _SireMol.Element("Xx")
-    ambertype_dummy = "du"
-
     for mol in pert_mols:
         # Store the molecule info.
         info = mol.info()
