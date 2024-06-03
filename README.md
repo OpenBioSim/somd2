@@ -57,6 +57,12 @@ An example perturbable system for a methane to ethanol perturbation in solvent
 can be found [here](https://sire.openbiosim.org/m/merged_molecule.s3.bz2).
 This is a `bzip2` compressed file that will need to be extracted before use.
 
+#### Running SOMD2 using one or more GPUs
+
+In order to run using GPUs you will first need to set the relevant environment variable. For example, to run using 4 CUDA enabled GPUS set `CUDA_VISIBLE_DEVICES=0,1,2,3` (for openCL and HIP use `OPENCL_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES` respectively). 
+
+By default, SOMD2 will automatically manage the distribution of lambda windows across all listed devices. In order to restrict the number of devices used the `--max_gpus` option can be set, for example setting `max_gpus=2` while `CUDA_VISIBLE_DEVICES` are set as above would restrict SOMD2 to using only GPUs 0 and 1.
+
 ## Analysis
 
 Simulation output will be written to the directory specified using the
