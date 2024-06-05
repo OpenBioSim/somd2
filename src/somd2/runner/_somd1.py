@@ -59,10 +59,6 @@ def _make_compatible(system):
     except KeyError:
         raise KeyError("No perturbable molecules in the system")
 
-    # Store a dummy element and ambertype.
-    element_dummy = _SireMol.Element("Xx")
-    ambertype_dummy = "du"
-
     for mol in pert_mols:
         # Store the molecule info.
         info = mol.info()
@@ -74,8 +70,8 @@ def _make_compatible(system):
         # First fix zero LJ sigmas values.
         ##################################
 
-        # Create a null LJParameter.
-        null_lj = _SireMM.LJParameter()
+        # Tolerance for zero sigma values.
+        null_lj_sigma = 1e-9
 
         for atom in mol.atoms():
             # Get the end state LJ sigma values.
@@ -83,7 +79,7 @@ def _make_compatible(system):
             lj1 = atom.property("LJ1")
 
             # Lambda = 0 state has a zero sigma value.
-            if lj0.sigma() == null_lj.sigma():
+            if abs(lj0.sigma().value()) <= null_lj_sigma:
                 # Use the sigma value from the lambda = 1 state.
                 edit_mol = (
                     edit_mol.atom(atom.index())
@@ -94,7 +90,7 @@ def _make_compatible(system):
                 )
 
             # Lambda = 1 state has a zero sigma value.
-            if lj1.sigma() == null_lj.sigma():
+            if abs(lj1.sigma().value()) <= null_lj_sigma:
                 # Use the sigma value from the lambda = 0 state.
                 edit_mol = (
                     edit_mol.atom(atom.index())
