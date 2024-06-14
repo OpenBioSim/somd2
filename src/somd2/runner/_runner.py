@@ -84,6 +84,12 @@ class Runner:
         self._config = config
         self._config._extra_args = {}
 
+        # Log the versions of somd2 and sire.
+        from somd2 import __version__, _sire_version, _sire_revisionid
+
+        _logger.info(f"somd2 version: {__version__}")
+        _logger.info(f"sire version: {_sire_version}+{_sire_revisionid}")
+
         # Check whether we need to apply a perturbation to the reference system.
         if self._config.pert_file is not None:
             _logger.info(
