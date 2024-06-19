@@ -311,6 +311,7 @@ class Runner:
                     _logger.info(
                         f"Constraints are at not the same at {_lam_sym} = 0 and {_lam_sym} = 1."
                     )
+                    break
 
     def _check_directory(self):
         """
