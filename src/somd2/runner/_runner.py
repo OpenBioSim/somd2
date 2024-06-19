@@ -306,11 +306,17 @@ class Runner:
             constraints1 = d.get_constraints()
 
             # Check for equivalence.
-            for c0, c1 in zip(constraints0, constraints1):
-                if c0 != c1:
-                    _logger.info(
-                        f"Constraints are at not the same at {_lam_sym} = 0 and {_lam_sym} = 1."
-                    )
+            if len(constraints0) != len(constraints1):
+                _logger.info(
+                    f"Constraints are at not the same at {_lam_sym} = 0 and {_lam_sym} = 1."
+                )
+            else:
+                for c0, c1 in zip(constraints0, constraints1):
+                    if c0 != c1:
+                        _logger.info(
+                            f"Constraints are at not the same at {_lam_sym} = 0 and {_lam_sym} = 1."
+                        )
+                        break
 
     def _check_directory(self):
         """
