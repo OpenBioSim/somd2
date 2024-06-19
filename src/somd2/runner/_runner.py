@@ -156,7 +156,7 @@ class Runner:
                             "Unable to convert water topology to AMBER format for SOMD1 compatibility."
                         )
 
-            # Only check for light atoms by the maxium end state mass if running
+            # Only check for light atoms by the maximum end state mass if running
             # in SOMD1 compatibility mode. Ghost atoms are considered light when
             # adding bond constraints. Also fix the LJ sigma for ghost atoms so
             # it isn't scaled to zero.
