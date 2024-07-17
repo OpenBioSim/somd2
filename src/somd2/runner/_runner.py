@@ -174,7 +174,7 @@ class Runner:
         self._check_end_state_constraints()
 
         # Get the charge difference between the two end states.
-        charge_diff = self._get_charge_difference()
+        charge_diff = self._get_charge_difference(self._system)
 
         # Make sure the difference is integer valued to 5 decimal places.
         if not round(charge_diff, 4).is_integer():
@@ -340,23 +340,55 @@ class Runner:
                         )
                         break
 
-    def _get_charge_difference(self):
+    @staticmethod
+    def _get_charge_difference(system):
         """
         Internal function to check the charge difference between the two end states.
+
+        Parameters
+        ----------
+
+        system: :class: `System <sire.system.System>`
+            The system to be perturbed.
+
+        Returns
+        -------
+
+        charge_diff: int
+            The charge difference between the perturbed and reference states.
         """
 
-        reference = _morph.link_to_reference(self._system).charge().value()
-        perturbed = _morph.link_to_perturbed(self._system).charge().value()
+        reference = _morph.link_to_reference(system).charge().value()
+        perturbed = _morph.link_to_perturbed(system).charge().value()
 
         return perturbed - reference
 
-    def _create_alchemical_ions(self, system, charge_diff):
+    @staticmethod
+    def _create_alchemical_ions(system, charge_diff):
         """
         Internal function to create alchemical ions to maintain charge neutrality.
+
+        Parameters
+        ----------
+
+        system: :class: `System <sire.system.System>`
+            The system to be perturbed.
+
+        charge_diff: int
+            The charge difference between perturbed and reference states.
+
+        Returns
+        -------
+
+        system: :class: `System <sire.system.System>`
+            The perturbed system with alchemical ions added.
         """
 
         from sire.legacy.IO import createChlorineIon as _createChlorineIon
         from sire.legacy.IO import createSodiumIon as _createSodiumIon
+
+        # Clone the system.
+        system = system.clone()
 
         # The number of waters to convert is the absolute charge difference.
         num_waters = abs(charge_diff)
@@ -366,9 +398,7 @@ class Runner:
         coord_string = f"{coords[0].value()}, {coords[1].value()}, {coords[2].value()}"
 
         # Find the furthest N waters from the perturbable molecule.
-        waters = self._system[
-            f"furthest {num_waters} waters from {coord_string}"
-        ].molecules()
+        waters = system[f"furthest {num_waters} waters from {coord_string}"].molecules()
 
         # Determine the water model.
         if waters[0].num_atoms() == 3:
@@ -380,7 +410,7 @@ class Runner:
             model = "tip4p"
 
         # Store the molecule numbers for the system.
-        numbers = self._system.numbers()
+        numbers = system.numbers()
 
         # Create the ions.
         for water in waters:
@@ -397,7 +427,7 @@ class Runner:
             merged = _morph.merge(water, ion, map={"as_new_molecule": False})
 
             # Update the system.
-            self._system.update(merged)
+            system.update(merged)
 
             # Get the index of the perturbed water.
             index = numbers.index(water.number())
@@ -407,6 +437,8 @@ class Runner:
                 f"Water at molecule index {index} will be perturbed to "
                 f"{ion_str} to preserve charge neutrality."
             )
+
+        return system
 
     def _check_directory(self):
         """
