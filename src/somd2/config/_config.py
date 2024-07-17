@@ -104,6 +104,7 @@ class Config:
         perturbable_constraint="h_bonds_not_heavy_perturbed",
         include_constrained_energies=False,
         dynamic_constraints=True,
+        charge_difference=0,
         com_reset_frequency=10,
         minimise=True,
         equilibration_time="0ps",
@@ -211,6 +212,12 @@ class Config:
             to the value of r0 at that lambda value. If this is False, then
             the constraint is set based on the current length.
 
+        charge_difference: int
+            The charge difference between the two end states. (Perturbed minus
+            reference.) If specified, then a number of alchemical ions will be
+            added to the system to neutralise the charge difference, i.e. make
+            perturbed state charge the same as the reference state.
+
         com_reset_frequency: int
             Frequency at which to reset the centre of mass of the system.
 
@@ -315,6 +322,7 @@ class Config:
         self.perturbable_constraint = perturbable_constraint
         self.include_constrained_energies = include_constrained_energies
         self.dynamic_constraints = dynamic_constraints
+        self.charge_difference = charge_difference
         self.com_reset_frequency = com_reset_frequency
         self.minimise = minimise
         self.equilibration_time = equilibration_time
@@ -860,6 +868,17 @@ class Config:
         if not isinstance(dynamic_constraints, bool):
             raise ValueError("'dynamic_constraints' must be of type 'bool'")
         self._dynamic_constraints = dynamic_constraints
+
+    @property
+    def charge_difference(self):
+        return self._charge_difference
+
+    @charge_difference.setter
+    def charge_difference(self, charge_difference):
+        if charge_difference is not None:
+            if not isinstance(charge_difference, int):
+                raise ValueError("'charge_difference' must be an integer")
+        self._charge_difference = charge_difference
 
     @property
     def com_reset_frequency(self):

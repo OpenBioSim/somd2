@@ -173,6 +173,28 @@ class Runner:
         # Check the end state contraints.
         self._check_end_state_constraints()
 
+        # Get the charge difference between the two end states.
+        charge_diff = self._get_charge_difference()
+
+        # Make sure the difference is integer valued to 5 decimal places.
+        if not round(charge_diff, 4).is_integer():
+            _logger.warning("Charge difference between end states is not an integer.")
+        charge_diff = round(charge_diff, 4)
+
+        # Make sure the charge difference matches the expected value
+        # from the config.
+        if self._config.charge_difference != charge_diff:
+            _logger.warning(
+                f"The charge difference of {charge_diff} between the end states "
+                f"does not match the expected value of {self._config.charge_difference}. "
+                "Please specify the 'charge_difference' if you wish to maintain "
+                "charge neutrality."
+            )
+
+        # Create alchemical ions.
+        if self._config.charge_difference != 0:
+            self._create_alchemical_ions(self._system, self._config.charge_difference)
+
         # Set the lambda values.
         if self._config.lambda_values:
             self._lambda_values = self._config.lambda_values
@@ -317,6 +339,74 @@ class Runner:
                             f"Constraints are at not the same at {_lam_sym} = 0 and {_lam_sym} = 1."
                         )
                         break
+
+    def _get_charge_difference(self):
+        """
+        Internal function to check the charge difference between the two end states.
+        """
+
+        reference = _morph.link_to_reference(self._system).charge().value()
+        perturbed = _morph.link_to_perturbed(self._system).charge().value()
+
+        return perturbed - reference
+
+    def _create_alchemical_ions(self, system, charge_diff):
+        """
+        Internal function to create alchemical ions to maintain charge neutrality.
+        """
+
+        from sire.legacy.IO import createChlorineIon as _createChlorineIon
+        from sire.legacy.IO import createSodiumIon as _createSodiumIon
+
+        # The number of waters to convert is the absolute charge difference.
+        num_waters = abs(charge_diff)
+
+        # Reference coordinates.
+        coords = system.molecules("property is_perturbable").coordinates()
+        coord_string = f"{coords[0].value()}, {coords[1].value()}, {coords[2].value()}"
+
+        # Find the furthest N waters from the perturbable molecule.
+        waters = self._system[
+            f"furthest {num_waters} waters from {coord_string}"
+        ].molecules()
+
+        # Determine the water model.
+        if waters[0].num_atoms() == 3:
+            model = "tip3p"
+        elif waters[0].num_atoms() == 4:
+            model = "tip4p"
+        elif waters[0].num_atoms() == 5:
+            # Note that AMBER has no ion model for tip5p.
+            model = "tip4p"
+
+        # Store the molecule numbers for the system.
+        numbers = self._system.numbers()
+
+        # Create the ions.
+        for water in waters:
+            # Create an ion. This is to adjust the charge of the perturbed state
+            # to match that of the reference.
+            if charge_diff > 0:
+                ion = _createChlorineIon(water["element O"].coordinates(), model)
+                ion_str = "Cl-"
+            else:
+                ion = _createSodiumIon(water["element O"].coordinates(), model)
+                ion_str = "Na+"
+
+            # Create a perturbable molecule: water --> ion.
+            merged = _morph.merge(water, ion, map={"as_new_molecule": False})
+
+            # Update the system.
+            self._system.update(merged)
+
+            # Get the index of the perturbed water.
+            index = numbers.index(water.number())
+
+            # Log that the water was perturbed.
+            _logger.info(
+                f"Water at molecule index {index} will be perturbed to "
+                f"{ion_str} to preserve charge neutrality."
+            )
 
     def _check_directory(self):
         """
