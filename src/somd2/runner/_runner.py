@@ -179,7 +179,7 @@ class Runner:
         # Make sure the difference is integer valued to 5 decimal places.
         if not round(charge_diff, 4).is_integer():
             _logger.warning("Charge difference between end states is not an integer.")
-        charge_diff = round(charge_diff, 4)
+        charge_diff = int(round(charge_diff, 4))
 
         # Make sure the charge difference matches the expected value
         # from the config.
