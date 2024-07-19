@@ -215,7 +215,7 @@ class Config:
         charge_difference: int
             The charge difference between the two end states. (Perturbed minus
             reference.) If specified, then a number of alchemical ions will be
-            added to the system to neutralise the charge difference, i.e. make
+            added to the system to keep the charge constant, i.e. make the
             perturbed state charge the same as the reference state.
 
         com_reset_frequency: int

@@ -187,8 +187,8 @@ class Runner:
             _logger.warning(
                 f"The charge difference of {charge_diff} between the end states "
                 f"does not match the expected value of {self._config.charge_difference}. "
-                "Please specify the 'charge_difference' if you wish to maintain "
-                "charge neutrality."
+                "Please specify the 'charge_difference' if you wish to keep the charge "
+                "constant."
             )
 
         # Create alchemical ions.
@@ -366,7 +366,7 @@ class Runner:
     @staticmethod
     def _create_alchemical_ions(system, charge_diff):
         """
-        Internal function to create alchemical ions to maintain charge neutrality.
+        Internal function to create alchemical ions to maintain a constant charge.
 
         Parameters
         ----------
@@ -435,7 +435,7 @@ class Runner:
             # Log that the water was perturbed.
             _logger.info(
                 f"Water at molecule index {index} will be perturbed to "
-                f"{ion_str} to preserve charge neutrality."
+                f"{ion_str} to keep charge constant."
             )
 
         return system
