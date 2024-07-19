@@ -193,7 +193,9 @@ class Runner:
 
         # Create alchemical ions.
         if self._config.charge_difference != 0:
-            self._create_alchemical_ions(self._system, self._config.charge_difference)
+            self._system = self._create_alchemical_ions(
+                self._system, self._config.charge_difference
+            )
 
         # Set the lambda values.
         if self._config.lambda_values:
