@@ -45,7 +45,7 @@ def test_restart(mols, request):
 
         # Load the trajectory.
         traj_1 = sr.load(
-            [str(Path(tmpdir) / "system.prm7"), str(Path(tmpdir) / "traj_0.00000.dcd")]
+            [str(Path(tmpdir) / "system0.prm7"), str(Path(tmpdir) / "traj_0.00000.dcd")]
         )
 
         # Check that both config and lambda have been written
@@ -89,7 +89,7 @@ def test_restart(mols, request):
 
         # Reload the trajectory.
         traj_2 = sr.load(
-            [str(Path(tmpdir) / "system.prm7"), str(Path(tmpdir) / "traj_0.00000.dcd")]
+            [str(Path(tmpdir) / "system0.prm7"), str(Path(tmpdir) / "traj_0.00000.dcd")]
         )
 
         # Check that the trajectory is twice as long as the first.

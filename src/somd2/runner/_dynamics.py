@@ -151,7 +151,8 @@ class Dynamics:
             raise ValueError("lambda_value not in lambda_array")
         lam = f"{lambda_value:.5f}"
         filenames = {}
-        filenames["topology"] = "system.prm7"
+        filenames["topology0"] = "system0.prm7"
+        filenames["topology1"] = "system1.prm7"
         filenames["checkpoint"] = f"checkpoint_{lam}.s3"
         filenames["energy_traj"] = f"energy_traj_{lam}.parquet"
         filenames["trajectory"] = f"traj_{lam}.dcd"
@@ -307,8 +308,12 @@ class Dynamics:
 
         # Save the system topology to a PRM7 file that can be used to load the
         # trajectory.
-        topology = str(self._config.output_directory / self._filenames["topology"])
-        sr.save(self._system, topology)
+        topology0 = str(self._config.output_directory / self._filenames["topology0"])
+        topology1 = str(self._config.output_directory / self._filenames["topology1"])
+        mols0 = sr.morph.link_to_reference(self._system)
+        mols1 = sr.morph.link_to_perturbed(self._system)
+        sr.save(mols0, topology0)
+        sr.save(mols1, topology1)
 
         def generate_lam_vals(lambda_base, increment):
             """Generate lambda values for a given lambda_base and increment"""
@@ -560,7 +565,7 @@ class Dynamics:
                     traj_chunks = [f"{traj_filename}.bak"] + traj_chunks
 
             # Load the topology and chunked trajectory files.
-            system = sr.load([topology] + traj_chunks)
+            system = sr.load([topology0] + traj_chunks)
 
             # Save the final trajectory to a single file.
             traj_filename = str(

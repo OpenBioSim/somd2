@@ -28,7 +28,7 @@ jobs:
       max-parallel: 9
       fail-fast: false
       matrix:
-        python-version: ["3.11"]
+        python-version: ["3.12"]
         platform:
           - { name: "windows", os: "windows-latest", shell: "pwsh" }
           - { name: "linux", os: "ubuntu-latest", shell: "bash -l {0}" }
@@ -55,12 +55,10 @@ jobs:
           activate-environment: somd2
           environment-file: environment.yaml
           miniforge-version: latest
-          miniforge-variant: Mambaforge
-          use-mamba: true
           run-post: ${{ matrix.platform.name != 'windows' }}
 #
       - name: Install pytest
-        run: mamba install pytest
+        run: conda install pytest
 #
       - name: Install the package
         run: pip install .
