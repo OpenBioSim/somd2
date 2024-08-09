@@ -186,7 +186,7 @@ class Runner:
         if self._config.charge_difference != charge_diff:
             _logger.warning(
                 f"The charge difference of {charge_diff} between the end states "
-                f"does not match the specified value of {self._config.charge_difference}."
+                f"does not match the specified value of {self._config.charge_difference}"
             )
 
         # The user value takes precedence.
@@ -194,7 +194,7 @@ class Runner:
             charge_diff = self._config.charge_difference
 
         # Create alchemical ions.
-        if self._config.charge_difference != 0:
+        if charge_diff != 0:
             self._system = self._create_alchemical_ions(self._system, charge_diff)
 
         # Set the lambda values.
