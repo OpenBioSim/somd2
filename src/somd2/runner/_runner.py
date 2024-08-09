@@ -183,19 +183,27 @@ class Runner:
 
         # Make sure the charge difference matches the expected value
         # from the config.
-        if self._config.charge_difference != charge_diff:
+        if (
+            self._config.charge_difference is not None
+            and self._config.charge_difference != charge_diff
+        ):
             _logger.warning(
                 f"The charge difference of {charge_diff} between the end states "
-                f"does not match the expected value of {self._config.charge_difference}. "
-                "Please specify the 'charge_difference' if you wish to keep the charge "
-                "constant."
+                f"does not match the specified value of {self._config.charge_difference}"
+            )
+        else:
+            _logger.info(
+                f"There is a charge difference of {charge_diff} between the end states. "
+                f"Adding alchemical ions to keep the charge constant."
             )
 
+        # The user value takes precedence.
+        if self._config.charge_difference is not None:
+            charge_diff = self._config.charge_difference
+
         # Create alchemical ions.
-        if self._config.charge_difference != 0:
-            self._system = self._create_alchemical_ions(
-                self._system, self._config.charge_difference
-            )
+        if charge_diff != 0:
+            self._system = self._create_alchemical_ions(self._system, charge_diff)
 
         # Set the lambda values.
         if self._config.lambda_values:
@@ -395,6 +403,14 @@ class Runner:
         # The number of waters to convert is the absolute charge difference.
         num_waters = abs(charge_diff)
 
+        # Make sure there are enough waters to convert. The charge difference should
+        # never be this large, but it prevents a crash if it is.
+        if num_waters > len(system["water"].molecules()):
+            raise ValueError(
+                f"Insufficient waters to convert to ions. {num_waters} required, "
+                f"{len(system['water'].molecules())} available."
+            )
+
         # Reference coordinates.
         coords = system.molecules("property is_perturbable").coordinates()
         coord_string = f"{coords[0].value()}, {coords[1].value()}, {coords[2].value()}"
@@ -419,10 +435,22 @@ class Runner:
             # Create an ion. This is to adjust the charge of the perturbed state
             # to match that of the reference.
             if charge_diff > 0:
-                ion = _createChlorineIon(water["element O"].coordinates(), model)
+                # Try to find a free chlorine ion so that we match parameters.
+                try:
+                    ion = system["element Cl"][0].molecule()
+                    assert ion.num_atoms() == 1
+                # If not found, create one using a template.
+                except:
+                    ion = _createChlorineIon(water["element O"].coordinates(), model)
                 ion_str = "Cl-"
             else:
-                ion = _createSodiumIon(water["element O"].coordinates(), model)
+                # Try to find a free sodium ion so that we match parameters.
+                try:
+                    ion = system["element Na"][0].molecule()
+                    assert ion.num_atoms() == 1
+                # If not found, create one using a template.
+                except:
+                    ion = _createSodiumIon(water["element O"].coordinates(), model)
                 ion_str = "Na+"
 
             # Create a perturbable molecule: water --> ion.
