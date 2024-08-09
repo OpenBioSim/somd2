@@ -104,7 +104,7 @@ class Config:
         perturbable_constraint="h_bonds_not_heavy_perturbed",
         include_constrained_energies=False,
         dynamic_constraints=True,
-        charge_difference=0,
+        charge_difference=None,
         com_reset_frequency=10,
         minimise=True,
         equilibration_time="0ps",
@@ -877,7 +877,10 @@ class Config:
     def charge_difference(self, charge_difference):
         if charge_difference is not None:
             if not isinstance(charge_difference, int):
-                raise ValueError("'charge_difference' must be an integer")
+                try:
+                    charge_difference = int(charge_difference)
+                except:
+                    raise ValueError("'charge_difference' must be an integer")
         self._charge_difference = charge_difference
 
     @property
