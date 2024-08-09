@@ -419,10 +419,22 @@ class Runner:
             # Create an ion. This is to adjust the charge of the perturbed state
             # to match that of the reference.
             if charge_diff > 0:
-                ion = _createChlorineIon(water["element O"].coordinates(), model)
+                # Try to find a free chlorine ion so that we match parameters.
+                try:
+                    ion = system["element Cl"][0].molecule()
+                    assert ion.num_atoms() == 1
+                # If not found, create one using a template.
+                except:
+                    ion = _createChlorineIon(water["element O"].coordinates(), model)
                 ion_str = "Cl-"
             else:
-                ion = _createSodiumIon(water["element O"].coordinates(), model)
+                # Try to find a free sodium ion so that we match parameters.
+                try:
+                    ion = system["element Na"][0].molecule()
+                    assert ion.num_atoms() == 1
+                # If not found, create one using a template.
+                except:
+                    ion = _createSodiumIon(water["element O"].coordinates(), model)
                 ion_str = "Na+"
 
             # Create a perturbable molecule: water --> ion.
