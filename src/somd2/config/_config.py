@@ -214,9 +214,12 @@ class Config:
 
         charge_difference: int
             The charge difference between the two end states. (Perturbed minus
-            reference.) If specified, then a number of alchemical ions will be
-            added to the system to keep the charge constant, i.e. make the
-            perturbed state charge the same as the reference state.
+            reference.) If None, then alchemical ions will automatically be
+            added to keep the charge constant throughout the perturbation. If
+            specified, then the user defined value will take precedence. Note
+            the reference used for the charge difference is the same, regardless
+            of whether swap-end-states is set, i.e. the states are swapped after
+            the charge difference is calculated and alchemical ions are added.
 
         com_reset_frequency: int
             Frequency at which to reset the centre of mass of the system.
