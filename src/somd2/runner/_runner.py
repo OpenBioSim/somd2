@@ -446,6 +446,7 @@ class Runner:
                     for ion in ions:
                         if ion.num_atoms() == 1:
                             has_ion = True
+                            _logger.debug("Found Cl- ion in system.")
                             break
 
                     # If there isn't an ion, then try searching for a free sodium ion.
@@ -455,16 +456,19 @@ class Runner:
                             if ion.num_atoms() == 1:
                                 has_ion = True
                                 is_reverse = True
+                                _logger.debug("Found Na+ ion in system.")
                                 break
 
                     # If not found, create one using a template.
                     if not has_ion:
+                        _logger.debug(f"Creating Cl- ion from {model} water template.")
                         ion = _createChlorineIon(
                             water["element O"].coordinates(), model
                         )
 
                 # If not found, create one using a template.
                 except:
+                    _logger.debug(f"Creating Cl- ion from {model} water template.")
                     ion = _createChlorineIon(water["element O"].coordinates(), model)
 
                 # Create the ion string.
@@ -481,6 +485,7 @@ class Runner:
                     for ion in ions:
                         if ion.num_atoms() == 1:
                             has_ion = True
+                            _logger.debug("Found Na+ ion in system.")
                             break
 
                     # If there isn't an ion, then try searching for a free chlorine ion.
@@ -490,14 +495,17 @@ class Runner:
                             if ion.num_atoms() == 1:
                                 has_ion = True
                                 is_reverse = True
+                                _logger.debug("Found Cl- ion in system.")
                                 break
 
                     # If not found, create one using a template.
                     if not has_ion:
+                        _logger.debug(f"Creating Na+ ion from {model} water template.")
                         ion = _createSodiumIon(water["element O"].coordinates(), model)
 
                 # If not found, create one using a template.
                 except:
+                    _logger.debug(f"Creating Na+ ion from {model} water template.")
                     ion = _createSodiumIon(water["element O"].coordinates(), model)
 
                 # Create the ion string.
