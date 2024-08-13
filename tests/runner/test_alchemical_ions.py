@@ -1,13 +1,15 @@
 import math
+import pytest
 
 from somd2.runner import Runner
 
 
-def test_alchemical_ions(ethane_methanol):
+@pytest.mark.parametrize("mols", ["ethane_methanol", "ethane_methanol_ions"])
+def test_alchemical_ions(mols, request):
     """Ensure that alchemical ions are added correctly."""
 
     # Clone the system.
-    mols = ethane_methanol.clone()
+    mols = request.getfixturevalue(mols).clone()
 
     # Add 10 Cl- ions.
     new_mols = Runner._create_alchemical_ions(mols, 10)

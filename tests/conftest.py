@@ -14,3 +14,10 @@ def ethane_methanol_hmr():
     mols = sr.load(sr.expand(sr.tutorial_url, "merged_molecule_hmr.s3"))
     mols = sr.morph.link_to_reference(mols)
     return mols
+
+
+@pytest.fixture(scope="session")
+def ethane_methanol_ions():
+    mols = sr.load(sr.expand(sr.tutorial_url, "merged_molecule_ions.s3"))
+    mols = sr.morph.link_to_reference(mols)
+    return mols
