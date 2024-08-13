@@ -432,29 +432,94 @@ class Runner:
 
         # Create the ions.
         for water in waters:
-            # Create an ion. This is to adjust the charge of the perturbed state
-            # to match that of the reference.
+            # Flag to indicate whether we need to reverse the alchemical ion
+            # perturbation, i.e. ion to water, rather than water to ion.
+            is_reverse = False
+
+            # Create an ion to keep the charge constant throughout the
+            # perturbation.
             if charge_diff > 0:
                 # Try to find a free chlorine ion so that we match parameters.
                 try:
-                    ion = system["element Cl"][0].molecule()
-                    assert ion.num_atoms() == 1
+                    has_ion = False
+                    ions = system["element Cl"].molecules()
+                    for ion in ions:
+                        if ion.num_atoms() == 1:
+                            has_ion = True
+                            _logger.debug("Found Cl- ion in system.")
+                            break
+
+                    # If there isn't an ion, then try searching for a free sodium ion.
+                    if not has_ion:
+                        ions = system["element Na"].molecules()
+                        for ion in ions:
+                            if ion.num_atoms() == 1:
+                                has_ion = True
+                                is_reverse = True
+                                _logger.debug("Found Na+ ion in system.")
+                                break
+
+                    # If not found, create one using a template.
+                    if not has_ion:
+                        _logger.debug(f"Creating Cl- ion from {model} water template.")
+                        ion = _createChlorineIon(
+                            water["element O"].coordinates(), model
+                        )
+
                 # If not found, create one using a template.
                 except:
+                    _logger.debug(f"Creating Cl- ion from {model} water template.")
                     ion = _createChlorineIon(water["element O"].coordinates(), model)
-                ion_str = "Cl-"
+
+                # Create the ion string.
+                if is_reverse:
+                    ion_str = "Na+"
+                else:
+                    ion_str = "Cl-"
+
             else:
                 # Try to find a free sodium ion so that we match parameters.
                 try:
-                    ion = system["element Na"][0].molecule()
-                    assert ion.num_atoms() == 1
+                    has_ion = False
+                    ions = system["element Na"].molecules()
+                    for ion in ions:
+                        if ion.num_atoms() == 1:
+                            has_ion = True
+                            _logger.debug("Found Na+ ion in system.")
+                            break
+
+                    # If there isn't an ion, then try searching for a free chlorine ion.
+                    if not has_ion:
+                        ions = system["element Cl"].molecules()
+                        for ion in ions:
+                            if ion.num_atoms() == 1:
+                                has_ion = True
+                                is_reverse = True
+                                _logger.debug("Found Cl- ion in system.")
+                                break
+
+                    # If not found, create one using a template.
+                    if not has_ion:
+                        _logger.debug(f"Creating Na+ ion from {model} water template.")
+                        ion = _createSodiumIon(water["element O"].coordinates(), model)
+
                 # If not found, create one using a template.
                 except:
+                    _logger.debug(f"Creating Na+ ion from {model} water template.")
                     ion = _createSodiumIon(water["element O"].coordinates(), model)
-                ion_str = "Na+"
 
-            # Create a perturbable molecule: water --> ion.
-            merged = _morph.merge(water, ion, map={"as_new_molecule": False})
+                # Create the ion string.
+                if is_reverse:
+                    ion_str = "Cl-"
+                else:
+                    ion_str = "Na+"
+
+            # Create an alchemical ion: ion --> water.
+            if is_reverse:
+                merged = _morph.merge(ion, water, map={"as_new_molecule": False})
+            # Create an alchemical ion: water --> ion.
+            else:
+                merged = _morph.merge(water, ion, map={"as_new_molecule": False})
 
             # Update the system.
             system.update(merged)
@@ -462,11 +527,17 @@ class Runner:
             # Get the index of the perturbed water.
             index = numbers.index(water.number())
 
-            # Log that the water was perturbed.
-            _logger.info(
-                f"Water at molecule index {index} will be perturbed to "
-                f"{ion_str} to keep charge constant."
-            )
+            # Log that we are adding an alchemical ion.
+            if is_reverse:
+                _logger.info(
+                    f"Water at molecule index {index} will be perturbed from a "
+                    f"{ion_str} ion to keep charge constant."
+                )
+            else:
+                _logger.info(
+                    f"Water at molecule index {index} will be perturbed to a "
+                    f"{ion_str} ion to keep charge constant."
+                )
 
         return system
 
