@@ -191,15 +191,18 @@ class Runner:
                 f"The charge difference of {charge_diff} between the end states "
                 f"does not match the specified value of {self._config.charge_difference}"
             )
-        else:
-            _logger.info(
-                f"There is a charge difference of {charge_diff} between the end states. "
-                f"Adding alchemical ions to keep the charge constant."
-            )
-
-        # The user value takes precedence.
-        if self._config.charge_difference is not None:
+            # The user value takes precedence.
             charge_diff = self._config.charge_difference
+            _logger.info(
+                f"Using user-specified value of {self._config.charge_difference}"
+            )
+        else:
+            # Report that the charge will automatically be held constant.
+            if charge_diff != 0 and self._config.charge_difference is None:
+                _logger.info(
+                    f"There is a charge difference of {charge_diff} between the end states. "
+                    f"Adding alchemical ions to keep the charge constant."
+                )
 
         # Create alchemical ions.
         if charge_diff != 0:
