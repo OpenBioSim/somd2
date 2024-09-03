@@ -114,7 +114,7 @@ class Runner:
 
         # We're running in SOMD1 compatibility mode.
         if self._config.somd1_compatibility:
-            from ._somd1 import _make_compatible
+            from .._utils._somd1 import _make_compatible
 
             # First, try to make the perturbation SOMD1 compatible.
 
