@@ -166,6 +166,7 @@ class Runner:
             self._config._extra_args["check_for_h_by_element"] = False
             self._config._extra_args["check_for_h_by_ambertype"] = False
             self._config._extra_args["fix_perturbable_zero_sigmas"] = True
+            self._config._extra_args["use_taylor_softening"] = True
 
         # Check for a periodic space.
         self._check_space()
