@@ -163,6 +163,11 @@ class Runner:
             self._config._extra_args["fix_perturbable_zero_sigmas"] = True
             self._config._extra_args["use_taylor_softening"] = True
 
+        else:
+            from .._utils._ghosts import _apply_boresch
+
+            self._system = _apply_boresch(self._system)
+
         # Check for a periodic space.
         self._check_space()
 
