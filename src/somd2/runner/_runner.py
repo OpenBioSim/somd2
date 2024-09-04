@@ -21,8 +21,6 @@
 
 __all__ = ["Runner"]
 
-import platform as _platform
-
 from sire import morph as _morph
 from sire import stream as _stream
 from sire.system import System as _System
@@ -33,10 +31,7 @@ from ..io import dict_to_yaml as _dict_to_yaml
 
 from somd2 import _logger
 
-if _platform.system() == "Windows":
-    _lam_sym = "lambda"
-else:
-    _lam_sym = "λ"
+from .._utils import _lam_sym
 
 
 class Runner:
