@@ -138,17 +138,25 @@ def _appy_boresch(system):
         if len(bridges0) > 0:
             _logger.debug("Ghost atom bridges at lambda = 0")
             for i, b in enumerate(bridges0):
-                _logger.debug(f"  Bridge {i}: {b}")
-                _logger.debug(f"  dummies: {bridges0[b]}")
-                _logger.debug(f"  physical: {physical0[b]}")
+                _logger.debug(f"  Bridge {i}: {b.value()}")
+                _logger.debug(
+                    f"  dummies: [{','.join([str(x.value()) for x in bridges0[b]])}]"
+                )
+                _logger.debug(
+                    f"  physical: [{','.join([str(x.value()) for x in physical0[b]])}]"
+                )
                 _logger.debug(f"  type: {len(physical0[b])}")
 
         if len(bridges1) > 0:
             _logger.debug("Ghost atom bridges at lambda = 1")
             for i, b in enumerate(bridges1):
-                _logger.debug(f"  Bridge {i}: {b}")
-                _logger.debug(f"  dummies: {bridges1[b]}")
-                _logger.debug(f"  physical: {physical1[b]}")
+                _logger.debug(f"  Bridge {i}: {b.value()}")
+                _logger.debug(
+                    f"  dummies: [{','.join([str(x.value()) for x in bridges1[b]])}]"
+                )
+                _logger.debug(
+                    f"  physical: [{','.join([str(x.value()) for x in physical1[b]])}]"
+                )
                 _logger.debug(f"  type: {len(physical1[b])}")
 
         # Now process the bridges.
@@ -246,7 +254,9 @@ def _terminal(mol, bridge, dummies, physical, is_lambda1=False):
         idx2 = info.atom_idx(d.atom2())
         idx3 = info.atom_idx(d.atom3())
         if (idx0 == idx and idx3 in dummies) or (idx3 == idx and idx0 in dummies):
-            _logger.debug(f"  Removing dihedral: {d}")
+            _logger.debug(
+                f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {d.function()}"
+            )
         else:
             new_dihedrals.set(idx0, idx1, idx2, idx3, d.function())
 
