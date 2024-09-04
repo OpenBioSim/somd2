@@ -53,6 +53,9 @@ def _make_compatible(system):
     if isinstance(system, _LegacySystem):
         system = _System(system)
 
+    # Clone the system.
+    system = system.clone()
+
     # Search for perturbable molecules.
     try:
         pert_mols = system.molecules("property is_perturbable")
