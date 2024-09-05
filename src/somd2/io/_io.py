@@ -110,7 +110,7 @@ def dict_to_yaml(data_dict, path, filename="config.yaml"):
                 yaml_file,
             )
     except Exception as e:
-        print(f"Error writing the dictionary to {path}: {e}")
+        raise IOError(f"Error writing the dictionary to {path}: {e}")
 
 
 def yaml_to_dict(path):
