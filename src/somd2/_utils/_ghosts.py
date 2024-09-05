@@ -115,13 +115,15 @@ def _boresch(system):
                     else:
                         bridges0[c].append(du)
         # Work out the indices of the other physical atoms that are connected to
-        # the bridge atoms.
+        # the bridge atoms, sorted by the atom index.
         physical0 = {}
         for b in bridges0:
             physical0[b] = []
             for c in connectivity0.connections_to(b):
                 if not _is_dummy(mol, [c])[0]:
                     physical0[b].append(c)
+        for b in physical0:
+            physical0[b].sort(key=lambda x: x.value())
 
         # Repeat the above for lambda = 1.
         bridges1 = {}
@@ -138,6 +140,8 @@ def _boresch(system):
             for c in connectivity1.connections_to(b):
                 if not _is_dummy(mol, [c], is_lambda1=True)[0]:
                     physical1[b].append(c)
+        for b in physical1:
+            physical1[b].sort(key=lambda x: x.value())
 
         # Log the results for each end state.
 
