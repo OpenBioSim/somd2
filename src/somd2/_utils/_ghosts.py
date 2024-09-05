@@ -512,7 +512,7 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
 
         # Now treat the dummy branches individually.
         for d in dummies:
-            mol = _dummy(mol, bridge, [d], physical, is_lambda1)
+            mol = _dual(mol, bridge, [d], physical, is_lambda1)
 
     # Return the updated molecule.
     return mol
