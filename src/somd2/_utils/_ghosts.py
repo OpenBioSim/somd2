@@ -718,7 +718,8 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
                 new_angles.set(idx0, idx1, idx2, p.function())
 
         # Next, remove all dihedral starting from the dummy atoms and ending in
-        # the physical system.
+        # the physical system. Also, only preserve dihedrals terminating at one
+        # of the physical atoms.
 
         # Get the end state dihedral functions.
         dihedrals = mol.property("dihedral" + suffix)
@@ -740,46 +741,22 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
                 _logger.debug(
                     f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
                 )
-            else:
-                new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
-
-        # Next, we need to work out the physical atoms two atoms away from the
-        # bridge atom.
-        physical2 = []
-        # Loop over the physical atoms connected to the bridge atom.
-        for p in physical:
-            # Loop over the atoms connected to the physical atom.
-            for c in connectivity.connections_to(p):
-                # If the atom is not a dummy atom or the bridge atom itself, we have
-                # found a physical atom two atoms away from the bridge atom.
-                if not _is_dummy(mol, [c], is_lambda1)[0] and c != bridge:
-                    if c not in physical2:
-                        physical2.append(c)
-
-        # Initialise a container to store the updated dihedrals.
-        new_new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
-
-        # Remove all dihedral terms for all of the physical atoms two atoms
-        # from the physical bridge atom.
-        for p in new_dihedrals.potentials():
-            idx0 = info.atom_idx(p.atom0())
-            idx1 = info.atom_idx(p.atom1())
-            idx2 = info.atom_idx(p.atom2())
-            idx3 = info.atom_idx(p.atom3())
-            if (idx0 in physical2 and idx3 in dummies) or (
-                idx3 in physical2 and idx0 in dummies
+            # Remove the dihedral if includes a dummy and doesn't terminate at the first
+            # physical atom.
+            elif (_is_dummy(mol, [idx0], is_lambda1)[0] and idx3 in physical[1:]) or (
+                _is_dummy(mol, [idx3], is_lambda1)[0] and idx0 in physical[1:]
             ):
                 _logger.debug(
                     f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
                 )
             else:
-                new_new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
+                new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
 
         # Update the molecule.
         mol = mol.edit().set_property("angle" + suffix, new_angles).molecule().commit()
         mol = (
             mol.edit()
-            .set_property("dihedral" + suffix, new_new_dihedrals)
+            .set_property("dihedral" + suffix, new_dihedrals)
             .molecule()
             .commit()
         )
