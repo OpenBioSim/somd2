@@ -361,7 +361,7 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
 
     # Single branch.
     if len(dummies) == 1:
-        _logger.debug("  Single branch.")
+        _logger.debug("  Single branch:")
 
         # First remove all dihedrals starting from the dummy atom and ending in
         # physical system.
@@ -474,7 +474,7 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
 
     # Dual branch.
     else:
-        _logger.debug("  Dual branch.")
+        _logger.debug("  Dual branch:")
 
         # First, delete all bonded terms between atoms in two dummy branches.
 
@@ -651,6 +651,7 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
         new_new_angles = _SireMM.ThreeAtomFunctions(mol.info())
         for angle in new_angles.potentials():
             idx0 = info.atom_idx(angle.atom0())
+            idx1 = info.atom_idx(angle.atom1())
             idx2 = info.atom_idx(angle.atom2())
 
             if (
