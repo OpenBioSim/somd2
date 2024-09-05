@@ -178,7 +178,7 @@ def _boresch(system):
 
             # Dual junction.
             elif junction == 2:
-                pass
+                mol = _dual(mol, b, bridges0[b], physical0[b])
 
             # Triple junction.
             elif junction == 3:
@@ -192,7 +192,7 @@ def _boresch(system):
                 mol = _terminal(mol, b, bridges1[b], physical1[b], is_lambda1=True)
 
             elif junction == 2:
-                pass
+                mol = _dual(mol, b, bridges0[b], physical0[b], is_lambda1=True)
 
             elif junction == 3:
                 mol = _triple(mol, b, bridges1[b], physical1[b], is_lambda1=True)
@@ -278,15 +278,17 @@ def _terminal(mol, bridge, dummies, physical, is_lambda1=False):
     # Initialise a container to store the updated dihedrals.
     new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
 
-    # For the first physical2 atom, remove all dihedrals that reach into
-    # the dummy group(s).
-    idx = physical2[0]
+    # Remove all dihedral terms for all but one of the physical atoms two atoms
+    # from the physical bridge atom.
+    physical2.pop(0)
     for p in dihedrals.potentials():
         idx0 = info.atom_idx(p.atom0())
         idx1 = info.atom_idx(p.atom1())
         idx2 = info.atom_idx(p.atom2())
         idx3 = info.atom_idx(p.atom3())
-        if (idx0 == idx and idx3 in dummies) or (idx3 == idx and idx0 in dummies):
+        if (idx0 in physical2 and idx3 in dummies) or (
+            idx3 in physical2 and idx0 in dummies
+        ):
             _logger.debug(
                 f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
             )
@@ -353,6 +355,242 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
         connectivity = mol.property("connectivity" + str(int(is_lambda1)))
     except:
         connectivity = mol.property("connectivity")
+
+    # Single branch.
+    if len(dummies) == 1:
+        _logger.debug("  Single branch.")
+
+        # First remove all dihedrals starting from the dummy atom and ending in
+        # physical system.
+
+        # Get the end state dihedral functions.
+        dihedrals = mol.property("dihedral" + suffix)
+        impropers = mol.property("improper" + suffix)
+
+        # Initialise a container to store the updated bonded terms.
+        new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
+        new_impropers = _SireMM.FourAtomFunctions(mol.info())
+
+        # Dihedrals.
+        for p in dihedrals.potentials():
+            idx0 = info.atom_idx(p.atom0())
+            idx1 = info.atom_idx(p.atom1())
+            idx2 = info.atom_idx(p.atom2())
+            idx3 = info.atom_idx(p.atom3())
+
+            if (
+                not _is_dummy(mol, [idx0], is_lambda1)[0]
+                and idx3 in dummies
+                or not _is_dummy(mol, [idx3], is_lambda1)[0]
+                and idx0 in dummies
+            ):
+                _logger.debug(
+                    f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
+                )
+
+            else:
+                new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
+
+        # Impropers.
+        for p in impropers.potentials():
+            idx0 = info.atom_idx(p.atom0())
+            idx1 = info.atom_idx(p.atom1())
+            idx2 = info.atom_idx(p.atom2())
+            idx3 = info.atom_idx(p.atom3())
+
+            if (
+                not _is_dummy(mol, [idx0], is_lambda1)[0]
+                and idx3 in dummies
+                or not _is_dummy(mol, [idx3], is_lambda1)[0]
+                and idx0 in dummies
+            ):
+                _logger.debug(
+                    f"  Removing improper: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
+                )
+
+            else:
+                new_impropers.set(idx0, idx1, idx2, idx3, p.function())
+
+        # Next we modify the angle terms between the physical and
+        # dummy atom so that the equilibrium angle is 90 degrees.
+        new_new_angles = _SireMM.ThreeAtomFunctions(mol.info())
+        for angle in new_angles.potentials():
+            idx0 = info.atom_idx(angle.atom0())
+            idx1 = info.atom_idx(angle.atom1())
+            idx2 = info.atom_idx(angle.atom2())
+
+            if (
+                idx0 in dummies
+                and idx2 in physical
+                or idx0 in physical
+                and idx2 in dummies
+            ):
+                from math import pi
+                from sire.legacy.CAS import Symbol
+
+                theta0 = pi / 2.0
+
+                # Create the new angle function.
+                amber_angle = _SireMM.AmberAngle(100, theta0)
+
+                # Generate the new angle expression.
+                expression = amber_angle.expression.to_expression(Symbol("theta"))
+
+                # Set the equilibrium angle to 90 degrees.
+                new_new_angles.set(idx0, idx1, idx2, expression)
+
+                _logger.debug(
+                    f"  Modifying angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], {angle.function()}"
+                )
+
+            else:
+                new_new_angles.set(idx0, idx1, idx2, angle.function())
+
+        # Next find the physical atoms two atoms away from the bridge atom.
+        physical2 = []
+
+        # Loop over the physical atoms connected to the bridge atom.
+        for p in physical:
+            # Loop over the atoms connected to the physical atom.
+            for c in connectivity.connections_to(p):
+                # If the atom is not a dummy atom or the bridge atom itself, we have
+                # found a physical atom two atoms away from the bridge atom.
+                if not _is_dummy(mol, [c], is_lambda1)[0] and c != bridge:
+                    if c not in physical2:
+                        physical2.append(c)
+
+        # Initialise a container to store the updated dihedrals.
+        new_new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
+
+        # Remove all dihedral terms for all the physical atoms two atoms from
+        # the physical bridge atom.
+        for p in new_dihedrals.potentials():
+            idx0 = info.atom_idx(p.atom0())
+            idx1 = info.atom_idx(p.atom1())
+            idx2 = info.atom_idx(p.atom2())
+            idx3 = info.atom_idx(p.atom3())
+            if (idx0 in physical2 and idx3 in dummies) or (
+                idx3 in physical2 and idx0 in dummies
+            ):
+                _logger.debug(
+                    f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
+                )
+                _logger.debug(
+                    f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
+                )
+            else:
+                new_new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
+
+        # Update the molecule.
+        mol = (
+            mol.edit()
+            .set_property("angle" + suffix, new_new_angles)
+            .molecule()
+            .commit()
+        )
+        mol = (
+            mol.edit()
+            .set_property("dihedral" + suffix, new_new_dihedrals)
+            .molecule()
+            .commit()
+        )
+        mol = (
+            mol.edit()
+            .set_property("improper" + suffix, new_impropers)
+            .molecule()
+            .commit()
+        )
+
+    # Dual branch.
+    else:
+        _logger.debug("  Dual branch.")
+
+        # First, delete all bonded terms between atoms in two dummy branches.
+
+        # Get the end state bond functions.
+        angles = mol.property("angle" + suffix)
+        dihedrals = mol.property("dihedral" + suffix)
+        impropers = mol.property("improper" + suffix)
+
+        # Initialise containers to store the updated bonded terms.
+        new_angles = _SireMM.ThreeAtomFunctions(mol.info())
+        new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
+        new_impropers = _SireMM.FourAtomFunctions(mol.info())
+
+        # Angles.
+        for p in angles.potentials():
+            idx0 = info.atom_idx(p.atom0())
+            idx1 = info.atom_idx(p.atom1())
+            idx2 = info.atom_idx(p.atom2())
+
+            if idx0 in dummies and idx2 in dummies:
+                _logger.debug(
+                    f"  Removing angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], {p.function()}"
+                )
+
+            else:
+                new_angles.set(idx0, idx1, idx2, p.function())
+
+        # Dihedrals.
+        for p in dihedrals.potentials():
+            idx0 = info.atom_idx(p.atom0())
+            idx1 = info.atom_idx(p.atom1())
+            idx2 = info.atom_idx(p.atom2())
+            idx3 = info.atom_idx(p.atom3())
+
+            # Work out the number of dummies in the dihedral.
+            num_dummies = len(
+                [idx for idx in [idx0, idx1, idx2, idx3] if idx in dummies]
+            )
+
+            # If there is more than one dummy, then this dihedral must bridge the
+            # dummy branches.
+            if num_dummies > 1:
+                _logger.debug(
+                    f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
+                )
+            else:
+                new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
+
+        # Impropers.
+        for p in impropers.potentials():
+            idx0 = info.atom_idx(p.atom0())
+            idx1 = info.atom_idx(p.atom1())
+            idx2 = info.atom_idx(p.atom2())
+            idx3 = info.atom_idx(p.atom3())
+
+            # Work out the number of dummies in the improper.
+            num_dummies = len(
+                [idx for idx in [idx0, idx1, idx2, idx3] if idx in dummies]
+            )
+
+            # If there is more than one dummy, then this improper must bridge the
+            # dummy branches.
+            if num_dummies > 1:
+                _logger.debug(
+                    f"  Removing improper: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
+                )
+            else:
+                new_impropers.set(idx0, idx1, idx2, idx3, p.function())
+
+        # Set the updated bonded terms.
+        mol = mol.edit().set_property("angle" + suffix, new_angles).molecule().commit()
+        mol = (
+            mol.edit()
+            .set_property("dihedral" + suffix, new_dihedrals)
+            .molecule()
+            .commit()
+        )
+        mol = (
+            mol.edit()
+            .set_property("improper" + suffix, new_impropers)
+            .molecule()
+            .commit()
+        )
+
+        # Now treat the dummy branches individually.
+        for d in dummies:
+            mol = _dummy(mol, bridge, [d], physical, is_lambda1)
 
     # Return the updated molecule.
     return mol
@@ -489,15 +727,12 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
         new_new_angles = _SireMM.ThreeAtomFunctions(mol.info())
         for angle in new_angles.potentials():
             idx0 = info.atom_idx(angle.atom0())
-            idx1 = info.atom_idx(angle.atom1())
             idx2 = info.atom_idx(angle.atom2())
 
             if (
                 idx0 in dummies
-                and idx1 == idx
                 and idx2 in physical[1:]
                 or idx0 in physical[1:]
-                and idx1 == idx
                 and idx2 in dummies
             ):
                 from math import pi
@@ -650,15 +885,16 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
         # Initialise a container to store the updated dihedrals.
         new_new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
 
-        # For the first physical2 atom, remove all dihedrals that reach into
-        # the dummy group(s).
-        idx = physical2[0]
+        # Remove all dihedral terms for all of the physical atoms two atoms
+        # from the physical bridge atom.
         for p in new_dihedrals.potentials():
             idx0 = info.atom_idx(p.atom0())
             idx1 = info.atom_idx(p.atom1())
             idx2 = info.atom_idx(p.atom2())
             idx3 = info.atom_idx(p.atom3())
-            if (idx0 == idx and idx3 in dummies) or (idx3 == idx and idx0 in dummies):
+            if (idx0 in physical2 and idx3 in dummies) or (
+                idx3 in physical2 and idx0 in dummies
+            ):
                 _logger.debug(
                     f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
                 )
