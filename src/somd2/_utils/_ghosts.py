@@ -403,10 +403,10 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
         # Next we modify the angle terms between the physical and
         # dummy atom so that the equilibrium angle is 90 degrees.
         new_angles = _SireMM.ThreeAtomFunctions(mol.info())
-        for angle in angles.potentials():
-            idx0 = info.atom_idx(angle.atom0())
-            idx1 = info.atom_idx(angle.atom1())
-            idx2 = info.atom_idx(angle.atom2())
+        for p in angles.potentials():
+            idx0 = info.atom_idx(p.atom0())
+            idx1 = info.atom_idx(p.atom1())
+            idx2 = info.atom_idx(p.atom2())
 
             if (
                 idx0 in dummies
@@ -430,11 +430,11 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
 
                 _logger.debug(
                     f"  Modifying angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
-                    f"{angle.function()} --> {expression}"
+                    f"{p.function()} --> {expression}"
                 )
 
             else:
-                new_angles.set(idx0, idx1, idx2, angle.function())
+                new_angles.set(idx0, idx1, idx2, p.function())
 
         # Update the molecule.
         mol = mol.edit().set_property("angle" + suffix, new_angles).molecule().commit()
@@ -622,10 +622,10 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
         # Next we modify the angle terms between the remaining physical and
         # dummy atoms so that the equilibrium angle is 90 degrees.
         new_new_angles = _SireMM.ThreeAtomFunctions(mol.info())
-        for angle in new_angles.potentials():
-            idx0 = info.atom_idx(angle.atom0())
-            idx1 = info.atom_idx(angle.atom1())
-            idx2 = info.atom_idx(angle.atom2())
+        for p in new_angles.potentials():
+            idx0 = info.atom_idx(p.atom0())
+            idx1 = info.atom_idx(p.atom1())
+            idx2 = info.atom_idx(p.atom2())
 
             if (
                 idx0 in dummies
@@ -649,11 +649,11 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
 
                 _logger.debug(
                     f"  Modifying angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
-                    f"{angle.function()} --> {expression}"
+                    f"{p.function()} --> {expression}"
                 )
 
             else:
-                new_new_angles.set(idx0, idx1, idx2, angle.function())
+                new_new_angles.set(idx0, idx1, idx2, p.function())
 
         # Update the molecule.
         mol = (
@@ -711,7 +711,7 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
 
                 _logger.debug(
                     f"  Modifying angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
-                    f"{angle.function()} --> {expression}"
+                    f"{p.function()} --> {expression}"
                 )
 
             else:
