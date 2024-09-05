@@ -764,11 +764,6 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
                 _logger.debug(
                     f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
                 )
-
-            elif num_dummies > 1:
-                _logger.debug("Unhandled case: multiple dummy atoms in dihedral")
-                new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
-
             else:
                 new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
 
