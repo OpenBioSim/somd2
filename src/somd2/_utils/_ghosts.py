@@ -692,7 +692,7 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
             mol.edit()
             .set_property("dihedral" + suffix, new_dihedrals)
             .molecule()
-            .commit
+            .commit()
         )
 
     # Non-planar junction.
