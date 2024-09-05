@@ -350,9 +350,12 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
     # Store the molecular info.
     info = mol.info()
 
+    # Property suffix based on the end state.
+    suffix = "0" if not is_lambda1 else "1"
+
     # Get the end state connectivity property.
     try:
-        connectivity = mol.property("connectivity" + str(int(is_lambda1)))
+        connectivity = mol.property("connectivity" + suffix)
     except:
         connectivity = mol.property("connectivity")
 
