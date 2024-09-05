@@ -192,7 +192,7 @@ def _boresch(system):
                 mol = _terminal(mol, b, bridges1[b], physical1[b], is_lambda1=True)
 
             elif junction == 2:
-                mol = _dual(mol, b, bridges0[b], physical0[b], is_lambda1=True)
+                mol = _dual(mol, b, bridges1[b], physical1[b], is_lambda1=True)
 
             elif junction == 3:
                 mol = _triple(mol, b, bridges1[b], physical1[b], is_lambda1=True)
