@@ -49,7 +49,7 @@ def _boresch(system):
         The updated system.
     """
 
-    _logger.debug(f"Applying Boresch modifications to ghost atom bonded terms:")
+    _logger.info(f"Applying Boresch modifications to ghost atom bonded terms.")
 
     # Check the system is a Sire system.
     if not isinstance(system, (_System, _LegacySystem)):
