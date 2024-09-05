@@ -422,7 +422,8 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
                 new_angles.set(idx0, idx1, idx2, expression)
 
                 _logger.debug(
-                    f"  Modifying angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], {angle.function()}"
+                    f"  Modifying angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
+                    f"{angle.function()} --> {expression}"
                 )
 
             else:
@@ -675,7 +676,8 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
                 new_new_angles.set(idx0, idx1, idx2, expression)
 
                 _logger.debug(
-                    f"  Modifying angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], {angle.function()}"
+                    f"  Modifying angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
+                    f"{angle.function()} --> {expression}"
                 )
 
             else:
@@ -736,7 +738,8 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
                 new_angles.set(idx0, idx1, idx2, expression)
 
                 _logger.debug(
-                    f"  Modifying angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], {p.function()}"
+                    f"  Modifying angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
+                    f"{angle.function()} --> {expression}"
                 )
 
             else:
