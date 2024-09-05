@@ -271,6 +271,9 @@ def _terminal(mol, bridge, dummies, physical, is_lambda1=False):
                 if c not in physical2:
                     physical2.append(c)
 
+    # Sort based on the atom indices.
+    physical2.sort(key=lambda x: x.value())
+
     # Get the end state dihedral functions.
     prop = "dihedral0" if not is_lambda1 else "dihedral1"
     dihedrals = mol.property(prop)
