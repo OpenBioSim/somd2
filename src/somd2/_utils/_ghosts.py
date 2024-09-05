@@ -369,11 +369,9 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
         # Get the end state bond functions.
         angles = mol.property("angle" + suffix)
         dihedrals = mol.property("dihedral" + suffix)
-        impropers = mol.property("improper" + suffix)
 
         # Initialise a container to store the updated bonded terms.
         new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
-        new_impropers = _SireMM.FourAtomFunctions(mol.info())
 
         # Dihedrals.
         for p in dihedrals.potentials():
@@ -394,26 +392,6 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
 
             else:
                 new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
-
-        # Impropers.
-        for p in impropers.potentials():
-            idx0 = info.atom_idx(p.atom0())
-            idx1 = info.atom_idx(p.atom1())
-            idx2 = info.atom_idx(p.atom2())
-            idx3 = info.atom_idx(p.atom3())
-
-            if (
-                not _is_dummy(mol, [idx0], is_lambda1)[0]
-                and idx3 in dummies
-                or not _is_dummy(mol, [idx3], is_lambda1)[0]
-                and idx0 in dummies
-            ):
-                _logger.debug(
-                    f"  Removing improper: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
-                )
-
-            else:
-                new_impropers.set(idx0, idx1, idx2, idx3, p.function())
 
         # Next we modify the angle terms between the physical and
         # dummy atom so that the equilibrium angle is 90 degrees.
@@ -493,12 +471,6 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
             .molecule()
             .commit()
         )
-        mol = (
-            mol.edit()
-            .set_property("improper" + suffix, new_impropers)
-            .molecule()
-            .commit()
-        )
 
     # Dual branch.
     else:
@@ -509,12 +481,10 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
         # Get the end state bond functions.
         angles = mol.property("angle" + suffix)
         dihedrals = mol.property("dihedral" + suffix)
-        impropers = mol.property("improper" + suffix)
 
         # Initialise containers to store the updated bonded terms.
         new_angles = _SireMM.ThreeAtomFunctions(mol.info())
         new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
-        new_impropers = _SireMM.FourAtomFunctions(mol.info())
 
         # Angles.
         for p in angles.potentials():
@@ -551,38 +521,11 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
             else:
                 new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
 
-        # Impropers.
-        for p in impropers.potentials():
-            idx0 = info.atom_idx(p.atom0())
-            idx1 = info.atom_idx(p.atom1())
-            idx2 = info.atom_idx(p.atom2())
-            idx3 = info.atom_idx(p.atom3())
-
-            # Work out the number of dummies in the improper.
-            num_dummies = len(
-                [idx for idx in [idx0, idx1, idx2, idx3] if idx in dummies]
-            )
-
-            # If there is more than one dummy, then this improper must bridge the
-            # dummy branches.
-            if num_dummies > 1:
-                _logger.debug(
-                    f"  Removing improper: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
-                )
-            else:
-                new_impropers.set(idx0, idx1, idx2, idx3, p.function())
-
         # Set the updated bonded terms.
         mol = mol.edit().set_property("angle" + suffix, new_angles).molecule().commit()
         mol = (
             mol.edit()
             .set_property("dihedral" + suffix, new_dihedrals)
-            .molecule()
-            .commit()
-        )
-        mol = (
-            mol.edit()
-            .set_property("improper" + suffix, new_impropers)
             .molecule()
             .commit()
         )
@@ -667,12 +610,10 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
         # Get the end state bond functions.
         angles = mol.property("angle" + suffix)
         dihedrals = mol.property("dihedral" + suffix)
-        impropers = mol.property("improper" + suffix)
 
         # Initialise a container to store the updated bonded terms.
         new_angles = _SireMM.ThreeAtomFunctions(mol.info())
         new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
-        new_impropers = _SireMM.FourAtomFunctions(mol.info())
 
         # Angles.
         for p in angles.potentials():
@@ -704,22 +645,6 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
 
             else:
                 new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
-
-        # Impropers.
-        for p in impropers.potentials():
-            idx0 = info.atom_idx(p.atom0())
-            idx1 = info.atom_idx(p.atom1())
-            idx2 = info.atom_idx(p.atom2())
-            idx3 = info.atom_idx(p.atom3())
-            idxs = [idx0, idx1, idx2, idx3]
-
-            if idx in idxs and any([x in dummies for x in idxs]):
-                _logger.debug(
-                    f"  Removing improper: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
-                )
-
-            else:
-                new_impropers.set(idx0, idx1, idx2, idx3, p.function())
 
         # Next we modify the angle terms between the remaining physical and
         # dummy atoms so that the equilibrium angle is 90 degrees.
@@ -821,11 +746,9 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
 
         # Get the end state dihedral functions.
         dihedrals = mol.property("dihedral" + suffix)
-        improper = mol.property("improper" + suffix)
 
-        # Initialise containers to store the updated dihedral and improper functions.
+        # Initialise containers to store the updated dihedral functions.
         new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
-        new_impropers = _SireMM.FourAtomFunctions(mol.info())
 
         for p in dihedrals.potentials():
             idx0 = info.atom_idx(p.atom0())
@@ -844,29 +767,10 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
 
             elif num_dummies > 1:
                 _logger.debug("Unhandled case: multiple dummy atoms in dihedral")
-                new_impropers.set(idx0, idx1, idx2, idx3, p.function())
+                new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
 
             else:
                 new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
-
-        for p in improper.potentials():
-            idx0 = info.atom_idx(p.atom0())
-            idx1 = info.atom_idx(p.atom1())
-            idx2 = info.atom_idx(p.atom2())
-            idx3 = info.atom_idx(p.atom3())
-            idxs = [idx0, idx1, idx2, idx3]
-
-            if len([x for x in idxs if x in dummies]) > 0:
-                _logger.debug(
-                    f"  Removing improper: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
-                )
-
-            elif num_dummies > 1:
-                _logger.debug("Unhandled case: multiple dummy atoms in improper")
-                new_impropers.set(idx0, idx1, idx2, idx3, p.function())
-
-            else:
-                new_impropers.set(idx0, idx1, idx2, idx3, p.function())
 
         # Next, we need to work out the physical atoms two atoms away from the
         # bridge atom.
@@ -905,12 +809,6 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
         mol = (
             mol.edit()
             .set_property("dihedral" + suffix, new_new_dihedrals)
-            .molecule()
-            .commit()
-        )
-        mol = (
-            mol.edit()
-            .set_property("improper" + suffix, new_impropers)
             .molecule()
             .commit()
         )
