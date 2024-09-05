@@ -366,7 +366,8 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
         # First remove all dihedrals starting from the dummy atom and ending in
         # physical system.
 
-        # Get the end state dihedral functions.
+        # Get the end state bond functions.
+        angles = mol.property("angle" + suffix)
         dihedrals = mol.property("dihedral" + suffix)
         impropers = mol.property("improper" + suffix)
 
@@ -416,8 +417,8 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
 
         # Next we modify the angle terms between the physical and
         # dummy atom so that the equilibrium angle is 90 degrees.
-        new_new_angles = _SireMM.ThreeAtomFunctions(mol.info())
-        for angle in new_angles.potentials():
+        new_angles = _SireMM.ThreeAtomFunctions(mol.info())
+        for angle in angles.potentials():
             idx0 = info.atom_idx(angle.atom0())
             idx1 = info.atom_idx(angle.atom1())
             idx2 = info.atom_idx(angle.atom2())
@@ -437,17 +438,17 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
                 amber_angle = _SireMM.AmberAngle(100, theta0)
 
                 # Generate the new angle expression.
-                expression = amber_angle.expression.to_expression(Symbol("theta"))
+                expression = amber_angle.to_expression(Symbol("theta"))
 
                 # Set the equilibrium angle to 90 degrees.
-                new_new_angles.set(idx0, idx1, idx2, expression)
+                new_angles.set(idx0, idx1, idx2, expression)
 
                 _logger.debug(
                     f"  Modifying angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], {angle.function()}"
                 )
 
             else:
-                new_new_angles.set(idx0, idx1, idx2, angle.function())
+                new_angles.set(idx0, idx1, idx2, angle.function())
 
         # Next find the physical atoms two atoms away from the bridge atom.
         physical2 = []
@@ -485,12 +486,7 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
                 new_new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
 
         # Update the molecule.
-        mol = (
-            mol.edit()
-            .set_property("angle" + suffix, new_new_angles)
-            .molecule()
-            .commit()
-        )
+        mol = mol.edit().set_property("angle" + suffix, new_angles).molecule().commit()
         mol = (
             mol.edit()
             .set_property("dihedral" + suffix, new_new_dihedrals)
@@ -747,7 +743,7 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
                 amber_angle = _SireMM.AmberAngle(100, theta0)
 
                 # Generate the new angle expression.
-                expression = amber_angle.expression.to_expression(Symbol("theta"))
+                expression = amber_angle.to_expression(Symbol("theta"))
 
                 # Set the equilibrium angle to 90 degrees.
                 new_new_angles.set(idx0, idx1, idx2, expression)
