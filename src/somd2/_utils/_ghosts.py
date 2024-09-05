@@ -26,11 +26,12 @@ import sire.legacy.MM as _SireMM
 import sire.legacy.Mol as _SireMol
 
 from somd2 import _logger
-from ._somd1 import _is_dummy
+
+from . import _is_dummy
 from . import _lam_sym
 
 
-def _apply_boresch(system):
+def _boresch(system):
     """
     Apply Boresch modifications to ghost atom bonded terms to avoid non-physical
     coupling between the ghost atoms and the physical region.

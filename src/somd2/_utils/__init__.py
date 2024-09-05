@@ -27,3 +27,112 @@ else:
     _lam_sym = "λ"
 
 del _platform
+
+
+def _has_dummy(mol, idxs, is_lambda1=False):
+    """
+    Internal function to check whether any atom is a dummy.
+
+    Parameters
+    ----------
+
+    mol : sire.legacy.Mol.Molecule
+        The molecule.
+
+    idxs : [sire.legacy.Mol.AtomIdx]
+        A list of atom indices.
+
+    is_lambda1 : bool
+        Whether to check the lambda = 1 state.
+
+    Returns
+    -------
+
+    has_dummy : bool
+        Whether a dummy atom is present.
+    """
+
+    import sire.legacy.Mol as _SireMol
+
+    # We need to check by ambertype too since this molecule may have been
+    # created via sire.morph.create_from_pertfile, in which case the element
+    # property will have been set to the end state with the largest mass, i.e.
+    # may no longer by a dummy.
+    if is_lambda1:
+        element_prop = "element1"
+        ambertype_prop = "ambertype1"
+    else:
+        element_prop = "element0"
+        ambertype_prop = "ambertype0"
+
+    element_dummy = _SireMol.Element(0)
+    ambertype_dummy = "du"
+
+    # Check whether an of the atoms is a dummy.
+    for idx in idxs:
+        if (
+            mol.atom(idx).property(element_prop) == element_dummy
+            or mol.atom(idx).property(ambertype_prop) == ambertype_dummy
+        ):
+            return True
+
+    return False
+
+
+def _is_dummy(mol, idxs, is_lambda1=False):
+    """
+    Internal function to return whether each atom is a dummy.
+
+    Parameters
+    ----------
+
+    mol : sire.legacy.Mol.Molecule
+        The molecule.
+
+    idxs : [sire.legacy.Mol.AtomIdx]
+        A list of atom indices.
+
+    is_lambda1 : bool
+        Whether to check the lambda = 1 state.
+
+    Returns
+    -------
+
+    is_dummy : [bool]
+        Whether each atom is a dummy.
+    """
+
+    import sire.legacy.Mol as _SireMol
+
+    # We need to check by ambertype too since this molecule may have been
+    # created via sire.morph.create_from_pertfile, in which case the element
+    # property will have been set to the end state with the largest mass, i.e.
+    # may no longer by a dummy.
+    if is_lambda1:
+        element_prop = "element1"
+        ambertype_prop = "ambertype1"
+    else:
+        element_prop = "element0"
+        ambertype_prop = "ambertype0"
+
+    if is_lambda1:
+        element_prop = "element1"
+        ambertype_prop = "ambertype1"
+    else:
+        element_prop = "element0"
+        ambertype_prop = "ambertype0"
+
+    element_dummy = _SireMol.Element(0)
+    ambertype_dummy = "du"
+
+    # Initialise a list to store the state of each atom.
+    is_dummy = []
+
+    # Check whether each of the atoms is a dummy.
+    for idx in idxs:
+        is_dummy.append(
+            mol.atom(idx).property(element_prop) == element_dummy
+            or mol.atom(idx).property(ambertype_prop) == ambertype_dummy
+        )
+
+    return is_dummy
