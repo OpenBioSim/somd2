@@ -346,7 +346,7 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
     """
 
     _logger.debug(
-        f"Applying Boresch modifications to triple dummy junction at "
+        f"Applying Boresch modifications to dual dummy junction at "
         f"{_lam_sym} = {int(is_lambda1)}:"
     )
 
