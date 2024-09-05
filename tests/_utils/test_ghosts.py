@@ -193,7 +193,6 @@ def test_acetone_to_propenol():
     # Create dihedral IDs for the missing dihedrals at lambda = 0.
 
     from sire.legacy.Mol import AtomIdx
-    from sire.legacy.Mol import DihedralID
 
     missing_dihedrals0 = [
         (AtomIdx(8), AtomIdx(3), AtomIdx(9), AtomIdx(10)),
