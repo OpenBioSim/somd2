@@ -74,10 +74,15 @@ def _boresch(system):
         # Store the molecule info.
         info = mol.info()
 
-        # Extract the connectivity property. This is currently the same
-        # for both end states since we aren't dealing with ring breaking.
-        # The logic is easy to adapt to separate connectivity objects.
-        connectivity = mol.property("connectivity")
+        # Extract the connectivity property.
+        try:
+            connectivity0 = mol.property("connectivity0")
+        except:
+            connectivity0 = mol.property("connectivity")
+        try:
+            connectivity1 = mol.property("connectivity1")
+        except:
+            connectivity1 = connectivity0
 
         # Find the indices of the dummy atoms at each end state.
         du0 = [
@@ -103,7 +108,7 @@ def _boresch(system):
         # that connect dummy atoms to the physical region.
         bridges0 = {}
         for du in du0:
-            for c in connectivity.connections_to(du):
+            for c in connectivity0.connections_to(du):
                 if not _is_dummy(mol, [c])[0]:
                     if c not in bridges0:
                         bridges0[c] = [du]
@@ -114,14 +119,14 @@ def _boresch(system):
         physical0 = {}
         for b in bridges0:
             physical0[b] = []
-            for c in connectivity.connections_to(b):
+            for c in connectivity0.connections_to(b):
                 if not _is_dummy(mol, [c])[0]:
                     physical0[b].append(c)
 
         # Repeat the above for lambda = 1.
         bridges1 = {}
         for du in du1:
-            for c in connectivity.connections_to(du):
+            for c in connectivity1.connections_to(du):
                 if not _is_dummy(mol, [c], is_lambda1=True)[0]:
                     if c not in bridges1:
                         bridges1[c] = [du]
@@ -130,7 +135,7 @@ def _boresch(system):
         physical1 = {}
         for b in bridges1:
             physical1[b] = []
-            for c in connectivity.connections_to(b):
+            for c in connectivity1.connections_to(b):
                 if not _is_dummy(mol, [c], is_lambda1=True)[0]:
                     physical1[b].append(c)
 
@@ -200,8 +205,19 @@ def _boresch(system):
 
 
 def _terminal(mol, bridge, dummies, physical, is_lambda1=False):
-    """
+    r"""
     Apply Boresch modifications to a terminal junction.
+
+    An example terminal junction with three dummy branches. Here X is the
+    physical bridge atom.
+
+               DR1
+              /
+             /
+        R---X---DR2
+             \
+              \
+               DR3
 
     Parameters
     ----------
@@ -236,8 +252,11 @@ def _terminal(mol, bridge, dummies, physical, is_lambda1=False):
     # Store the molecular info.
     info = mol.info()
 
-    # Store the molecular connectivity.
-    connectivity = mol.property("connectivity")
+    # Get the end state connectivity property.
+    try:
+        connectivity = mol.property("connectivity" + str(int(is_lambda1)))
+    except:
+        connectivity = mol.property("connectivity")
 
     # First, we need to work out the physical atoms two atoms away from the
     # bridge atom.
@@ -281,9 +300,20 @@ def _terminal(mol, bridge, dummies, physical, is_lambda1=False):
     return mol
 
 
-def _triple(mol, bridge, dummies, physical, is_lambda1=False):
-    """
-    Apply Boresch modifications to a triple junction.
+def _dual(mol, bridge, dummies, physical, is_lambda1=False):
+    r"""
+    Apply Boresch modifications to a dual junction.
+
+    An example dual junction with two dummy branches. Here X is the physical
+    bridge atom.
+
+         R1     DR1
+           \   /
+            \ /
+             X
+            / \
+           /   \
+         R2     DR2
 
     Parameters
     ----------
@@ -318,11 +348,71 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
     # Store the molecular info.
     info = mol.info()
 
-    # Store the molecular connectivity.
-    connectivity = mol.property("connectivity")
+    # Get the end state connectivity property.
+    try:
+        connectivity = mol.property("connectivity" + str(int(is_lambda1)))
+    except:
+        connectivity = mol.property("connectivity")
+
+    # Return the updated molecule.
+    return mol
+
+
+def _triple(mol, bridge, dummies, physical, is_lambda1=False):
+    r"""
+    Apply Boresch modifications to a triple junction.
+
+    An example triple junction. Here X is the physical bridge atom.
+
+         R1
+           \
+            \
+        R2---X---DR
+            /
+           /
+         R3
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    bridge : sire.legacy.Mol.AtomIdx
+        The physical bridge atom.
+
+    dummies : List[sire.legacy.Mol.AtomIdx]
+        The list of dummy atoms connected to the bridge atom.
+
+    physical : List[sire.legacy.Mol.AtomIdx]
+        The list of physical atoms connected to the bridge atom.
+
+    is_lambda1 : bool, optional
+        Whether the junction is at lambda = 1.
+
+    Returns
+    -------
+
+    mol : sire.mol.Molecule
+        The updated molecule.
+    """
+
+    _logger.debug(
+        f"Applying Boresch modifications to triple dummy junction at "
+        f"{_lam_sym} = {int(is_lambda1)}:"
+    )
+
+    # Store the molecular info.
+    info = mol.info()
 
     # Property suffix based on the end state.
     suffix = "0" if not is_lambda1 else "1"
+
+    # Get the end state connectivity property.
+    try:
+        connectivity = mol.property("connectivity" + suffix)
+    except:
+        connectivity = mol.property("connectivity")
 
     # Store the element of the bridge atom.
     element = mol.atom(bridge).property("element" + suffix)
