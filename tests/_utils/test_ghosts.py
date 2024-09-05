@@ -125,8 +125,8 @@ def test_toluene_to_pyridine():
         == False
     )
 
-    # List of angles that should be modified.
-    modified_angls = [
+    # Create a list of angle IDs for the modified angles.
+    modified_angles = [
         (AtomIdx(0), AtomIdx(1), AtomIdx(2)),
         (AtomIdx(0), AtomIdx(1), AtomIdx(6)),
     ]
@@ -140,7 +140,7 @@ def test_toluene_to_pyridine():
         idx1 = info.atom_idx(p.atom1())
         idx2 = info.atom_idx(p.atom2())
 
-        if (idx0, idx1, idx2) in modified_angls:
+        if (idx0, idx1, idx2) in modified_angles:
             assert str(p.function()) != expression
 
     # Check that the modified angles have the correct functional form.
@@ -149,7 +149,7 @@ def test_toluene_to_pyridine():
         idx1 = info.atom_idx(p.atom1())
         idx2 = info.atom_idx(p.atom2())
 
-        if (idx0, idx1, idx2) in modified_angls:
+        if (idx0, idx1, idx2) in modified_angles:
             assert str(p.function()) == expression
 
 
