@@ -22,9 +22,12 @@
 __all__ = ["Runner"]
 
 import platform as _platform
+from pathlib import Path as _Path
 
 from sire import morph as _morph
 from sire import stream as _stream
+from sire import load as _load
+from sire import save as _save
 from sire.system import System as _System
 
 from ..config import Config as _Config
@@ -969,6 +972,9 @@ class Runner:
                         self._config.max_threads // self._config.num_lambda
                     )
                 self._config._extra_args["threads"] = threads_per_worker
+                _logger.debug(
+                    f"Using platform {self._config.platform} with {self.max_workers} workers."
+                )
 
             # (Multi-)GPU platform.
             elif self._is_gpu:
@@ -1048,44 +1054,114 @@ class Runner:
             The result of the simulation.
         """
 
-        def _run(sim, is_restart=False):
-            # This function is complex due to the mixture of options for minimisation and dynamics
+        import math as _math
+
+        def _run(sim, num_chunks, is_restart=False):
+            # This run function assumes that the whole lambda window will run continuously
+            # if doing repex will need a different function
+            # first need to minimise
+            filenames = sim._get_filenames()
+            topology0 = str(self._config.output_directory / filenames["topology0"])
+            topology1 = str(self._config.output_directory / filenames["topology1"])
+            mols0 = _morph.link_to_reference(self._system)
+            mols1 = _morph.link_to_perturbed(self._system)
+            _save(mols0, topology0)
+            _save(mols1, topology1)
             if self._config.minimise:
-                try:
-                    df = sim._run(is_restart=is_restart)
-                    lambda_grad = sim._lambda_grad
-                    speed = sim.get_timing()
-                    return df, lambda_grad, speed
-                except Exception as e:
-                    _logger.warning(
-                        f"Minimisation/dynamics at {_lam_sym} = {lambda_value} failed with the "
-                        f"following exception {e}, trying again with minimsation at {_lam_sym} = 0."
-                    )
-                    try:
-                        df = sim._run(lambda_minimisation=0.0, is_restart=is_restart)
-                        lambda_grad = sim._lambda_grad
-                        speed = sim.get_timing()
-                        return df, lambda_grad, speed
-                    except Exception as e:
-                        _logger.error(
-                            f"Minimisation/dynamics at {_lam_sym} = {lambda_value} failed, even after "
-                            f"minimisation at {_lam_sym} = 0. The following warning was raised: {e}."
+                _logger.debug(f"Minimising {_lam_sym} = {lambda_value}")
+                minimised = sim._run(minimisation=True, is_restart=is_restart)
+            # then equilibrate
+            if self._config.equilibration_time > 0:
+                _logger.debug(f"Equilibrating {_lam_sym} = {lambda_value}")
+                equilibrated = sim._run(equilibration=True, is_restart=is_restart)
+
+            # NOTE: becuase we are defining multiple dynamics blocks, things become complex
+            # regarding frame frequency and energy frequency. It appears that sire dumps a frame and
+            # an energy trajectory at the end of each dynamics block, meaning that if frame or energy
+            # frequency is larger than checkpoint frequency, they will effectively be set to the same
+            # value as checkpoint frequency.
+            total_runtime = self._config.runtime
+            chunks_so_far = self._current_block
+            checkpoint_frequency = self._config.checkpoint_frequency
+            # if runtime % checkpoint frequency != 0, we need to also run the remainder.
+            # this is especially relevant for simulations that crashed or were killed.
+            product = num_chunks * checkpoint_frequency
+            remainder = total_runtime - product
+            if remainder < self._config.timestep:
+                remainder = 0
+            for x in range(chunks_so_far, num_chunks + chunks_so_far):
+                sim._run(
+                    runtime=checkpoint_frequency, is_restart=is_restart, cycle_number=x
+                )
+                _logger.info(
+                    f"Finished block {x+1} of {chunks_so_far + num_chunks + int(remainder > 0)} "
+                    f"for {_lam_sym} = {lambda_value}"
+                )
+            if remainder > 0:
+                _logger.debug(f"Remainder = {remainder}")
+                sim._run(
+                    runtime=remainder,
+                    is_restart=is_restart,
+                    cycle_number=num_chunks + chunks_so_far,
+                )
+                _logger.info(
+                    f"Finished block {chunks_so_far + num_chunks + int(remainder > 0)} of {chunks_so_far + num_chunks + int(remainder > 0)} "
+                    f"for {_lam_sym} = {lambda_value}"
+                )
+            # Now that the run is finished, cleanup the output files.
+            if self._config.save_trajectories:
+                _logger.debug(
+                    f"Cleaning up trajectory files for {_lam_sym} = {lambda_value}"
+                )
+                traj_filename = str(
+                    self._config.output_directory / filenames["trajectory"]
+                )
+                # Glob for the trajectory chunks.
+                from glob import glob
+
+                traj_chunks = sorted(
+                    glob(
+                        str(
+                            self._config.output_directory
+                            / f"{filenames['trajectory_chunk']}*"
                         )
-                        raise
-            else:
-                try:
-                    df = sim._run(is_restart)
-                    lambda_grad = sim._lambda_grad
-                    speed = sim.get_timing()
-                    return df, lambda_grad, speed
-                except Exception as e:
-                    _logger.error(
-                        f"Dynamics at {_lam_sym} = {lambda_value} failed. The following warning was "
-                        f"raised: {e}. This may be due to a lack of minimisation."
                     )
+                )
+                # If this is a restart, then we need to check for an existing
+                # trajectory file with the same name. If it exists and is non-empty,
+                # then copy it to a backup file and prepend it to the list of chunks.
+                if self._config.restart:
+                    path = _Path(traj_filename)
+                    if path.exists() and path.stat().st_size > 0:
+                        from shutil import copyfile
+
+                        copyfile(traj_filename, f"{traj_filename}.bak")
+                        traj_chunks = [f"{traj_filename}.bak"] + traj_chunks
+
+                # Load the topology and chunked trajectory files.
+                topology0 = str(self._config.output_directory / filenames["topology0"])
+                system = _load([topology0] + traj_chunks)
+
+                # Save the final trajectory to a single file.
+                traj_filename = str(
+                    self._config.output_directory / filenames["trajectory"]
+                )
+                _save(system.trajectory(), traj_filename, format=["DCD"])
+
+                # Delete the trajectory from memory.
+                self._system.delete_all_frames()
+
+                # Now remove the chunked trajectory files.
+                for chunk in traj_chunks:
+                    _Path(chunk).unlink()
+
+                speed = sim.get_timing()
+                lambda_grad = sim._lambda_grad
+                df = sim._get_energy_trajectory()
+
+            return df, lambda_grad, speed
 
         if self._config.restart:
-            _logger.debug(f"Restarting {_lam_sym} = {lambda_value} from file")
             try:
                 system = _stream.load(
                     str(
@@ -1093,11 +1169,20 @@ class Runner:
                         / self._fnames[lambda_value]["checkpoint"]
                     )
                 ).clone()
+                # Work out the current block number.
+                self._current_block = int(
+                    round(
+                        system.time().value()
+                        / self._config.checkpoint_frequency.value(),
+                        12,
+                    )
+                )
             except:
                 _logger.warning(
                     f"Unable to load checkpoint file for {_lam_sym}={lambda_value}, starting from scratch."
                 )
                 system = self._system.clone()
+                self._current_block = 0
                 is_restart = False
             else:
                 aresame, reason = self._systems_are_same(self._system, system)
@@ -1130,6 +1215,7 @@ class Runner:
                 is_restart = True
         else:
             system = self._system.clone()
+            self._current_block = 0
             is_restart = False
         if is_restart:
             acc_time = system.time()
@@ -1142,6 +1228,19 @@ class Runner:
                 _logger.info(
                     f"Restarting {_lam_sym} = {lambda_value} at time {acc_time}, time remaining = {self._config.runtime - acc_time}"
                 )
+                self._config.runtime = str(self._config.runtime - acc_time)
+        frac = self._config.runtime.value() / self._config.checkpoint_frequency.value()
+        # Handle the case where the runtime is less than the checkpoint frequency.
+        # Has to be done after runtime has been set to the remaining time.
+        if frac < 1.0:
+            frac = 1.0
+            self._config.checkpoint_frequency = str(self._config.runtime)
+        num_blocks = int(frac)
+        # Seems to be an issue in which frac is not an integer, and converting it is effectively a floor function,
+        # meaning that the total num_blocks is 1 less than it should be.
+        # So if frac % 1 is very close to 1, we need to add 1 to num_blocks.
+        if _math.isclose(frac % 1, 1, abs_tol=1e-12):
+            num_blocks += 1
         # GPU platform.
         if self._is_gpu:
             if self._config.run_parallel:
@@ -1158,7 +1257,9 @@ class Runner:
                 _logger.info(f"Running {_lam_sym} = {lambda_value} on GPU 0")
             self._initialise_simulation(system, lambda_value, device=gpu_num)
             try:
-                df, lambda_grad, speed = _run(self._sim, is_restart=is_restart)
+                df, lambda_grad, speed = _run(
+                    self._sim, num_chunks=num_blocks, is_restart=is_restart
+                )
             except:
                 if self._config.run_parallel:
                     with self._lock:
@@ -1176,7 +1277,9 @@ class Runner:
 
             self._initialise_simulation(system, lambda_value)
             try:
-                df, lambda_grad, speed = _run(self._sim, is_restart=is_restart)
+                df, lambda_grad, speed = _run(
+                    self._sim, num_chunks=num_blocks, is_restart=is_restart
+                )
             except:
                 raise
             self._sim._cleanup()
