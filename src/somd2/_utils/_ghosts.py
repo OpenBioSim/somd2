@@ -833,7 +833,7 @@ def _higher(mol, bridge, dummies, physical, is_lambda1=False):
         connectivity = mol.property("connectivity")
 
     # Now remove all bonded interactions between the dummy atoms and one of the
-    # physical atoms connected to the bridge atom, hence reduced the problem to
+    # physical atoms connected to the bridge atom, hence reducing the problem to
     # that of a triple junction.
     while len(physical) > 3:
         # Pop the first physical atom index from the list.
