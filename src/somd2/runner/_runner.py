@@ -170,6 +170,9 @@ class Runner:
 
             self._system = _boresch(self._system)
 
+            # Make sure there are no zero LJ sigmas for perturbable atoms.
+            self._config._extra_args["fix_perturbable_zero_sigmas"] = True
+
         # Check for a periodic space.
         self._check_space()
 
