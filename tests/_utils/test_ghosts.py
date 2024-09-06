@@ -10,7 +10,7 @@ def test_hexane_to_propane():
     """
 
     # Load the system.
-    mols = sr.load_test_files("hex2prp-1.s3")
+    mols = sr.load_test_files("hex2prp.s3")
 
     # Store the orginal angles and dihedrals at lambda = 1.
     angles = mols[0].property("angle1")
@@ -71,7 +71,7 @@ def test_toluene_to_pyridine():
     """
 
     # Load the system.
-    mols = sr.load_test_files("tol2pyr-1.s3")
+    mols = sr.load_test_files("tol2pyr.s3")
 
     # Store the orginal angles and dihedrals at lambda = 1.
     angles = mols[0].property("angle1")
@@ -161,7 +161,7 @@ def test_acetone_to_propenol():
     """
 
     # Load the system.
-    mols = sr.load_test_files("acepol-1.s3")
+    mols = sr.load_test_files("acepol.s3")
 
     # Store the orginal angles and dihedrals at lambda = 0 and lambda = 1.
     angles0 = mols[0].property("angle0")
