@@ -88,7 +88,7 @@ def _boresch(system):
         try:
             connectivity1 = mol.property("connectivity1")
         except:
-            connectivity1 = connectivity0
+            connectivity1 = mol.property("connectivity")
 
         # Find the indices of the ghost atoms at each end state.
         du0 = [
