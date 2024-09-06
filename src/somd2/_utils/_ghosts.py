@@ -194,6 +194,10 @@ def _boresch(system):
             elif junction == 3:
                 mol = _triple(mol, b, bridges0[b], physical0[b])
 
+            # Higher order junction.
+            else:
+                mol = _higher(mol, b, bridges0[b], physical0[b])
+
         # Now lambda = 1.
         for b in bridges1:
             junction = len(physical1[b])
@@ -206,6 +210,10 @@ def _boresch(system):
 
             elif junction == 3:
                 mol = _triple(mol, b, bridges1[b], physical1[b], is_lambda1=True)
+
+            # Higher order junction.
+            else:
+                mol = _higher(mol, b, bridges1[b], physical1[b], is_lambda1=True)
 
         # Update the molecule in the system.
         system.update(mol)
@@ -776,3 +784,105 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
 
     # Return the updated molecule.
     return mol
+
+
+def _higher(mol, bridge, dummies, physical, is_lambda1=False):
+    r"""
+    Apply Boresch modifications to higher order junctions.
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    bridge : sire.legacy.Mol.AtomIdx
+        The physical bridge atom.
+
+    dummies : List[sire.legacy.Mol.AtomIdx]
+        The list of dummy atoms connected to the bridge atom.
+
+    physical : List[sire.legacy.Mol.AtomIdx]
+        The list of physical atoms connected to the bridge atom.
+
+    is_lambda1 : bool, optional
+        Whether the junction is at lambda = 1.
+
+    Returns
+    -------
+
+    mol : sire.mol.Molecule
+        The updated molecule.
+    """
+
+    _logger.debug(
+        f"Applying Boresch modifications to triple dummy junction at "
+        f"{_lam_sym} = {int(is_lambda1)}:"
+    )
+
+    # Store the molecular info.
+    info = mol.info()
+
+    # Property suffix based on the end state.
+    suffix = "0" if not is_lambda1 else "1"
+
+    # Get the end state connectivity property.
+    try:
+        connectivity = mol.property("connectivity" + suffix)
+    except:
+        connectivity = mol.property("connectivity")
+
+    # Now remove all bonded interactions between the dummy atoms and one of the
+    # physical atoms connected to the bridge atom, hence reduced the problem to
+    # that of a triple junction.
+    while len(physical) > 3:
+        # Pop the first physical atom index from the list.
+        idx = physical.pop(0)
+
+        # Get the end state bond functions.
+        angles = mol.property("angle" + suffix)
+        dihedrals = mol.property("dihedral" + suffix)
+
+        # Initialise containers to store the updated bonded terms.
+        new_angles = _SireMM.ThreeAtomFunctions(mol.info())
+        new_dihedrals = _SireMM.FourAtomFunctions(mol.info())
+
+        # Angles.
+        for p in angles.potentials():
+            idx0 = info.atom_idx(p.atom0())
+            idx1 = info.atom_idx(p.atom1())
+            idx2 = info.atom_idx(p.atom2())
+
+            if idx == idx0 and idx2 in dummies or idx == idx2 and idx0 in dummies:
+                _logger.debug(
+                    f"  Removing angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], {p.function()}"
+                )
+            else:
+                new_angles.set(idx0, idx1, idx2, p.function())
+
+        # Dihedrals.
+        for p in dihedrals.potentials():
+            idx0 = info.atom_idx(p.atom0())
+            idx1 = info.atom_idx(p.atom1())
+            idx2 = info.atom_idx(p.atom2())
+            idx3 = info.atom_idx(p.atom3())
+            idxs = [idx0, idx1, idx2, idx3]
+
+            if idx in idxs and any([x in dummies for x in idxs]):
+                _logger.debug(
+                    f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
+                )
+            else:
+                new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
+
+        # Update the molecule.
+        mol = mol.edit().set_property("angle" + suffix, new_angles).molecule().commit()
+        mol = (
+            mol.edit()
+            .set_property("dihedral" + suffix, new_dihedrals)
+            .molecule()
+            .commit()
+        )
+
+    # Now treat the triple junction.
+    mol = _triple(mol, bridge, dummies, physical, is_lambda1)
