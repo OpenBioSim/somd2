@@ -29,9 +29,9 @@ else:
 del _platform
 
 
-def _has_dummy(mol, idxs, is_lambda1=False):
+def _has_ghost(mol, idxs, is_lambda1=False):
     """
-    Internal function to check whether any atom is a dummy.
+    Internal function to check whether any atom is a ghost.
 
     Parameters
     ----------
@@ -48,8 +48,8 @@ def _has_dummy(mol, idxs, is_lambda1=False):
     Returns
     -------
 
-    has_dummy : bool
-        Whether a dummy atom is present.
+    has_ghost : bool
+        Whether a ghost atom is present.
     """
 
     import sire.legacy.Mol as _SireMol
@@ -57,7 +57,7 @@ def _has_dummy(mol, idxs, is_lambda1=False):
     # We need to check by ambertype too since this molecule may have been
     # created via sire.morph.create_from_pertfile, in which case the element
     # property will have been set to the end state with the largest mass, i.e.
-    # may no longer by a dummy.
+    # may no longer by a ghost.
     if is_lambda1:
         element_prop = "element1"
         ambertype_prop = "ambertype1"
@@ -65,23 +65,23 @@ def _has_dummy(mol, idxs, is_lambda1=False):
         element_prop = "element0"
         ambertype_prop = "ambertype0"
 
-    element_dummy = _SireMol.Element(0)
-    ambertype_dummy = "du"
+    element_ghost = _SireMol.Element(0)
+    ambertype_ghost = "du"
 
-    # Check whether an of the atoms is a dummy.
+    # Check whether an of the atoms is a ghost.
     for idx in idxs:
         if (
-            mol.atom(idx).property(element_prop) == element_dummy
-            or mol.atom(idx).property(ambertype_prop) == ambertype_dummy
+            mol.atom(idx).property(element_prop) == element_ghost
+            or mol.atom(idx).property(ambertype_prop) == ambertype_ghost
         ):
             return True
 
     return False
 
 
-def _is_dummy(mol, idxs, is_lambda1=False):
+def _is_ghost(mol, idxs, is_lambda1=False):
     """
-    Internal function to return whether each atom is a dummy.
+    Internal function to return whether each atom is a ghost.
 
     Parameters
     ----------
@@ -98,8 +98,8 @@ def _is_dummy(mol, idxs, is_lambda1=False):
     Returns
     -------
 
-    is_dummy : [bool]
-        Whether each atom is a dummy.
+    is_ghost : [bool]
+        Whether each atom is a ghost.
     """
 
     import sire.legacy.Mol as _SireMol
@@ -107,7 +107,7 @@ def _is_dummy(mol, idxs, is_lambda1=False):
     # We need to check by ambertype too since this molecule may have been
     # created via sire.morph.create_from_pertfile, in which case the element
     # property will have been set to the end state with the largest mass, i.e.
-    # may no longer by a dummy.
+    # may no longer by a ghost.
     if is_lambda1:
         element_prop = "element1"
         ambertype_prop = "ambertype1"
@@ -122,17 +122,17 @@ def _is_dummy(mol, idxs, is_lambda1=False):
         element_prop = "element0"
         ambertype_prop = "ambertype0"
 
-    element_dummy = _SireMol.Element(0)
-    ambertype_dummy = "du"
+    element_ghost = _SireMol.Element(0)
+    ambertype_ghost = "du"
 
     # Initialise a list to store the state of each atom.
-    is_dummy = []
+    is_ghost = []
 
-    # Check whether each of the atoms is a dummy.
+    # Check whether each of the atoms is a ghost.
     for idx in idxs:
-        is_dummy.append(
-            mol.atom(idx).property(element_prop) == element_dummy
-            or mol.atom(idx).property(ambertype_prop) == ambertype_dummy
+        is_ghost.append(
+            mol.atom(idx).property(element_prop) == element_ghost
+            or mol.atom(idx).property(ambertype_prop) == ambertype_ghost
         )
 
-    return is_dummy
+    return is_ghost

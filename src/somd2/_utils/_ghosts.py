@@ -27,7 +27,7 @@ import sire.legacy.Mol as _SireMol
 
 from somd2 import _logger
 
-from . import _is_dummy
+from . import _is_ghost
 from . import _lam_sym
 
 
@@ -90,18 +90,18 @@ def _boresch(system):
         except:
             connectivity1 = connectivity0
 
-        # Find the indices of the dummy atoms at each end state.
+        # Find the indices of the ghost atoms at each end state.
         du0 = [
             _SireMol.AtomIdx(i)
             for i, x in enumerate(
-                _is_dummy(mol, [_SireMol.AtomIdx(i) for i in range(mol.num_atoms())])
+                _is_ghost(mol, [_SireMol.AtomIdx(i) for i in range(mol.num_atoms())])
             )
             if x
         ]
         du1 = [
             _SireMol.AtomIdx(i)
             for i, x in enumerate(
-                _is_dummy(
+                _is_ghost(
                     mol,
                     [_SireMol.AtomIdx(i) for i in range(mol.num_atoms())],
                     is_lambda1=True,
@@ -111,11 +111,11 @@ def _boresch(system):
         ]
 
         # Work out the physical bridge atoms at lambda = 0. These are the atoms
-        # that connect dummy atoms to the physical region.
+        # that connect ghost atoms to the physical region.
         bridges0 = {}
         for du in du0:
             for c in connectivity0.connections_to(du):
-                if not _is_dummy(mol, [c])[0]:
+                if not _is_ghost(mol, [c])[0]:
                     if c not in bridges0:
                         bridges0[c] = [du]
                     else:
@@ -126,7 +126,7 @@ def _boresch(system):
         for b in bridges0:
             physical0[b] = []
             for c in connectivity0.connections_to(b):
-                if not _is_dummy(mol, [c])[0]:
+                if not _is_ghost(mol, [c])[0]:
                     physical0[b].append(c)
         for b in physical0:
             physical0[b].sort(key=lambda x: x.value())
@@ -135,7 +135,7 @@ def _boresch(system):
         bridges1 = {}
         for du in du1:
             for c in connectivity1.connections_to(du):
-                if not _is_dummy(mol, [c], is_lambda1=True)[0]:
+                if not _is_ghost(mol, [c], is_lambda1=True)[0]:
                     if c not in bridges1:
                         bridges1[c] = [du]
                     else:
@@ -144,7 +144,7 @@ def _boresch(system):
         for b in bridges1:
             physical1[b] = []
             for c in connectivity1.connections_to(b):
-                if not _is_dummy(mol, [c], is_lambda1=True)[0]:
+                if not _is_ghost(mol, [c], is_lambda1=True)[0]:
                     physical1[b].append(c)
         for b in physical1:
             physical1[b].sort(key=lambda x: x.value())
@@ -156,7 +156,7 @@ def _boresch(system):
             for i, b in enumerate(bridges0):
                 _logger.debug(f"  Bridge {i}: {b.value()}")
                 _logger.debug(
-                    f"  dummies: [{','.join([str(x.value()) for x in bridges0[b]])}]"
+                    f"  ghosts: [{','.join([str(x.value()) for x in bridges0[b]])}]"
                 )
                 _logger.debug(
                     f"  physical: [{','.join([str(x.value()) for x in physical0[b]])}]"
@@ -168,7 +168,7 @@ def _boresch(system):
             for i, b in enumerate(bridges1):
                 _logger.debug(f"  Bridge {i}: {b.value()}")
                 _logger.debug(
-                    f"  dummies: [{','.join([str(x.value()) for x in bridges1[b]])}]"
+                    f"  ghosts: [{','.join([str(x.value()) for x in bridges1[b]])}]"
                 )
                 _logger.debug(
                     f"  physical: [{','.join([str(x.value()) for x in physical1[b]])}]"
@@ -222,11 +222,11 @@ def _boresch(system):
     return system
 
 
-def _terminal(mol, bridge, dummies, physical, is_lambda1=False):
+def _terminal(mol, bridge, ghosts, physical, is_lambda1=False):
     r"""
     Apply Boresch modifications to a terminal junction.
 
-    An example terminal junction with three dummy branches. Here X is the
+    An example terminal junction with three ghost branches. Here X is the
     physical bridge atom.
 
                DR1
@@ -246,8 +246,8 @@ def _terminal(mol, bridge, dummies, physical, is_lambda1=False):
     bridge : sire.legacy.Mol.AtomIdx
         The physical bridge atom.
 
-    dummies : List[sire.legacy.Mol.AtomIdx]
-        The list of dummy atoms connected to the bridge atom.
+    ghosts : List[sire.legacy.Mol.AtomIdx]
+        The list of ghost atoms connected to the bridge atom.
 
     physical : List[sire.legacy.Mol.AtomIdx]
         The list of physical atoms connected to the bridge atom.
@@ -263,7 +263,7 @@ def _terminal(mol, bridge, dummies, physical, is_lambda1=False):
     """
 
     _logger.debug(
-        f"Applying Boresch modifications to terminal dummy junction at "
+        f"Applying Boresch modifications to terminal ghost junction at "
         f"{_lam_sym} = {int(is_lambda1)}:"
     )
 
@@ -283,9 +283,9 @@ def _terminal(mol, bridge, dummies, physical, is_lambda1=False):
     for p in physical:
         # Loop over the atoms connected to the physical atom.
         for c in connectivity.connections_to(p):
-            # If the atom is not a dummy atom or the bridge atom itself, we have
+            # If the atom is not a ghost atom or the bridge atom itself, we have
             # found a physical atom two atoms away from the bridge atom.
-            if not _is_dummy(mol, [c], is_lambda1)[0] and c != bridge:
+            if not _is_ghost(mol, [c], is_lambda1)[0] and c != bridge:
                 if c not in physical2:
                     physical2.append(c)
 
@@ -307,8 +307,8 @@ def _terminal(mol, bridge, dummies, physical, is_lambda1=False):
         idx1 = info.atom_idx(p.atom1())
         idx2 = info.atom_idx(p.atom2())
         idx3 = info.atom_idx(p.atom3())
-        if (idx0 in physical2 and idx3 in dummies) or (
-            idx3 in physical2 and idx0 in dummies
+        if (idx0 in physical2 and idx3 in ghosts) or (
+            idx3 in physical2 and idx0 in ghosts
         ):
             _logger.debug(
                 f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
@@ -323,11 +323,11 @@ def _terminal(mol, bridge, dummies, physical, is_lambda1=False):
     return mol
 
 
-def _dual(mol, bridge, dummies, physical, is_lambda1=False):
+def _dual(mol, bridge, ghosts, physical, is_lambda1=False):
     r"""
     Apply Boresch modifications to a dual junction.
 
-    An example dual junction with two dummy branches. Here X is the physical
+    An example dual junction with two ghost branches. Here X is the physical
     bridge atom.
 
          R1     DR1
@@ -347,8 +347,8 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
     bridge : sire.legacy.Mol.AtomIdx
         The physical bridge atom.
 
-    dummies : List[sire.legacy.Mol.AtomIdx]
-        The list of dummy atoms connected to the bridge atom.
+    ghosts : List[sire.legacy.Mol.AtomIdx]
+        The list of ghost atoms connected to the bridge atom.
 
     physical : List[sire.legacy.Mol.AtomIdx]
         The list of physical atoms connected to the bridge atom.
@@ -364,7 +364,7 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
     """
 
     _logger.debug(
-        f"Applying Boresch modifications to dual dummy junction at "
+        f"Applying Boresch modifications to dual ghost junction at "
         f"{_lam_sym} = {int(is_lambda1)}:"
     )
 
@@ -381,10 +381,10 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
         connectivity = mol.property("connectivity")
 
     # Single branch.
-    if len(dummies) == 1:
+    if len(ghosts) == 1:
         _logger.debug("  Single branch:")
 
-        # First remove all dihedrals starting from the dummy atom and ending in
+        # First remove all dihedrals starting from the ghost atom and ending in
         # physical system.
 
         # Get the end state bond functions.
@@ -401,19 +401,19 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
             idx2 = info.atom_idx(p.atom2())
             idx3 = info.atom_idx(p.atom3())
 
-            # Dihedral terminates at the dummy bridge.
+            # Dihedral terminates at the ghost bridge.
             if (
-                not _is_dummy(mol, [idx0], is_lambda1)[0]
-                and idx3 in dummies
-                or not _is_dummy(mol, [idx3], is_lambda1)[0]
-                and idx0 in dummies
+                not _is_ghost(mol, [idx0], is_lambda1)[0]
+                and idx3 in ghosts
+                or not _is_ghost(mol, [idx3], is_lambda1)[0]
+                and idx0 in ghosts
             ):
                 _logger.debug(
                     f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
                 )
             # Dihedral terminates at the second physical atom.
-            elif (_is_dummy(mol, [idx0], is_lambda1)[0] and idx3 == physical[1]) or (
-                _is_dummy(mol, [idx3], is_lambda1)[0] and idx0 == physical[1]
+            elif (_is_ghost(mol, [idx0], is_lambda1)[0] and idx3 == physical[1]) or (
+                _is_ghost(mol, [idx3], is_lambda1)[0] and idx0 == physical[1]
             ):
                 _logger.debug(
                     f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
@@ -422,7 +422,7 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
                 new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
 
         # Next we modify the angle terms between the physical and
-        # dummy atom so that the equilibrium angle is 90 degrees.
+        # ghost atom so that the equilibrium angle is 90 degrees.
         new_angles = _SireMM.ThreeAtomFunctions(mol.info())
         for p in angles.potentials():
             idx0 = info.atom_idx(p.atom0())
@@ -430,10 +430,10 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
             idx2 = info.atom_idx(p.atom2())
 
             if (
-                idx0 in dummies
+                idx0 in ghosts
                 and idx2 in physical
                 or idx0 in physical
-                and idx2 in dummies
+                and idx2 in ghosts
             ):
                 from math import pi
                 from sire.legacy.CAS import Symbol
@@ -470,7 +470,7 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
     else:
         _logger.debug("  Dual branch:")
 
-        # First, delete all bonded terms between atoms in two dummy branches.
+        # First, delete all bonded terms between atoms in two ghost branches.
 
         # Get the end state bond functions.
         angles = mol.property("angle" + suffix)
@@ -486,7 +486,7 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
             idx1 = info.atom_idx(p.atom1())
             idx2 = info.atom_idx(p.atom2())
 
-            if idx0 in dummies and idx2 in dummies:
+            if idx0 in ghosts and idx2 in ghosts:
                 _logger.debug(
                     f"  Removing angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], {p.function()}"
                 )
@@ -501,14 +501,12 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
             idx2 = info.atom_idx(p.atom2())
             idx3 = info.atom_idx(p.atom3())
 
-            # Work out the number of dummies in the dihedral.
-            num_dummies = len(
-                [idx for idx in [idx0, idx1, idx2, idx3] if idx in dummies]
-            )
+            # Work out the number of ghosts in the dihedral.
+            num_ghosts = len([idx for idx in [idx0, idx1, idx2, idx3] if idx in ghosts])
 
-            # If there is more than one dummy, then this dihedral must bridge the
-            # dummy branches.
-            if num_dummies > 1:
+            # If there is more than one ghost, then this dihedral must bridge the
+            # ghost branches.
+            if num_ghosts > 1:
                 _logger.debug(
                     f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
                 )
@@ -524,15 +522,15 @@ def _dual(mol, bridge, dummies, physical, is_lambda1=False):
             .commit()
         )
 
-        # Now treat the dummy branches individually.
-        for d in dummies:
+        # Now treat the ghost branches individually.
+        for d in ghosts:
             mol = _dual(mol, bridge, [d], physical, is_lambda1)
 
     # Return the updated molecule.
     return mol
 
 
-def _triple(mol, bridge, dummies, physical, is_lambda1=False):
+def _triple(mol, bridge, ghosts, physical, is_lambda1=False):
     r"""
     Apply Boresch modifications to a triple junction.
 
@@ -555,8 +553,8 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
     bridge : sire.legacy.Mol.AtomIdx
         The physical bridge atom.
 
-    dummies : List[sire.legacy.Mol.AtomIdx]
-        The list of dummy atoms connected to the bridge atom.
+    ghosts : List[sire.legacy.Mol.AtomIdx]
+        The list of ghost atoms connected to the bridge atom.
 
     physical : List[sire.legacy.Mol.AtomIdx]
         The list of physical atoms connected to the bridge atom.
@@ -572,7 +570,7 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
     """
 
     _logger.debug(
-        f"Applying Boresch modifications to triple dummy junction at "
+        f"Applying Boresch modifications to triple ghost junction at "
         f"{_lam_sym} = {int(is_lambda1)}:"
     )
 
@@ -596,7 +594,7 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
         _logger.debug("  Planar junction.")
 
         # First remove all bonded terms between one of the physical atoms
-        # and the dummy group.
+        # and the ghost group.
 
         # Store the index of the first physical atom.
         idx = physical[0]
@@ -616,7 +614,7 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
             idx2 = info.atom_idx(p.atom2())
             idxs = [idx0, idx1, idx2]
 
-            if idx in idxs and any([x in dummies for x in idxs]):
+            if idx in idxs and any([x in ghosts for x in idxs]):
                 _logger.debug(
                     f"  Removing angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], {p.function()}"
                 )
@@ -632,7 +630,7 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
             idx3 = info.atom_idx(p.atom3())
             idxs = [idx0, idx1, idx2, idx3]
 
-            if idx in idxs and any([x in dummies for x in idxs]):
+            if idx in idxs and any([x in ghosts for x in idxs]):
                 _logger.debug(
                     f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
                 )
@@ -641,7 +639,7 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
                 new_dihedrals.set(idx0, idx1, idx2, idx3, p.function())
 
         # Next we modify the angle terms between the remaining physical and
-        # dummy atoms so that the equilibrium angle is 90 degrees.
+        # ghost atoms so that the equilibrium angle is 90 degrees.
         new_new_angles = _SireMM.ThreeAtomFunctions(mol.info())
         for p in new_angles.potentials():
             idx0 = info.atom_idx(p.atom0())
@@ -649,10 +647,10 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
             idx2 = info.atom_idx(p.atom2())
 
             if (
-                idx0 in dummies
+                idx0 in ghosts
                 and idx2 in physical[1:]
                 or idx0 in physical[1:]
-                and idx2 in dummies
+                and idx2 in ghosts
             ):
                 from math import pi
                 from sire.legacy.CAS import Symbol
@@ -694,7 +692,7 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
     elif element == _SireMol.Element("N"):
         _logger.debug("  Non-planar junction.")
 
-        # First, modify the force constants of the angle terms between the dummy
+        # First, modify the force constants of the angle terms between the ghost
         # atoms and the physical system to be very low.
 
         # Get the end state angle functions.
@@ -709,9 +707,9 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
             idx2 = info.atom_idx(p.atom2())
 
             if (
-                idx0 in dummies
+                idx0 in ghosts
                 and idx2 in physical
-                or idx2 in dummies
+                or idx2 in ghosts
                 and idx0 in physical
             ):
                 from sire.legacy.CAS import Symbol
@@ -738,7 +736,7 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
             else:
                 new_angles.set(idx0, idx1, idx2, p.function())
 
-        # Next, remove all dihedral starting from the dummy atoms and ending in
+        # Next, remove all dihedral starting from the ghost atoms and ending in
         # the physical system. Also, only preserve dihedrals terminating at one
         # of the physical atoms.
 
@@ -755,17 +753,17 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
             idx3 = info.atom_idx(p.atom3())
             idxs = [idx0, idx1, idx2, idx3]
 
-            # If there is one dummy atom, then this dihedral must begin or terminate
-            # at the dummy atom.
-            num_dummies = len([x for x in idxs if x in dummies])
-            if num_dummies == 1:
+            # If there is one ghost atom, then this dihedral must begin or terminate
+            # at the ghost atom.
+            num_ghosts = len([x for x in idxs if x in ghosts])
+            if num_ghosts == 1:
                 _logger.debug(
                     f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
                 )
-            # Remove the dihedral if includes a dummy and doesn't terminate at the first
+            # Remove the dihedral if includes a ghost and doesn't terminate at the first
             # physical atom.
-            elif (_is_dummy(mol, [idx0], is_lambda1)[0] and idx3 in physical[1:]) or (
-                _is_dummy(mol, [idx3], is_lambda1)[0] and idx0 in physical[1:]
+            elif (_is_ghost(mol, [idx0], is_lambda1)[0] and idx3 in physical[1:]) or (
+                _is_ghost(mol, [idx3], is_lambda1)[0] and idx0 in physical[1:]
             ):
                 _logger.debug(
                     f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
@@ -786,7 +784,7 @@ def _triple(mol, bridge, dummies, physical, is_lambda1=False):
     return mol
 
 
-def _higher(mol, bridge, dummies, physical, is_lambda1=False):
+def _higher(mol, bridge, ghosts, physical, is_lambda1=False):
     r"""
     Apply Boresch modifications to higher order junctions.
 
@@ -799,8 +797,8 @@ def _higher(mol, bridge, dummies, physical, is_lambda1=False):
     bridge : sire.legacy.Mol.AtomIdx
         The physical bridge atom.
 
-    dummies : List[sire.legacy.Mol.AtomIdx]
-        The list of dummy atoms connected to the bridge atom.
+    ghosts : List[sire.legacy.Mol.AtomIdx]
+        The list of ghost atoms connected to the bridge atom.
 
     physical : List[sire.legacy.Mol.AtomIdx]
         The list of physical atoms connected to the bridge atom.
@@ -816,7 +814,7 @@ def _higher(mol, bridge, dummies, physical, is_lambda1=False):
     """
 
     _logger.debug(
-        f"Applying Boresch modifications to triple dummy junction at "
+        f"Applying Boresch modifications to triple ghost junction at "
         f"{_lam_sym} = {int(is_lambda1)}:"
     )
 
@@ -832,7 +830,7 @@ def _higher(mol, bridge, dummies, physical, is_lambda1=False):
     except:
         connectivity = mol.property("connectivity")
 
-    # Now remove all bonded interactions between the dummy atoms and one of the
+    # Now remove all bonded interactions between the ghost atoms and one of the
     # physical atoms connected to the bridge atom, hence reducing the problem to
     # that of a triple junction.
     while len(physical) > 3:
@@ -853,7 +851,7 @@ def _higher(mol, bridge, dummies, physical, is_lambda1=False):
             idx1 = info.atom_idx(p.atom1())
             idx2 = info.atom_idx(p.atom2())
 
-            if idx == idx0 and idx2 in dummies or idx == idx2 and idx0 in dummies:
+            if idx == idx0 and idx2 in ghosts or idx == idx2 and idx0 in ghosts:
                 _logger.debug(
                     f"  Removing angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], {p.function()}"
                 )
@@ -868,7 +866,7 @@ def _higher(mol, bridge, dummies, physical, is_lambda1=False):
             idx3 = info.atom_idx(p.atom3())
             idxs = [idx0, idx1, idx2, idx3]
 
-            if idx in idxs and any([x in dummies for x in idxs]):
+            if idx in idxs and any([x in ghosts for x in idxs]):
                 _logger.debug(
                     f"  Removing dihedral: [{idx0.value()}-{idx1.value()}-{idx2.value()}-{idx3.value()}], {p.function()}"
                 )
@@ -885,4 +883,4 @@ def _higher(mol, bridge, dummies, physical, is_lambda1=False):
         )
 
     # Now treat the triple junction.
-    mol = _triple(mol, bridge, dummies, physical, is_lambda1)
+    mol = _triple(mol, bridge, ghosts, physical, is_lambda1)

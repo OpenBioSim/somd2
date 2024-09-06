@@ -62,7 +62,7 @@ def _make_compatible(system):
     except KeyError:
         raise KeyError("No perturbable molecules in the system")
 
-    from . import _is_dummy, _has_dummy
+    from . import _is_ghost, _has_ghost
 
     for mol in pert_mols:
         # Store the molecule info.
@@ -177,18 +177,18 @@ def _make_compatible(system):
             idx0 = p0.atom0()
             idx1 = p0.atom1()
 
-            # Check whether a dummy atoms are present in the lambda = 0
+            # Check whether a ghost atoms are present in the lambda = 0
             # and lambda = 1 states.
-            initial_dummy = _has_dummy(mol, [idx0, idx1])
-            final_dummy = _has_dummy(mol, [idx0, idx1], True)
+            initial_ghost = _has_ghost(mol, [idx0, idx1])
+            final_ghost = _has_ghost(mol, [idx0, idx1], True)
 
-            # If there is a dummy, then set the potential to the opposite state.
+            # If there is a ghost, then set the potential to the opposite state.
             # This should already be the case, but we explicitly set it here.
 
-            if initial_dummy:
+            if initial_ghost:
                 new_bonds0.set(idx0, idx1, p1.function())
                 new_bonds1.set(idx0, idx1, p1.function())
-            elif final_dummy:
+            elif final_ghost:
                 new_bonds0.set(idx0, idx1, p0.function())
                 new_bonds1.set(idx0, idx1, p0.function())
             else:
@@ -274,22 +274,22 @@ def _make_compatible(system):
             idx1 = p0.atom1()
             idx2 = p0.atom2()
 
-            # Check whether a dummy atoms are present in the lambda = 0
+            # Check whether a ghost atoms are present in the lambda = 0
             # and lambda = 1 states.
-            initial_dummy = _has_dummy(mol, [idx0, idx1, idx2])
-            final_dummy = _has_dummy(mol, [idx0, idx1, idx2], True)
+            initial_ghost = _has_ghost(mol, [idx0, idx1, idx2])
+            final_ghost = _has_ghost(mol, [idx0, idx1, idx2], True)
 
-            # If both end states contain a dummy, then don't add the potentials.
-            if initial_dummy and final_dummy:
+            # If both end states contain a ghost, then don't add the potentials.
+            if initial_ghost and final_ghost:
                 continue
-            # If the initial state contains a dummy, then use the potential from the final state.
+            # If the initial state contains a ghost, then use the potential from the final state.
             # This should already be the case, but we explicitly set it here.
-            elif initial_dummy:
+            elif initial_ghost:
                 new_angles0.set(idx0, idx1, idx2, p1.function())
                 new_angles1.set(idx0, idx1, idx2, p1.function())
-            # If the final state contains a dummy, then use the potential from the initial state.
+            # If the final state contains a ghost, then use the potential from the initial state.
             # This should already be the case, but we explicitly set it here.
-            elif final_dummy:
+            elif final_ghost:
                 new_angles0.set(idx0, idx1, idx2, p0.function())
                 new_angles1.set(idx0, idx1, idx2, p0.function())
             # Otherwise, use the potentials from the initial and final states.
@@ -379,28 +379,28 @@ def _make_compatible(system):
             idx2 = info.atom_idx(p0.atom2())
             idx3 = info.atom_idx(p0.atom3())
 
-            # Whether any atom in each end state is a dummy.
-            has_dummy_initial = _has_dummy(mol, [idx0, idx1, idx2, idx3])
-            has_dummy_final = _has_dummy(mol, [idx0, idx1, idx2, idx3], True)
+            # Whether any atom in each end state is a ghost.
+            has_ghost_initial = _has_ghost(mol, [idx0, idx1, idx2, idx3])
+            has_ghost_final = _has_ghost(mol, [idx0, idx1, idx2, idx3], True)
 
-            # Whether all atoms in each state are dummies.
-            all_dummy_initial = all(_is_dummy(mol, [idx0, idx1, idx2, idx3]))
-            all_dummy_final = all(_is_dummy(mol, [idx0, idx1, idx2, idx3], True))
+            # Whether all atoms in each state are ghosts.
+            all_ghost_initial = all(_is_ghost(mol, [idx0, idx1, idx2, idx3]))
+            all_ghost_final = all(_is_ghost(mol, [idx0, idx1, idx2, idx3], True))
 
-            # If both end states contain a dummy, then don't add the potentials.
-            if has_dummy_initial and has_dummy_final:
+            # If both end states contain a ghost, then don't add the potentials.
+            if has_ghost_initial and has_ghost_final:
                 continue
-            elif has_dummy_initial:
-                # If all the atoms are dummy, then use the potential from the final state.
-                if all_dummy_initial:
+            elif has_ghost_initial:
+                # If all the atoms are ghosts, then use the potential from the final state.
+                if all_ghost_initial:
                     new_dihedrals0.set(idx0, idx1, idx2, idx3, p1.function())
                     new_dihedrals1.set(idx0, idx1, idx2, idx3, p1.function())
                 # Otherwise, remove the potential from the initial state.
                 else:
                     new_dihedrals1.set(idx0, idx1, idx2, idx3, p1.function())
-            elif has_dummy_final:
-                # If all the atoms are dummy, then use the potential from the initial state.
-                if all_dummy_final:
+            elif has_ghost_final:
+                # If all the atoms are ghosts, then use the potential from the initial state.
+                if all_ghost_final:
                     new_dihedrals0.set(idx0, idx1, idx2, idx3, p0.function())
                     new_dihedrals1.set(idx0, idx1, idx2, idx3, p0.function())
                 # Otherwise, remove the potential from the final state.
@@ -505,28 +505,28 @@ def _make_compatible(system):
             idx2 = info.atom_idx(p0.atom2())
             idx3 = info.atom_idx(p0.atom3())
 
-            # Whether any atom in each end state is a dummy.
-            has_dummy_initial = _has_dummy(mol, [idx0, idx1, idx2, idx3])
-            has_dummy_final = _has_dummy(mol, [idx0, idx1, idx2, idx3], True)
+            # Whether any atom in each end state is a ghost.
+            has_ghost_initial = _has_ghost(mol, [idx0, idx1, idx2, idx3])
+            has_ghost_final = _has_ghost(mol, [idx0, idx1, idx2, idx3], True)
 
-            # Whether all atoms in each state are dummies.
-            all_dummy_initial = all(_is_dummy(mol, [idx0, idx1, idx2, idx3]))
-            all_dummy_final = all(_is_dummy(mol, [idx0, idx1, idx2, idx3], True))
+            # Whether all atoms in each state are ghosts.
+            all_ghost_initial = all(_is_ghost(mol, [idx0, idx1, idx2, idx3]))
+            all_ghost_final = all(_is_ghost(mol, [idx0, idx1, idx2, idx3], True))
 
-            # If both end states contain a dummy, then don't add the potentials.
-            if has_dummy_initial and has_dummy_final:
+            # If both end states contain a ghost, then don't add the potentials.
+            if has_ghost_initial and has_ghost_final:
                 continue
-            elif has_dummy_initial:
-                # If all the atoms are dummy, then use the potential from the final state.
-                if all_dummy_initial:
+            elif has_ghost_initial:
+                # If all the atoms are ghosts, then use the potential from the final state.
+                if all_ghost_initial:
                     new_impropers0.set(idx0, idx1, idx2, idx3, p1.function())
                     new_impropers1.set(idx0, idx1, idx2, idx3, p1.function())
                 # Otherwise, remove the potential from the initial state.
                 else:
                     new_impropers1.set(idx0, idx1, idx2, idx3, p1.function())
-            elif has_dummy_final:
-                # If all the atoms are dummy, then use the potential from the initial state.
-                if all_dummy_final:
+            elif has_ghost_final:
+                # If all the atoms are ghosts, then use the potential from the initial state.
+                if all_ghost_final:
                     new_impropers0.set(idx0, idx1, idx2, idx3, p0.function())
                     new_impropers1.set(idx0, idx1, idx2, idx3, p0.function())
                 # Otherwise, remove the potential from the final state.
