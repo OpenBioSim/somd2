@@ -47,6 +47,12 @@ def _boresch(system):
 
     system : sire.legacy.System.System
         The updated system.
+
+    Notes
+    -----
+
+    For technical details, please refer to the original publication:
+        https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328
     """
 
     _logger.info(f"Applying Boresch modifications to ghost atom bonded terms.")
