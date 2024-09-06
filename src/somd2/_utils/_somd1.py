@@ -39,7 +39,7 @@ def _make_compatible(system):
     Returns
     -------
 
-    system : sire.legacy.System.System
+    system : sire.system.System
         The updated system.
     """
 

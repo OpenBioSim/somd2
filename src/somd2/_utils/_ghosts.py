@@ -45,7 +45,7 @@ def _boresch(system):
     Returns
     -------
 
-    system : sire.legacy.System.System
+    system : sire.system.System
         The updated system.
 
     Notes
