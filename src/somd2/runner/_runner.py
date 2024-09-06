@@ -161,7 +161,6 @@ class Runner:
             self._config._extra_args["check_for_h_by_element"] = False
             self._config._extra_args["check_for_h_by_ambertype"] = False
             self._config._extra_args["fix_perturbable_zero_sigmas"] = True
-            self._config._extra_args["use_taylor_softening"] = True
 
         # Apply Boresch modifications to bonded terms involving ghost atoms to
         # avoid spurious couplings to the physical system at the end states.
