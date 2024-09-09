@@ -103,14 +103,14 @@ def _boresch(system, k_hard=100, k_soft=5, optimise_angles=True):
             connectivity1 = mol.property("connectivity")
 
         # Find the indices of the ghost atoms at each end state.
-        du0 = [
+        ghosts0 = [
             _SireMol.AtomIdx(i)
             for i, x in enumerate(
                 _is_ghost(mol, [_SireMol.AtomIdx(i) for i in range(mol.num_atoms())])
             )
             if x
         ]
-        du1 = [
+        ghosts1 = [
             _SireMol.AtomIdx(i)
             for i, x in enumerate(
                 _is_ghost(
@@ -125,13 +125,13 @@ def _boresch(system, k_hard=100, k_soft=5, optimise_angles=True):
         # Work out the physical bridge atoms at lambda = 0. These are the atoms
         # that connect ghost atoms to the physical region.
         bridges0 = {}
-        for du in du0:
-            for c in connectivity0.connections_to(du):
+        for ghost in ghosts0:
+            for c in connectivity0.connections_to(ghost):
                 if not _is_ghost(mol, [c])[0]:
                     if c not in bridges0:
-                        bridges0[c] = [du]
+                        bridges0[c] = [ghost]
                     else:
-                        bridges0[c].append(du)
+                        bridges0[c].append(ghost)
         # Work out the indices of the other physical atoms that are connected to
         # the bridge atoms, sorted by the atom index.
         physical0 = {}
@@ -145,13 +145,13 @@ def _boresch(system, k_hard=100, k_soft=5, optimise_angles=True):
 
         # Repeat the above for lambda = 1.
         bridges1 = {}
-        for du in du1:
-            for c in connectivity1.connections_to(du):
+        for ghost in ghosts1:
+            for c in connectivity1.connections_to(ghost):
                 if not _is_ghost(mol, [c], is_lambda1=True)[0]:
                     if c not in bridges1:
-                        bridges1[c] = [du]
+                        bridges1[c] = [ghost]
                     else:
-                        bridges1[c].append(du)
+                        bridges1[c].append(ghost)
         physical1 = {}
         for b in bridges1:
             physical1[b] = []
