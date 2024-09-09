@@ -51,7 +51,7 @@ def _boresch(system, k_hard=100, k_soft=5, optimise_angles=True):
         for non-planar triple junctions. (In kcal/mol/rad^2)
 
     optimise_angles : bool, optional
-        Whether to optimise the equilibrium angle of the angle terms involving
+        Whether to optimise the equilibrium value of the angle terms involving
         ghost atoms for non-planar triple junctions.
 
     Returns
@@ -629,7 +629,7 @@ def _triple(
         atoms for non-planar triple junctions. (In kcal/mol/rad^2)
 
     optimise_angles : bool, optional
-        Whether to optimise the equilibrium angle of the angle terms involving
+        Whether to optimise the equilibrium value of the angle terms involving
         ghost atoms for non-planar triple junctions.
 
     is_lambda1 : bool, optional
@@ -964,7 +964,7 @@ def _higher(
         atoms for non-planar triple junctions. (In kcal/mol/rad^2)
 
     optimise_angles : bool, optional
-        Whether to optimise the equilibrium angle of the angle terms involving
+        Whether to optimise the equilibrium value of the angle terms involving
         ghost atoms for non-planar triple junctions.
 
     is_lambda1 : bool, optional
