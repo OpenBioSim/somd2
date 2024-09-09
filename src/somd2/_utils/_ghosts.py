@@ -31,7 +31,7 @@ from . import _is_ghost
 from . import _lam_sym
 
 
-def _boresch(system):
+def _boresch(system, k_hard=100, k_soft=5, optimise_angles=True):
     """
     Apply Boresch modifications to ghost atom bonded terms to avoid non-physical
     coupling between the ghost atoms and the physical region.
@@ -41,6 +41,18 @@ def _boresch(system):
 
     system : sire.system.System, sire.legacy.System.System
         The system containing the molecules to be perturbed.
+
+    k_hard : float, optional
+        The force constant to use to when setting angle terms involving ghost
+        atoms to 90 degrees to avoid flapping. (In kcal/mol/rad^2)
+
+    k_soft : float, optional
+        The force constant to use when setting angle terms involving ghost atoms
+        for non-planar triple junctions. (In kcal/mol/rad^2)
+
+    optimise_angles : bool, optional
+        Whether to optimise the equilibrium angle of the angle terms involving
+        ghost atoms for non-planar triple junctions.
 
     Returns
     -------
@@ -188,15 +200,30 @@ def _boresch(system):
 
             # Dual junction.
             elif junction == 2:
-                mol = _dual(mol, b, bridges0[b], physical0[b])
+                mol = _dual(mol, b, bridges0[b], physical0[b], k_hard=k_hard)
 
             # Triple junction.
             elif junction == 3:
-                mol = _triple(mol, b, bridges0[b], physical0[b])
+                mol = _triple(
+                    mol,
+                    b,
+                    bridges0[b],
+                    physical0[b],
+                    k_hard=k_hard,
+                    k_soft=k_soft,
+                    optimise_angles=optimise_angles,
+                )
 
             # Higher order junction.
             else:
-                mol = _higher(mol, b, bridges0[b], physical0[b])
+                mol = _higher(
+                    mol,
+                    b,
+                    bridges0[b],
+                    physical0[b],
+                    k_soft=k_soft,
+                    optimise_angles=optimise_angles,
+                )
 
         # Now lambda = 1.
         for b in bridges1:
@@ -206,14 +233,33 @@ def _boresch(system):
                 mol = _terminal(mol, b, bridges1[b], physical1[b], is_lambda1=True)
 
             elif junction == 2:
-                mol = _dual(mol, b, bridges1[b], physical1[b], is_lambda1=True)
+                mol = _dual(
+                    mol, b, bridges1[b], physical1[b], k_hard=k_hard, is_lambda1=True
+                )
 
             elif junction == 3:
-                mol = _triple(mol, b, bridges1[b], physical1[b], is_lambda1=True)
+                mol = _triple(
+                    mol,
+                    b,
+                    bridges1[b],
+                    physical1[b],
+                    k_hard=k_hard,
+                    k_soft=k_soft,
+                    optimise_angles=optimise_angles,
+                    is_lambda1=True,
+                )
 
             # Higher order junction.
             else:
-                mol = _higher(mol, b, bridges1[b], physical1[b], is_lambda1=True)
+                mol = _higher(
+                    mol,
+                    b,
+                    bridges1[b],
+                    physical1[b],
+                    k_soft=k_soft,
+                    optimise_angles=optimise_angles,
+                    is_lambda1=True,
+                )
 
         # Update the molecule in the system.
         system.update(mol)
@@ -323,7 +369,7 @@ def _terminal(mol, bridge, ghosts, physical, is_lambda1=False):
     return mol
 
 
-def _dual(mol, bridge, ghosts, physical, is_lambda1=False):
+def _dual(mol, bridge, ghosts, physical, k_hard=100, is_lambda1=False):
     r"""
     Apply Boresch modifications to a dual junction.
 
@@ -352,6 +398,10 @@ def _dual(mol, bridge, ghosts, physical, is_lambda1=False):
 
     physical : List[sire.legacy.Mol.AtomIdx]
         The list of physical atoms connected to the bridge atom.
+
+    k_hard : float, optional
+        The force constant to use when setting angle terms involving ghost
+        atoms to 90 degrees to avoid flapping. (In kcal/mol/rad^2)
 
     is_lambda1 : bool, optional
         Whether the junction is at lambda = 1.
@@ -441,7 +491,7 @@ def _dual(mol, bridge, ghosts, physical, is_lambda1=False):
                 theta0 = pi / 2.0
 
                 # Create the new angle function.
-                amber_angle = _SireMM.AmberAngle(100, theta0)
+                amber_angle = _SireMM.AmberAngle(k_hard, theta0)
 
                 # Generate the new angle expression.
                 expression = amber_angle.to_expression(Symbol("theta"))
@@ -524,13 +574,24 @@ def _dual(mol, bridge, ghosts, physical, is_lambda1=False):
 
         # Now treat the ghost branches individually.
         for d in ghosts:
-            mol = _dual(mol, bridge, [d], physical, is_lambda1)
+            mol = _dual(
+                mol, bridge, [d], physical, k_hard=k_hard, is_lambda1=is_lambda1
+            )
 
     # Return the updated molecule.
     return mol
 
 
-def _triple(mol, bridge, ghosts, physical, is_lambda1=False):
+def _triple(
+    mol,
+    bridge,
+    ghosts,
+    physical,
+    k_hard=100,
+    k_soft=5,
+    optimise_angles=True,
+    is_lambda1=False,
+):
     r"""
     Apply Boresch modifications to a triple junction.
 
@@ -558,6 +619,18 @@ def _triple(mol, bridge, ghosts, physical, is_lambda1=False):
 
     physical : List[sire.legacy.Mol.AtomIdx]
         The list of physical atoms connected to the bridge atom.
+
+    k_hard : float, optional
+        The force constant to use when setting angle terms involving ghost
+        atoms to 90 degrees to avoid flapping. (In kcal/mol/rad^2)
+
+    k_soft : float, optional
+        The force constant to use when setting angle terms involving ghost
+        atoms for non-planar triple junctions. (In kcal/mol/rad^2)
+
+    optimise_angles : bool, optional
+        Whether to optimise the equilibrium angle of the angle terms involving
+        ghost atoms for non-planar triple junctions.
 
     is_lambda1 : bool, optional
         Whether the junction is at lambda = 1.
@@ -658,7 +731,7 @@ def _triple(mol, bridge, ghosts, physical, is_lambda1=False):
                 theta0 = pi / 2.0
 
                 # Create the new angle function.
-                amber_angle = _SireMM.AmberAngle(100, theta0)
+                amber_angle = _SireMM.AmberAngle(k_hard, theta0)
 
                 # Generate the new angle expression.
                 expression = amber_angle.to_expression(Symbol("theta"))
@@ -720,7 +793,7 @@ def _triple(mol, bridge, ghosts, physical, is_lambda1=False):
                 amber_angle = _SireMM.AmberAngle(p.function(), theta)
 
                 # Create a new Amber angle with a modified force constant.
-                amber_angle = _SireMM.AmberAngle(5, amber_angle.theta0())
+                amber_angle = _SireMM.AmberAngle(k_soft, amber_angle.theta0())
 
                 # Generate the new angle expression.
                 expression = amber_angle.to_expression(theta)
@@ -784,7 +857,9 @@ def _triple(mol, bridge, ghosts, physical, is_lambda1=False):
     return mol
 
 
-def _higher(mol, bridge, ghosts, physical, is_lambda1=False):
+def _higher(
+    mol, bridge, ghosts, physical, k_soft=5, optimise_angles=True, is_lambda1=False
+):
     r"""
     Apply Boresch modifications to higher order junctions.
 
@@ -802,6 +877,14 @@ def _higher(mol, bridge, ghosts, physical, is_lambda1=False):
 
     physical : List[sire.legacy.Mol.AtomIdx]
         The list of physical atoms connected to the bridge atom.
+
+    k_soft : float, optional
+        The force constant to use when setting angle terms involving ghost
+        atoms for non-planar triple junctions. (In kcal/mol/rad^2)
+
+    optimise_angles : bool, optional
+        Whether to optimise the equilibrium angle of the angle terms involving
+        ghost atoms for non-planar triple junctions.
 
     is_lambda1 : bool, optional
         Whether the junction is at lambda = 1.
@@ -883,4 +966,12 @@ def _higher(mol, bridge, ghosts, physical, is_lambda1=False):
         )
 
     # Now treat the triple junction.
-    mol = _triple(mol, bridge, ghosts, physical, is_lambda1)
+    mol = _triple(
+        mol,
+        bridge,
+        ghosts,
+        physical,
+        k_hard=k_hard,
+        k_soft=k_soft,
+        optimise_angles=optimise_angles,
+    )
