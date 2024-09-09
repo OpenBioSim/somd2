@@ -919,7 +919,7 @@ def _triple(
                     new_angles.set(idx0, idx1, idx2, expression)
 
                     _logger.debug(
-                        f"  Stiffening angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
+                        f"  Optimising angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
                         f"{p.function()} --> {expression}"
                     )
 
