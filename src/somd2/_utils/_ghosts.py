@@ -500,7 +500,7 @@ def _dual(mol, bridge, ghosts, physical, k_hard=100, is_lambda1=False):
                 new_angles.set(idx0, idx1, idx2, expression)
 
                 _logger.debug(
-                    f"  Modifying angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
+                    f"  Stiffening angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
                     f"{p.function()} --> {expression}"
                 )
 
@@ -740,7 +740,7 @@ def _triple(
                 new_new_angles.set(idx0, idx1, idx2, expression)
 
                 _logger.debug(
-                    f"  Modifying angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
+                    f"  Stiffening angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
                     f"{p.function()} --> {expression}"
                 )
 
@@ -774,6 +774,9 @@ def _triple(
         # Initialise a container to store the updated angle functions.
         new_angles = _SireMM.ThreeAtomFunctions(mol.info())
 
+        # Indices for the softened angle terms.
+        angle_idxs = []
+
         for p in angles.potentials():
             idx0 = info.atom_idx(p.atom0())
             idx1 = info.atom_idx(p.atom1())
@@ -793,7 +796,14 @@ def _triple(
                 amber_angle = _SireMM.AmberAngle(p.function(), theta)
 
                 # Create a new Amber angle with a modified force constant.
-                amber_angle = _SireMM.AmberAngle(k_soft, amber_angle.theta0())
+
+                # We'll optimise the equilibrium angle for the softened angle term.
+                if optimise_angles:
+                    amber_angle = _SireMM.AmberAngle(0.05, amber_angle.theta0())
+                    angle_idxs.append((idx0, idx1, idx2))
+                # Use the existing equilibrium angle.
+                else:
+                    amber_angle = _SireMM.AmberAngle(k_soft, amber_angle.theta0())
 
                 # Generate the new angle expression.
                 expression = amber_angle.to_expression(theta)
@@ -802,7 +812,7 @@ def _triple(
                 new_angles.set(idx0, idx1, idx2, expression)
 
                 _logger.debug(
-                    f"  Modifying angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
+                    f"  Softening angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
                     f"{p.function()} --> {expression}"
                 )
 
@@ -852,6 +862,77 @@ def _triple(
             .molecule()
             .commit()
         )
+
+        # Optimise the equilibrium value of theta0 for the softened angle term.
+        if optimise_angles:
+            _logger.debug("  Optimising equilibrium values for softened angles.")
+
+            import sire.morph as _morph
+            from sire.units import radian as _radian
+
+            # Link properties to the appropriate end state.
+            if is_lambda1:
+                min_mol = _morph.link_to_perturbed(mol)
+            else:
+                min_mol = _morph.link_to_reference(mol)
+
+            # Minimise the molecule.
+            minimiser = min_mol.minimisation(constraint="none", platform="cpu")
+            minimiser.run()
+
+            # Commit the changes.
+            min_mol = minimiser.commit()
+
+            # Get the equilibrium angle values.
+            theta0s = {}
+            for idx in angle_idxs:
+                try:
+                    theta0s[idx] = min_mol.angles(*idx).sizes()[0].to(_radian)
+                except:
+                    raise ValueError(f"Could not find optimised angle term: {idx}")
+
+            # Get the existing angles.
+            angles = mol.property("angle" + suffix)
+
+            # Initialise a container to store the updated angle functions.
+            new_angles = _SireMM.ThreeAtomFunctions(mol.info())
+
+            # Update the angle potentials.
+            for p in angles.potentials():
+                idx0 = info.atom_idx(p.atom0())
+                idx1 = info.atom_idx(p.atom1())
+                idx2 = info.atom_idx(p.atom2())
+                idx = (idx0, idx1, idx2)
+
+                # This is the softened angle term.
+                if idx in angle_idxs:
+                    # Get the optimised equilibrium angle.
+                    theta0 = theta0s[idx]
+
+                    # Create the new angle function.
+                    amber_angle = _SireMM.AmberAngle(k_soft, theta0)
+
+                    # Generate the new angle expression.
+                    expression = amber_angle.to_expression(Symbol("theta"))
+
+                    # Set the equilibrium angle to 90 degrees.
+                    new_angles.set(idx0, idx1, idx2, expression)
+
+                    _logger.debug(
+                        f"  Stiffening angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
+                        f"{p.function()} --> {expression}"
+                    )
+
+                else:
+                    new_angles.set(idx0, idx1, idx2, p.function())
+
+            # Update the molecule.
+            mol = (
+                mol.edit()
+                .set_property("angle" + suffix, new_angles)
+                .molecule()
+                .commit()
+            )
 
     # Return the updated molecule.
     return mol
