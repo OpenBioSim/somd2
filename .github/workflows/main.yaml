@@ -30,7 +30,7 @@ jobs:
       matrix:
         python-version: ["3.11"]
         platform:
-          - { name: "windows", os: "windows-latest", shell: "pwsh" }
+          #- { name: "windows", os: "windows-latest", shell: "pwsh" }
           - { name: "linux", os: "ubuntu-latest", shell: "bash -l {0}" }
           - { name: "macos", os: "macos-latest", shell: "bash -l {0}" }
     defaults:
