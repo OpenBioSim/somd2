@@ -98,7 +98,7 @@ class Config:
         charge_scale_factor=0.2,
         swap_end_states=False,
         coulomb_power=1.0,
-        shift_delta="10A",
+        shift_delta="1A",
         restraints=None,
         constraint="h_bonds",
         perturbable_constraint="h_bonds_not_heavy_perturbed",
