@@ -1060,7 +1060,7 @@ def _higher(
         )
 
     # Now treat the triple junction.
-    mol = _triple(
+    return _triple(
         mol,
         bridge,
         ghosts,
