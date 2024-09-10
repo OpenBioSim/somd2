@@ -221,6 +221,7 @@ def _boresch(system, k_hard=100, k_soft=5, optimise_angles=True):
                     b,
                     bridges0[b],
                     physical0[b],
+                    k_hard=k_hard,
                     k_soft=k_soft,
                     optimise_angles=optimise_angles,
                 )
@@ -256,6 +257,7 @@ def _boresch(system, k_hard=100, k_soft=5, optimise_angles=True):
                     b,
                     bridges1[b],
                     physical1[b],
+                    k_hard=k_hard,
                     k_soft=k_soft,
                     optimise_angles=optimise_angles,
                     is_lambda1=True,
@@ -939,7 +941,14 @@ def _triple(
 
 
 def _higher(
-    mol, bridge, ghosts, physical, k_soft=5, optimise_angles=True, is_lambda1=False
+    mol,
+    bridge,
+    ghosts,
+    physical,
+    k_hard=100,
+    k_soft=5,
+    optimise_angles=True,
+    is_lambda1=False,
 ):
     r"""
     Apply Boresch modifications to higher order junctions.
@@ -958,6 +967,10 @@ def _higher(
 
     physical : List[sire.legacy.Mol.AtomIdx]
         The list of physical atoms connected to the bridge atom.
+
+    k_hard : float, optional
+        The force constant to use when setting angle terms involving ghost
+        atoms to 90 degrees to avoid flapping. (In kcal/mol/rad^2)
 
     k_soft : float, optional
         The force constant to use when setting angle terms involving ghost
