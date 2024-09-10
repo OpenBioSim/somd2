@@ -991,7 +991,7 @@ def _higher(
     """
 
     _logger.debug(
-        f"Applying Boresch modifications to triple ghost junction at "
+        f"Applying Boresch modifications to higher order junction at "
         f"{_lam_sym} = {int(is_lambda1)}:"
     )
 
