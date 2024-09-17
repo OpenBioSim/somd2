@@ -1289,7 +1289,7 @@ class Config:
             raise ValueError(
                 f"Log level not recognised. Valid log levels are: {', '.join(self._choices['log_level'])}"
             )
-        # Do logging setup here for use in the rest of the ocnfig and all other modules.
+        # Do logging setup here for use in the rest of the config and all other modules.
         import sys
 
         _logger.remove()
