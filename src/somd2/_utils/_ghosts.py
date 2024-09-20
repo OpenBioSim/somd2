@@ -24,6 +24,7 @@ from sire.legacy.System import System as _LegacySystem
 
 import sire.legacy.MM as _SireMM
 import sire.legacy.Mol as _SireMol
+import sire.morph as _morph
 
 from somd2 import _logger
 
@@ -92,15 +93,9 @@ def _boresch(system, k_hard=100, k_soft=5, optimise_angles=True):
         # Store the molecule info.
         info = mol.info()
 
-        # Extract the connectivity property.
-        try:
-            connectivity0 = mol.property("connectivity0")
-        except:
-            connectivity0 = mol.property("connectivity")
-        try:
-            connectivity1 = mol.property("connectivity1")
-        except:
-            connectivity1 = mol.property("connectivity")
+        # Generate the end state connectivity objects.
+        connectivity0 = _create_connectivity(_morph.link_to_reference(mol))
+        connectivity1 = _create_connectivity(_morph.link_to_perturbed(mol))
 
         # Find the indices of the ghost atoms at each end state.
         ghosts0 = [
@@ -319,10 +314,10 @@ def _terminal(mol, bridge, ghosts, physical, is_lambda1=False):
     info = mol.info()
 
     # Get the end state connectivity property.
-    try:
-        connectivity = mol.property("connectivity" + str(int(is_lambda1)))
-    except:
-        connectivity = mol.property("connectivity")
+    if is_lambda1:
+        connectivity = _create_connectivity(_morph.link_to_perturbed(mol))
+    else:
+        connectivity = _create_connectivity(_morph.link_to_reference(mol))
 
     # First, we need to work out the physical atoms two atoms away from the
     # bridge atom.
@@ -1069,3 +1064,30 @@ def _higher(
         k_soft=k_soft,
         optimise_angles=optimise_angles,
     )
+
+
+def _create_connectivity(mol):
+    """
+    Create a connectivity object for an end state molecule.
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The molecule at the end state.
+
+    Returns
+
+    connectivity : sire.legacy.Mol.Connectivity
+        The connectivity object.
+    """
+
+    # Create an editable connectivity object.
+    connectivity = _SireMol.Connectivity(mol.info()).edit()
+
+    # Loop over the bonds in the molecule and connect the atoms.
+    for bond in mol.bonds():
+        connectivity.connect(bond.atom0().index(), bond.atom1().index())
+
+    # Commit the changes and return the connectivity object.
+    return connectivity.commit()
