@@ -21,7 +21,6 @@
 
 __all__ = ["Dynamics"]
 
-import platform as _platform
 from pathlib import Path as _Path
 
 from somd2 import _logger
@@ -29,7 +28,7 @@ from somd2 import _logger
 from ..config import Config as _Config
 from ..io import dataframe_to_parquet as _dataframe_to_parquet
 from ..io import parquet_append as _parquet_append
-from ._runner import _lam_sym
+from .._utils import _lam_sym
 
 
 class Dynamics:

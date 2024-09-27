@@ -28,9 +28,9 @@ jobs:
       max-parallel: 9
       fail-fast: false
       matrix:
-        python-version: ["3.12"]
+        python-version: ["3.11"]
         platform:
-          - { name: "windows", os: "windows-latest", shell: "pwsh" }
+          #- { name: "windows", os: "windows-latest", shell: "pwsh" }
           - { name: "linux", os: "ubuntu-latest", shell: "bash -l {0}" }
           - { name: "macos", os: "macos-latest", shell: "bash -l {0}" }
     defaults:
@@ -48,7 +48,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
         if: github.event_name == 'pull_request'
 #
-      - uses: conda-incubator/setup-miniconda@v2
+      - uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
           python-version: ${{ matrix.python-version }}

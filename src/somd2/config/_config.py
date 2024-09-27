@@ -97,9 +97,9 @@ class Config:
         lambda_schedule="standard_morph",
         charge_scale_factor=0.2,
         swap_end_states=False,
-        coulomb_power=1.0,
+        coulomb_power=0.0,
         shift_coulomb="1A",
-        shift_delta="1A",
+        shift_delta="2A",
         restraints=None,
         constraint="h_bonds",
         perturbable_constraint="h_bonds_not_heavy_perturbed",
@@ -1317,7 +1317,7 @@ class Config:
             raise ValueError(
                 f"Log level not recognised. Valid log levels are: {', '.join(self._choices['log_level'])}"
             )
-        # Do logging setup here for use in the rest of the ocnfig and all other modules.
+        # Do logging setup here for use in the rest of the config and all other modules.
         import sys
 
         _logger.remove()

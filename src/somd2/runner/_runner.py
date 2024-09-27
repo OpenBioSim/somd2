@@ -21,8 +21,6 @@
 
 __all__ = ["Runner"]
 
-import platform as _platform
-
 from sire import morph as _morph
 from sire import stream as _stream
 from sire.system import System as _System
@@ -33,10 +31,7 @@ from ..io import dict_to_yaml as _dict_to_yaml
 
 from somd2 import _logger
 
-if _platform.system() == "Windows":
-    _lam_sym = "lambda"
-else:
-    _lam_sym = "λ"
+from .._utils import _lam_sym
 
 
 class Runner:
@@ -114,7 +109,7 @@ class Runner:
 
         # We're running in SOMD1 compatibility mode.
         if self._config.somd1_compatibility:
-            from ._somd1 import _make_compatible
+            from .._utils._somd1 import _make_compatible
 
             # First, try to make the perturbation SOMD1 compatible.
 
@@ -165,6 +160,16 @@ class Runner:
             self._config._extra_args["check_for_h_by_mass"] = False
             self._config._extra_args["check_for_h_by_element"] = False
             self._config._extra_args["check_for_h_by_ambertype"] = False
+            self._config._extra_args["fix_perturbable_zero_sigmas"] = True
+
+        # Apply Boresch modifications to bonded terms involving ghost atoms to
+        # avoid spurious couplings to the physical system at the end states.
+        else:
+            from .._utils._ghosts import _boresch
+
+            self._system = _boresch(self._system)
+
+            # Make sure there are no zero LJ sigmas for perturbable atoms.
             self._config._extra_args["fix_perturbable_zero_sigmas"] = True
 
         # Check for a periodic space.
