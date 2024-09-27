@@ -98,6 +98,7 @@ class Config:
         charge_scale_factor=0.2,
         swap_end_states=False,
         coulomb_power=1.0,
+        shift_coulomb="1A",
         shift_delta="1A",
         restraints=None,
         constraint="h_bonds",
@@ -184,6 +185,10 @@ class Config:
         couloumb_power : float
             Power to use for the soft-core Coulomb interaction. This is used
             to soften the electrostatic interaction.
+
+        shift_coulomb : str
+            The soft-core shift-coulomb parameter. This is used to soften the
+            Coulomb interaction.
 
         shift_delta : str
             The soft-core shift-delta parameter. This is used to soften the
@@ -319,6 +324,7 @@ class Config:
         self.charge_scale_factor = charge_scale_factor
         self.swap_end_states = swap_end_states
         self.coulomb_power = coulomb_power
+        self.shift_coulomb = shift_coulomb
         self.shift_delta = shift_delta
         self.restraints = restraints
         self.constraint = constraint
@@ -771,6 +777,28 @@ class Config:
             except Exception:
                 raise ValueError("'coulomb_power' must be a of type 'float'")
         self._coulomb_power = coulomb_power
+
+    @property
+    def shift_coulomb(self):
+        return self._shift_coulomb
+
+    @shift_coulomb.setter
+    def shift_coulomb(self, shift_coulomb):
+        if not isinstance(shift_coulomb, str):
+            raise TypeError("'shift_coulomb' must be of type 'str'")
+
+        from sire.units import angstrom
+
+        try:
+            sc = _sr.u(shift_coulomb)
+        except:
+            raise ValueError(
+                f"Unable to parse 'shift_coulomb' as a Sire GeneralUnit: {shift_coulomb}"
+            )
+        if not sc.has_same_units(angstrom):
+            raise ValueError("'shift_coulomb' units are invalid.")
+
+        self._shift_coulomb = sc
 
     @property
     def shift_delta(self):

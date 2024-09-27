@@ -216,6 +216,9 @@ class Dynamics:
             swap_end_states=self._config.swap_end_states,
             com_reset_frequency=self._config.com_reset_frequency,
             vacuum=not self._has_space,
+            coulomb_power=self._config.coulomb_power,
+            shift_coulomb=self._config.shift_coulomb,
+            shift_delta=self._config.shift_delta,
             map=self._config._extra_args,
         )
 
@@ -248,6 +251,9 @@ class Dynamics:
                     include_constrained_energies=self._config.include_constrained_energies,
                     dynamic_constraints=self._config.dynamic_constraints,
                     swap_end_states=self._config.swap_end_states,
+                    coulomb_power=self._config.coulomb_power,
+                    shift_coulomb=self._config.shift_coulomb,
+                    shift_delta=self._config.shift_delta,
                     map=self._config._extra_args,
                 )
                 m.run()
@@ -269,6 +275,9 @@ class Dynamics:
                     include_constrained_energies=self._config.include_constrained_energies,
                     dynamic_constraints=self._config.dynamic_constraints,
                     swap_end_states=self._config.swap_end_states,
+                    coulomb_power=self._config.coulomb_power,
+                    shift_coulomb=self._config.shift_coulomb,
+                    shift_delta=self._config.shift_delta,
                     map=self._config._extra_args,
                 )
                 m.run()
