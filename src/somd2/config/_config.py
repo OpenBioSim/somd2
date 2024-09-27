@@ -186,7 +186,7 @@ class Config:
             Power to use for the soft-core Coulomb interaction. This is used
             to soften the electrostatic interaction.
 
-        shift_couloomb : str
+        shift_coulomb : str
             The soft-core shift-coulomb parameter. This is used to soften the
             Coulomb interaction.
 
