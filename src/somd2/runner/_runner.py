@@ -91,7 +91,7 @@ class Runner:
                 f"Applying perturbation to reference system: {self._config.pert_file}"
             )
             try:
-                from ._somd1 import _apply_pert
+                from .._utils._somd1 import _apply_pert
 
                 self._system = _apply_pert(self._system, self._config.pert_file)
                 self._config.somd1_compatibility = True
