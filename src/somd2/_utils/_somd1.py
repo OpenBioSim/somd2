@@ -594,8 +594,7 @@ def _apply_pert(system, pert_file):
     if not is_pert:
         raise ValueError(f"Failed to apply the perturbation in '{pert_file}'.")
 
-    # Replace the reference molecule with the perturbed molecule.
-    system.remove(mol)
-    system.add(pert_mol)
+    # Update the molecule.
+    system.update(mol)
 
     return system
