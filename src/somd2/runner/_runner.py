@@ -94,7 +94,6 @@ class Runner:
                 from .._utils._somd1 import _apply_pert
 
                 self._system = _apply_pert(self._system, self._config.pert_file)
-                self._config.somd1_compatibility = True
             except Exception as e:
                 raise IOError(f"Unable to apply perturbation to reference system: {e}")
 
