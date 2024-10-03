@@ -256,7 +256,7 @@ class Dynamics:
                     shift_delta=self._config.shift_delta,
                     map=self._config._extra_args,
                 )
-                m.run()
+                m.run(timeout=self._config.timeout)
                 self._system = m.commit()
             except:
                 raise
@@ -280,7 +280,7 @@ class Dynamics:
                     shift_delta=self._config.shift_delta,
                     map=self._config._extra_args,
                 )
-                m.run()
+                m.run(timeout=self._config.timeout)
                 self._system = m.commit()
             except:
                 raise
