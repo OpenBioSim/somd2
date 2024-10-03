@@ -1257,9 +1257,6 @@ class Config:
 
         self._pert_file = pert_file
 
-        if pert_file is not None:
-            self._somd1_compatibility = True
-
     @property
     def save_energy_components(self):
         return self._save_energy_components
