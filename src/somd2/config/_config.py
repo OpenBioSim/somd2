@@ -127,6 +127,7 @@ class Config:
         somd1_compatibility=False,
         pert_file=None,
         save_energy_components=False,
+        timeout="300s",
     ):
         """
         Constructor.
@@ -301,6 +302,9 @@ class Config:
         save_energy_components: bool
             Whether to save the energy contribution for each force when checkpointing.
             This is useful when debugging crashes.
+
+        timeout: str
+            Timeout for the minimiser.
         """
 
         # Setup logger before doing anything else
@@ -350,6 +354,7 @@ class Config:
         self.somd1_compatibility = somd1_compatibility
         self.pert_file = pert_file
         self.save_energy_components = save_energy_components
+        self.timeout = timeout
 
         self.write_config = write_config
 
@@ -1266,6 +1271,29 @@ class Config:
         if not isinstance(save_energy_components, bool):
             raise ValueError("'save_energy_components' must be of type 'bool'")
         self._save_energy_components = save_energy_components
+
+    @property
+    def timeout(self):
+        return self._timeout
+
+    @timeout.setter
+    def timeout(self, timeout):
+        if not isinstance(timeout, str):
+            raise TypeError("'timeout' must be of type 'str'")
+
+        from sire.units import second
+
+        try:
+            t = _sr.u(timeout)
+        except:
+            raise ValueError(
+                f"Unable to parse 'timeout' as a Sire GeneralUnit: {timeout}"
+            )
+
+        if t.value() != 0 and not t.has_same_units(second):
+            raise ValueError("'timeout' units are invalid.")
+
+        self._timeout = t
 
     @property
     def output_directory(self):
