@@ -184,6 +184,7 @@ class Dynamics:
         else:
             pressure = None
 
+        # Create the dynamics object.
         self._dyn = self._system.dynamics(
             integrator=self._config.integrator,
             temperature=self._config.temperature,
@@ -222,6 +223,18 @@ class Dynamics:
             map=self._config._extra_args,
         )
 
+        # We now need to re-initialize the context so that the constraints
+        # are updated correctly.
+
+        # Get the current positions.
+        positions = self._dyn._d._omm_mols.getState(getPositions=True).getPositions()
+
+        # Reinitialize the context to update the constraints.
+        self._dyn._d._omm_mols.reinitialize()
+
+        # Set the positions.
+        self._dyn._d._omm_mols.setPositions(positions)
+
     def _minimisation(
         self, lambda_min=None, constraint="none", perturbable_constraint="none"
     ):
@@ -239,6 +252,7 @@ class Dynamics:
         if lambda_min is None:
             _logger.info(f"Minimising at {_lam_sym} = {self._lambda_val}")
             try:
+                # Create a minimisation object.
                 m = self._system.minimisation(
                     cutoff_type=self._config.cutoff_type,
                     cutoff=self._config.cutoff,
@@ -256,6 +270,19 @@ class Dynamics:
                     shift_delta=self._config.shift_delta,
                     map=self._config._extra_args,
                 )
+
+                # We now need to re-initialize the context so that the constraints
+                # are updated correctly.
+
+                # Get the current positions.
+                positions = m._d._omm_mols.getState(getPositions=True).getPositions()
+
+                # Reinitialize the context to update the constraints.
+                m._d._omm_mols.reinitialize()
+
+                # Set the positions.
+                m._d._omm_mols.setPositions(positions)
+
                 m.run(timeout=self._config.timeout)
                 self._system = m.commit()
             except:
@@ -263,6 +290,7 @@ class Dynamics:
         else:
             _logger.info(f"Minimising at {_lam_sym} = {lambda_min}")
             try:
+                # Create a minimisation object.
                 m = self._system.minimisation(
                     cutoff_type=self._config.cutoff_type,
                     cutoff=self._config.cutoff,
@@ -280,6 +308,20 @@ class Dynamics:
                     shift_delta=self._config.shift_delta,
                     map=self._config._extra_args,
                 )
+
+                # We now need to re-initialize the context so that the constraints
+                # are updated correctly.
+
+                # Get the current positions.
+                positions = m._d._omm_mols.getState(getPositions=True).getPositions()
+
+                # Reinitialize the context to update the constraints.
+                m._d._omm_mols.reinitialize()
+
+                # Set the positions.
+                m._d._omm_mols.setPositions(positions)
+
+                # Minimise and commit the changes.
                 m.run(timeout=self._config.timeout)
                 self._system = m.commit()
             except:
