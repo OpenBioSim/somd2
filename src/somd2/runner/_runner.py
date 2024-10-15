@@ -106,6 +106,18 @@ class Runner:
         # Link properties to the lambda = 0 end state.
         self._system = _morph.link_to_reference(self._system)
 
+        # Set the default configuration options.
+
+        # Restrict the atomic properties used to define light atoms when
+        # applying constraints.
+        self._config._extra_args["check_for_h_by_max_mass"] = True
+        self._config._extra_args["check_for_h_by_mass"] = False
+        self._config._extra_args["check_for_h_by_element"] = False
+        self._config._extra_args["check_for_h_by_ambertype"] = False
+
+        # Make sure that perturbable LJ sigmas aren't scaled to zero.
+        self._config._extra_args["fix_perturbable_zero_sigmas"] = True
+
         # We're running in SOMD1 compatibility mode.
         if self._config.somd1_compatibility:
             from .._utils._somd1 import _make_compatible
@@ -150,16 +162,8 @@ class Runner:
                             "Unable to convert water topology to AMBER format for SOMD1 compatibility."
                         )
 
-            # Only check for light atoms by the maximum end state mass if running
-            # in SOMD1 compatibility mode. Ghost atoms are considered light when
-            # adding bond constraints. Also fix the LJ sigma for ghost atoms so
-            # it isn't scaled to zero.
+            # Ghost atoms are considered light when adding bond constraints.
             self._config._extra_args["ghosts_are_light"] = True
-            self._config._extra_args["check_for_h_by_max_mass"] = True
-            self._config._extra_args["check_for_h_by_mass"] = False
-            self._config._extra_args["check_for_h_by_element"] = False
-            self._config._extra_args["check_for_h_by_ambertype"] = False
-            self._config._extra_args["fix_perturbable_zero_sigmas"] = True
 
         # Apply Boresch modifications to bonded terms involving ghost atoms to
         # avoid spurious couplings to the physical system at the end states.
@@ -167,9 +171,6 @@ class Runner:
             from .._utils._ghosts import _boresch
 
             self._system = _boresch(self._system)
-
-            # Make sure there are no zero LJ sigmas for perturbable atoms.
-            self._config._extra_args["fix_perturbable_zero_sigmas"] = True
 
         # Check for a periodic space.
         self._check_space()
