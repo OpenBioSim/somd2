@@ -126,6 +126,7 @@ class Dynamics:
             self._config.restart,
         )
 
+        self._num_frames = 0
         self._nrg_sample = 0
         self._nrg_file = "energy_components.txt"
 
@@ -489,11 +490,11 @@ class Dynamics:
                             + f"{x}.dcd"
                         )
                         sr.save(
-                            self._system.trajectory(), traj_filename, format=["DCD"]
+                            self._system.trajectory()[self._num_frames :],
+                            traj_filename,
+                            format=["DCD"],
                         )
-
-                        # Delete the trajectory from memory.
-                        self._system.delete_all_frames()
+                        self._num_frames = self._system.num_frames()
 
                     # Stream the checkpoint to file.
                     sr.stream.save(self._system, str(checkpoint_file))
@@ -557,11 +558,11 @@ class Dynamics:
                             + f"{x}.dcd"
                         )
                         sr.save(
-                            self._system.trajectory(), traj_filename, format=["DCD"]
+                            self._system.trajectory()[self._num_frames :],
+                            traj_filename,
+                            format=["DCD"],
                         )
-
-                        # Delete the trajectory from memory.
-                        self._system.delete_all_frames()
+                        self._num_frames = self._system.num_frames()
 
                     _logger.info(
                         f"Finished block {x+1} of {self._current_block + num_blocks + int(rem > 0)} "
@@ -622,9 +623,7 @@ class Dynamics:
                 self._config.output_directory / self._filenames["trajectory"]
             )
             sr.save(system.trajectory(), traj_filename, format=["DCD"])
-
-            # Delete the trajectory from memory.
-            self._system.delete_all_frames()
+            self._num_frames = system.num_frames()
 
             # Now remove the chunked trajectory files.
             for chunk in traj_chunks:
