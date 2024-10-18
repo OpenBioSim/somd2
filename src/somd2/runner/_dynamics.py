@@ -224,18 +224,6 @@ class Dynamics:
             map=self._config._extra_args,
         )
 
-        # We now need to re-initialize the context so that the constraints
-        # are updated correctly.
-
-        # Get the current positions.
-        positions = self._dyn._d._omm_mols.getState(getPositions=True).getPositions()
-
-        # Reinitialize the context to update the constraints.
-        self._dyn._d._omm_mols.reinitialize()
-
-        # Set the positions.
-        self._dyn._d._omm_mols.setPositions(positions)
-
     def _minimisation(
         self, lambda_min=None, constraint="none", perturbable_constraint="none"
     ):
@@ -271,19 +259,6 @@ class Dynamics:
                     shift_delta=self._config.shift_delta,
                     map=self._config._extra_args,
                 )
-
-                # We now need to re-initialize the context so that the constraints
-                # are updated correctly.
-
-                # Get the current positions.
-                positions = m._d._omm_mols.getState(getPositions=True).getPositions()
-
-                # Reinitialize the context to update the constraints.
-                m._d._omm_mols.reinitialize()
-
-                # Set the positions.
-                m._d._omm_mols.setPositions(positions)
-
                 m.run(timeout=self._config.timeout)
                 self._system = m.commit()
             except:
@@ -309,20 +284,6 @@ class Dynamics:
                     shift_delta=self._config.shift_delta,
                     map=self._config._extra_args,
                 )
-
-                # We now need to re-initialize the context so that the constraints
-                # are updated correctly.
-
-                # Get the current positions.
-                positions = m._d._omm_mols.getState(getPositions=True).getPositions()
-
-                # Reinitialize the context to update the constraints.
-                m._d._omm_mols.reinitialize()
-
-                # Set the positions.
-                m._d._omm_mols.setPositions(positions)
-
-                # Minimise and commit the changes.
                 m.run(timeout=self._config.timeout)
                 self._system = m.commit()
             except:
