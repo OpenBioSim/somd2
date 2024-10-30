@@ -1032,8 +1032,9 @@ class RunnerBase:
         # Get the energy trajectory.
         df = system.energy_trajectory(to_alchemlyb=True, energy_unit="kT")
 
+        # Set the lambda values at which energies were sampled.
         if lambda_energy is None:
-            lamdba_energy = self._lambda_values
+            lambda_energy = self._lambda_values
 
         # Create the metadata.
         metadata = {
