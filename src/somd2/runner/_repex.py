@@ -201,7 +201,9 @@ class RepexRunner(_RunnerBase):
         """
 
         if config.restart:
-            raise ValueError("'restart' is not currently supported for replica exchange.")
+            raise ValueError(
+                "'restart' is not currently supported for replica exchange."
+            )
 
         if config.lambda_energy is not None:
             raise ValueError(
