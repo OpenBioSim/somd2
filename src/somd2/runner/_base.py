@@ -290,6 +290,9 @@ class RunnerBase:
             self._config.checkpoint_frequency / self._config.energy_frequency
         )
 
+        # Zero the energy sample.
+        self._nrg_sample = 0
+
         # Create the default dynamics kwargs dictionary. These can be overloaded
         # as needed.
         self._dynamics_kwargs = {
@@ -1159,3 +1162,49 @@ class RunnerBase:
                     self._parquet,
                     df.iloc[-self._energy_per_block :],
                 )
+
+    def _save_energy_components(self, context):
+        """
+        Internal function to save the energy components for each force group to file.
+
+        Parameters
+        ----------
+
+        context : :class: `Context <openmm.Context>`
+            The current OpenMM context.
+        """
+
+        from copy import deepcopy
+        import openmm
+
+        # Get the current context and system.
+        system = deepcopy(context.getSystem())
+
+        # Add each force to a unique group.
+        for i, f in enumerate(system.getForces()):
+            f.setForceGroup(i)
+
+        # Create a new context.
+        new_context = openmm.Context(system, deepcopy(context.getIntegrator()))
+        new_context.setPositions(context.getState(getPositions=True).getPositions())
+
+        header = f"{'# Sample':>10}"
+        record = f"{self._nrg_sample:>10}"
+
+        # Process the records.
+        for i, f in enumerate(system.getForces()):
+            state = new_context.getState(getEnergy=True, groups={i})
+            header += f"{f.getName():>25}"
+            record += f"{state.getPotentialEnergy().value_in_unit(openmm.unit.kilocalories_per_mole):>25.2f}"
+
+        # Write to file.
+        if self._nrg_sample == 0:
+            with open(self._filenames["energy_components"], "w") as f:
+                f.write(header + "\n")
+                f.write(record + "\n")
+        else:
+            with open(self._filenames["energy_components"], "a") as f:
+                f.write(record + "\n")
+
+        # Increment the sample number.
+        self._nrg_sample += 1
