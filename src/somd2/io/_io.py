@@ -50,11 +50,13 @@ def dataframe_to_parquet(df, metadata, filepath=None, filename=None):
 
     metadata: dict
         Dictionary containing metadata to be saved with the dataframe.
-        Currently just temperature and lambda value.
 
     filepath: str or pathlib.PosixPath
         The of the parent directory in to which the parquet file will be saved.
         If None, save to current working directory.
+
+    filename: str
+        The name of the parquet file to be saved. If None, a default name will be used.
     """
 
     if filepath is None:
@@ -81,7 +83,7 @@ def dataframe_to_parquet(df, metadata, filepath=None, filename=None):
     return filepath / filename
 
 
-def dict_to_yaml(data_dict, path, filename="config.yaml"):
+def dict_to_yaml(data_dict, filename="config.yaml", path=None):
     """
     Write a dictionary to a YAML file.
 
@@ -91,16 +93,20 @@ def dict_to_yaml(data_dict, path, filename="config.yaml"):
     data_dict: dict
         The dictionary to be written to a YAML file.
 
-    path: str or pathlib.PosixPath
-        The path to the YAML file to be written.
-
     filename: str
         The name of the YAML file to be written (default 'config.yaml').
+
+    path: str or pathlib.PosixPath
+        The path to the YAML file to be written.
     """
     import yaml as _yaml
 
-    try:
+    if path is None:
+        path = _Path(filename)
+    else:
         path = _Path(path) / filename
+
+    try:
         # Ensure the parent directory for the file exists
         path.parent.mkdir(parents=True, exist_ok=True)
         # Open the file in write mode and write the dictionary as YAML

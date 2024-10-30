@@ -119,7 +119,8 @@ class Config:
         platform="auto",
         max_threads=None,
         max_gpus=None,
-        run_parallel=True,
+        oversubscription_factor=1,
+        replica_exchange=False,
         output_directory="output",
         restart=False,
         write_config=True,
@@ -196,17 +197,16 @@ class Config:
             Lennard-Jones interaction.
 
         restraints: sire.mm._MM.Restraints
-            A single set of restraints, or a list of
-            sets of restraints that will be applied to
-            the atoms during the simulation.
+            A single set of restraints, or a list of sets of restraints that
+            will be applied to the atoms during the simulation.
 
         constraint: str
             Constraint type to use for non-perturbable molecules.
 
         perturbable_constraint: str
             Constraint type to use for perturbable molecules. If None, then
-            this will be set according to what is chosen for the
-            non-perturbable constraint.
+            this will be set according to what is chosen for the non-perturbable
+            constraint.
 
         include_constrained_energies: bool
             Whether to include constrained energies in the potential.
@@ -244,7 +244,8 @@ class Config:
             Whether to use constraints during equilibration.
 
         energy_frequency: str
-            Frequency at which to output energy data.
+            Frequency at which to output energy data. If running using 'replica_exchange',
+            then this will also be the frequency at which replica swaps are attempted.
 
         save_trajectories: bool
             Whether to save trajectory files
@@ -270,8 +271,12 @@ class Config:
             Maximum number of GPUs to use for simulation (Default None, uses all available.)
             Does nothing if platform is set to CPU.
 
-        run_parallel: bool
-            Whether to run simulation in parallel.
+        oversubscription_factor: int
+            Factor by which to oversubscribe jobs on GPUs during replica exchange simulations.
+
+        replica_exchange: bool
+            Whether to run replica exchange simulation. Currently this can only be used when
+            GPU resources are available.
 
         output_directory: str
             Path to a directory to store output files.
@@ -349,7 +354,8 @@ class Config:
         self.platform = platform
         self.max_threads = max_threads
         self.max_gpus = max_gpus
-        self.run_parallel = run_parallel
+        self.oversubscription_factor = oversubscription_factor
+        self.replica_exchange = replica_exchange
         self.restart = restart
         self.somd1_compatibility = somd1_compatibility
         self.pert_file = pert_file
@@ -1203,9 +1209,12 @@ class Config:
         ):
             if "CUDA_VISIBLE_DEVICES" in _os.environ:
                 self._max_gpus = len(_os.environ["CUDA_VISIBLE_DEVICES"].split(","))
+            elif "OPENCL_VISIBLE_DEVICES" in _os.environ:
+                self._max_gpus = len(_os.environ["OPENCL_VISIBLE_DEVICES"].split(","))
+            elif "HIP_VISIBLE_DEVICES" in _os.environ:
+                self._max_gpus = len(_os.environ["HIP_VISIBLE_DEVICES"].split(","))
             else:
                 self._max_gpus = 0
-
         else:
             try:
                 self._max_gpus = int(max_gpus)
@@ -1217,14 +1226,31 @@ class Config:
                 )
 
     @property
-    def run_parallel(self):
-        return self._run_parallel
+    def oversubscription_factor(self):
+        return self._oversubscription_factor
 
-    @run_parallel.setter
-    def run_parallel(self, run_parallel):
-        if not isinstance(run_parallel, bool):
-            raise ValueError("'run_parallel' must be of type 'bool'")
-        self._run_parallel = run_parallel
+    @oversubscription_factor.setter
+    def oversubscription_factor(self, oversubscription_factor):
+        if not isinstance(oversubscription_factor, int):
+            try:
+                oversubscription_factor = int(oversubscription_factor)
+            except:
+                raise ValueError("'oversubscription_factor' must be of type 'int'")
+
+        if oversubscription_factor < 1:
+            raise ValueError("'oversubscription_factor' must be greater than 1")
+
+        self._oversubscription_factor = oversubscription_factor
+
+    @property
+    def replica_exchange(self):
+        return self._replica_exchange
+
+    @replica_exchange.setter
+    def replica_exchange(self, replica_exchange):
+        if not isinstance(replica_exchange, bool):
+            raise ValueError("'replica_exchange' must be of type 'bool'")
+        self._replica_exchange = replica_exchange
 
     @property
     def restart(self):
