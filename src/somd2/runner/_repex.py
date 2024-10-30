@@ -83,8 +83,9 @@ class DynamicsCache:
             else:
                 mols = system
 
-            # Overload the device.
+            # Overload the device and lambda value.
             dynamics_kwargs["device"] = device
+            dynamics_kwargs["lambda_value"] = lam
 
             # Create the dynamics object.
             try:
