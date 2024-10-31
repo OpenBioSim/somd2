@@ -756,6 +756,7 @@ class RunnerBase:
             "log_level",
             "log_file",
             "overwrite",
+            "timeout",
         ]
         for key in config1.keys():
             if key not in allowed_diffs:
