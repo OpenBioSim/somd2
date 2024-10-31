@@ -1163,12 +1163,15 @@ class RunnerBase:
                     df.iloc[-self._energy_per_block :],
                 )
 
-    def _save_energy_components(self, context):
+    def _save_energy_components(self, index, context):
         """
         Internal function to save the energy components for each force group to file.
 
         Parameters
         ----------
+
+        index : int
+            The index of the window or replica.
 
         context : openmm.Context
             The current OpenMM context.
@@ -1199,11 +1202,11 @@ class RunnerBase:
 
         # Write to file.
         if self._nrg_sample == 0:
-            with open(self._filenames["energy_components"], "w") as f:
+            with open(self._filenames[index]["energy_components"], "w") as f:
                 f.write(header + "\n")
                 f.write(record + "\n")
         else:
-            with open(self._filenames["energy_components"], "a") as f:
+            with open(self._filenames[index]["energy_components"], "a") as f:
                 f.write(record + "\n")
 
         # Increment the sample number.

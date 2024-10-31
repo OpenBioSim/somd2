@@ -488,7 +488,7 @@ class Runner(_RunnerBase):
                 try:
                     # Save the energy contribution for each force.
                     if self._config.save_energy_components:
-                        self._save_energy_components(dynamics.context())
+                        self._save_energy_components(index, dynamics.context())
 
                     # Commit the current system.
                     system = dynamics.commit()
@@ -539,7 +539,7 @@ class Runner(_RunnerBase):
 
                     # Save the energy contribution for each force.
                     if self._config.save_energy_components:
-                        self._save_energy_components(dynamics.context())
+                        self._save_energy_components(index, dynamics.context())
 
                     # Commit the current system.
                     system = dynamics.commit()
