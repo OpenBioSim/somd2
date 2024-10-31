@@ -68,9 +68,6 @@ class DynamicsCache:
         # Copy the dynamics keyword arguments.
         dynamics_kwargs = dynamics_kwargs.copy()
 
-        # Overload the platform.
-        dynamics_kwargs["platform"] = "cuda"
-
         # Create the dynamics objects in serial.
         for i, lam in enumerate(lambdas):
             # Work out the device index.
