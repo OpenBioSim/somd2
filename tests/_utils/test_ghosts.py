@@ -1,6 +1,6 @@
 import sire as sr
 
-from somd2._utils._ghosts import _boresch
+from somd2._utils._ghosts import boresch
 
 
 def test_hexane_to_propane():
@@ -17,7 +17,7 @@ def test_hexane_to_propane():
     dihedrals = mols[0].property("dihedral1")
 
     # Apply the ghost atom modifications.
-    new_mols = _boresch(mols)
+    new_mols = boresch(mols)
 
     # Get the new angles and dihedrals.
     new_angles = new_mols[0].property("angle1")
@@ -78,7 +78,7 @@ def test_toluene_to_pyridine():
     dihedrals = mols[0].property("dihedral1")
 
     # Apply the ghost atom modifications.
-    new_mols = _boresch(mols)
+    new_mols = boresch(mols)
 
     # Get the new angles and dihedrals.
     new_angles = new_mols[0].property("angle1")
@@ -170,7 +170,7 @@ def test_acetone_to_propenol():
     dihedrals1 = mols[0].property("dihedral1")
 
     # Apply the ghost atom modifications.
-    new_mols = _boresch(mols)
+    new_mols = boresch(mols)
 
     # Get the new angles and dihedrals.
     new_angles0 = new_mols[0].property("angle0")
