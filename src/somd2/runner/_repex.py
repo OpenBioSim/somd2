@@ -172,7 +172,7 @@ class DynamicsCache:
         for i, state in enumerate(self._states):
             # The state has changed.
             if i != state:
-                _logger.debug(f"Replica {i} changed state to {state}")
+                _logger.debug(f"Replica {i} seeded from state {state}")
                 self._dynamics[i]._d._omm_mols.setState(self._openmm_states[state])
 
 
@@ -339,6 +339,14 @@ class RepexRunner(_RunnerBase):
         # Perform the replica exchange simulation.
         for i in range(cycles):
             _logger.info(f"Running dynamics for cycle {i+1} of {cycles}")
+
+            # Log the states. This is the replica index for the state (positions
+            # and velocities) used to seed each replica for the current cycle.
+            # For example:
+            #   States: [ 2 0 1 3 4 5 6 7 8 9 10 ]
+            # means that the final positions and velocities from replica 2 are
+            # used to seed replica 0, those from replica 0 are used to seed
+            # replica 1, and so on.
             _logger.info(f"States: {self._dynamics_cache.get_states()}")
 
             # Clear the results list.
