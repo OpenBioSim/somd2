@@ -1170,7 +1170,7 @@ class RunnerBase:
         Parameters
         ----------
 
-        context : :class: `Context <openmm.Context>`
+        context : openmm.Context
             The current OpenMM context.
         """
 
