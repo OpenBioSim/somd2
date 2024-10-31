@@ -85,9 +85,9 @@ class RunnerBase:
                 f"Applying perturbation to reference system: {self._config.pert_file}"
             )
             try:
-                from .._utils._somd1 import _apply_pert
+                from .._utils._somd1 import apply_pert
 
-                self._system = _apply_pert(self._system, self._config.pert_file)
+                self._system = apply_pert(self._system, self._config.pert_file)
             except Exception as e:
                 raise IOError(f"Unable to apply perturbation to reference system: {e}")
 
@@ -114,12 +114,12 @@ class RunnerBase:
 
         # We're running in SOMD1 compatibility mode.
         if self._config.somd1_compatibility:
-            from .._utils._somd1 import _make_compatible
+            from .._utils._somd1 import make_compatible
 
             # First, try to make the perturbation SOMD1 compatible.
 
             _logger.info("Applying SOMD1 perturbation compatibility.")
-            self._system = _make_compatible(self._system)
+            self._system = make_compatible(self._system)
             self._system = _sr.morph.link_to_reference(self._system)
 
             # Next, swap the water topology so that it is in AMBER format.
@@ -163,9 +163,9 @@ class RunnerBase:
         # Apply Boresch modifications to bonded terms involving ghost atoms to
         # avoid spurious couplings to the physical system at the end states.
         else:
-            from .._utils._ghosts import _boresch
+            from .._utils._ghosts import boresch
 
-            self._system = _boresch(self._system)
+            self._system = boresch(self._system)
 
         # Check for a periodic space.
         self._has_space = self._check_space()

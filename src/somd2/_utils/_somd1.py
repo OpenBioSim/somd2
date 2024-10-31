@@ -19,6 +19,8 @@
 # along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
+__all__ = ["make_compatible", "apply_pert"]
+
 from sire.system import System as _System
 from sire.legacy.System import System as _LegacySystem
 
@@ -26,7 +28,7 @@ import sire.legacy.MM as _SireMM
 import sire.legacy.Mol as _SireMol
 
 
-def _make_compatible(system):
+def make_compatible(system):
     """
     Makes a perturbation SOMD1 compatible.
 
@@ -547,7 +549,7 @@ def _make_compatible(system):
     return system
 
 
-def _apply_pert(system, pert_file):
+def apply_pert(system, pert_file):
     """
     Helper function to apply a perturbation to a reference system.
 
