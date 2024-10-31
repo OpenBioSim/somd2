@@ -63,7 +63,7 @@ class DynamicsCache:
         self._lambdas = lambdas
         self._states = _np.array(range(len(lambdas)))
         self._openmm_states = [None] * len(lambdas)
-        self._openmm_volums = [None] * len(lambdas)
+        self._openmm_volumes = [None] * len(lambdas)
 
         # Copy the dynamics keyword arguments.
         dynamics_kwargs = dynamics_kwargs.copy()
@@ -136,7 +136,7 @@ class DynamicsCache:
         self._openmm_states[index] = state
 
         # Store the volume.
-        self._openmm_volums[index] = state.getPeriodicBoxVolume().value_in_unit(
+        self._openmm_volumes[index] = state.getPeriodicBoxVolume().value_in_unit(
             angstrom**3
         )
 
@@ -564,7 +564,7 @@ class RepexRunner(_RunnerBase):
         for i, energies in results:
             for j, energy in enumerate(energies):
                 matrix[i, j] = self._beta * (
-                    energy + self._pressure * self._dynamics_cache._openmm_volums[i]
+                    energy + self._pressure * self._dynamics_cache._openmm_volumes[i]
                 )
 
         return matrix
