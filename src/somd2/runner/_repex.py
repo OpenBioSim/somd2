@@ -173,8 +173,10 @@ class DynamicsCache:
         for i, (old_state, new_state) in enumerate(zip(self._old_states, self._states)):
             # The state has changed.
             if old_state != new_state:
-                positions, velocities = self._omm_states[new_state]
-                self._dynamics[i]._d._omm_mols.setStates(self._omm_states[new_state])
+                _logger.debug(
+                    f"Replica {i} changed state from {old_state} to {new_state}"
+                )
+                self._dynamics[i]._d._omm_mols.setState(self._omm_states[new_state])
 
 
 class RepexRunner(_RunnerBase):
@@ -590,6 +592,9 @@ class RepexRunner(_RunnerBase):
         states: np.ndarray
             The new states.
         """
+
+        # Copy the states.
+        states = states.copy()
 
         for swap in range(num_replicas**3):
             # Choose two replicas to swap.
