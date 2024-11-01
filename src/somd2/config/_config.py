@@ -948,7 +948,7 @@ class Config:
             raise ValueError("'minimise' must be of type 'bool'")
         if not minimise:
             _logger.warning(
-                "Minimisation is highly recommended for increased stability in SOMD2"
+                "Minimisation is highly recommended for increased stability."
             )
         self._minimise = minimise
 
