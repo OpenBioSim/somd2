@@ -81,7 +81,7 @@ class Config:
     def __init__(
         self,
         log_level="info",
-        log_file=None,
+        log_file="log.txt",
         runtime="1ns",
         timestep="4fs",
         temperature="300K",
