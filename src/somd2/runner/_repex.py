@@ -267,9 +267,13 @@ class RepexRunner(_RunnerBase):
         """
 
         from math import ceil
+        from time import time
 
         from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
         from itertools import repeat as _repeat
+
+        # Record the start time.
+        start = time()
 
         # Work out the number of repex cycles.
         cycles = ceil(self._config.runtime / self._config.energy_frequency)
@@ -406,6 +410,12 @@ class RepexRunner(_RunnerBase):
                 # Update the block number.
                 if is_checkpoint:
                     block += 1
+
+        # Record the end time.
+        end = time()
+
+        # Log the run time in minutes.
+        _logger.success(f"Simulation finished. Run time: {(end - start) / 60:.2f} minutes")
 
     def _run_block(
         self, index, lambdas, is_checkpoint, is_final_block, block, num_blocks

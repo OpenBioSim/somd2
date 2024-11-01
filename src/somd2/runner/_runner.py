@@ -131,15 +131,12 @@ class Runner(_RunnerBase):
     def run(self):
         """
         Use concurrent.futures to run lambda windows in parallel
-
-        Returns
-        --------
-
-        results : [bool]
-            List of simulation results. (Currently whether the simulation finished
-            successfully or not.)
         """
-        results = self._manager.list()
+
+        from time import time
+
+        # Record the start time.
+        start = time()
 
         # Create shared resources.
         self._create_shared_resources()
@@ -184,8 +181,6 @@ class Runner(_RunnerBase):
                         _logger.error(
                             f"Exception raised for {_lam_sym} = {lambda_value}: {e}"
                         )
-                    with self._lock:
-                        results.append(result)
 
             # Kill all current and future jobs if keyboard interrupt.
             except KeyboardInterrupt:
@@ -193,7 +188,11 @@ class Runner(_RunnerBase):
                 for pid in executor._processes:
                     executor._processes[pid].terminate()
 
-        return results
+        # Record the end time.
+        end = time()
+
+        # Log the run time in minutes.
+        _logger.success(f"Simulation finished. Run time: {(end - start) / 60:.2f} minutes")
 
     def run_window(self, index):
         """
