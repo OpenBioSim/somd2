@@ -1455,7 +1455,7 @@ class Config:
         )
 
         # Add the parameters.
-        for param in params:
+        for param in sorted(params):
             # Convert underscores to hyphens for the command line.
             cli_param = param.replace("_", "-")
 
