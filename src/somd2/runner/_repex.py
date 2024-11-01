@@ -58,6 +58,14 @@ class DynamicsCache:
         dynamics_kwargs: dict
             A dictionary of default dynamics keyword arguments.
         """
+
+        # Warn if the number of replicas is not a multiple of the number of GPUs.
+        if len(lambdas) > num_gpus and len(lambdas) % num_gpus != 0:
+            _logger.warning(
+                "The number of replicas is not a multiple of the number of GPUs. "
+                "This may result in suboptimal performance."
+            )
+
         # Initialise attributes.
         self._dynamics = []
         self._lambdas = lambdas
