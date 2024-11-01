@@ -177,7 +177,6 @@ class Runner(_RunnerBase):
                         result = job.result()
                     except Exception as e:
                         result = False
-
                         _logger.error(
                             f"Exception raised for {_lam_sym} = {lambda_value}: {e}"
                         )
@@ -192,7 +191,9 @@ class Runner(_RunnerBase):
         end = time()
 
         # Log the run time in minutes.
-        _logger.success(f"Simulation finished. Run time: {(end - start) / 60:.2f} minutes")
+        _logger.success(
+            f"Simulation finished. Run time: {(end - start) / 60:.2f} minutes"
+        )
 
     def run_window(self, index):
         """

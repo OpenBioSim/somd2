@@ -159,15 +159,17 @@ def parquet_append(filepath: _Path or str, df: _pd.DataFrame) -> None:
         Pandas dataframe to append. Must be same schema as original.
     """
     try:
+        # Use memory map for speed.
         table_original_file = _pq.read_table(
             source=str(filepath), pre_buffer=False, use_threads=True, memory_map=True
-        )  # Use memory map for speed.
+        )
         table_to_append = _pa.Table.from_pandas(df)
-        table_to_append = table_to_append.cast(
-            table_original_file.schema
-        )  # Attempt to cast new schema to existing, e.g. datetime64[ns] to datetime64[us] (may throw otherwise).
+        # Attempt to cast new schema to existing, e.g. datetime64[ns] to
+        # datetime64[us] (may throw otherwise).
+        table_to_append = table_to_append.cast(table_original_file.schema)
 
-        temp_file = str(filepath) + "_temp"  # Temporary file to write to
+        # Temporary file to write to.
+        temp_file = str(filepath) + "_temp"
 
         # Writing to a temporary file
         with _pq.ParquetWriter(temp_file, table_original_file.schema) as temp_writer:

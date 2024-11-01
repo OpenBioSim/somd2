@@ -415,7 +415,9 @@ class RepexRunner(_RunnerBase):
         end = time()
 
         # Log the run time in minutes.
-        _logger.success(f"Simulation finished. Run time: {(end - start) / 60:.2f} minutes")
+        _logger.success(
+            f"Simulation finished. Run time: {(end - start) / 60:.2f} minutes"
+        )
 
     def _run_block(
         self, index, lambdas, is_checkpoint, is_final_block, block, num_blocks
