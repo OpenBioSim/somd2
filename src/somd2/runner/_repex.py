@@ -103,7 +103,7 @@ class DynamicsCache:
             # Append the dynamics object.
             self._dynamics.append(dynamics)
 
-            _logger.info(f"Created dynamics object for lambda {lam:.5f}")
+            _logger.info(f"Created dynamics object for lambda {lam:.5f} on device {device}")
 
     def get(self, index):
         """
