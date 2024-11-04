@@ -65,7 +65,7 @@ class RunnerBase:
             except:
                 raise IOError(f"Unable to load system from stream file: '{system}'")
         else:
-            self._system = system
+            self._system = system.clone()
 
         # Validate the configuration.
         if not isinstance(config, _Config):
