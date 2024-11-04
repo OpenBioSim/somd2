@@ -327,11 +327,11 @@ class RepexRunner(_RunnerBase):
             num_blocks = 1
             rem = 0
 
+        # Store the number of concurrent workers.
+        num_workers = self._num_gpus * self._config.oversubscription_factor
+
         # Work out the required number of batches.
-        num_batches = ceil(
-            self._config.num_lambda
-            / (self._num_gpus * self._config.oversubscription_factor)
-        )
+        num_batches = ceil(self._config.num_lambda / num_workers)
 
         # Create the replica list.
         replica_list = list(range(self._config.num_lambda))
@@ -367,14 +367,8 @@ class RepexRunner(_RunnerBase):
             # Run a dynamics block for each replica, making sure only each GPU is only
             # oversubscribed by a factor of self._config.oversubscription_factor.
             for j in range(num_batches):
-                replicas = replica_list[
-                    j
-                    * self._num_gpus
-                    * self._config.oversubscription_factor : (j + 1)
-                    * self._num_gpus
-                    * self._config.oversubscription_factor
-                ]
-                with ThreadPoolExecutor() as executor:
+                replicas = replica_list[j * num_workers : (j + 1) * num_workers]
+                with ThreadPoolExecutor(max_workers=num_workers) as executor:
                     try:
                         for result, index, energies in executor.map(
                             self._run_block,
