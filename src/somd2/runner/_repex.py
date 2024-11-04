@@ -337,7 +337,7 @@ class RepexRunner(_RunnerBase):
         replica_list = list(range(self._config.num_lambda))
 
         # Minimise at each lambda value. This is currently done in serial due to a
-        # limitation in OpenMM.
+        # threading issue with the Sire OpenMM minimiser.
         if self._config.minimise:
             for i in range(self._config.num_lambda):
                 self._minimise(i)
