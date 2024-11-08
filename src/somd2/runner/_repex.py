@@ -557,23 +557,12 @@ class RepexRunner(_RunnerBase):
         """
         _logger.info(f"Minimising at {_lam_sym} = {self._lambda_values[index]:.5f}")
 
-        # Note: For now we minimise with the LocalEnergyMinimizer in OpenMM
-        # since dynamics.minimise() is not thread safe.
-
         try:
-            from openmm import LocalEnergyMinimizer
-
             # Get the dynamics object.
             dynamics = self._dynamics_cache.get(index)
 
-            # Get the context.
-            context = dynamics.context()
-
             # Minimise.
-            LocalEnergyMinimizer.minimize(context)
-
-            # Clear the internal dynamics state.
-            dynamics._d._clear_state()
+            dynamics.minimise(timeout=self._config.timeout)
 
         except Exception as e:
             return False, index, e
