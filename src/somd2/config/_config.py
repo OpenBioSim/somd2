@@ -121,6 +121,8 @@ class Config:
         max_gpus=None,
         oversubscription_factor=1,
         replica_exchange=False,
+        rest2_scale=1.0,
+        rest2_selection=None,
         output_directory="output",
         restart=False,
         write_config=True,
@@ -146,7 +148,8 @@ class Config:
             Simulation temperature.
 
         pressure: str
-            Simulation pressure. (Simulations will run in the NVT ensemble unless a pressure is specified.)
+            Simulation pressure. (Simulations will run in the NVT ensemble unless
+            a pressure is specified.)
 
         barostat_frequency: int
             The number of integration steps between barostat updates.
@@ -257,8 +260,9 @@ class Config:
             Whether to save velocities in trajectory frames.
 
         checkpoint_frequency: str
-            Frequency at which to save checkpoint files, should be larger than min(energy_frequency, frame_frequency).
-            If zero, then no checkpointing will be performed.
+            Frequency at which to save checkpoint files, should be larger than
+            min(energy_frequency, frame_frequency). If zero, then no checkpointing
+            will be performed.
 
         platform: str
             Platform to run simulation on.
@@ -277,6 +281,18 @@ class Config:
         replica_exchange: bool
             Whether to run replica exchange simulation. Currently this can only be used when
             GPU resources are available.
+
+        rest2_scale: float
+            The scaling factor for Replica Exchange with Solute Tempering (REST) simulations.
+            This is the factor by which the temperature of the solute is scaled with respect to
+            the rest of the system.
+
+        rest2_selection: str
+            A sire selection string for atoms to include in the REST2 region in
+            addition to the perturbable molecule. For example, "molidx 0 and residx 0,1,2"
+            would select atoms from the first three residues of the first molecule. Selected
+            atoms should be within the same molecule. If None, then only the perturbable
+            molecule will be used for the REST2 region.
 
         output_directory: str
             Path to a directory to store output files.
@@ -356,6 +372,8 @@ class Config:
         self.max_gpus = max_gpus
         self.oversubscription_factor = oversubscription_factor
         self.replica_exchange = replica_exchange
+        self.rest2_scale = rest2_scale
+        self.rest2_selection = rest2_selection
         self.restart = restart
         self.somd1_compatibility = somd1_compatibility
         self.pert_file = pert_file
@@ -1251,6 +1269,32 @@ class Config:
         if not isinstance(replica_exchange, bool):
             raise ValueError("'replica_exchange' must be of type 'bool'")
         self._replica_exchange = replica_exchange
+
+    @property
+    def rest2_scale(self):
+        return self._rest2_scale
+
+    @rest2_scale.setter
+    def rest2_scale(self, rest2_scale):
+        if not isinstance(rest2_scale, float):
+            try:
+                rest2_scale = float(rest2_scale)
+            except Exception:
+                raise ValueError("'rest2_scale' must be of type 'float'")
+        if rest2_scale < 1.0:
+            raise ValueError("'rest2_scale' must be greater than or equal to 1.0")
+        self._rest2_scale = rest2_scale
+
+    @property
+    def rest2_selection(self):
+        return self._rest2_selection
+
+    @rest2_selection.setter
+    def rest2_selection(self, rest2_selection):
+        if rest2_selection is not None:
+            if not isinstance(rest2_selection, str):
+                raise TypeError("'rest2_selection' must be of type 'str'")
+        self._rest2_selection = rest2_selection
 
     @property
     def restart(self):

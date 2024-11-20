@@ -249,6 +249,29 @@ class RunnerBase:
                     self._system, self._config.h_mass_factor
                 )
 
+        # Make sure the REST2 selection is valid.
+        if self._config.rest2_selection is not None:
+            from sire.mol import selection_to_atoms
+
+            try:
+                atoms = selection_to_atoms(self._system, self._config.rest2_selection)
+            except:
+                raise ValueError("Invalid 'rest2_selection' value.")
+
+            # Make sure all atoms are in the same molecule.
+            mol = atoms[0].molecule()
+            for atom in atoms:
+                if atom.molecule() != mol:
+                    raise ValueError(
+                        "All atoms in 'rest2_selection' must be in the same molecule."
+                    )
+
+            # Make sure the molecule isn't perturbable.
+            if mol.has_property("is_perturbable"):
+                raise ValueError(
+                    "The 'rest2_selection' cannot be in a perturbable molecule."
+                )
+
         # Flag whether this is a GPU simulation.
         self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]
 
@@ -316,6 +339,8 @@ class RunnerBase:
             "coulomb_power": config.coulomb_power,
             "shift_coulomb": config.shift_coulomb,
             "shift_delta": config.shift_delta,
+            "rest2_scale": config.rest2_scale,
+            "rest2_selection": config.rest2_selection,
             "map": config._extra_args,
         }
 
