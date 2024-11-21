@@ -658,6 +658,7 @@ class RepexRunner(_RunnerBase):
 
             # Record that we have proposed a swap.
             proposed[state_i, state_j] += 1
+            proposed[state_j, state_i] += 1
 
             # Get the energies.
             energy_ii = energy_matrix[replica_i, state_i]
@@ -675,5 +676,6 @@ class RepexRunner(_RunnerBase):
                 states[replica_j] = state_i
                 # Record the swap.
                 accepted[state_i, state_j] += 1
+                accepted[state_j, state_i] += 1
 
         return states
