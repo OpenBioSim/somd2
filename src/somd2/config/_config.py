@@ -289,10 +289,12 @@ class Config:
 
         rest2_selection: str
             A sire selection string for atoms to include in the REST2 region in
-            addition to the perturbable molecule. For example, "molidx 0 and residx 0,1,2"
-            would select atoms from the first three residues of the first molecule. Selected
-            atoms should be within the same molecule. If None, then only the perturbable
-            molecule will be used for the REST2 region.
+            addition to any perturbable molecules. For example, "molidx 0 and residx 0,1,2"
+            would select atoms from the first three residues of the first molecule. If None,
+            then all atoms within perturbable molecules will be included in the REST2 region.
+            When atoms within a perturbable molecule are included in the selection, then only
+            those atoms will be considered as part of the REST2 region. This allows REST2 to
+            be applied to protein mutations.
 
         output_directory: str
             Path to a directory to store output files.

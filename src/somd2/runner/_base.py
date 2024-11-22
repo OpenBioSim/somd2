@@ -258,20 +258,6 @@ class RunnerBase:
             except:
                 raise ValueError("Invalid 'rest2_selection' value.")
 
-            # Make sure all atoms are in the same molecule.
-            mol = atoms[0].molecule()
-            for atom in atoms:
-                if atom.molecule() != mol:
-                    raise ValueError(
-                        "All atoms in 'rest2_selection' must be in the same molecule."
-                    )
-
-            # Make sure the molecule isn't perturbable.
-            if mol.has_property("is_perturbable"):
-                raise ValueError(
-                    "The 'rest2_selection' cannot be in a perturbable molecule."
-                )
-
         # Flag whether this is a GPU simulation.
         self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]
 
