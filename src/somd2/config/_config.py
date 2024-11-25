@@ -76,6 +76,7 @@ class Config:
     _nargs = {
         "lambda_values": "+",
         "lambda_energy": "+",
+        "rest2_scale": "+",
     }
 
     def __init__(
@@ -282,10 +283,13 @@ class Config:
             Whether to run replica exchange simulation. Currently this can only be used when
             GPU resources are available.
 
-        rest2_scale: float
+        rest2_scale: float, list(float)
             The scaling factor for Replica Exchange with Solute Tempering (REST) simulations.
             This is the factor by which the temperature of the solute is scaled with respect to
-            the rest of the system.
+            the rest of the system. This can either be a single scaling factor, or a list of
+            scale factors for each lambda window. When a single scaling factor is used, then
+            the scale factor will be interpolated between a value of 1.0 in the end states,
+            and the value of 'rest2_scale' in intermediate lambda = 0.5 state.
 
         rest2_selection: str
             A sire selection string for atoms to include in the REST2 region in
@@ -1278,13 +1282,23 @@ class Config:
 
     @rest2_scale.setter
     def rest2_scale(self, rest2_scale):
-        if not isinstance(rest2_scale, float):
-            try:
-                rest2_scale = float(rest2_scale)
-            except Exception:
-                raise ValueError("'rest2_scale' must be of type 'float'")
-        if rest2_scale < 1.0:
-            raise ValueError("'rest2_scale' must be greater than or equal to 1.0")
+        # Convert to an iterable.
+        if not isinstance(rest2_scale, _Iterable):
+            rest2_scale = [rest2_scale]
+
+        # Convert to floats.
+        try:
+            rest2_scale = [float(x) for x in rest2_scale]
+        except:
+            raise ValueError("'rest2_scale' must be a float, or iterable of floats")
+
+        # Check that all values are greater than 1.0.
+        for scale in rest2_scale:
+            if scale < 1.0:
+                raise ValueError("'rest2_scale' must be greater than or equal to 1.0")
+
+        if len(rest2_scale) == 1:
+            rest2_scale = rest2_scale[0]
         self._rest2_scale = rest2_scale
 
     @property

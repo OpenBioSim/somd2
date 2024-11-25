@@ -223,12 +223,51 @@ class RunnerBase:
         else:
             self._lambda_energy = self._lambda_values
 
+        from math import isclose
+
+        # Set the REST2 scale factors.
+        if self._config.rest2_scale is not None:
+            # Single value. Interpolate between 1.0 at the end states and rest2_scale
+            # at lambda = 0.5.
+            if isinstance(self._config.rest2_scale, float):
+                if self._config.num_lambda != len(self._lambda_values):
+                    raise ValueError(
+                        "REST2 scaling can currently only be used when 'lambda_values' is unset."
+                    )
+                if self._lambda_energy != self._lambda_values:
+                    raise ValueError(
+                        "'rest2_scale' can only be used when 'lambda_energy' matches 'lambda_values'."
+                    )
+                scale_factors = []
+                for lambda_value in self._lambda_values:
+                    scale_factors.append(
+                        1.0
+                        + (self._config.rest2_scale - 1.0)
+                        * (1.0 - 2.0 * abs(lambda_value - 0.5))
+                    )
+                self._rest2_scale_factors = scale_factors
+            else:
+                if len(self._config.rest2_scale) != len(self._lambda_values):
+                    raise ValueError(
+                        f"Length of 'rest2_scale' must match the number of {_lam_sym} values."
+                    )
+                if self._lambda_energy != self._lambda_values:
+                    raise ValueError(
+                        "'rest2_scale' can only be used when 'lambda_energy' matches 'lambda_values'."
+                    )
+                # Make sure the end states are clsoe to 1.0.
+                if not isclose(
+                    self._config.rest2_scale[0], 1.0, abs_tol=1e-4
+                ) or not isclose(self._config.rest2_scale[-1], 1.0, abs_tol=1e-4):
+                    raise ValueError(
+                        f"'rest2_scale' must be 1.0 at {_lam_sym}=0 and {_lam_sym}=1."
+                    )
+                self._rest2_scale_factors = self._config.rest2_scale
+
         # Work out the current hydrogen mass factor.
         h_mass_factor, has_hydrogen = self._get_h_mass_factor(self._system)
 
         # HMR has already been applied.
-        from math import isclose
-
         if has_hydrogen:
             if not isclose(h_mass_factor, 1.0, abs_tol=1e-4):
                 _logger.info(
@@ -325,7 +364,6 @@ class RunnerBase:
             "coulomb_power": config.coulomb_power,
             "shift_coulomb": config.shift_coulomb,
             "shift_delta": config.shift_delta,
-            "rest2_scale": config.rest2_scale,
             "rest2_selection": config.rest2_selection,
             "map": config._extra_args,
         }

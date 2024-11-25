@@ -39,7 +39,7 @@ class DynamicsCache:
     A class for caching dynamics objects.
     """
 
-    def __init__(self, system, lambdas, num_gpus, dynamics_kwargs):
+    def __init__(self, system, lambdas, rest2_scale_factors, num_gpus, dynamics_kwargs):
         """
         Constructor.
 
@@ -51,6 +51,9 @@ class DynamicsCache:
 
         lambdas: np.ndarray
             The lambda value for each replica.
+
+        rest2_scale_factors: np.ndarray
+            The REST2 scaling factor for each replica.
 
         num_gpus: int
             The number of GPUs to use.
@@ -69,6 +72,7 @@ class DynamicsCache:
         # Initialise attributes.
         self._dynamics = []
         self._lambdas = lambdas
+        self._rest2_scale_factors = rest2_scale_factors
         self._states = _np.array(range(len(lambdas)))
         self._openmm_states = [None] * len(lambdas)
         self._openmm_volumes = [None] * len(lambdas)
@@ -79,7 +83,7 @@ class DynamicsCache:
         dynamics_kwargs = dynamics_kwargs.copy()
 
         # Create the dynamics objects in serial.
-        for i, lam in enumerate(lambdas):
+        for i, (lam, scale) in enumerate(zip(lambdas, rest2_scale_factors)):
             # Work out the device index.
             device = i % num_gpus
 
@@ -93,6 +97,7 @@ class DynamicsCache:
             # Overload the device and lambda value.
             dynamics_kwargs["device"] = device
             dynamics_kwargs["lambda_value"] = lam
+            dynamics_kwargs["rest2_scale"] = scale
 
             # Create the dynamics object.
             try:
@@ -250,6 +255,7 @@ class RepexRunner(_RunnerBase):
         self._dynamics_cache = DynamicsCache(
             self._system,
             self._lambda_values,
+            self._rest2_scale_factors,
             self._num_gpus,
             self._dynamics_kwargs,
         )
@@ -471,6 +477,9 @@ class RepexRunner(_RunnerBase):
         lambdas: np.ndarray
             The lambda values for each replica.
 
+        rest2_scale: np.ndarray
+            The REST2 scaling factor for each replica.
+
         is_checkpoint: bool
             Whether to checkpoint.
 
@@ -512,6 +521,7 @@ class RepexRunner(_RunnerBase):
                 energy_frequency=self._config.energy_frequency,
                 frame_frequency=self._config.frame_frequency,
                 lambda_windows=lambdas,
+                rest2_scale_factors=self._rest2_scale_factors,
                 save_velocities=self._config.save_velocities,
                 auto_fix_minimise=True,
             )

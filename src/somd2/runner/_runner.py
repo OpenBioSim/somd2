@@ -306,6 +306,9 @@ class Runner(_RunnerBase):
         # Get the lambda value.
         lambda_value = self._lambda_values[index]
 
+        # Get the REST2 scaling factor.
+        rest2_scale = self._rest2_scale_factors[index]
+
         # Check for completion if this is a restart.
         if is_restart:
             time = system.time()
@@ -352,6 +355,7 @@ class Runner(_RunnerBase):
             system = self._minimisation(
                 system,
                 lambda_value,
+                rest2_scale=rest2_scale,
                 device=device,
                 constraint=constraint,
                 perturbable_constraint=perturbable_constraint,
@@ -369,6 +373,7 @@ class Runner(_RunnerBase):
                 {
                     "device": device,
                     "lambda_value": lambda_value,
+                    "rest2_scale": rest2_scale,
                     "constraint": (
                         "none"
                         if not self._equilibration_constraints
@@ -380,7 +385,7 @@ class Runner(_RunnerBase):
                         else self._config.perturbable_constraint
                     ),
                     "save_velocities": False,
-                    "auto_fix_minimise": False,
+                    "auto_fix_minimise": True,
                 }
             )
 
@@ -409,6 +414,7 @@ class Runner(_RunnerBase):
                 self._minimisation(
                     system,
                     lambda_min=lambda_value,
+                    rest2_scale=rest2_scale,
                     device=device,
                     constraint=self._config.constraint,
                     perturbable_constraint=self._config.perturbable_constraint,
@@ -433,6 +439,10 @@ class Runner(_RunnerBase):
         # Add the lambda values for finite-difference gradient analysis.
         lambda_array.extend(lambda_grad)
 
+        # Add additional REST2 scaling factors.
+        rest2_scale_factors = self._rest2_scale_factors.copy()
+        rest2_scale_factors.extend([rest2_scale] * len(lambda_grad))
+
         # Sort the lambda values.
         lambda_array = sorted(lambda_array)
 
@@ -446,6 +456,7 @@ class Runner(_RunnerBase):
             {
                 "device": device,
                 "lambda_value": lambda_value,
+                "rest2_scale": rest2_scale,
             }
         )
 
@@ -478,8 +489,9 @@ class Runner(_RunnerBase):
                         energy_frequency=self._config.energy_frequency,
                         frame_frequency=self._config.frame_frequency,
                         lambda_windows=lambda_array,
+                        rest2_scale_factors=rest2_scale_factors,
                         save_velocities=self._config.save_velocities,
-                        auto_fix_minimise=False,
+                        auto_fix_minimise=True,
                     )
                 except:
                     raise
@@ -533,8 +545,9 @@ class Runner(_RunnerBase):
                         energy_frequency=self._config.energy_frequency,
                         frame_frequency=self._config.frame_frequency,
                         lambda_windows=lambda_array,
+                        rest2_scale_factors=rest2_scale_factors,
                         save_velocities=self._config.save_velocities,
-                        auto_fix_minimise=False,
+                        auto_fix_minimise=True,
                     )
 
                     # Save the energy contribution for each force.
@@ -574,9 +587,10 @@ class Runner(_RunnerBase):
                     self._config.checkpoint_frequency,
                     energy_frequency=self._config.energy_frequency,
                     frame_frequency=self._config.frame_frequency,
-                    lambda_windows=lam_arr,
+                    lambda_windows=lambda_array,
+                    rest2_scale_factors=rest2_scale_factors,
                     save_velocities=self._config.save_velocities,
-                    auto_fix_minimise=False,
+                    auto_fix_minimise=True,
                 )
             except:
                 raise
@@ -598,6 +612,7 @@ class Runner(_RunnerBase):
         self,
         system,
         lambda_value,
+        rest2_scale=1.0,
         device=None,
         constraint="none",
         perturbable_constraint="none",
@@ -613,6 +628,9 @@ class Runner(_RunnerBase):
 
         lambda_value: float
             Lambda value at which to run minimisation.
+
+        rest2_scale: float
+            The scaling factor for the REST2 region.
 
         device: int
             The GPU device number to be used for the simulation.
@@ -634,6 +652,7 @@ class Runner(_RunnerBase):
             {
                 "device": device,
                 "lambda_value": lambda_value,
+                "rest2_scale": rest2_scale,
                 "constraint": constraint,
                 "perturbable_constraint": perturbable_constraint,
             }
