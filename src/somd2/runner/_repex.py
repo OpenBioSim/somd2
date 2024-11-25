@@ -74,10 +74,12 @@ class DynamicsCache:
         self._lambdas = lambdas
         self._rest2_scale_factors = rest2_scale_factors
         self._states = _np.array(range(len(lambdas)))
+        self._old_states = _np.array(range(len(lambdas)))
         self._openmm_states = [None] * len(lambdas)
         self._openmm_volumes = [None] * len(lambdas)
         self._num_proposed = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
         self._num_accepted = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
+        self._num_swaps = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
 
         # Copy the dynamics keyword arguments.
         dynamics_kwargs = dynamics_kwargs.copy()
@@ -192,6 +194,13 @@ class DynamicsCache:
                 _logger.debug(f"Replica {i} seeded from state {state}")
                 self._dynamics[i]._d._omm_mols.setState(self._openmm_states[state])
 
+            # Update the swap matrix.
+            old_state = self._old_states[i]
+            self._num_swaps[old_state, state] += 1
+
+        # Store the current states.
+        self._old_states = self._states.copy()
+
     def get_proposed(self):
         """
         Return the number of proposed swaps between replicas.
@@ -203,6 +212,12 @@ class DynamicsCache:
         Return the number of accepted swaps between replicas.
         """
         return self._num_accepted
+
+    def get_swaps(self):
+        """
+        Return the swap matrix.
+        """
+        return self._num_swaps
 
 
 class RepexRunner(_RunnerBase):
@@ -446,11 +461,26 @@ class RepexRunner(_RunnerBase):
                     # Update the block number.
                     block += 1
 
+                    # Create the transition matrix estimate. Adapted from OpenMMTools:
+                    #   https://github.com/choderlab/openmmtools
+                    t_ij = _np.zeros((self._config.num_lambda, self._config.num_lambda))
+                    for i_state in range(self._config.num_lambda):
+                        swaps = self._dynamics_cache.get_swaps()
+                        denom = float(
+                            (swaps[i_state, :].sum() + swaps[:, i_state].sum())
+                        )
+                        if denom > 0:
+                            for j_state in range(self._config.num_lambda):
+                                t_ij[i_state, j_state] = (
+                                    swaps[i_state, j_state] + swaps[j_state, i_state]
+                                ) / denom
+                        else:
+                            t[i_state, i_state] = 1.0
+
                     # Save the replica exchange swap acceptance matrix.
                     _np.savetxt(
                         self._repex_matrix,
-                        self._dynamics_cache.get_accepted()
-                        / self._dynamics_cache.get_proposed(),
+                        t_ij,
                         fmt="%.5f",
                     )
 
