@@ -443,8 +443,16 @@ class Runner(_RunnerBase):
         rest2_scale_factors = self._rest2_scale_factors.copy()
         rest2_scale_factors.extend([rest2_scale] * len(lambda_grad))
 
+        # Get the indices of the lambda values in sorted order.
+        sorted_indices = [
+            i for i, _ in sorted(enumerate(lambda_array), key=lambda x: x[1])
+        ]
+
         # Sort the lambda values.
         lambda_array = sorted(lambda_array)
+
+        # Now sort the scaling factors.
+        rest2_scale_factors = [rest2_scale_factors[i] for i in sorted_indices]
 
         _logger.info(f"Running dynamics at {_lam_sym} = {lambda_value:.5f}")
 
