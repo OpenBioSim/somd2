@@ -240,6 +240,15 @@ class RepexRunner(_RunnerBase):
             The configuration options for the simulation.
         """
 
+        # No support for non replica exchange simulations.
+        if not config.replica_exchange:
+            msg = (
+                "The RepexRunner class can only be used for replica exchange simulations. "
+                "Please set replica_exchange=True, or use the Runner class."
+            )
+            _logger.error(msg)
+            raise ValueError(msg)
+
         if config.restart:
             raise ValueError(
                 "'restart' is not currently supported for replica exchange."

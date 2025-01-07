@@ -54,17 +54,17 @@ class Runner(_RunnerBase):
             The configuration options for the simulation.
         """
 
-        # Call the base class constructor.
-        super().__init__(system, config)
-
         # No support for replica exchange.
-        if self._config.replica_exchange:
+        if config.replica_exchange:
             msg = (
                 "The Runner class does not support replica exchange simulations. "
                 "Please set replica_exchange=False, or use the RepexRunner class."
             )
             _logger.error(msg)
             raise ValueError(msg)
+
+        # Call the base class constructor.
+        super().__init__(system, config)
 
         # Store the array of lambda values for energy sampling.
         if self._config.lambda_energy is not None:
