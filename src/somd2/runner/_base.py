@@ -91,6 +91,13 @@ class RunnerBase:
             except Exception as e:
                 raise IOError(f"Unable to apply perturbation to reference system: {e}")
 
+            # If we're not using SOMD1 compatibility, then reconstruct the original
+            # perturbable system.
+            if not self._config.somd1_compatibility:
+                from .._utils._somd1 import reconstruct_system
+
+                self._system = reconstruct_system(self._system)
+
         # Make sure the system contains perturbable molecules.
         try:
             self._system.molecules("property is_perturbable")

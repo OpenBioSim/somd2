@@ -19,7 +19,7 @@
 # along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
-__all__ = ["make_compatible", "apply_pert"]
+__all__ = ["make_compatible", "apply_pert", "reconstruct_system"]
 
 from sire.system import System as _System
 from sire.legacy.System import System as _LegacySystem
@@ -598,5 +598,100 @@ def apply_pert(system, pert_file):
 
     # Update the molecule.
     system.update(pert_mol)
+
+    # Link to the reference state.
+    system = _morph.link_to_reference(system)
+
+    return system
+
+
+def reconstruct_system(system):
+    """
+    Reconstruct a perturbable system to its original state, i.e. extract the
+    end states for each perturbable molecule and re-merge them using the original
+    mapping. This removes any ghost atom modifications applied via a perturbation
+    file.
+
+    Parameters
+    ----------
+
+    system : sire.system.System, sire.legacy.System.System
+        The system containing the molecules to be perturbed.
+
+    Returns
+    -------
+
+    system : sire.system.System
+        The updated system.
+    """
+
+    import BioSimSpace as _BSS
+
+    from sire import morph as _morph
+
+    # Check the system is a Sire system.
+    if not isinstance(system, (_System, _LegacySystem)):
+        raise TypeError(
+            "'system' must of type 'sire.system.System' or 'sire.legacy.System.System'"
+        )
+
+    # Extract the legacy system.
+    if isinstance(system, _LegacySystem):
+        system = _System(system)
+
+    # Clone the system.
+    system = system.clone()
+
+    # Search for perturbable molecules.
+    try:
+        pert_mols = system.molecules("property is_perturbable")
+    except KeyError:
+        raise KeyError("No perturbable molecules in the system")
+
+    from . import _is_ghost, _has_ghost
+
+    # Loop over all perturbable molecules.
+    for mol in pert_mols:
+
+        # Extract the end states.
+        ref = _morph.extract_reference(mol)
+        pert = _morph.extract_perturbed(mol)
+
+        # Find the indices for non-ghost atoms.
+        ref_idxs = [x for x, a in enumerate(ref.property("ambertype")) if a != "du"]
+        pert_idxs = [x for x, a in enumerate(pert.property("ambertype")) if a != "du"]
+
+        # Convert to BioSimSpace molecules and extract the non-ghost atoms.
+        ref = _BSS._SireWrappers.Molecule(ref).extract(ref_idxs)
+        pert = _BSS._SireWrappers.Molecule(pert).extract(pert_idxs)
+
+        # Work out the mapping.
+        idx0 = 0
+        idx1 = 0
+        mapping = {}
+        for x, atom in enumerate(mol.atoms()):
+            at0 = atom.property("ambertype0")
+            at1 = atom.property("ambertype1")
+
+            if at0 != "du" and at1 != "du":
+                mapping[idx0] = idx1
+
+            if at0 != "du":
+                idx0 += 1
+
+            if at1 != "du":
+                idx1 += 1
+
+        # Re-merge the molecules.
+        merged = _BSS.Align.merge(ref, pert, mapping=mapping, force=True)
+
+        # Give the molecule the same number as the original.
+        merged = merged._sire_object.edit().renumber(mol.number()).molecule().commit()
+
+        # Update the system.
+        system.update(merged)
+
+    # Link to the reference state.
+    system = _morph.link_to_reference(system)
 
     return system

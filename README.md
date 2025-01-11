@@ -124,3 +124,8 @@ somd2 somd1.bss --pert-file somd1.pert --somd1-compatibility
 ```
 
 (This only shows the limited options required. Others will take default values and can be set accordingly.)
+
+If you want to load an existing system from a perturbation file and use the
+new `somd2` ghost atom bonded-term modifications, then simply omit the
+`--somd1-compatibility` option.
+
