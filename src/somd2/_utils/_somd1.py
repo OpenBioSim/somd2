@@ -19,13 +19,69 @@
 # along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
-__all__ = ["make_compatible", "apply_pert", "reconstruct_system"]
+__all__ = ["apply_pert", "make_compatible", "reconstruct_system"]
 
 from sire.system import System as _System
 from sire.legacy.System import System as _LegacySystem
 
 import sire.legacy.MM as _SireMM
 import sire.legacy.Mol as _SireMol
+
+
+def apply_pert(system, pert_file):
+    """
+    Helper function to apply a perturbation to a reference system.
+
+    Parameters
+    ----------
+
+    system: sr.system.System
+        The reference system.
+
+    pert_file: str
+        Path to a stream file containing the perturbation to apply to the
+        reference system.
+
+    Returns
+    -------
+
+    system: sire.system.System
+        The perturbable system.
+    """
+
+    if not isinstance(system, _System):
+        raise TypeError("'system' must be of type 'sr.system.System'.")
+
+    if not isinstance(pert_file, str):
+        raise TypeError("'pert_file' must be of type 'str'.")
+
+    from sire import morph as _morph
+
+    # Get the non-water molecules in the system.
+    non_waters = system["not water"].molecules()
+
+    # Try to apply the perturbation to each non-water molecule.
+    is_pert = False
+    for mol in non_waters:
+        # Exclude ions.
+        if mol.num_atoms() > 1:
+            try:
+                pert_mol = _morph.create_from_pertfile(mol, pert_file)
+                is_pert = True
+                break
+            except:
+                pass
+
+    if not is_pert:
+        raise ValueError(f"Failed to apply the perturbation in '{pert_file}'.")
+
+    # Update the molecule.
+    system.update(pert_mol)
+
+    # Link to the reference state.
+    system = _morph.link_to_reference(system)
+
+    return system
 
 
 def make_compatible(system):
@@ -546,62 +602,6 @@ def make_compatible(system):
         system.update(edit_mol.commit())
 
     # Return the updated system.
-    return system
-
-
-def apply_pert(system, pert_file):
-    """
-    Helper function to apply a perturbation to a reference system.
-
-    Parameters
-    ----------
-
-    system: sr.system.System
-        The reference system.
-
-    pert_file: str
-        Path to a stream file containing the perturbation to apply to the
-        reference system.
-
-    Returns
-    -------
-
-    system: sire.system.System
-        The perturbable system.
-    """
-
-    if not isinstance(system, _System):
-        raise TypeError("'system' must be of type 'sr.system.System'.")
-
-    if not isinstance(pert_file, str):
-        raise TypeError("'pert_file' must be of type 'str'.")
-
-    from sire import morph as _morph
-
-    # Get the non-water molecules in the system.
-    non_waters = system["not water"].molecules()
-
-    # Try to apply the perturbation to each non-water molecule.
-    is_pert = False
-    for mol in non_waters:
-        # Exclude ions.
-        if mol.num_atoms() > 1:
-            try:
-                pert_mol = _morph.create_from_pertfile(mol, pert_file)
-                is_pert = True
-                break
-            except:
-                pass
-
-    if not is_pert:
-        raise ValueError(f"Failed to apply the perturbation in '{pert_file}'.")
-
-    # Update the molecule.
-    system.update(pert_mol)
-
-    # Link to the reference state.
-    system = _morph.link_to_reference(system)
-
     return system
 
 
