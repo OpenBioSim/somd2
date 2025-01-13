@@ -648,7 +648,8 @@ def reconstruct_system(system):
     except KeyError:
         raise KeyError("No perturbable molecules in the system")
 
-    from . import _is_ghost, _has_ghost
+    # Store a dummy element for ghost atoms.
+    ghost = _SireMol.Element(0)
 
     # Loop over all perturbable molecules.
     for mol in pert_mols:
@@ -658,8 +659,22 @@ def reconstruct_system(system):
         pert = _morph.extract_perturbed(mol)
 
         # Find the indices for non-ghost atoms.
-        ref_idxs = [x for x, a in enumerate(ref.property("ambertype")) if a != "du"]
-        pert_idxs = [x for x, a in enumerate(pert.property("ambertype")) if a != "du"]
+        ref_idxs = []
+        for x, (a, e) in enumerate(
+            zip(ref.property("ambertype"), ref.property("element"))
+        ):
+            if a == "du" or e == ghost:
+                continue
+            else:
+                ref_idxs.append(x)
+        pert_idxs = []
+        for x, (a, e) in enumerate(
+            zip(pert.property("ambertype"), pert.property("element"))
+        ):
+            if a == "du" or e == ghost:
+                continue
+            else:
+                pert_idxs.append(x)
 
         # Convert to BioSimSpace molecules and extract the non-ghost atoms.
         ref = _BSS._SireWrappers.Molecule(ref).extract(ref_idxs)
