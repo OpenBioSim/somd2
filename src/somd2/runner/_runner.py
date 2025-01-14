@@ -264,10 +264,10 @@ class Runner(_RunnerBase):
 
                 with self._lock:
                     self._update_gpu_pool(gpu_num)
-            except:
+            except Exception as e:
                 with self._lock:
                     self._update_gpu_pool(gpu_num)
-                raise
+                _logger.error(f"Error running {_lam_sym} = {lambda_value}: {e}")
 
         # All other platforms.
         else:
@@ -276,8 +276,8 @@ class Runner(_RunnerBase):
             # Run the simulation.
             try:
                 self._run(system, index, is_restart=self._is_restart)
-            except:
-                raise
+            except Exception as e:
+                _logger.error(f"Error running {_lam_sym} = {lambda_value}: {e}")
 
         return True
 
@@ -361,73 +361,79 @@ class Runner(_RunnerBase):
                 constraint = self._config.constraint
                 perturbable_constraint = self._config.perturbable_constraint
 
-            system = self._minimisation(
-                system,
-                lambda_value,
-                rest2_scale=rest2_scale,
-                device=device,
-                constraint=constraint,
-                perturbable_constraint=perturbable_constraint,
-            )
+            try:
+                system = self._minimisation(
+                    system,
+                    lambda_value,
+                    rest2_scale=rest2_scale,
+                    device=device,
+                    constraint=constraint,
+                    perturbable_constraint=perturbable_constraint,
+                )
+            except Exception as e:
+                raise RuntimeError(f"Minimisation failed: {e}")
 
         # Equilibration.
         if self._config.equilibration_time.value() > 0.0 and not is_restart:
-            # Run without saving energies or frames.
+            try:
+                # Run without saving energies or frames.
 
-            # Copy the dynamics kwargs.
-            dynamics_kwargs = self._dynamics_kwargs.copy()
+                # Copy the dynamics kwargs.
+                dynamics_kwargs = self._dynamics_kwargs.copy()
 
-            # Overload the dynamics kwargs with the simulation options.
-            dynamics_kwargs.update(
-                {
-                    "device": device,
-                    "lambda_value": lambda_value,
-                    "rest2_scale": rest2_scale,
-                    "constraint": (
-                        "none"
-                        if not self._equilibration_constraints
-                        else self._config.constraint
-                    ),
-                    "perturbable_constraint": (
-                        "none"
-                        if not self._equilibration_constraints
-                        else self._config.perturbable_constraint
-                    ),
-                    "save_velocities": False,
-                    "auto_fix_minimise": True,
-                }
-            )
-
-            # Create the dynamics object.
-            dynamics = system.dynamics(**dynamics_kwargs)
-
-            # Run without saving energies or frames.
-            dynamics.run(
-                self._config.equilibration_time,
-                energy_frequency=0,
-                frame_frequency=0,
-            )
-
-            # Commit the system.
-            system = dynamics.commit()
-
-            # Reset the timer to zero
-            system.set_time(_sr.u("0ps"))
-
-            # Perform minimisation at the end of equilibration only if the
-            # timestep is increasing, or the constraint is changing.
-            if (self._config.timestep > self._config.equilibration_timestep) or (
-                not self._config.equilibration_constraints
-                and self._config.perturbable_constraint != "none"
-            ):
-                self._minimisation(
-                    system,
-                    lambda_min=lambda_value,
-                    rest2_scale=rest2_scale,
-                    device=device,
-                    constraint=self._config.constraint,
-                    perturbable_constraint=self._config.perturbable_constraint,
+                # Overload the dynamics kwargs with the simulation options.
+                dynamics_kwargs.update(
+                    {
+                        "device": device,
+                        "lambda_value": lambda_value,
+                        "rest2_scale": rest2_scale,
+                        "constraint": (
+                            "none"
+                            if not self._equilibration_constraints
+                            else self._config.constraint
+                        ),
+                        "perturbable_constraint": (
+                            "none"
+                            if not self._equilibration_constraints
+                            else self._config.perturbable_constraint
+                        ),
+                        "save_velocities": False,
+                        "auto_fix_minimise": True,
+                    }
                 )
+
+                # Create the dynamics object.
+                dynamics = system.dynamics(**dynamics_kwargs)
+
+                # Run without saving energies or frames.
+                dynamics.run(
+                    self._config.equilibration_time,
+                    energy_frequency=0,
+                    frame_frequency=0,
+                )
+
+                # Commit the system.
+                system = dynamics.commit()
+
+                # Reset the timer to zero
+                system.set_time(_sr.u("0ps"))
+
+                # Perform minimisation at the end of equilibration only if the
+                # timestep is increasing, or the constraint is changing.
+                if (self._config.timestep > self._config.equilibration_timestep) or (
+                    not self._config.equilibration_constraints
+                    and self._config.perturbable_constraint != "none"
+                ):
+                    self._minimisation(
+                        system,
+                        lambda_min=lambda_value,
+                        rest2_scale=rest2_scale,
+                        device=device,
+                        constraint=self._config.constraint,
+                        perturbable_constraint=self._config.perturbable_constraint,
+                    )
+            except Exception as e:
+                raise RuntimeError(f"Equilibration failed: {e}")
 
         # Work out the lambda values for finite-difference gradient analysis.
         lambda_grad = generate_lam_vals(lambda_value)
@@ -510,8 +516,10 @@ class Runner(_RunnerBase):
                         save_velocities=self._config.save_velocities,
                         auto_fix_minimise=True,
                     )
-                except:
-                    raise
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Dynamics block {block+1} for {_lam_sym} = {lambda_value:.5f} failed: {e}"
+                    )
 
                 # Checkpoint.
                 try:
@@ -550,8 +558,10 @@ class Runner(_RunnerBase):
                         _logger.success(
                             f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"
                         )
-                except:
-                    raise
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Checkpoint failed for {_lam_sym} = {lambda_value:.5f}: {e}"
+                    )
 
             # Handle the remainder time.
             if rem > 0:
@@ -597,7 +607,9 @@ class Runner(_RunnerBase):
                         f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"
                     )
                 except Exception as e:
-                    raise
+                    raise RuntimeError(
+                        f"Final dynamics block for {lam_sym} = {lambda_value:.5f} failed: {e}"
+                    )
         else:
             try:
                 dynamics.run(
@@ -609,8 +621,10 @@ class Runner(_RunnerBase):
                     save_velocities=self._config.save_velocities,
                     auto_fix_minimise=True,
                 )
-            except:
-                raise
+            except Exception as e:
+                raise RuntimeError(
+                    f"Dynamics for {_lam_sym} = {lambda_value:.5f} failed: {e}"
+                )
 
             # Commit the current system.
             system = dynamics.commit()
