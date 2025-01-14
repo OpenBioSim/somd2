@@ -86,4 +86,8 @@ def cli():
         runner = Runner(system, config)
 
     # Run the simulation.
-    runner.run()
+    try:
+        runner.run()
+    except Exception as e:
+        _logger.error(f"An error occurred during the simulation: {e}")
+        exit(1)
