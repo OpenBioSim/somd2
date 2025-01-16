@@ -1172,7 +1172,7 @@ class RunnerBase:
             _sr.stream.save(system, self._filenames[index]["checkpoint"])
 
             # Create the final parquet file.
-            self._parquet = _dataframe_to_parquet(
+            _dataframe_to_parquet(
                 df,
                 metadata=metadata,
                 filename=self._filenames[index]["energy_traj"],
@@ -1206,17 +1206,20 @@ class RunnerBase:
             # Stream the checkpoint to file.
             _sr.stream.save(system, self._filenames[index]["checkpoint"])
 
+            # Create the parquet file name.
+            filename = self._filenames[index]["energy_traj"]
+
             # Create the parquet file.
             if block == self._start_block:
-                self._parquet = _dataframe_to_parquet(
+                _dataframe_to_parquet(
                     df,
                     metadata=metadata,
-                    filename=self._filenames[index]["energy_traj"],
+                    filename=filename
                 )
             # Append to the parquet file.
             else:
                 _parquet_append(
-                    self._parquet,
+                    filename,
                     df.iloc[-self._energy_per_block :],
                 )
 
