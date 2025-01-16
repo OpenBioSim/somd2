@@ -1163,9 +1163,6 @@ class RunnerBase:
             system.set_property("config", self._config.as_dict(sire_compatible=True))
             system.set_property("lambda", lam)
 
-            # Delete the trajectory frames.
-            system.delete_all_frames()
-
             # Stream the final system to file.
             _sr.stream.save(system, self._filenames[index]["checkpoint"])
 
@@ -1198,9 +1195,6 @@ class RunnerBase:
             system.set_property("config", self._config.as_dict(sire_compatible=True))
             system.set_property("lambda", lam)
 
-            # Delete the trajectory frames.
-            system.delete_all_frames()
-
             # Stream the checkpoint to file.
             _sr.stream.save(system, self._filenames[index]["checkpoint"])
 
@@ -1209,11 +1203,7 @@ class RunnerBase:
 
             # Create the parquet file.
             if block == self._start_block:
-                _dataframe_to_parquet(
-                    df,
-                    metadata=metadata,
-                    filename=filename
-                )
+                _dataframe_to_parquet(df, metadata=metadata, filename=filename)
             # Append to the parquet file.
             else:
                 _parquet_append(
