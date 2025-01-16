@@ -1080,8 +1080,6 @@ class RunnerBase:
 
         is_final_block: bool
             Whether this is the final block of the simulation.
-
-        speed:
         """
 
         from somd2 import __version__, _sire_version, _sire_revisionid
