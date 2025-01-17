@@ -337,9 +337,6 @@ class RunnerBase:
         _sr.save(mols0, self._filenames["topology0"])
         _sr.save(mols1, self._filenames["topology1"])
 
-        # Initialise the number of frames.
-        self._num_frames = [0] * len(self._lambda_values)
-
         # Append only this number of lines from the end of the dataframe during checkpointing.
         self._energy_per_block = int(
             self._config.checkpoint_frequency / self._config.energy_frequency
@@ -1113,16 +1110,15 @@ class RunnerBase:
             # Assemble and save the final trajectory.
             if self._config.save_trajectories:
                 # Save the final trajectory chunk to file.
-                if system.num_frames() > self._num_frames[index]:
+                if system.num_frames() > 0:
                     traj_filename = (
                         self._filenames[index]["trajectory_chunk"] + f"{block}.dcd"
                     )
                     _sr.save(
-                        system.trajectory()[self._num_frames[index] :],
+                        system.trajectory(),
                         traj_filename,
                         format=["DCD"],
                     )
-                    self._num_frames[index] = system.num_frames()
 
                 # Create the final topology file name.
                 topology0 = self._filenames["topology0"]
@@ -1153,7 +1149,6 @@ class RunnerBase:
 
                 # Save the final trajectory to a single file.
                 _sr.save(mols.trajectory(), traj_filename, format=["DCD"])
-                self._num_frames[index] = system.num_frames()
 
                 # Now remove the chunked trajectory files.
                 for chunk in traj_chunks:
@@ -1180,16 +1175,15 @@ class RunnerBase:
 
             # Save the current trajectory chunk to file.
             if self._config.save_trajectories:
-                if system.num_frames() > self._num_frames[index]:
+                if system.num_frames() > 0:
                     traj_filename = (
                         self._filenames[index]["trajectory_chunk"] + f"{block}.dcd"
                     )
                     _sr.save(
-                        system.trajectory()[self._num_frames[index] :],
+                        system.trajectory(),
                         traj_filename,
                         format=["DCD"],
                     )
-                    self._num_frames[index] = system.num_frames()
 
             # Encode the configuration and lambda value as system properties.
             system.set_property("config", self._config.as_dict(sire_compatible=True))

@@ -596,6 +596,10 @@ class RepexRunner(_RunnerBase):
                         system, index, block, speed, is_final_block=is_final_block
                     )
 
+                # Delete all trajectory frames from the Sire system within the
+                # dynamics object.
+                dynamics._d._sire_mols.delete_all_frames()
+
                 _logger.info(
                     f"Finished block {block+1} of {self._start_block + num_blocks} "
                     f"for {_lam_sym} = {lam:.5f}"
