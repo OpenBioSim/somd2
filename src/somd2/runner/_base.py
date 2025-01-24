@@ -608,6 +608,9 @@ class RunnerBase:
             else:
                 merged = _sr.morph.merge(water, ion, map={"as_new_molecule": False})
 
+            # Flag that this an alchemical ion.
+            merged = merged.edit().set_property("is_alchemical_ion", True).commit()
+
             # Update the system.
             system.update(merged)
 
