@@ -241,7 +241,10 @@ class RunnerBase:
                     raise ValueError(
                         "REST2 scaling can currently only be used when 'lambda_values' is unset."
                     )
-                if self._lambda_energy != self._lambda_values:
+                if (
+                    self._lambda_energy != self._lambda_values
+                    and self._config.rest2_scale != 1.0
+                ):
                     raise ValueError(
                         "'rest2_scale' can only be used when 'lambda_energy' matches 'lambda_values'."
                     )
