@@ -515,6 +515,8 @@ class Runner(_RunnerBase):
                         rest2_scale_factors=rest2_scale_factors,
                         save_velocities=self._config.save_velocities,
                         auto_fix_minimise=True,
+                        num_energy_neighbours=self._config.num_energy_neighbours,
+                        null_energy=self._config.null_energy,
                     )
                 except Exception as e:
                     raise RuntimeError(
@@ -579,6 +581,8 @@ class Runner(_RunnerBase):
                         rest2_scale_factors=rest2_scale_factors,
                         save_velocities=self._config.save_velocities,
                         auto_fix_minimise=True,
+                        num_energy_neighbours=self._config.num_energy_neighbours,
+                        null_energy=self._config.null_energy,
                     )
 
                     # Save the energy contribution for each force.
@@ -628,6 +632,8 @@ class Runner(_RunnerBase):
                     rest2_scale_factors=rest2_scale_factors,
                     save_velocities=self._config.save_velocities,
                     auto_fix_minimise=True,
+                    num_energy_neighbours=self._config.num_energy_neighbours,
+                    null_energy=self._config.null_energy,
                 )
             except Exception as e:
                 raise RuntimeError(

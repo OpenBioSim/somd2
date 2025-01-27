@@ -117,6 +117,8 @@ class Config:
         frame_frequency="20 ps",
         save_velocities=False,
         checkpoint_frequency="100 ps",
+        num_energy_neighbours=None,
+        null_energy="10000 kcal/mol",
         platform="auto",
         max_threads=None,
         max_gpus=None,
@@ -332,6 +334,21 @@ class Config:
 
         timeout: str
             Timeout for the minimiser.
+
+        num_energy_neighbours: int
+            The number of neighbouring windows to compute energies for when
+
+        num_energy_neighbours: int
+            The number of neighbouring windows to use when computing the energy
+            trajectory for the a given simulation lambda value. This can be
+            used to compute energies over a subset of windows, hence reducing
+            the cost of computing the energy trajectory. A value of 'null_energy'
+            will be added to the energy trajectory for the windows that are
+            omitted.
+
+        null_energy: str
+            The energy value to use for lambda windows that are not
+            being computed as part of the energy trajectory.
         """
 
         # Setup logger before doing anything else
@@ -385,6 +402,8 @@ class Config:
         self.pert_file = pert_file
         self.save_energy_components = save_energy_components
         self.timeout = timeout
+        self.num_energy_neighbours = num_energy_neighbours
+        self.null_energy = null_energy
 
         self.write_config = write_config
 
@@ -1380,6 +1399,43 @@ class Config:
             raise ValueError("'timeout' units are invalid.")
 
         self._timeout = t
+
+    @property
+    def num_energy_neighbours(self):
+        return self._num_energy_neighbours
+
+    @num_energy_neighbours.setter
+    def num_energy_neighbours(self, num_energy_neighbours):
+        if num_energy_neighbours is not None:
+            if not isinstance(num_energy_neighbours, int):
+                try:
+                    num_energy_neighbours = int(num_energy_neighbours)
+                except:
+                    raise ValueError("'num_energy_neighbours' must be of type 'int'")
+        self._num_energy_neighbours = num_energy_neighbours
+
+    @property
+    def null_energy(self):
+        return self._null_energy
+
+    @null_energy.setter
+    def null_energy(self, null_energy):
+        if not isinstance(null_energy, str):
+            raise TypeError("'null_energy' must be of type 'str'")
+
+        from sire.units import kcal_per_mol
+
+        try:
+            e = _sr.u(null_energy)
+        except:
+            raise ValueError(
+                f"Unable to parse 'null_energy' as a Sire GeneralUnit: {null_energy}"
+            )
+
+        if e.value() != 0 and not e.has_same_units(kcal_per_mol):
+            raise ValueError("'null_energy' units are invalid.")
+
+        self._null_energy = e
 
     @property
     def output_directory(self):

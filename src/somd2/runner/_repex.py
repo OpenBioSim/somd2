@@ -569,6 +569,8 @@ class RepexRunner(_RunnerBase):
                 rest2_scale_factors=self._rest2_scale_factors,
                 save_velocities=self._config.save_velocities,
                 auto_fix_minimise=True,
+                num_energy_neighbours=self._config.num_energy_neighbours,
+                null_energy=self._config.null_energy,
             )
 
             # Set the state.
