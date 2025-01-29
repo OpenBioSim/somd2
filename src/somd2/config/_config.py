@@ -336,15 +336,12 @@ class Config:
             Timeout for the minimiser.
 
         num_energy_neighbours: int
-            The number of neighbouring windows to compute energies for when
-
-        num_energy_neighbours: int
             The number of neighbouring windows to use when computing the energy
             trajectory for the a given simulation lambda value. This can be
             used to compute energies over a subset of windows, hence reducing
             the cost of computing the energy trajectory. A value of 'null_energy'
             will be added to the energy trajectory for the windows that are
-            omitted.
+            omitted. If None, then all windows will be used.
 
         null_energy: str
             The energy value to use for lambda windows that are not
