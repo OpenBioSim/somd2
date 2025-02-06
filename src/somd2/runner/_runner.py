@@ -389,12 +389,12 @@ class Runner(_RunnerBase):
                         "rest2_scale": rest2_scale,
                         "constraint": (
                             "none"
-                            if not self._equilibration_constraints
+                            if not self._config.equilibration_constraints
                             else self._config.constraint
                         ),
                         "perturbable_constraint": (
                             "none"
-                            if not self._equilibration_constraints
+                            if not self._config.equilibration_constraints
                             else self._config.perturbable_constraint
                         ),
                         "save_velocities": False,
