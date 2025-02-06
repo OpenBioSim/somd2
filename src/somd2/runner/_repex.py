@@ -24,6 +24,7 @@ __all__ = ["RepexRunner"]
 from numba import njit as _njit
 
 import numpy as _np
+import pickle as _pickle
 
 import sire as _sr
 
@@ -70,7 +71,6 @@ class DynamicsCache:
             )
 
         # Initialise attributes.
-        self._dynamics = []
         self._lambdas = lambdas
         self._rest2_scale_factors = rest2_scale_factors
         self._states = _np.array(range(len(lambdas)))
@@ -81,8 +81,68 @@ class DynamicsCache:
         self._num_accepted = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
         self._num_swaps = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
 
+        # Create the dynamics objects.
+        self._create_dynamics(
+            system, lambdas, rest2_scale_factors, num_gpus, dynamics_kwargs
+        )
+
+    def __setstate__(self, state):
+        """
+        Set the state of the object.
+        """
+        for key, value in state.items():
+            setattr(self, key, value)
+
+    def __getstate__(self):
+        """
+        Get the state of the object.
+        """
+
+        # Create the state dict.
+        d = {
+            "_lambdas": self._lambdas,
+            "_rest2_scale_factors": self._rest2_scale_factors,
+            "_states": self._states,
+            "_old_states": self._old_states,
+            "_openmm_states": self._openmm_states,
+            "_openmm_volumes": self._openmm_volumes,
+            "_num_proposed": self._num_proposed,
+            "_num_accepted": self._num_accepted,
+            "_num_swaps": self._num_swaps,
+        }
+
+        return d
+
+    def _create_dynamics(
+        self, system, lambdas, rest2_scale_factors, num_gpus, dynamics_kwargs
+    ):
+        """
+        Create the dynamics objects.
+
+        Parameters
+        ----------
+
+        system: :class: `System <sire.system.System>`, List[:class: `System <sire.system.System>`]
+            The perturbable system, or systems, to be simulated.
+
+        lambdas: np.ndarray
+            The lambda value for each replica.
+
+        rest2_scale_factors: np.ndarray
+            The REST2 scaling factor for each replica.
+
+        num_gpus: int
+            The number of GPUs to use.
+
+        dynamics_kwargs: dict
+            A dictionary of default dynamics keyword arguments.
+        """
+
         # Copy the dynamics keyword arguments.
         dynamics_kwargs = dynamics_kwargs.copy()
+
+        # Initialise the dynamics object list.
+        self._dynamics = []
 
         # Create the dynamics objects in serial.
         for i, (lam, scale) in enumerate(zip(lambdas, rest2_scale_factors)):
@@ -249,11 +309,6 @@ class RepexRunner(_RunnerBase):
             _logger.error(msg)
             raise ValueError(msg)
 
-        if config.restart:
-            raise ValueError(
-                "'restart' is not currently supported for replica exchange."
-            )
-
         if config.lambda_energy is not None:
             raise ValueError(
                 "'lambda_energy' is not currently supported for replica exchange."
@@ -275,14 +330,52 @@ class RepexRunner(_RunnerBase):
         else:
             self._num_gpus = min(self._config.max_gpus, len(gpu_devices))
 
+        # Store the name of the dynamics cache pickle file.
+        self._dynamics_cache_file = self._config.output_directory / "dynamics_cache.pkl"
+
+        # Store the name of the replica exchange swap acceptance matrix.
+        self._repex_matrix = self._config.output_directory / "repex_matrix.txt"
+
         # Create the dynamics cache.
-        self._dynamics_cache = DynamicsCache(
-            self._system,
-            self._lambda_values,
-            self._rest2_scale_factors,
-            self._num_gpus,
-            self._dynamics_kwargs,
-        )
+        if not self._is_restart:
+            self._dynamics_cache = DynamicsCache(
+                self._system,
+                self._lambda_values,
+                self._rest2_scale_factors,
+                self._num_gpus,
+                self._dynamics_kwargs,
+            )
+        else:
+            # Check to see if the simulation is already complete.
+            time = self._system[0].time()
+            if time > self._config.runtime - self._config.timestep:
+                _logger.success(f"Simulation already complete. Exiting.")
+                exit(0)
+
+            try:
+                with open(self._dynamics_cache_file, "rb") as f:
+                    self._dynamics_cache = _pickle.load(f)
+            except Exception as e:
+                _logger.error(
+                    f"Could not load dynamics cache from {self._dynamics_cache_file}: {e}"
+                )
+                raise e
+
+            # Make sure the number of replicas is the same.
+            if len(self._dynamics_cache._lambdas) != self._config.num_lambda:
+                _logger.error(
+                    f"The number of replicas in the dynamics cache ({len(self._dynamics_cache._lambdas)}) "
+                    f"does not match the number of replicas in the configuration ({self._config.num_lambda})."
+                )
+
+            # Create the dynamics objects.
+            self._dynamics_cache._create_dynamics(
+                self._system,
+                self._lambda_values,
+                self._rest2_scale_factors,
+                self._num_gpus,
+                self._dynamics_kwargs,
+            )
 
         # Conversion factor for reduced potential.
         kT = (_sr.units.k_boltz * self._config.temperature).to(_sr.units.kcal_per_mol)
@@ -294,21 +387,15 @@ class RepexRunner(_RunnerBase):
 
         # If restarting, subtract the time already run from the total runtime
         if self._config.restart:
-            self._config.runtime = str(self._config.runtime - self._system.time())
+            time = self._system[0].time()
+            self._config.runtime = str(self._config.runtime - time)
 
             # Work out the current block number.
             self._start_block = int(
-                round(
-                    self._system.time().value()
-                    / self._config.checkpoint_frequency.value(),
-                    12,
-                )
+                round(time.value() / self._config.checkpoint_frequency.value(), 12)
             )
         else:
             self._start_block = 0
-
-        # Store the name of the replica exchange swap acceptance matrix.
-        self._repex_matrix = self._config.output_directory / "repex_matrix.txt"
 
         from threading import Lock
 
@@ -402,7 +489,7 @@ class RepexRunner(_RunnerBase):
                         exit(1)
 
         # Current block number.
-        block = 0
+        block = self._start_block
 
         # Perform the replica exchange simulation.
         for i in range(cycles):
@@ -495,6 +582,10 @@ class RepexRunner(_RunnerBase):
                         t_ij,
                         fmt="%.5f",
                     )
+
+                    # Pickle the dynamics cache.
+                    with open(self._dynamics_cache_file, "wb") as f:
+                        _pickle.dump(self._dynamics_cache, f)
 
         # Save the final transition matrix.
         self._save_transition_matrix()
