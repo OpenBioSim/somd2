@@ -471,7 +471,7 @@ class RepexRunner(_RunnerBase):
         replica_list = list(range(self._config.num_lambda))
 
         # Minimise at each lambda value.
-        if self._config.minimise:
+        if self._config.minimise and not self._is_restart:
             for i in range(num_batches):
                 with ThreadPoolExecutor(max_workers=num_workers) as executor:
                     try:
