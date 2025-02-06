@@ -560,35 +560,16 @@ class RepexRunner(_RunnerBase):
                     # Save the transition matrix.
                     self._save_transition_matrix()
 
-                    # Create the transition matrix estimate. Adapted from OpenMMTools:
-                    #   https://github.com/choderlab/openmmtools
-                    t_ij = _np.zeros((self._config.num_lambda, self._config.num_lambda))
-                    for i_state in range(self._config.num_lambda):
-                        swaps = self._dynamics_cache.get_swaps()
-                        denom = float(
-                            (swaps[i_state, :].sum() + swaps[:, i_state].sum())
-                        )
-                        if denom > 0:
-                            for j_state in range(self._config.num_lambda):
-                                t_ij[i_state, j_state] = (
-                                    swaps[i_state, j_state] + swaps[j_state, i_state]
-                                ) / denom
-                        else:
-                            t[i_state, i_state] = 1.0
-
-                    # Save the replica exchange swap acceptance matrix.
-                    _np.savetxt(
-                        self._repex_matrix,
-                        t_ij,
-                        fmt="%.5f",
-                    )
-
                     # Pickle the dynamics cache.
                     with open(self._dynamics_cache_file, "wb") as f:
                         _pickle.dump(self._dynamics_cache, f)
 
         # Save the final transition matrix.
         self._save_transition_matrix()
+
+        # Pickle final state of the dynamics cache.
+        with open(self._dynamics_cache_file, "wb") as f:
+            _pickle.dump(self._dynamics_cache, f)
 
         # Record the end time.
         end = time()
