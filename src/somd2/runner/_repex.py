@@ -535,7 +535,7 @@ class RepexRunner(_RunnerBase):
                         _logger.error("Dynamics cancelled. Exiting.")
                         exit(1)
 
-            if i < cycles - 1:
+            if i < cycles:
                 # Assemble and energy matrix from the results.
                 _logger.info("Assembling energy matrix")
                 energy_matrix = self._assemble_results(results)
