@@ -331,7 +331,7 @@ class RepexRunner(_RunnerBase):
             self._num_gpus = min(self._config.max_gpus, len(gpu_devices))
 
         # Store the name of the dynamics cache pickle file.
-        self._dynamics_cache_file = self._config.output_directory / "dynamics_cache.pkl"
+        self._repex_state = self._config.output_directory / "repex_state.pkl"
 
         # Store the name of the replica exchange swap acceptance matrix.
         self._repex_matrix = self._config.output_directory / "repex_matrix.txt"
@@ -353,11 +353,11 @@ class RepexRunner(_RunnerBase):
                 exit(0)
 
             try:
-                with open(self._dynamics_cache_file, "rb") as f:
+                with open(self._repex_state, "rb") as f:
                     self._dynamics_cache = _pickle.load(f)
             except Exception as e:
                 _logger.error(
-                    f"Could not load dynamics cache from {self._dynamics_cache_file}: {e}"
+                    f"Could not load dynamics cache from {self._repex_state}: {e}"
                 )
                 raise e
 
@@ -561,14 +561,14 @@ class RepexRunner(_RunnerBase):
                     self._save_transition_matrix()
 
                     # Pickle the dynamics cache.
-                    with open(self._dynamics_cache_file, "wb") as f:
+                    with open(self._repex_state, "wb") as f:
                         _pickle.dump(self._dynamics_cache, f)
 
         # Save the final transition matrix.
         self._save_transition_matrix()
 
         # Pickle final state of the dynamics cache.
-        with open(self._dynamics_cache_file, "wb") as f:
+        with open(self._repex_state, "wb") as f:
             _pickle.dump(self._dynamics_cache, f)
 
         # Record the end time.
