@@ -559,16 +559,20 @@ class RepexRunner(_RunnerBase):
                     block += 1
 
                     # Save the transition matrix.
+                    _logger.info("Saving replica exchange transition matrix")
                     self._save_transition_matrix()
 
                     # Pickle the dynamics cache.
+                    _logger.info("Saving replica exchange state")
                     with open(self._repex_state, "wb") as f:
                         _pickle.dump(self._dynamics_cache, f)
 
         # Save the final transition matrix.
+        _logger.info("Saving final replica exchange transition matrix")
         self._save_transition_matrix()
 
         # Pickle final state of the dynamics cache.
+        _logger.info("Saving final replica exchange state")
         with open(self._repex_state, "wb") as f:
             _pickle.dump(self._dynamics_cache, f)
 
