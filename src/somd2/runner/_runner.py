@@ -486,6 +486,14 @@ class Runner(_RunnerBase):
         # Create the dynamics object.
         dynamics = system.dynamics(**dynamics_kwargs)
 
+        # Set the number of neighbours used for the energy calculation.
+        # If not None, then we add one to account for the extra windows
+        # used for finite-difference gradient analysis.
+        if self._config.num_energy_neighbours is not None:
+            num_energy_neighbours = self._config.num_energy_neighbours + 1
+        else:
+            num_energy_neighbours = None
+
         # Run the simulation, checkpointing in blocks.
         if self._config.checkpoint_frequency.value() > 0.0:
 
@@ -515,7 +523,7 @@ class Runner(_RunnerBase):
                         rest2_scale_factors=rest2_scale_factors,
                         save_velocities=self._config.save_velocities,
                         auto_fix_minimise=True,
-                        num_energy_neighbours=self._config.num_energy_neighbours,
+                        num_energy_neighbours=num_energy_neighbours,
                         null_energy=self._config.null_energy,
                     )
                 except Exception as e:
@@ -581,7 +589,7 @@ class Runner(_RunnerBase):
                         rest2_scale_factors=rest2_scale_factors,
                         save_velocities=self._config.save_velocities,
                         auto_fix_minimise=True,
-                        num_energy_neighbours=self._config.num_energy_neighbours,
+                        num_energy_neighbours=num_energy_neighbours,
                         null_energy=self._config.null_energy,
                     )
 
@@ -632,7 +640,7 @@ class Runner(_RunnerBase):
                     rest2_scale_factors=rest2_scale_factors,
                     save_velocities=self._config.save_velocities,
                     auto_fix_minimise=True,
-                    num_energy_neighbours=self._config.num_energy_neighbours,
+                    num_energy_neighbours=num_energy_neighbours,
                     null_energy=self._config.null_energy,
                 )
             except Exception as e:
