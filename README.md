@@ -99,7 +99,7 @@ involving conformational changes, e.g.  ring flips. This can be enabled
 using the `--rest2-scale` option, which specifies the "temperature" of the
 REST2 region relative to the rest of the system. By default, the REST2 region
 comprises _all_ atoms in perturbable molecules, but can be controlled via the
-`--rest2-selection` option. This should be a `Sire` selection spring that specifies
+`--rest2-selection` option. This should be a `Sire` selection string that specifies
 additional atoms of interest, i.e. those in regular, non-perturbable molecules.
 If the selection does contain atoms within perturbable molecules, then only
 those atoms will be considered as part of the REST2 region, i.e. you can
