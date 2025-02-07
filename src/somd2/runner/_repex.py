@@ -521,6 +521,7 @@ class RepexRunner(_RunnerBase):
                             replicas,
                             repeat(self._lambda_values),
                             repeat(is_checkpoint),
+                            repeat(i == 0),
                             repeat(i == cycles - 1),
                             repeat(block),
                             repeat(num_blocks + int(rem > 0)),
@@ -580,7 +581,14 @@ class RepexRunner(_RunnerBase):
         )
 
     def _run_block(
-        self, index, lambdas, is_checkpoint, is_final_block, block, num_blocks
+        self,
+        index,
+        lambdas,
+        is_checkpoint,
+        is_first_block,
+        is_final_block,
+        block,
+        num_blocks,
     ):
         """
         Run a dynamics block for a given replica.
@@ -599,6 +607,9 @@ class RepexRunner(_RunnerBase):
 
         is_checkpoint: bool
             Whether to checkpoint.
+
+        is_first_block: bool
+            Whether this is the first block.
 
         is_final_block: bool
             Whether this is the final block.
@@ -626,11 +637,18 @@ class RepexRunner(_RunnerBase):
         # Get the lambda value.
         lam = lambdas[index]
 
-        _logger.info(f"Running dynamics for {_lam_sym} = {lam:.5f}")
-
         try:
             # Get the dynamics object.
             dynamics = self._dynamics_cache.get(index)
+
+            # Minimise the system if this is a restart simulation and this is
+            # the first block.
+            if is_first_block and self._is_restart:
+                if self._config.minimise:
+                    _logger.info(f"Minimising restart at {_lam_sym} = {lam:.5f}")
+                    dynamics.minimise(timeout=self._config.timeout)
+
+            _logger.info(f"Running dynamics for {_lam_sym} = {lam:.5f}")
 
             # Run the dynamics.
             dynamics.run(
