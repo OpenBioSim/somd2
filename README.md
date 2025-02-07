@@ -102,8 +102,9 @@ comprises _all_ atoms in perturbable molecules, but can be controlled via the
 `--rest2-selection` option. This should be a `Sire` selection string that specifies
 additional atoms of interest, i.e. those in regular, non-perturbable molecules.
 If the selection does contain atoms within perturbable molecules, then only
-those atoms will be considered as part of the REST2 region, i.e. you can
-select a sub-set of atoms within a perturbable molecule to be scaled.
+those atoms within the perturbable molecules will be considered as part of the
+REST2 region, i.e. you can select a sub-set of atoms within a perturbable
+molecule to be scaled.
 
 By default, the REST2 schedule is a triangular function that starts and ends
 at 1.0, with a peak at the middle of the lambda schedule corresponding to
