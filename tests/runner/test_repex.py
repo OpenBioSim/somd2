@@ -109,10 +109,10 @@ def test_rest2_scale(ethane_methanol, rest2_scale, is_valid):
 
         # Instantiate a runner using the config defined above.
         if is_valid:
-            runner = RepexRunner(ethane_methanol, Config(**config))
+            runner = RunnerBase(ethane_methanol, Config(**config))
         else:
             with pytest.raises(ValueError):
-                runner = RepexRunner(ethane_methanol, Config(**config))
+                runner = RunnerBase(ethane_methanol, Config(**config))
 
 
 @pytest.mark.parametrize(
@@ -147,7 +147,7 @@ def test_rest2_selection(ethane_methanol, rest2_selection, is_valid):
 
         # Instantiate a runner using the config defined above.
         if is_valid:
-            runner = RepexRunner(ethane_methanol, Config(**config))
+            runner = RunnerBase(ethane_methanol, Config(**config))
         else:
             with pytest.raises(ValueError):
-                runner = RepexRunner(ethane_methanol, Config(**config))
+                runner = RunnerBase(ethane_methanol, Config(**config))
