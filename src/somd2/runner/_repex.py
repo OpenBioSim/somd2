@@ -319,9 +319,7 @@ class RepexRunner(_RunnerBase):
 
         # Make sure we're using the CUDA platform.
         if self._config.platform != "cuda":
-            msg = (
-                "Currently replica exchange simulations can only be run on the CUDA platform."
-            )
+            msg = "Currently replica exchange simulations can only be run on the CUDA platform."
             _logger.error(msg)
             raise ValueError(msg)
 
