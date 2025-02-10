@@ -867,19 +867,28 @@ class RepexRunner(_RunnerBase):
                 frame_frequency=0,
             )
 
+            # Perform minimisation at the end of equilibration only if the
+            # timestep is increasing, or the constraint is changing.
+            if (self._config.timestep > self._config.equilibration_timestep) or (
+                not self._config.equilibration_constraints
+                and self._config.perturbable_constraint != "none"
+            ):
+                _logger.info(
+                    f"Minimising at {_lam_sym} = {self._lambda_values[index]:.5f}"
+                )
+                dynamics.minimise(timeout=self._config.timeout)
+
             # Commit the system.
             system = dynamics.commit()
+
+            # Reset the timer to zero.
+            system.set_time(_sr.u("0ps"))
 
             # Delete the dynamics object.
             self._dynamics_cache.delete(index)
 
             # Work out the device index.
             device = index % self._num_gpus
-
-            _logger.info(
-                f"Creating production dynamics object for {_lam_sym} = "
-                f"{self._lambda_values[index]:.5f}"
-            )
 
             # Copy the dynamics keyword arguments.
             dynamics_kwargs = self._dynamics_kwargs.copy()
@@ -889,11 +898,15 @@ class RepexRunner(_RunnerBase):
             dynamics_kwargs["lambda_value"] = self._lambda_values[index]
             dynamics_kwargs["rest2_scale"] = self._rest2_scale_factors[index]
 
-            # Create the dynamics object.
+            # Create the production dynamics object.
             dynamics = system.dynamics(**dynamics_kwargs)
 
             # Set the new dynamics object.
             self._dynamics_cache.set(index, dynamics)
+
+            _logger.info(
+                f"Created dynamics object for {_lam_sym} = {self._lambda_values[index]:.5f}"
+            )
 
         except Exception as e:
             return False, index, e
