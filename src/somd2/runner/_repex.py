@@ -194,6 +194,33 @@ class DynamicsCache:
         """
         return self._dynamics[index]
 
+    def set(self, index, dynamics):
+        """
+        Set the dynamics object for a given index.
+
+        Parameters
+        ----------
+
+        index: int
+            The index of the replica.
+
+        dynamics: sire.legacy.Convert.SOMMContext
+            The dynamics object.
+        """
+        self._dynamics[index] = dynamics
+
+    def delete(self, index):
+        """
+        Delete the dynamics object for a given index.
+
+        Parameters
+        ----------
+
+        index: int
+            The index of the replica.
+        """
+        self._dynamics[index] = None
+
     def save_openmm_state(self, index):
         """
         Save the state of the dynamics object.
@@ -346,14 +373,38 @@ class RepexRunner(_RunnerBase):
         # Store the name of the replica exchange swap acceptance matrix.
         self._repex_matrix = self._config.output_directory / "repex_matrix.txt"
 
+        # Flag that we haven't equilibrated.
+        self._is_equilibration = False
+
         # Create the dynamics cache.
         if not self._is_restart:
+            dynamics_kwargs = self._dynamics_kwargs.copy()
+
+            if self._config.equilibration_time.value() > 0.0:
+                self._is_equilibration = True
+
+                # Overload the dynamics kwargs with the equilibration options.
+                dynamics_kwargs.update(
+                    {
+                        "constraint": (
+                            "none"
+                            if not self._config.equilibration_constraints
+                            else self._config.constraint
+                        ),
+                        "perturbable_constraint": (
+                            "none"
+                            if not self._config.equilibration_constraints
+                            else self._config.perturbable_constraint
+                        ),
+                    }
+                )
+
             self._dynamics_cache = DynamicsCache(
                 self._system,
                 self._lambda_values,
                 self._rest2_scale_factors,
                 self._num_gpus,
-                self._dynamics_kwargs,
+                dynamics_kwargs,
             )
         else:
             # Check to see if the simulation is already complete.
@@ -496,6 +547,24 @@ class RepexRunner(_RunnerBase):
                                 raise e
                     except KeyboardInterrupt:
                         _logger.error("Minimisation cancelled. Exiting.")
+                        exit(1)
+
+        # Equilibrate the system.
+        if self._is_equilibration:
+            for i in range(num_batches):
+                with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                    try:
+                        for success, index, e in executor.map(
+                            self._equilibrate,
+                            replica_list[i * num_workers : (i + 1) * num_workers],
+                        ):
+                            if not success:
+                                _logger.error(
+                                    f"Equilibration failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
+                                )
+                                raise e
+                    except KeyboardInterrupt:
+                        _logger.error("Equilibration cancelled. Exiting.")
                         exit(1)
 
         # Current block number.
@@ -756,6 +825,74 @@ class RepexRunner(_RunnerBase):
 
             # Minimise.
             dynamics.minimise(timeout=self._config.timeout)
+
+        except Exception as e:
+            return False, index, e
+
+        return True, index, None
+
+    def _equilibrate(self, index):
+        """
+        Equilibrate the system.
+
+        Parameters
+        ----------
+
+        index: int
+            The index of the replica.
+
+        Returns
+        -------
+
+        success: bool
+            Whether the equilibration was successful.
+
+        index: int
+            The index of the replica.
+
+        exception: Exception
+            The exception if the equilibration failed.
+        """
+        _logger.info(f"Equilibrating at {_lam_sym} = {self._lambda_values[index]:.5f}")
+
+        try:
+            # Get the dynamics object.
+            dynamics = self._dynamics_cache.get(index)
+
+            # Equilibrate.
+            dynamics.run(
+                self._config.equilibration_time,
+                energy_frequency=0,
+                frame_frequency=0,
+            )
+
+            # Commit the system.
+            system = dynamics.commit()
+
+            # Delete the dynamics object.
+            self._dynamics_cache.delete(index)
+
+            # Work out the device index.
+            device = index % self._num_gpus
+
+            _logger.info(
+                f"Creating production dynamics object for {_lam_sym} = "
+                f"{self._lambda_values[index]:.5f}"
+            )
+
+            # Copy the dynamics keyword arguments.
+            dynamics_kwargs = self._dynamics_kwargs.copy()
+
+            # Overload the device and lambda value.
+            dynamics_kwargs["device"] = device
+            dynamics_kwargs["lambda_value"] = self._lambda_values[index]
+            dynamics_kwargs["rest2_scale"] = self._rest2_scale_factors[index]
+
+            # Create the dynamics object.
+            dynamics = system.dynamics(**dynamics_kwargs)
+
+            # Set the new dynamics object.
+            self._dynamics_cache.set(index, dynamics)
 
         except Exception as e:
             return False, index, e
