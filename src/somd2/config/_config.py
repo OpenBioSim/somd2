@@ -106,6 +106,7 @@ class Config:
         perturbable_constraint="h_bonds_not_heavy_perturbed",
         include_constrained_energies=False,
         dynamic_constraints=True,
+        ghost_modifications=True,
         charge_difference=None,
         com_reset_frequency=10,
         minimise=True,
@@ -223,6 +224,12 @@ class Config:
             lambda will change any constraint on a perturbable bond to equal
             to the value of r0 at that lambda value. If this is False, then
             the constraint is set based on the current length.
+
+        ghost_modifications: bool
+            Whether to modify bonded terms between ghost atoms and the physical
+            system to avoid spurious coupling between the two, which can lead to
+            sampling of non-physical conformations. We implement the recommended
+            modifcations from https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328
 
         charge_difference: int
             The charge difference between the two end states. (Perturbed minus
@@ -376,6 +383,7 @@ class Config:
         self.perturbable_constraint = perturbable_constraint
         self.include_constrained_energies = include_constrained_energies
         self.dynamic_constraints = dynamic_constraints
+        self.ghost_modifications = ghost_modifications
         self.charge_difference = charge_difference
         self.com_reset_frequency = com_reset_frequency
         self.minimise = minimise
@@ -950,6 +958,16 @@ class Config:
         if not isinstance(dynamic_constraints, bool):
             raise ValueError("'dynamic_constraints' must be of type 'bool'")
         self._dynamic_constraints = dynamic_constraints
+
+    @property
+    def ghost_modifications(self):
+        return self._ghost_modifications
+
+    @ghost_modifications.setter
+    def ghost_modifications(self, ghost_modifications):
+        if not isinstance(ghost_modifications, bool):
+            raise ValueError("'ghost_modifications' must be of type 'bool'")
+        self._ghost_modifications = ghost_modifications
 
     @property
     def charge_difference(self):

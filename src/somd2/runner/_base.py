@@ -169,7 +169,7 @@ class RunnerBase:
 
         # Apply Boresch modifications to bonded terms involving ghost atoms to
         # avoid spurious couplings to the physical system at the end states.
-        else:
+        elif self._config.ghost_modifications:
             from .._utils._ghosts import boresch
 
             self._system = boresch(self._system)
