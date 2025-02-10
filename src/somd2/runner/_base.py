@@ -265,7 +265,7 @@ class RunnerBase:
                     raise ValueError(
                         "'rest2_scale' can only be used when 'lambda_energy' matches 'lambda_values'."
                     )
-                # Make sure the end states are clsoe to 1.0.
+                # Make sure the end states are close to 1.0.
                 if not isclose(
                     self._config.rest2_scale[0], 1.0, abs_tol=1e-4
                 ) or not isclose(self._config.rest2_scale[-1], 1.0, abs_tol=1e-4):
