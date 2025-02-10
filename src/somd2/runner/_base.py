@@ -307,6 +307,12 @@ class RunnerBase:
             except:
                 raise ValueError("Invalid 'rest2_selection' value.")
 
+            # Make sure the user hasn't selected all atoms.
+            if len(atoms) == self._system.num_atoms():
+                raise ValueError(
+                    "REST2 selection cannot contain all atoms in the system."
+                )
+
         # Flag whether this is a GPU simulation.
         self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]
 
