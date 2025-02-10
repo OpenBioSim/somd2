@@ -5,9 +5,13 @@ import pytest
 import tempfile
 
 from somd2.runner import RepexRunner
+from somd2.runner._base import RunnerBase
 from somd2.config import Config
 
+from conftest import has_cuda
 
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
 def test_repex_output(ethane_methanol):
     """
     Validate that repex specific simulation output is generated.
@@ -21,7 +25,7 @@ def test_repex_output(ethane_methanol):
             "energy_frequency": "4fs",
             "checkpoint_frequency": "4fs",
             "frame_frequency": "4fs",
-            "platform": "CPU",
+            "platform": "cuda",
             "max_threads": 1,
             "num_lambda": 2,
             "replica_exchange": True,

@@ -1,5 +1,8 @@
+import os
 import pytest
 import sire as sr
+
+has_cuda = True if "CUDA_VISIBLE_DEVICES" in os.environ else False
 
 
 @pytest.fixture(scope="session")
