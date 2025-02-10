@@ -386,6 +386,7 @@ class RepexRunner(_RunnerBase):
                 # Overload the dynamics kwargs with the equilibration options.
                 dynamics_kwargs.update(
                     {
+                        "timestep": self._config.equilibration_timestep,
                         "constraint": (
                             "none"
                             if not self._config.equilibration_constraints
