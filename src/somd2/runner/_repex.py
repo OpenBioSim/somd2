@@ -867,17 +867,6 @@ class RepexRunner(_RunnerBase):
                 frame_frequency=0,
             )
 
-            # Perform minimisation at the end of equilibration only if the
-            # timestep is increasing, or the constraint is changing.
-            if (self._config.timestep > self._config.equilibration_timestep) or (
-                not self._config.equilibration_constraints
-                and self._config.perturbable_constraint != "none"
-            ):
-                _logger.info(
-                    f"Minimising at {_lam_sym} = {self._lambda_values[index]:.5f}"
-                )
-                dynamics.minimise(timeout=self._config.timeout)
-
             # Commit the system.
             system = dynamics.commit()
 
@@ -900,6 +889,17 @@ class RepexRunner(_RunnerBase):
 
             # Create the production dynamics object.
             dynamics = system.dynamics(**dynamics_kwargs)
+
+            # Perform minimisation at the end of equilibration only if the
+            # timestep is increasing, or the constraint is changing.
+            if (self._config.timestep > self._config.equilibration_timestep) or (
+                not self._config.equilibration_constraints
+                and self._config.perturbable_constraint != "none"
+            ):
+                _logger.info(
+                    f"Minimising at {_lam_sym} = {self._lambda_values[index]:.5f}"
+                )
+                dynamics.minimise(timeout=self._config.timeout)
 
             # Set the new dynamics object.
             self._dynamics_cache.set(index, dynamics)
