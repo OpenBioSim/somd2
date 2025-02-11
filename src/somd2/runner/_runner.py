@@ -387,7 +387,7 @@ class Runner(_RunnerBase):
                         "device": device,
                         "lambda_value": lambda_value,
                         "rest2_scale": rest2_scale,
-                        "timestep": self._config.equilibrium_timestep,
+                        "timestep": self._config.equilibration_timestep,
                         "constraint": (
                             "none"
                             if not self._config.equilibration_constraints
