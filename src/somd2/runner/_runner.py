@@ -377,6 +377,7 @@ class Runner(_RunnerBase):
         if self._config.equilibration_time.value() > 0.0 and not is_restart:
             try:
                 # Run without saving energies or frames.
+                _logger.info(f"Equilibrating at {_lam_sym} = {lambda_value:.5f}")
 
                 # Copy the dynamics kwargs.
                 dynamics_kwargs = self._dynamics_kwargs.copy()
@@ -416,8 +417,10 @@ class Runner(_RunnerBase):
                 # Commit the system.
                 system = dynamics.commit()
 
+                from sire import u
+
                 # Reset the timer to zero.
-                system.set_time(_sr.u("0ps"))
+                system.set_time(u("0ps"))
 
                 # Perform minimisation at the end of equilibration only if the
                 # timestep is increasing, or the constraint is changing.
@@ -427,7 +430,7 @@ class Runner(_RunnerBase):
                 ):
                     self._minimisation(
                         system,
-                        lambda_min=lambda_value,
+                        lambda_value=lambda_value,
                         rest2_scale=rest2_scale,
                         device=device,
                         constraint=self._config.constraint,
