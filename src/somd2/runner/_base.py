@@ -407,7 +407,7 @@ class RunnerBase:
 
     def _check_end_state_constraints(self):
         """
-        Internal function to check whether the constrants are the same at the two
+        Internal function to check whether the constraints are the same at the two
         end states.
         """
 
