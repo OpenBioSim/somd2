@@ -398,8 +398,6 @@ class Runner(_RunnerBase):
                             if not self._config.equilibration_constraints
                             else self._config.perturbable_constraint
                         ),
-                        "save_velocities": False,
-                        "auto_fix_minimise": True,
                     }
                 )
 
@@ -411,6 +409,8 @@ class Runner(_RunnerBase):
                     self._config.equilibration_time,
                     energy_frequency=0,
                     frame_frequency=0,
+                    save_velocities=False,
+                    auto_fix_minimise=True,
                 )
 
                 # Commit the system.
