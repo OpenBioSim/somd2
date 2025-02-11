@@ -183,10 +183,10 @@ class RunnerBase:
         # Get the charge difference between the two end states.
         charge_diff = self._get_charge_difference(self._system)
 
-        # Make sure the difference is integer valued to 5 decimal places.
-        if not round(charge_diff, 4).is_integer():
+        # Make sure the difference is integer valued to 2 decimal places.
+        if not round(charge_diff, 2).is_integer():
             _logger.warning("Charge difference between end states is not an integer.")
-        charge_diff = int(round(charge_diff, 4))
+        charge_diff = round(charge_diff)
 
         # Make sure the charge difference matches the expected value
         # from the config.
