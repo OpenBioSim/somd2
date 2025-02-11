@@ -21,6 +21,8 @@
 
 __all__ = ["Runner"]
 
+import sire as _sr
+
 from somd2 import _logger
 
 from .._utils import _lam_sym
@@ -417,10 +419,8 @@ class Runner(_RunnerBase):
                 # Commit the system.
                 system = dynamics.commit()
 
-                from sire import u
-
                 # Reset the timer to zero.
-                system.set_time(u("0ps"))
+                system.set_time(_sr.u("0ps"))
 
                 # Perform minimisation at the end of equilibration only if the
                 # timestep is increasing, or the constraint is changing.
