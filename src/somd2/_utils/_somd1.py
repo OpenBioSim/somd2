@@ -1,7 +1,7 @@
 ######################################################################
 # SOMD2: GPU accelerated alchemical free-energy engine.
 #
-# Copyright: 2023-2024
+# Copyright: 2023-2025
 #
 # Authors: The OpenBioSim Team <team@openbiosim.org>
 #
@@ -19,6 +19,8 @@
 # along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
+__all__ = ["apply_pert", "make_compatible", "reconstruct_system"]
+
 from sire.system import System as _System
 from sire.legacy.System import System as _LegacySystem
 
@@ -26,7 +28,63 @@ import sire.legacy.MM as _SireMM
 import sire.legacy.Mol as _SireMol
 
 
-def _make_compatible(system):
+def apply_pert(system, pert_file):
+    """
+    Helper function to apply a perturbation to a reference system.
+
+    Parameters
+    ----------
+
+    system: sr.system.System
+        The reference system.
+
+    pert_file: str
+        Path to a stream file containing the perturbation to apply to the
+        reference system.
+
+    Returns
+    -------
+
+    system: sire.system.System
+        The perturbable system.
+    """
+
+    if not isinstance(system, _System):
+        raise TypeError("'system' must be of type 'sr.system.System'.")
+
+    if not isinstance(pert_file, str):
+        raise TypeError("'pert_file' must be of type 'str'.")
+
+    from sire import morph as _morph
+
+    # Get the non-water molecules in the system.
+    non_waters = system["not water"].molecules()
+
+    # Try to apply the perturbation to each non-water molecule.
+    is_pert = False
+    for mol in non_waters:
+        # Exclude ions.
+        if mol.num_atoms() > 1:
+            try:
+                pert_mol = _morph.create_from_pertfile(mol, pert_file)
+                is_pert = True
+                break
+            except:
+                pass
+
+    if not is_pert:
+        raise ValueError(f"Failed to apply the perturbation in '{pert_file}'.")
+
+    # Update the molecule.
+    system.update(pert_mol)
+
+    # Link to the reference state.
+    system = _morph.link_to_reference(system)
+
+    return system
+
+
+def make_compatible(system):
     """
     Makes a perturbation SOMD1 compatible.
 
@@ -547,54 +605,108 @@ def _make_compatible(system):
     return system
 
 
-def _apply_pert(system, pert_file):
+def reconstruct_system(system):
     """
-    Helper function to apply a perturbation to a reference system.
+    Reconstruct a perturbable system to its original state, i.e. extract the
+    end states for each perturbable molecule and re-merge them using the original
+    mapping. This removes any ghost atom modifications applied via a perturbation
+    file.
 
     Parameters
     ----------
 
-    system: sr.system.System
-        The reference system.
-
-    pert_file: str
-        Path to a stream file containing the perturbation to apply to the
-        reference system.
+    system : sire.system.System, sire.legacy.System.System
+        The system containing the molecules to be perturbed.
 
     Returns
     -------
 
-    system: sire.system.System
-        The perturbable system.
+    system : sire.system.System
+        The updated system.
     """
 
-    if not isinstance(system, _System):
-        raise TypeError("'system' must be of type 'sr.system.System'.")
-
-    if not isinstance(pert_file, str):
-        raise TypeError("'pert_file' must be of type 'str'.")
+    import BioSimSpace as _BSS
 
     from sire import morph as _morph
 
-    # Get the non-water molecules in the system.
-    non_waters = system["not water"].molecules()
+    # Check the system is a Sire system.
+    if not isinstance(system, (_System, _LegacySystem)):
+        raise TypeError(
+            "'system' must of type 'sire.system.System' or 'sire.legacy.System.System'"
+        )
 
-    # Try to apply the perturbation to each non-water molecule.
-    is_pert = False
-    for mol in non_waters:
-        # Exclude ions.
-        if mol.num_atoms() > 1:
-            try:
-                pert_mol = _morph.create_from_pertfile(mol, pert_file)
-                is_pert = True
-                break
-            except:
-                pass
+    # Extract the legacy system.
+    if isinstance(system, _LegacySystem):
+        system = _System(system)
 
-    if not is_pert:
-        raise ValueError(f"Failed to apply the perturbation in '{pert_file}'.")
+    # Clone the system.
+    system = system.clone()
 
-    # Update the molecule.
-    system.update(pert_mol)
+    # Search for perturbable molecules.
+    try:
+        pert_mols = system.molecules("property is_perturbable")
+    except KeyError:
+        raise KeyError("No perturbable molecules in the system")
+
+    # Store a dummy element for ghost atoms.
+    ghost = _SireMol.Element(0)
+
+    # Loop over all perturbable molecules.
+    for mol in pert_mols:
+
+        # Extract the end states.
+        ref = _morph.extract_reference(mol)
+        pert = _morph.extract_perturbed(mol)
+
+        # Find the indices for non-ghost atoms.
+        ref_idxs = []
+        for x, (a, e) in enumerate(
+            zip(ref.property("ambertype"), ref.property("element"))
+        ):
+            if a == "du" or e == ghost:
+                continue
+            else:
+                ref_idxs.append(x)
+        pert_idxs = []
+        for x, (a, e) in enumerate(
+            zip(pert.property("ambertype"), pert.property("element"))
+        ):
+            if a == "du" or e == ghost:
+                continue
+            else:
+                pert_idxs.append(x)
+
+        # Convert to BioSimSpace molecules and extract the non-ghost atoms.
+        ref = _BSS._SireWrappers.Molecule(ref).extract(ref_idxs)
+        pert = _BSS._SireWrappers.Molecule(pert).extract(pert_idxs)
+
+        # Work out the mapping.
+        idx0 = 0
+        idx1 = 0
+        mapping = {}
+        for x, atom in enumerate(mol.atoms()):
+            at0 = atom.property("ambertype0")
+            at1 = atom.property("ambertype1")
+
+            if at0 != "du" and at1 != "du":
+                mapping[idx0] = idx1
+
+            if at0 != "du":
+                idx0 += 1
+
+            if at1 != "du":
+                idx1 += 1
+
+        # Re-merge the molecules.
+        merged = _BSS.Align.merge(ref, pert, mapping=mapping, force=True)
+
+        # Give the molecule the same number as the original.
+        merged = merged._sire_object.edit().renumber(mol.number()).molecule().commit()
+
+        # Update the system.
+        system.update(merged)
+
+    # Link to the reference state.
+    system = _morph.link_to_reference(system)
 
     return system

@@ -1,7 +1,7 @@
 ######################################################################
 # SOMD2: GPU accelerated alchemical free-energy engine.
 #
-# Copyright: 2023-2024
+# Copyright: 2023-2025
 #
 # Authors: The OpenBioSim Team <team@openbiosim.org>
 #
@@ -50,11 +50,13 @@ def dataframe_to_parquet(df, metadata, filepath=None, filename=None):
 
     metadata: dict
         Dictionary containing metadata to be saved with the dataframe.
-        Currently just temperature and lambda value.
 
     filepath: str or pathlib.PosixPath
         The of the parent directory in to which the parquet file will be saved.
         If None, save to current working directory.
+
+    filename: str
+        The name of the parquet file to be saved. If None, a default name will be used.
     """
 
     if filepath is None:
@@ -81,7 +83,7 @@ def dataframe_to_parquet(df, metadata, filepath=None, filename=None):
     return filepath / filename
 
 
-def dict_to_yaml(data_dict, path, filename="config.yaml"):
+def dict_to_yaml(data_dict, filename="config.yaml", path=None):
     """
     Write a dictionary to a YAML file.
 
@@ -91,16 +93,20 @@ def dict_to_yaml(data_dict, path, filename="config.yaml"):
     data_dict: dict
         The dictionary to be written to a YAML file.
 
-    path: str or pathlib.PosixPath
-        The path to the YAML file to be written.
-
     filename: str
         The name of the YAML file to be written (default 'config.yaml').
+
+    path: str or pathlib.PosixPath
+        The path to the YAML file to be written.
     """
     import yaml as _yaml
 
-    try:
+    if path is None:
+        path = _Path(filename)
+    else:
         path = _Path(path) / filename
+
+    try:
         # Ensure the parent directory for the file exists
         path.parent.mkdir(parents=True, exist_ok=True)
         # Open the file in write mode and write the dictionary as YAML
@@ -153,15 +159,17 @@ def parquet_append(filepath: _Path or str, df: _pd.DataFrame) -> None:
         Pandas dataframe to append. Must be same schema as original.
     """
     try:
+        # Use memory map for speed.
         table_original_file = _pq.read_table(
             source=str(filepath), pre_buffer=False, use_threads=True, memory_map=True
-        )  # Use memory map for speed.
+        )
         table_to_append = _pa.Table.from_pandas(df)
-        table_to_append = table_to_append.cast(
-            table_original_file.schema
-        )  # Attempt to cast new schema to existing, e.g. datetime64[ns] to datetime64[us] (may throw otherwise).
+        # Attempt to cast new schema to existing, e.g. datetime64[ns] to
+        # datetime64[us] (may throw otherwise).
+        table_to_append = table_to_append.cast(table_original_file.schema)
 
-        temp_file = str(filepath) + "_temp"  # Temporary file to write to
+        # Temporary file to write to.
+        temp_file = str(filepath) + "_temp"
 
         # Writing to a temporary file
         with _pq.ParquetWriter(temp_file, table_original_file.schema) as temp_writer:

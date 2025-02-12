@@ -1,7 +1,7 @@
 ######################################################################
 # SOMD2: GPU accelerated alchemical free-energy engine.
 #
-# Copyright: 2023-2024
+# Copyright: 2023-2025
 #
 # Authors: The OpenBioSim Team <team@openbiosim.org>
 #
@@ -76,20 +76,21 @@ class Config:
     _nargs = {
         "lambda_values": "+",
         "lambda_energy": "+",
+        "rest2_scale": "+",
     }
 
     def __init__(
         self,
         log_level="info",
-        log_file=None,
-        runtime="1ns",
-        timestep="4fs",
-        temperature="300K",
+        log_file="log.txt",
+        runtime="1 ns",
+        timestep="4 fs",
+        temperature="300 K",
         pressure="1 atm",
         barostat_frequency=25,
         integrator="langevin_middle",
         cutoff_type="pme",
-        cutoff="7.5A",
+        cutoff="7.5 A",
         h_mass_factor=1.5,
         num_lambda=11,
         lambda_values=None,
@@ -98,28 +99,34 @@ class Config:
         charge_scale_factor=0.2,
         swap_end_states=False,
         coulomb_power=0.0,
-        shift_coulomb="1A",
-        shift_delta="2A",
+        shift_coulomb="1 A",
+        shift_delta="2.25 A",
         restraints=None,
         constraint="h_bonds",
         perturbable_constraint="h_bonds_not_heavy_perturbed",
         include_constrained_energies=False,
         dynamic_constraints=True,
+        ghost_modifications=True,
         charge_difference=None,
         com_reset_frequency=10,
         minimise=True,
-        equilibration_time="0ps",
-        equilibration_timestep="1fs",
+        equilibration_time="0 ps",
+        equilibration_timestep="1 fs",
         equilibration_constraints=False,
-        energy_frequency="1ps",
+        energy_frequency="1 ps",
         save_trajectories=True,
-        frame_frequency="20ps",
+        frame_frequency="20 ps",
         save_velocities=False,
-        checkpoint_frequency="100ps",
+        checkpoint_frequency="100 ps",
+        num_energy_neighbours=None,
+        null_energy="10000 kcal/mol",
         platform="auto",
         max_threads=None,
         max_gpus=None,
-        run_parallel=True,
+        oversubscription_factor=1,
+        replica_exchange=False,
+        rest2_scale=1.0,
+        rest2_selection=None,
         output_directory="output",
         restart=False,
         write_config=True,
@@ -127,7 +134,7 @@ class Config:
         somd1_compatibility=False,
         pert_file=None,
         save_energy_components=False,
-        timeout="300s",
+        timeout="300 s",
     ):
         """
         Constructor.
@@ -145,7 +152,8 @@ class Config:
             Simulation temperature.
 
         pressure: str
-            Simulation pressure. (Simulations will run in the NVT ensemble unless a pressure is specified.)
+            Simulation pressure. (Simulations will run in the NVT ensemble unless
+            a pressure is specified.)
 
         barostat_frequency: int
             The number of integration steps between barostat updates.
@@ -196,17 +204,16 @@ class Config:
             Lennard-Jones interaction.
 
         restraints: sire.mm._MM.Restraints
-            A single set of restraints, or a list of
-            sets of restraints that will be applied to
-            the atoms during the simulation.
+            A single set of restraints, or a list of sets of restraints that
+            will be applied to the atoms during the simulation.
 
         constraint: str
             Constraint type to use for non-perturbable molecules.
 
         perturbable_constraint: str
             Constraint type to use for perturbable molecules. If None, then
-            this will be set according to what is chosen for the
-            non-perturbable constraint.
+            this will be set according to what is chosen for the non-perturbable
+            constraint.
 
         include_constrained_energies: bool
             Whether to include constrained energies in the potential.
@@ -217,6 +224,12 @@ class Config:
             lambda will change any constraint on a perturbable bond to equal
             to the value of r0 at that lambda value. If this is False, then
             the constraint is set based on the current length.
+
+        ghost_modifications: bool
+            Whether to modify bonded terms between ghost atoms and the physical
+            system to avoid spurious coupling between the two, which can lead to
+            sampling of non-physical conformations. We implement the recommended
+            modifcations from https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328
 
         charge_difference: int
             The charge difference between the two end states. (Perturbed minus
@@ -244,7 +257,8 @@ class Config:
             Whether to use constraints during equilibration.
 
         energy_frequency: str
-            Frequency at which to output energy data.
+            Frequency at which to output energy data. If running using 'replica_exchange',
+            then this will also be the frequency at which replica swaps are attempted.
 
         save_trajectories: bool
             Whether to save trajectory files
@@ -256,8 +270,9 @@ class Config:
             Whether to save velocities in trajectory frames.
 
         checkpoint_frequency: str
-            Frequency at which to save checkpoint files, should be larger than min(energy_frequency, frame_frequency).
-            If zero, then no checkpointing will be performed.
+            Frequency at which to save checkpoint files, should be larger than
+            min(energy_frequency, frame_frequency). If zero, then no checkpointing
+            will be performed.
 
         platform: str
             Platform to run simulation on.
@@ -270,8 +285,29 @@ class Config:
             Maximum number of GPUs to use for simulation (Default None, uses all available.)
             Does nothing if platform is set to CPU.
 
-        run_parallel: bool
-            Whether to run simulation in parallel.
+        oversubscription_factor: int
+            Factor by which to oversubscribe jobs on GPUs during replica exchange simulations.
+
+        replica_exchange: bool
+            Whether to run replica exchange simulation. Currently this can only be used when
+            GPU resources are available.
+
+        rest2_scale: float, list(float)
+            The scaling factor for Replica Exchange with Solute Tempering (REST) simulations.
+            This is the factor by which the temperature of the solute is scaled with respect to
+            the rest of the system. This can either be a single scaling factor, or a list of
+            scale factors for each lambda window. When a single scaling factor is used, then
+            the scale factor will be interpolated between a value of 1.0 in the end states,
+            and the value of 'rest2_scale' in intermediate lambda = 0.5 state.
+
+        rest2_selection: str
+            A sire selection string for atoms to include in the REST2 region in
+            addition to any perturbable molecules. For example, "molidx 0 and residx 0,1,2"
+            would select atoms from the first three residues of the first molecule. If None,
+            then all atoms within perturbable molecules will be included in the REST2 region.
+            When atoms within a perturbable molecule are included in the selection, then only
+            those atoms will be considered as part of the REST2 region. This allows REST2 to
+            be applied to protein mutations.
 
         output_directory: str
             Path to a directory to store output files.
@@ -305,6 +341,18 @@ class Config:
 
         timeout: str
             Timeout for the minimiser.
+
+        num_energy_neighbours: int
+            The number of neighbouring windows to use when computing the energy
+            trajectory for the a given simulation lambda value. This can be
+            used to compute energies over a subset of windows, hence reducing
+            the cost of computing the energy trajectory. A value of 'null_energy'
+            will be added to the energy trajectory for the windows that are
+            omitted. If None, then all windows will be used.
+
+        null_energy: str
+            The energy value to use for lambda windows that are not
+            being computed as part of the energy trajectory.
         """
 
         # Setup logger before doing anything else
@@ -335,6 +383,7 @@ class Config:
         self.perturbable_constraint = perturbable_constraint
         self.include_constrained_energies = include_constrained_energies
         self.dynamic_constraints = dynamic_constraints
+        self.ghost_modifications = ghost_modifications
         self.charge_difference = charge_difference
         self.com_reset_frequency = com_reset_frequency
         self.minimise = minimise
@@ -349,12 +398,17 @@ class Config:
         self.platform = platform
         self.max_threads = max_threads
         self.max_gpus = max_gpus
-        self.run_parallel = run_parallel
+        self.oversubscription_factor = oversubscription_factor
+        self.replica_exchange = replica_exchange
+        self.rest2_scale = rest2_scale
+        self.rest2_selection = rest2_selection
         self.restart = restart
         self.somd1_compatibility = somd1_compatibility
         self.pert_file = pert_file
         self.save_energy_components = save_energy_components
         self.timeout = timeout
+        self.num_energy_neighbours = num_energy_neighbours
+        self.null_energy = null_energy
 
         self.write_config = write_config
 
@@ -906,6 +960,16 @@ class Config:
         self._dynamic_constraints = dynamic_constraints
 
     @property
+    def ghost_modifications(self):
+        return self._ghost_modifications
+
+    @ghost_modifications.setter
+    def ghost_modifications(self, ghost_modifications):
+        if not isinstance(ghost_modifications, bool):
+            raise ValueError("'ghost_modifications' must be of type 'bool'")
+        self._ghost_modifications = ghost_modifications
+
+    @property
     def charge_difference(self):
         return self._charge_difference
 
@@ -942,7 +1006,7 @@ class Config:
             raise ValueError("'minimise' must be of type 'bool'")
         if not minimise:
             _logger.warning(
-                "Minimisation is highly recommended for increased stability in SOMD2"
+                "Minimisation is highly recommended for increased stability."
             )
         self._minimise = minimise
 
@@ -1203,9 +1267,12 @@ class Config:
         ):
             if "CUDA_VISIBLE_DEVICES" in _os.environ:
                 self._max_gpus = len(_os.environ["CUDA_VISIBLE_DEVICES"].split(","))
+            elif "OPENCL_VISIBLE_DEVICES" in _os.environ:
+                self._max_gpus = len(_os.environ["OPENCL_VISIBLE_DEVICES"].split(","))
+            elif "HIP_VISIBLE_DEVICES" in _os.environ:
+                self._max_gpus = len(_os.environ["HIP_VISIBLE_DEVICES"].split(","))
             else:
                 self._max_gpus = 0
-
         else:
             try:
                 self._max_gpus = int(max_gpus)
@@ -1217,14 +1284,67 @@ class Config:
                 )
 
     @property
-    def run_parallel(self):
-        return self._run_parallel
+    def oversubscription_factor(self):
+        return self._oversubscription_factor
 
-    @run_parallel.setter
-    def run_parallel(self, run_parallel):
-        if not isinstance(run_parallel, bool):
-            raise ValueError("'run_parallel' must be of type 'bool'")
-        self._run_parallel = run_parallel
+    @oversubscription_factor.setter
+    def oversubscription_factor(self, oversubscription_factor):
+        if not isinstance(oversubscription_factor, int):
+            try:
+                oversubscription_factor = int(oversubscription_factor)
+            except:
+                raise ValueError("'oversubscription_factor' must be of type 'int'")
+
+        if oversubscription_factor < 1:
+            raise ValueError("'oversubscription_factor' must be greater than 1")
+
+        self._oversubscription_factor = oversubscription_factor
+
+    @property
+    def replica_exchange(self):
+        return self._replica_exchange
+
+    @replica_exchange.setter
+    def replica_exchange(self, replica_exchange):
+        if not isinstance(replica_exchange, bool):
+            raise ValueError("'replica_exchange' must be of type 'bool'")
+        self._replica_exchange = replica_exchange
+
+    @property
+    def rest2_scale(self):
+        return self._rest2_scale
+
+    @rest2_scale.setter
+    def rest2_scale(self, rest2_scale):
+        # Convert to an iterable.
+        if not isinstance(rest2_scale, _Iterable):
+            rest2_scale = [rest2_scale]
+
+        # Convert to floats.
+        try:
+            rest2_scale = [float(x) for x in rest2_scale]
+        except:
+            raise ValueError("'rest2_scale' must be a float, or iterable of floats")
+
+        # Check that all values are greater than 1.0.
+        for scale in rest2_scale:
+            if scale < 1.0:
+                raise ValueError("'rest2_scale' must be greater than or equal to 1.0")
+
+        if len(rest2_scale) == 1:
+            rest2_scale = rest2_scale[0]
+        self._rest2_scale = rest2_scale
+
+    @property
+    def rest2_selection(self):
+        return self._rest2_selection
+
+    @rest2_selection.setter
+    def rest2_selection(self, rest2_selection):
+        if rest2_selection is not None:
+            if not isinstance(rest2_selection, str):
+                raise TypeError("'rest2_selection' must be of type 'str'")
+        self._rest2_selection = rest2_selection
 
     @property
     def restart(self):
@@ -1294,6 +1414,43 @@ class Config:
             raise ValueError("'timeout' units are invalid.")
 
         self._timeout = t
+
+    @property
+    def num_energy_neighbours(self):
+        return self._num_energy_neighbours
+
+    @num_energy_neighbours.setter
+    def num_energy_neighbours(self, num_energy_neighbours):
+        if num_energy_neighbours is not None:
+            if not isinstance(num_energy_neighbours, int):
+                try:
+                    num_energy_neighbours = int(num_energy_neighbours)
+                except:
+                    raise ValueError("'num_energy_neighbours' must be of type 'int'")
+        self._num_energy_neighbours = num_energy_neighbours
+
+    @property
+    def null_energy(self):
+        return self._null_energy
+
+    @null_energy.setter
+    def null_energy(self, null_energy):
+        if not isinstance(null_energy, str):
+            raise TypeError("'null_energy' must be of type 'str'")
+
+        from sire.units import kcal_per_mol
+
+        try:
+            e = _sr.u(null_energy)
+        except:
+            raise ValueError(
+                f"Unable to parse 'null_energy' as a Sire GeneralUnit: {null_energy}"
+            )
+
+        if e.value() != 0 and not e.has_same_units(kcal_per_mol):
+            raise ValueError("'null_energy' units are invalid.")
+
+        self._null_energy = e
 
     @property
     def output_directory(self):
@@ -1429,7 +1586,7 @@ class Config:
         )
 
         # Add the parameters.
-        for param in params:
+        for param in sorted(params):
             # Convert underscores to hyphens for the command line.
             cli_param = param.replace("_", "-")
 

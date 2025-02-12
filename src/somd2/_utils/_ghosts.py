@@ -1,7 +1,7 @@
 ######################################################################
 # SOMD2: GPU accelerated alchemical free-energy engine.
 #
-# Copyright: 2023-2024
+# Copyright: 2023-2025
 #
 # Authors: The OpenBioSim Team <team@openbiosim.org>
 #
@@ -19,6 +19,8 @@
 # along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
+__all__ = ["boresch"]
+
 from sire.system import System as _System
 from sire.legacy.System import System as _LegacySystem
 
@@ -32,7 +34,7 @@ from . import _is_ghost
 from . import _lam_sym
 
 
-def _boresch(system, k_hard=100, k_soft=5, optimise_angles=True):
+def boresch(system, k_hard=100, k_soft=5, optimise_angles=True):
     """
     Apply Boresch modifications to ghost atom bonded terms to avoid non-physical
     coupling between the ghost atoms and the physical region.

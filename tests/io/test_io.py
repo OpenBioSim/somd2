@@ -1,6 +1,5 @@
 from somd2.io import (
     dataframe_to_parquet,
-    dict_to_yaml,
     parquet_append,
     parquet_to_dataframe,
 )

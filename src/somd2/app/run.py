@@ -1,7 +1,7 @@
 ######################################################################
 # SOMD2: GPU accelerated alchemical free-energy engine.
 #
-# Copyright: 2023-2024
+# Copyright: 2023-2025
 #
 # Authors: The OpenBioSim Team <team@openbiosim.org>
 #
@@ -39,7 +39,7 @@ def cli():
 
     from somd2 import _logger
     from somd2.config import Config
-    from somd2.runner import Runner
+    from somd2.runner import Runner, RepexRunner
 
     from somd2.io import yaml_to_dict
 
@@ -80,7 +80,14 @@ def cli():
     config = Config(**args)
 
     # Instantiate a Runner object to run the simulation.
-    runner = Runner(system, config)
+    if config.replica_exchange:
+        runner = RepexRunner(system, config)
+    else:
+        runner = Runner(system, config)
 
     # Run the simulation.
-    runner.run()
+    try:
+        runner.run()
+    except Exception as e:
+        _logger.error(f"An error occurred during the simulation: {e}")
+        exit(1)
