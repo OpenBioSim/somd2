@@ -1057,6 +1057,7 @@ class RunnerBase:
         return _repartition_hydrogen_masses(
             system,
             mass_factor=factor,
+            ignore_water=True,
         )
 
     def _checkpoint(
