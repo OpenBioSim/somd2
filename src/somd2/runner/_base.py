@@ -310,7 +310,7 @@ class RunnerBase:
             if factor_non_water is not None:
                 if not isclose(factor_non_water, 1.0, abs_tol=1e-4):
                     _logger.info(
-                        f"Detected existing hydrogen mass repartioning factor of {factor_non_water:.3f}."
+                        f"Detected existing hydrogen mass repartioning factor of {factor_non_water:.3f}"
                     )
 
                     if not isclose(
