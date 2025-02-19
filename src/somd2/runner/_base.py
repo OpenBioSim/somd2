@@ -258,40 +258,54 @@ class RunnerBase:
                 self._rest2_scale_factors = scale_factors
             else:
                 if len(self._config.rest2_scale) != len(self._lambda_values):
-                    raise ValueError(
-                        f"Length of 'rest2_scale' must match the number of {_lam_sym} values."
-                    )
+                    msg = f"Length of 'rest2_scale' must match the number of {_lam_sym} values."
+                    _logger.error(msg)
+                    raise ValueError(msg)
                 if self._lambda_energy != self._lambda_values:
-                    raise ValueError(
-                        "'rest2_scale' can only be used when 'lambda_energy' matches 'lambda_values'."
+                    msg = (
+                        "REST2 scaling can currently only be used when "
+                        "'lambda_energy' matches 'lambda_values'."
                     )
+                    _logger.error(msg)
+                    raise ValueError(msg)
                 # Make sure the end states are close to 1.0.
                 if not isclose(
                     self._config.rest2_scale[0], 1.0, abs_tol=1e-4
                 ) or not isclose(self._config.rest2_scale[-1], 1.0, abs_tol=1e-4):
-                    raise ValueError(
-                        f"'rest2_scale' must be 1.0 at {_lam_sym}=0 and {_lam_sym}=1."
-                    )
+                    msg = f"'rest2_scale' must be 1.0 at {_lam_sym}=0 and {_lam_sym}=1."
+                    _logger.error(msg)
+                    raise ValueError(msg)
                 self._rest2_scale_factors = self._config.rest2_scale
 
         # Apply hydrogen mass repartitioning.
         if self._config.hmr:
             # Work out the current hydrogen mass factor.
-            h_mass_factor, has_hydrogen = self._get_h_mass_factor(self._system)
+            factor_non_water, factor_water = self._get_h_mass_factor(self._system)
+
+            # We don't support repartiioning water molecules, so check those first.
+            if factor_water is not None:
+                if not isclose(factor_water, 1.0, abs_tol=1e-4):
+                    msg = (
+                        "Water molecules have already been repartitioned with "
+                        f"a factor of {factor_water:.3f}. We only support "
+                        "repartitioning of non-water molecules."
+                    )
+                    _logger.error(msg)
+                    raise ValueError(msg)
 
             # HMR has already been applied.
-            if has_hydrogen:
-                if not isclose(h_mass_factor, 1.0, abs_tol=1e-4):
+            if factor_non_water is not None:
+                if not isclose(factor_non_water, 1.0, abs_tol=1e-4):
                     _logger.info(
-                        f"Detected existing hydrogen mass repartioning factor of {h_mass_factor:.3f}."
+                        f"Detected existing hydrogen mass repartioning factor of {factor_non_water:.3f}."
                     )
 
                     if not isclose(
-                        h_mass_factor, self._config.h_mass_factor, abs_tol=1e-4
+                        factor_non_water, self._config.h_mass_factor, abs_tol=1e-4
                     ):
-                        new_factor = self._config.h_mass_factor / h_mass_factor
+                        new_factor = self._config.h_mass_factor / factor_non_water
                         _logger.warning(
-                            f"Existing hydrogen mass repartitioning factor of {h_mass_factor:.3f} "
+                            f"Existing hydrogen mass repartitioning factor of {factor_non_water:.3f} "
                             f"does not match the requested value of {self._config.h_mass_factor:.3f}. "
                             f"Applying new factor of {new_factor:.3f}."
                         )
@@ -1001,6 +1015,14 @@ class RunnerBase:
 
         system : :class: `System <sire.system.System>`
             The system of interest.
+
+        Returns
+
+        h_mass_non_water : float
+            The mass of the first non-water hydrogen.
+
+        h_mass_water : float
+            The mass of the first water hydrogen.
         """
 
         from sire.mol import Element
@@ -1008,15 +1030,21 @@ class RunnerBase:
         # Store the expected hydrogen mass.
         expected_h_mass = Element("H").mass().value()
 
-        # Get the mass of the first hydrogen atom.
+        # Get the mass of the first non-water hydrogen.
         try:
-            h_mass = system["element H"][0].mass()
+            h_mass = system["not water"].molecules()["element H"][0].mass()
+            h_mass_non_water = round(h_mass.value() / expected_h_mass, 3)
         except:
-            return expected_h_mass, False
+            h_mass_non_water = None
 
-        # Work out the current hydrogen mass factor. We round to 3dp due to
-        # the precision of atomic masses loaded from text files.
-        return round(h_mass.value() / expected_h_mass, 3), True
+        # Get the mass of the first water hydrogen.
+        try:
+            h_mass = system["water"].molecules()["element H"][0].mass()
+            h_mass_water = round(h_mass.value() / expected_h_mass, 3)
+        except:
+            h_mass_water = None
+
+        return h_mass_non_water, h_mass_water
 
     @staticmethod
     def _repartition_h_mass(system, factor=1.0):
