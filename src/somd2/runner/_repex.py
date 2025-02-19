@@ -571,6 +571,9 @@ class RepexRunner(_RunnerBase):
         # Current block number.
         block = self._start_block
 
+        # Record the start time for the production block.
+        prod_start = time()
+
         # Perform the replica exchange simulation.
         for i in range(cycles):
             _logger.info(f"Running dynamics for cycle {i+1} of {cycles}")
@@ -647,6 +650,9 @@ class RepexRunner(_RunnerBase):
                     with open(self._repex_state, "wb") as f:
                         _pickle.dump(self._dynamics_cache, f)
 
+        # Record the end time for the production block.
+        prod_end = time()
+
         # Save the final transition matrix.
         _logger.info("Saving final replica exchange transition matrix")
         self._save_transition_matrix()
@@ -658,6 +664,15 @@ class RepexRunner(_RunnerBase):
 
         # Record the end time.
         end = time()
+
+        # Work how many days per replica the production block took.
+        prod_time = ((prod_end - prod_start) / 86400) / self._config.num_lambda
+
+        # Record the average production speed. (ns/day per replica)
+        prod_speed = self._config.runtime.to("ns") / prod_time
+
+        # Record the average production speed.
+        _logger.success(f"Average replica speed: {prod_speed:.2f} ns day-1")
 
         # Log the run time in minutes.
         _logger.success(
