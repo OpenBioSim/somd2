@@ -797,9 +797,7 @@ class RepexRunner(_RunnerBase):
                 )
 
                 if is_final_block:
-                    _logger.success(
-                        f"{_lam_sym} = {lam:.5f} complete, speed = {speed:.2f} ns day-1"
-                    )
+                    _logger.success(f"{_lam_sym} = {lam:.5f} complete")
 
         except Exception as e:
             return False, index, e
