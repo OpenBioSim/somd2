@@ -56,20 +56,26 @@ class RunnerBase:
         """
 
         if not isinstance(system, (str, _System)):
-            raise TypeError("'system' must be of type 'str' or 'sire.system.System'")
+            msg = "'system' must be of type 'str' or 'sire.system.System'"
+            _logger.error(msg)
+            raise TypeError(msg)
 
         if isinstance(system, str):
             # Try to load the stream file.
             try:
                 self._system = _sr.stream.load(system)
             except:
-                raise IOError(f"Unable to load system from stream file: '{system}'")
+                msg = f"Unable to load system from stream file: '{system}'"
+                _logger.error(msg)
+                raise IOError(msg)
         else:
             self._system = system.clone()
 
         # Validate the configuration.
         if not isinstance(config, _Config):
-            raise TypeError("'config' must be of type 'somd2.config.Config'")
+            msg = "'config' must be of type 'somd2.config.Config'"
+            _logger.error(msg)
+            raise TypeError(msg)
         self._config = config
         self._config._extra_args = {}
 
@@ -89,7 +95,9 @@ class RunnerBase:
 
                 self._system = apply_pert(self._system, self._config.pert_file)
             except Exception as e:
-                raise IOError(f"Unable to apply perturbation to reference system: {e}")
+                msg = f"Unable to apply perturbation to reference system: {e}"
+                _logger.error(msg)
+                raise IOError(msg)
 
             # If we're not using SOMD1 compatibility, then reconstruct the original
             # perturbable system.
@@ -102,7 +110,9 @@ class RunnerBase:
         try:
             self._system.molecules("property is_perturbable")
         except KeyError:
-            raise KeyError("No perturbable molecules in the system")
+            msg = "No perturbable molecules in the system"
+            _logger.error(msg)
+            raise KeyError(msg)
 
         # Link properties to the lambda = 0 end state.
         self._system = _sr.morph.link_to_reference(self._system)
@@ -238,16 +248,19 @@ class RunnerBase:
             # at lambda = 0.5.
             if isinstance(self._config.rest2_scale, float):
                 if self._config.num_lambda != len(self._lambda_values):
-                    raise ValueError(
-                        "REST2 scaling can currently only be used when 'lambda_values' is unset."
-                    )
+                    msg = "REST2 scaling can currently only be used when 'lambda_values' is unset."
+                    _logger.error(msg)
+                    raise ValueError(msg)
                 if (
                     self._lambda_energy != self._lambda_values
                     and self._config.rest2_scale != 1.0
                 ):
-                    raise ValueError(
-                        "'rest2_scale' can only be used when 'lambda_energy' matches 'lambda_values'."
+                    msg = (
+                        "REST2 scaling can currently only be used when "
+                        "'lambda_energy' matches 'lambda_values'."
                     )
+                    _logger.error(msg)
+                    raise ValueError(msg)
                 scale_factors = []
                 for lambda_value in self._lambda_values:
                     scale_factors.append(
@@ -325,13 +338,15 @@ class RunnerBase:
             try:
                 atoms = selection_to_atoms(self._system, self._config.rest2_selection)
             except:
-                raise ValueError("Invalid 'rest2_selection' value.")
+                msg = "Invalid 'rest2_selection' value."
+                _logger.error(msg)
+                raise ValueError(msg)
 
             # Make sure the user hasn't selected all atoms.
             if len(atoms) == self._system.num_atoms():
-                raise ValueError(
-                    "REST2 selection cannot contain all atoms in the system."
-                )
+                msg = "REST2 selection cannot contain all atoms in the system."
+                _logger.error(msg)
+                raise ValueError(msg)
 
         # Flag whether this is a GPU simulation.
         self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]
@@ -892,8 +907,8 @@ class RunnerBase:
             config = self._config.as_dict()
         except:
             _logger.info(
-                f"""No config files found in {self._config.output_directory},
-                attempting to retrieve config from lambda = 0 checkpoint file."""
+                f"No config files found in {self._config.output_directory}, "
+                "attempting to retrieve config from lambda = 0 checkpoint file."
             )
             try:
                 system_temp = _sr.stream.load(
