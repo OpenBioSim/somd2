@@ -92,6 +92,7 @@ class Config:
         cutoff_type="pme",
         cutoff="7.5 A",
         h_mass_factor=1.5,
+        hmr=True,
         num_lambda=11,
         lambda_values=None,
         lambda_energy=None,
@@ -169,6 +170,12 @@ class Config:
 
         h_mass_factor: float
             Factor by which to scale hydrogen masses.
+
+        hmr: bool
+            Whether to use hydrogen mass repartitioning. If False, then the masses
+            of the input system will be used. This can be useful if you have
+            already repartitioned the masses, or use a different repartitioning
+            scheme.
 
         num_lambda: int
             Number of lambda windows to use.
@@ -368,6 +375,7 @@ class Config:
         self.cutoff_type = cutoff_type
         self.cutoff = cutoff
         self.h_mass_factor = h_mass_factor
+        self.hmr = hmr
         self.timestep = timestep
         self.num_lambda = num_lambda
         self.lambda_values = lambda_values
@@ -675,6 +683,16 @@ class Config:
                 "and will likely lead to undesired simulation behaviour."
             )
         self._h_mass_factor = h_mass_factor
+
+    @property
+    def hmr(self):
+        return self._hmr
+
+    @hmr.setter
+    def hmr(self, hmr):
+        if not isinstance(hmr, bool):
+            raise ValueError("'hmr' must be of type 'bool'")
+        self._hmr = hmr
 
     @property
     def timestep(self):

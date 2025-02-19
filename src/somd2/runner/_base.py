@@ -274,29 +274,35 @@ class RunnerBase:
                     )
                 self._rest2_scale_factors = self._config.rest2_scale
 
-        # Work out the current hydrogen mass factor.
-        h_mass_factor, has_hydrogen = self._get_h_mass_factor(self._system)
+        # Apply hydrogen mass repartitioning.
+        if self._config.hmr:
+            # Work out the current hydrogen mass factor.
+            h_mass_factor, has_hydrogen = self._get_h_mass_factor(self._system)
 
-        # HMR has already been applied.
-        if has_hydrogen:
-            if not isclose(h_mass_factor, 1.0, abs_tol=1e-4):
-                _logger.info(
-                    f"Detected existing hydrogen mass repartioning factor of {h_mass_factor:.3f}."
-                )
-
-                if not isclose(h_mass_factor, self._config.h_mass_factor, abs_tol=1e-4):
-                    new_factor = self._config.h_mass_factor / h_mass_factor
-                    _logger.warning(
-                        f"Existing hydrogen mass repartitioning factor of {h_mass_factor:.3f} "
-                        f"does not match the requested value of {self._config.h_mass_factor:.3f}. "
-                        f"Applying new factor of {new_factor:.3f}."
+            # HMR has already been applied.
+            if has_hydrogen:
+                if not isclose(h_mass_factor, 1.0, abs_tol=1e-4):
+                    _logger.info(
+                        f"Detected existing hydrogen mass repartioning factor of {h_mass_factor:.3f}."
                     )
-                    self._system = self._repartition_h_mass(self._system, new_factor)
 
-            else:
-                self._system = self._repartition_h_mass(
-                    self._system, self._config.h_mass_factor
-                )
+                    if not isclose(
+                        h_mass_factor, self._config.h_mass_factor, abs_tol=1e-4
+                    ):
+                        new_factor = self._config.h_mass_factor / h_mass_factor
+                        _logger.warning(
+                            f"Existing hydrogen mass repartitioning factor of {h_mass_factor:.3f} "
+                            f"does not match the requested value of {self._config.h_mass_factor:.3f}. "
+                            f"Applying new factor of {new_factor:.3f}."
+                        )
+                        self._system = self._repartition_h_mass(
+                            self._system, new_factor
+                        )
+
+                else:
+                    self._system = self._repartition_h_mass(
+                        self._system, self._config.h_mass_factor
+                    )
 
         # Make sure the REST2 selection is valid.
         if self._config.rest2_selection is not None:
