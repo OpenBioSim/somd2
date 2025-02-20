@@ -70,7 +70,7 @@ def boresch(system, k_hard=100, k_soft=5, optimise_angles=True):
         https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328
     """
 
-    _logger.info(f"Applying Boresch modifications to ghost atom bonded terms.")
+    _logger.info(f"Applying Boresch modifications to ghost atom bonded terms")
 
     # Check the system is a Sire system.
     if not isinstance(system, (_System, _LegacySystem)):
