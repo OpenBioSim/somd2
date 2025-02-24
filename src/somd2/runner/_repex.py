@@ -666,7 +666,7 @@ class RepexRunner(_RunnerBase):
         end = time()
 
         # Work how many fractional days the production block took.
-        prod_time = ((prod_end - prod_start) / 86400)
+        prod_time = (prod_end - prod_start) / 86400
 
         # Record the average production speed. (ns/day per replica)
         prod_speed = self._config.runtime.to("ns") / prod_time
