@@ -20,7 +20,8 @@ dynamic = ["version"]
 license-files = ["LICENSE"]
 
 [project.scripts]
-somd2 = "somd2.app:cli"
+somd2 = "somd2.app:somd2"
+ghostly = "somd2.app:ghostly"
 
 [project.urls]
 repository = "https://github.com/OpenBioSim/somd2"
