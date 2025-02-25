@@ -23,6 +23,8 @@
 SOMD2 command line interface.
 """
 
+__all__ = ["somd2", "ghostly"]
+
 
 def somd2():
     """
