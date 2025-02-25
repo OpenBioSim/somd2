@@ -159,7 +159,7 @@ be used to apply the modifications to perturbable system without running a simul
 e.g. for use elsewhere. This can be used via:
 
 ```bash
-ghostly perturbable_system.bss --output perturbable_system_ghosted.bss --log-level debug
+ghostly perturbable_system.bss --output ghosted --log-level debug
 ```
 
 (Here the log level is set to debug to provide more information on the modifications
