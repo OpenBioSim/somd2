@@ -95,6 +95,7 @@ def ghostly():
     """
 
     import argparse
+    import os
     import sys
 
     import sire as sr
@@ -107,7 +108,7 @@ def ghostly():
     )
 
     parser.add_argument(
-        "system",
+        "input",
         type=str,
         help="Path to a stream file containing the perturbable system.",
     )
@@ -116,7 +117,6 @@ def ghostly():
         "--output",
         type=str,
         help="File prefix for the output file.",
-        default="ghostly",
         required=False,
     )
 
@@ -138,7 +138,7 @@ def ghostly():
 
     # Try to load the system.
     try:
-        system = sr.stream.load(args.system)
+        system = sr.stream.load(args.input)
         system = sr.morph.link_to_reference(system)
     except Exception as e:
         _logger.error(f"An error occurred while loading the system: {e}")
@@ -155,7 +155,9 @@ def ghostly():
 
     # Try to save the system.
     try:
-        sr.stream.save(system, f"{args.output}.bss")
+        input = os.path.splitext(args.input)[0]
+        output = args.output if args.output else input + "_ghostly"
+        sr.stream.save(system, f"{output}.bss")
     except Exception as e:
         _logger.error(f"An error occurred while saving the system: {e}")
         exit(1)
