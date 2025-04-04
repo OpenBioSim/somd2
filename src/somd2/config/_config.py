@@ -109,6 +109,7 @@ class Config:
         dynamic_constraints=True,
         ghost_modifications=True,
         charge_difference=None,
+        coalchemical_restraint_dist=None,
         com_reset_frequency=10,
         minimise=True,
         equilibration_time="0 ps",
@@ -246,6 +247,13 @@ class Config:
             the reference used for the charge difference is the same, regardless
             of whether swap-end-states is set, i.e. the states are swapped after
             the charge difference is calculated and alchemical ions are added.
+
+        coalchemical_restraint_dist: str
+            The minimum distance at which the co-alchemical ion will be kept relative
+            to the centre of mass of the largest molecule in the system. This is
+            used to keep the co-alchemical ion in the bulk, preventing it from interacting
+            with the protein or ligand. If None, then no restraint will be applied.
+            Only functions if `charge_difference` is non-zero.
 
         com_reset_frequency: int
             Frequency at which to reset the centre of mass of the system.
@@ -393,6 +401,7 @@ class Config:
         self.dynamic_constraints = dynamic_constraints
         self.ghost_modifications = ghost_modifications
         self.charge_difference = charge_difference
+        self.coalchemical_restraint_dist = coalchemical_restraint_dist
         self.com_reset_frequency = com_reset_frequency
         self.minimise = minimise
         self.equilibration_time = equilibration_time
@@ -1000,6 +1009,31 @@ class Config:
                 except:
                     raise ValueError("'charge_difference' must be an integer")
         self._charge_difference = charge_difference
+
+    @property
+    def coalchemical_restraint_dist(self):
+        return self._coalchemical_restraint_dist
+
+    @coalchemical_restraint_dist.setter
+    def coalchemical_restraint_dist(self, coalchemical_restraint_dist):
+        if coalchemical_restraint_dist is not None:
+            if not isinstance(coalchemical_restraint_dist, str):
+                raise TypeError("'coalchemical_restraint_dist' must be of type 'str'")
+
+            from sire.units import angstrom
+
+            try:
+                c = _sr.u(coalchemical_restraint_dist)
+            except:
+                raise ValueError(
+                    f"Unable to parse 'coalchemical_restraint_dist' as a Sire GeneralUnit: {coalchemical_restraint_dist}"
+                )
+            if not c.has_same_units(angstrom):
+                raise ValueError("'coalchemical_restraint_dist' units are invalid.")
+
+            self._coalchemical_restraint_dist = c
+        else:
+            self._coalchemical_restraint_dist = None
 
     @property
     def com_reset_frequency(self):

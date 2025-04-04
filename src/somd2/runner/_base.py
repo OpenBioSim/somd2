@@ -223,7 +223,15 @@ class RunnerBase:
 
         # Create alchemical ions.
         if charge_diff != 0:
-            self._system = self._create_alchemical_ions(self._system, charge_diff)
+            self._system, new_restraints = self._create_alchemical_ions(
+                self._system, charge_diff
+            )
+            if new_restraints is not None:
+                # Add to the self.restraints list if it exists, otherwise create a new one.
+                if self._config.restraints is not None:
+                    self._config.restraints.append(new_restraints)
+                else:
+                    self._config.restraints = [new_restraints]
 
         # Set the lambda values.
         if self._config.lambda_values:
@@ -505,7 +513,7 @@ class RunnerBase:
         return perturbed - reference
 
     @staticmethod
-    def _create_alchemical_ions(system, charge_diff):
+    def _create_alchemical_ions(system, charge_diff, restraint_width=None):
         """
         Internal function to create alchemical ions to maintain a constant charge.
 
@@ -673,7 +681,39 @@ class RunnerBase:
                     f"{ion_str} ion to keep charge constant."
                 )
 
-        return system
+                # Add the inverse distance restraint to keep the ion in the bulk
+            if restraint_width is not None:
+                largest_mol = system[0]
+                # first we need to find the largest molecule in the system
+                # and assume that is the protein (or ligand in the free leg)
+                for molecules in system.molcules():
+                    if molecules.num_atoms() > largest_mol.num_atoms():
+                        largest_mol = molecules
+
+                if largest_mol.is_perturbable():
+                    # Probably a free system
+                    _logger.debug(
+                        "Alchemical ion restraint applied to perturbable molecule."
+                    )
+
+                COM_atom = largest_mol[
+                    f"closest 1 atoms to {largest_mol.coordinates()}"
+                ].atoms()[0]
+
+                # Create the restraint.
+                from sire.restraints import inverse_distance as _inverse_distance
+
+                restraint = _inverse_distance(system, COM_atom, merged, restraint_width)
+
+                number_COM = numbers.index(COM_atom.number())
+
+                _logger.info(
+                    f"Restraint of width {str(restraint_width)} between atoms {number_COM} and {index}."
+                )
+            else:
+                restraint = None
+
+        return system, restraint
 
     @staticmethod
     def _create_filenames(lambda_array, lambda_value, output_directory, restart=False):
