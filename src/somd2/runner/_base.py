@@ -224,7 +224,9 @@ class RunnerBase:
         # Create alchemical ions.
         if charge_diff != 0:
             self._system, new_restraints = self._create_alchemical_ions(
-                self._system, charge_diff
+                self._system,
+                charge_diff,
+                self._config.coalchemical_restraint_dist,
             )
             if new_restraints is not None:
                 # Add to the self.restraints list if it exists, otherwise create a new one.
@@ -686,7 +688,7 @@ class RunnerBase:
                 largest_mol = system[0]
                 # first we need to find the largest molecule in the system
                 # and assume that is the protein (or ligand in the free leg)
-                for molecules in system.molcules():
+                for molecules in system.molecules():
                     if molecules.num_atoms() > largest_mol.num_atoms():
                         largest_mol = molecules
 
@@ -705,10 +707,8 @@ class RunnerBase:
 
                 restraint = _inverse_distance(system, COM_atom, merged, restraint_width)
 
-                number_COM = numbers.index(COM_atom.number())
-
                 _logger.info(
-                    f"Restraint of width {str(restraint_width)} between atoms {number_COM} and {index}."
+                    f"Alchemical ion restraint of width {str(restraint_width)} applied."
                 )
             else:
                 restraint = None
