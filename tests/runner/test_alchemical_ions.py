@@ -12,13 +12,13 @@ def test_alchemical_ions(mols, request):
     mols = request.getfixturevalue(mols).clone()
 
     # Add 10 Cl- ions.
-    new_mols = Runner._create_alchemical_ions(mols, 10)
+    new_mols, _ = Runner._create_alchemical_ions(mols, 10)
 
     # Make sure the charge difference is correct.
     assert math.isclose(Runner._get_charge_difference(new_mols), -10.0, rel_tol=1e-6)
 
     # Add 10 Na+ ions.
-    new_mols = Runner._create_alchemical_ions(mols, -10)
+    new_mols, _ = Runner._create_alchemical_ions(mols, -10)
 
     # Make sure the charge difference is correct.
     assert math.isclose(Runner._get_charge_difference(new_mols), 10.0, rel_tol=1e-6)
