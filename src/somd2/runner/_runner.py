@@ -637,7 +637,7 @@ class Runner(_RunnerBase):
         else:
             try:
                 dynamics.run(
-                    self._config.checkpoint_frequency,
+                    time,
                     energy_frequency=self._config.energy_frequency,
                     frame_frequency=self._config.frame_frequency,
                     lambda_windows=lambda_array,
