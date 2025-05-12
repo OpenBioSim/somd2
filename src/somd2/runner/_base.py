@@ -247,22 +247,8 @@ class RunnerBase:
             # Single value. Interpolate between 1.0 at the end states and rest2_scale
             # at lambda = 0.5.
             if isinstance(self._config.rest2_scale, float):
-                if self._config.num_lambda != len(self._lambda_values):
-                    msg = "REST2 scaling can currently only be used when 'lambda_values' is unset."
-                    _logger.error(msg)
-                    raise ValueError(msg)
-                if (
-                    self._lambda_energy != self._lambda_values
-                    and self._config.rest2_scale != 1.0
-                ):
-                    msg = (
-                        "REST2 scaling can currently only be used when "
-                        "'lambda_energy' matches 'lambda_values'."
-                    )
-                    _logger.error(msg)
-                    raise ValueError(msg)
                 scale_factors = []
-                for lambda_value in self._lambda_values:
+                for lambda_value in self._lambda_energy:
                     scale_factors.append(
                         1.0
                         + (self._config.rest2_scale - 1.0)
@@ -270,24 +256,21 @@ class RunnerBase:
                     )
                 self._rest2_scale_factors = scale_factors
             else:
-                if len(self._config.rest2_scale) != len(self._lambda_values):
+                if len(self._config.rest2_scale) != len(self._lambda_energy):
                     msg = f"Length of 'rest2_scale' must match the number of {_lam_sym} values."
                     _logger.error(msg)
                     raise ValueError(msg)
-                if self._lambda_energy != self._lambda_values:
-                    msg = (
-                        "REST2 scaling can currently only be used when "
-                        "'lambda_energy' matches 'lambda_values'."
-                    )
-                    _logger.error(msg)
-                    raise ValueError(msg)
                 # Make sure the end states are close to 1.0.
-                if not isclose(
-                    self._config.rest2_scale[0], 1.0, abs_tol=1e-4
-                ) or not isclose(self._config.rest2_scale[-1], 1.0, abs_tol=1e-4):
-                    msg = f"'rest2_scale' must be 1.0 at {_lam_sym}=0 and {_lam_sym}=1."
-                    _logger.error(msg)
-                    raise ValueError(msg)
+                if isclose(self._lambda_energy[0], 0.0, abs_tol=1e-4):
+                    if not isclose(self._config.rest2_scale[0], 1.0, abs_tol=1e-4):
+                        msg = f"'rest2_scale' must be 1.0 at {_lam_sym}=0."
+                        _logger.error(msg)
+                        raise ValueError(msg)
+                if isclose(self._lambda_energy[-1], 1.0, abs_tol=1e-4):
+                    if not isclose(self._config.rest2_scale[-1], 1.0, abs_tol=1e-4):
+                        msg = f"'rest2_scale' must be 1.0 at {_lam_sym}=1."
+                        _logger.error(msg)
+                        raise ValueError(msg)
                 self._rest2_scale_factors = self._config.rest2_scale
 
         # Apply hydrogen mass repartitioning.
