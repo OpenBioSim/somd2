@@ -305,7 +305,9 @@ class Config:
             the rest of the system. This can either be a single scaling factor, or a list of
             scale factors for each lambda window. When a single scaling factor is used, then
             the scale factor will be interpolated between a value of 1.0 in the end states,
-            and the value of 'rest2_scale' in intermediate lambda = 0.5 state.
+            and the value of 'rest2_scale' in intermediate lambda = 0.5 state. When multiple
+            values are used, then the number should match the number of lambda windows at which
+            energies are sampled.
 
         rest2_selection: str
             A sire selection string for atoms to include in the REST2 region in

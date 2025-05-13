@@ -240,6 +240,25 @@ class RunnerBase:
         else:
             self._lambda_energy = self._lambda_values
 
+        # Make sure the lambda values are in the lambda energy list.
+        is_missing = False
+        for lambda_value in self._lambda_values:
+            if lambda_value not in self._lambda_energy:
+                self._lambda_energy.append(lambda_value)
+                is_missing = True
+
+        # Make sure the lambda_values entries are unique.
+        if not len(self._lambda_values) == len(set(self._lambda_values)):
+            msg = "Duplicate entries in 'lambda_values' list."
+            _logger.error(msg)
+            raise ValueError(msg)
+
+        # Make sure the lambda_energy entries are unique.
+        if not len(self._lambda_energy) == len(set(self._lambda_energy)):
+            msg = "Duplicate entries in 'lambda_energy' list."
+            _logger.error(msg)
+            raise ValueError(msg)
+
         from math import isclose
 
         # Set the REST2 scale factors.
@@ -258,6 +277,9 @@ class RunnerBase:
             else:
                 if len(self._config.rest2_scale) != len(self._lambda_energy):
                     msg = f"Length of 'rest2_scale' must match the number of {_lam_sym} values."
+                    if is_missing:
+                        msg += f"If you have omitted some 'lambda_values` from `lambda_energy`, please "
+                        f"add them to `lambda_energy`, along with the corresponding `rest2_scale` values."
                     _logger.error(msg)
                     raise ValueError(msg)
                 # Make sure the end states are close to 1.0.
