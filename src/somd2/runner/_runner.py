@@ -317,8 +317,11 @@ class Runner(_RunnerBase):
         # Get the lambda value.
         lambda_value = self._lambda_values[index]
 
+        # Get the index in the lambda_energy array.
+        nrg_index = self._lambda_energy.index(lambda_value)
+
         # Get the REST2 scaling factor.
-        rest2_scale = self._rest2_scale_factors[index]
+        rest2_scale = self._rest2_scale_factors[nrg_index]
 
         # Check for completion if this is a restart.
         if is_restart:
@@ -444,10 +447,6 @@ class Runner(_RunnerBase):
 
         # Create the array of lambda values for energy sampling.
         lambda_energy = self._lambda_energy.copy()
-
-        # If missing, add the lambda value.
-        if lambda_value not in self._lambda_energy:
-            lambda_energy.append(lambda_value)
 
         # Sort the lambda values.
         lambda_energy = sorted(lambda_energy)

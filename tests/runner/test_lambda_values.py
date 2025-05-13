@@ -85,10 +85,10 @@ def test_lambda_energy(ethane_methanol):
         )
 
         # Make sure the lambda_array in the metadata is correct. This is the
-        # sampled lambda plus the lambda_energy values in the config.
-        assert meta["lambda_array"] == [0.0, 0.5]
+        # sampled lambda_values plus the lambda_energy values in the config.
+        assert meta["lambda_array"] == [0.0, 0.5, 1.0]
 
-        # Make sure the second dimension of the energy trajectory is the correct
-        # size. This is one for the current lambda value, one for its gradient,
-        # and one for the length of lambda_energy.
-        assert energy_traj.shape[1] == 3
+        # Make sure the second dimension of the energy trajectory is the correct.
+        # This is the sampled lambda values, i.e. unique entries from lambda_values
+        # and lambda_energy, plus the gradient for TI.
+        assert energy_traj.shape[1] == 4
