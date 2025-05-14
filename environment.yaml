@@ -9,3 +9,6 @@ dependencies:
   - git
   - loguru
   - numba
+  - pycuda
+  - pip:
+      - git+https://github.com/openbiosim/loch
