@@ -381,10 +381,33 @@ class RunnerBase:
             mols = self._system[0]
         else:
             mols = self._system
-        mols0 = _sr.morph.link_to_reference(mols)
-        mols1 = _sr.morph.link_to_perturbed(mols)
-        _sr.save(mols0, self._filenames["topology0"])
-        _sr.save(mols1, self._filenames["topology1"])
+        # Add ghost waters to the system.
+        if self._gcmc and self._has_space:
+            from loch import GCMCSampler
+            from numpy.random import default_rng
+
+            # Create a random number generator.
+            rng = default_rng()
+
+            # Get a water template.
+            try:
+                water = mols["water"].molecules()[0]
+            except:
+                msg = "No water molecules in the system."
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            # Create the GCMC system.
+            mols = GCMCSampler._prepare_system(
+                mols, water, rng, self._config.gcmc_num_ghosts
+            )
+
+        # For GCMC, we need to save the system with the ghost waters.
+        if not self._config.gcmc:
+            mols0 = _sr.morph.link_to_reference(mols)
+            mols1 = _sr.morph.link_to_perturbed(mols)
+            _sr.save(mols0, self._filenames["topology0"])
+            _sr.save(mols1, self._filenames["topology1"])
 
         # Append only this number of lines from the end of the dataframe during checkpointing.
         self._energy_per_block = int(
@@ -393,6 +416,60 @@ class RunnerBase:
 
         # Zero the energy sample.
         self._nrg_sample = 0
+
+        # GCMC specific validation.
+        if self._config.gcmc:
+            if not self._is_gpu:
+                msg = "GCMC simulations require a GPU platform."
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            if not self._has_space:
+                msg = "GCMC simulations require a periodic space."
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            if self._config.pressure != None:
+                msg = "GCMC simulations must be run in the NVT ensemble."
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            # Make sure the frame frequency is a multiple of the energy frequency.
+
+            # Get the scale factor.
+            scale = (
+                self._config.frame_frequency / self._config.energy_frequency
+            ).value()
+
+            # Make sure it's an integer.
+            if isclose(scale, round(scale), abs_tol=1e-4):
+                msg = "'frame_frequency' must be a multiple of 'energy_frequency'."
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            # Make sure the checkpoint frequency is a multiple of the frame frequency.
+
+            # Get the scale factor.
+            scale = (
+                self._config.checkpoint_frequency / self._config.frame_frequency
+            ).value()
+
+            # Make sure it's an integer.
+            if isclose(scale, round(scale), abs_tol=1e-4):
+                msg = "'checkpoint_frequency' must be a multiple of 'frame_frequency'."
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            # Make sure the selection is valid.
+            if self._gcmc_selection is not None:
+                try:
+                    atoms = _sr.mol.selection_to_atoms(
+                        self._system, self._config.gcmc_selection
+                    )
+                except:
+                    msg = "Invalid 'gcmc_selection' value."
+                    _logger.error(msg)
+                    raise ValueError(msg)
 
         # Create the default dynamics kwargs dictionary. These can be overloaded
         # as needed.
