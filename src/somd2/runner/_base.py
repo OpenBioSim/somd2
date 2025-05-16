@@ -527,7 +527,7 @@ class RunnerBase:
                 "coulomb_power": self._config.coulomb_power,
                 "shift_coulomb": str(self._config.shift_coulomb),
                 "shift_delta": str(self._config.shift_delta),
-                "log_level": self._config.log_level,
+                "log_level": self._config.gcmc_log_level,
                 "overwrite": self._config.overwrite,
             }
 
