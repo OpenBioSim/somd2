@@ -126,6 +126,13 @@ class Config:
         max_gpus=None,
         oversubscription_factor=1,
         replica_exchange=False,
+        gcmc=False,
+        gcmc_selection=None,
+        gcmc_excess_chemical_potential="-6.09 kcal/mol",
+        gcmc_standard_volume="30.543 A^3",
+        gcmc_num_ghosts=10,
+        gcmc_sphere_radius="4 A",
+        gcmc_bulk_sampling_probability=0.1,
         rest2_scale=1.0,
         rest2_selection=None,
         output_directory="output",
@@ -266,6 +273,9 @@ class Config:
         energy_frequency: str
             Frequency at which to output energy data. If running using 'replica_exchange',
             then this will also be the frequency at which replica swaps are attempted.
+            When performing Grand Canonical Monte Carlo (GCMC) water insertions/deletions
+            via 'gcmc=True', this will also be the frequency at which GCMC moves are
+            attempted.
 
         save_trajectories: bool
             Whether to save trajectory files
@@ -298,6 +308,36 @@ class Config:
         replica_exchange: bool
             Whether to run replica exchange simulation. Currently this can only be used when
             GPU resources are available.
+
+        gcmc: bool
+            Whether to perform Grand Canonical Monte Carlo (GCMC) water insertions/deletions.
+
+        gcmc_selection: str
+            A sire sslection string specifying the atoms that define the centre of geometry
+            of the GCMC sphere. If None, then GCMC moves will be attempted within the entire
+            simulation volume.
+
+        gcmc_excess_chemical_potential: str
+            The excess chemical potential of water in kcal/mol. The default value is calibrated
+            for the TIP3P water model. This can be calculated from the free energy of decoupling
+            a single water molecule from bulk.
+
+        gcmc_standard_volume: str
+            The standard volume of a water molecule in A^3. The default value is calibrated
+            from NPT simulation of TIP3P water.
+
+        gcmc_num_ghosts: int
+            The initial number of ghost water molecules to insert into the system. These
+            are used as placeholders for GCMC insertion moves.
+
+        gcmc_sphere_radius: str
+            The radius of the GCMC sphere.
+
+        gcmc_bulk_sampling_probability: float
+            The probability of performing bulk GCMC moves, i.e. within the entire simulation
+            box rather than the GCMC sphere. These can be used to maintain a constant bulk
+            density, i.e. acting as a barostat. (This option has no affect when
+            'gcmc_selection=None'.)
 
         rest2_scale: float, list(float)
             The scaling factor for Replica Exchange with Solute Tempering (REST) simulations.
@@ -410,6 +450,13 @@ class Config:
         self.max_gpus = max_gpus
         self.oversubscription_factor = oversubscription_factor
         self.replica_exchange = replica_exchange
+        self.gcmc = gcmc
+        self.gcmc_selection = gcmc_selection
+        self.gcmc_excess_chemical_potential = gcmc_excess_chemical_potential
+        self.gcmc_standard_volume = gcmc_standard_volume
+        self.gcmc_num_ghosts = gcmc_num_ghosts
+        self.gcmc_sphere_radius = gcmc_sphere_radius
+        self.gcmc_bulk_sampling_probability = gcmc_bulk_sampling_probability
         self.rest2_scale = rest2_scale
         self.rest2_selection = rest2_selection
         self.restart = restart
@@ -1335,6 +1382,133 @@ class Config:
         if not isinstance(replica_exchange, bool):
             raise ValueError("'replica_exchange' must be of type 'bool'")
         self._replica_exchange = replica_exchange
+
+    @property
+    def gcmc(self):
+        return self._gcmc
+
+    @gcmc.setter
+    def gcmc(self, gcmc):
+        if not isinstance(gcmc, bool):
+            raise ValueError("'gcmc' must be of type 'bool'")
+        self._gcmc = gcmc
+
+    @property
+    def gcmc_selection(self):
+        return self._gcmc_selection
+
+    @gcmc_selection.setter
+    def gcmc_selection(self, gcmc_selection):
+        if gcmc_selection is not None:
+            if not isinstance(gcmc_selection, str):
+                raise TypeError("'gcmc_selection' must be of type 'str'")
+        self._gcmc_selection = gcmc_selection
+
+    @property
+    def gcmc_excess_chemical_potential(self):
+        return self._gcmc_excess_chemical_potential
+
+    @gcmc_excess_chemical_potential.setter
+    def gcmc_excess_chemical_potential(self, gcmc_excess_chemical_potential):
+        if not isinstance(gcmc_excess_chemical_potential, str):
+            raise TypeError("'gcmc_excess_chemical_potential' must be of type 'str'")
+
+        from sire.units import kcal_per_mol
+
+        try:
+            gcmc_e = _sr.u(gcmc_excess_chemical_potential)
+        except:
+            raise ValueError(
+                "Unable to parse 'gcmc_excess_chemical_potential' "
+                f"as a Sire GeneralUnit: {gcmc_excess_chemical_potential}"
+            )
+
+        if not gcmc_e.has_same_units(kcal_per_mol):
+            raise ValueError("'gcmc_excess_chemical_potential' units are invalid.")
+
+        self._gcmc_excess_chemical_potential = gcmc_e
+
+    @property
+    def gcmc_standard_volume(self):
+        return self._gcmc_standard_volume
+
+    @gcmc_standard_volume.setter
+    def gcmc_standard_volume(self, gcmc_standard_volume):
+        if not isinstance(gcmc_standard_volume, str):
+            raise TypeError("'gcmc_standard_volume' must be of type 'str'")
+
+        from sire.units import angstrom3
+
+        try:
+            gcmc_v = _sr.u(gcmc_standard_volume)
+        except:
+            raise ValueError(
+                "Unable to parse 'gcmc_standard_volume' "
+                f"as a Sire GeneralUnit: {gcmc_standard_volume}"
+            )
+
+        if not gcmc_v.has_same_units(angstrom3):
+            raise ValueError("'gcmc_standard_volume' units are invalid.")
+
+        self._gcmc_standard_volume = gcmc_v
+
+    @property
+    def gcmc_num_ghosts(self):
+        return self._gcmc_num_ghosts
+
+    @gcmc_num_ghosts.setter
+    def gcmc_num_ghosts(self, gcmc_num_ghosts):
+        if gcmc_num_ghosts is not None:
+            if not isinstance(gcmc_num_ghosts, int):
+                try:
+                    gcmc_num_ghosts = int(gcmc_num_ghosts)
+                except:
+                    raise ValueError("'gcmc_num_ghosts' must be an integer")
+
+            if gcmc_num_ghosts < 0:
+                raise ValueError("'gcmc_num_ghosts' must be greater than or equal to 0")
+        self._gcmc_num_ghosts = gcmc_num_ghosts
+
+    @property
+    def gcmc_sphere_radius(self):
+        return self._gcmc_sphere_radius
+
+    @gcmc_sphere_radius.setter
+    def gcmc_sphere_radius(self, gcmc_sphere_radius):
+        if not isinstance(gcmc_sphere_radius, str):
+            raise TypeError("'gcmc_sphere_radius' must be of type 'str'")
+
+        from sire.units import angstrom
+
+        try:
+            gcmc_r = _sr.u(gcmc_sphere_radius)
+        except:
+            raise ValueError(
+                "Unable to parse 'gcmc_sphere_radius' "
+                f"as a Sire GeneralUnit: {gcmc_sphere_radius}"
+            )
+
+        if not gcmc_r.has_same_units(angstrom):
+            raise ValueError("'gcmc_sphere_radius' units are invalid.")
+
+        self._gcmc_sphere_radius = gcmc_r
+
+    @property
+    def gcmc_bulk_sampling_probability(self):
+        return self._gcmc_bulk_sampling_probability
+
+    @gcmc_bulk_sampling_probability.setter
+    def gcmc_bulk_sampling_probability(self, gcmc_bulk_sampling_probability):
+        if not isinstance(gcmc_bulk_sampling_probability, float):
+            try:
+                gcmc_bulk_sampling_probability = float(gcmc_bulk_sampling_probability)
+            except Exception:
+                raise ValueError("'gcmc_bulk_sampling_probability' must be a float")
+        if gcmc_bulk_sampling_probability < 0.0 or gcmc_bulk_sampling_probability > 1.0:
+            raise ValueError(
+                "'gcmc_bulk_sampling_probability' must be between 0.0 and 1.0"
+            )
+        self._gcmc_bulk_sampling_probability = gcmc_bulk_sampling_probability
 
     @property
     def rest2_scale(self):
