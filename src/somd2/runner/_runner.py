@@ -431,7 +431,7 @@ class Runner(_RunnerBase):
                     not self._config.equilibration_constraints
                     and self._config.perturbable_constraint != "none"
                 ):
-                    self._minimisation(
+                    system = self._minimisation(
                         system,
                         lambda_value=lambda_value,
                         rest2_scale=rest2_scale,
@@ -696,6 +696,12 @@ class Runner(_RunnerBase):
 
         perturbable_constraint: str
             The constraint for perturbable molecules.
+
+        Returns
+        -------
+
+        system: :class: `System <sire.system.System>`
+            The minimised system.
         """
 
         _logger.info(f"Minimising at {_lam_sym} = {lambda_value:.5f}")
