@@ -131,7 +131,7 @@ class Config:
         gcmc_excess_chemical_potential="-6.09 kcal/mol",
         gcmc_standard_volume="30.543 A^3",
         gcmc_num_ghosts=10,
-        gcmc_sphere_radius="4 A",
+        gcmc_radius="4 A",
         gcmc_bulk_sampling_probability=0.1,
         rest2_scale=1.0,
         rest2_selection=None,
@@ -330,7 +330,7 @@ class Config:
             The initial number of ghost water molecules to insert into the system. These
             are used as placeholders for GCMC insertion moves.
 
-        gcmc_sphere_radius: str
+        gcmc_radius: str
             The radius of the GCMC sphere.
 
         gcmc_bulk_sampling_probability: float
@@ -455,7 +455,7 @@ class Config:
         self.gcmc_excess_chemical_potential = gcmc_excess_chemical_potential
         self.gcmc_standard_volume = gcmc_standard_volume
         self.gcmc_num_ghosts = gcmc_num_ghosts
-        self.gcmc_sphere_radius = gcmc_sphere_radius
+        self.gcmc_radius = gcmc_radius
         self.gcmc_bulk_sampling_probability = gcmc_bulk_sampling_probability
         self.rest2_scale = rest2_scale
         self.rest2_selection = rest2_selection
@@ -1470,28 +1470,27 @@ class Config:
         self._gcmc_num_ghosts = gcmc_num_ghosts
 
     @property
-    def gcmc_sphere_radius(self):
-        return self._gcmc_sphere_radius
+    def gcmc_radius(self):
+        return self._gcmc_radius
 
-    @gcmc_sphere_radius.setter
-    def gcmc_sphere_radius(self, gcmc_sphere_radius):
-        if not isinstance(gcmc_sphere_radius, str):
-            raise TypeError("'gcmc_sphere_radius' must be of type 'str'")
+    @gcmc_radius.setter
+    def gcmc_radius(self, gcmc_radius):
+        if not isinstance(gcmc_radius, str):
+            raise TypeError("'gcmc_radius' must be of type 'str'")
 
         from sire.units import angstrom
 
         try:
-            gcmc_r = _sr.u(gcmc_sphere_radius)
+            gcmc_r = _sr.u(gcmc_radius)
         except:
             raise ValueError(
-                "Unable to parse 'gcmc_sphere_radius' "
-                f"as a Sire GeneralUnit: {gcmc_sphere_radius}"
+                "Unable to parse 'gcmc_radius' " f"as a Sire GeneralUnit: {gcmc_radius}"
             )
 
         if not gcmc_r.has_same_units(angstrom):
-            raise ValueError("'gcmc_sphere_radius' units are invalid.")
+            raise ValueError("'gcmc_radius' units are invalid.")
 
-        self._gcmc_sphere_radius = gcmc_r
+        self._gcmc_radius = gcmc_r
 
     @property
     def gcmc_bulk_sampling_probability(self):

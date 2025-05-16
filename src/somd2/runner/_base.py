@@ -382,7 +382,7 @@ class RunnerBase:
         else:
             mols = self._system
         # Add ghost waters to the system.
-        if self._gcmc and self._has_space:
+        if self._config.gcmc and self._has_space:
             from loch import GCMCSampler
             from numpy.random import default_rng
 
@@ -442,7 +442,7 @@ class RunnerBase:
             ).value()
 
             # Make sure it's an integer.
-            if isclose(scale, round(scale), abs_tol=1e-4):
+            if not isclose(scale, round(scale), abs_tol=1e-4):
                 msg = "'frame_frequency' must be a multiple of 'energy_frequency'."
                 _logger.error(msg)
                 raise ValueError(msg)
@@ -455,13 +455,24 @@ class RunnerBase:
             ).value()
 
             # Make sure it's an integer.
-            if isclose(scale, round(scale), abs_tol=1e-4):
+            if not isclose(scale, round(scale), abs_tol=1e-4):
                 msg = "'checkpoint_frequency' must be a multiple of 'frame_frequency'."
                 _logger.error(msg)
                 raise ValueError(msg)
 
+            # Make sure the runtime is a multiple of the frame frequency.
+
+            # Get the scale factor.
+            scale = (self._config.runtime / self._config.frame_frequency).value()
+
+            # Make sure it's an integer.
+            if not isclose(scale, round(scale), abs_tol=1e-4):
+                msg = "'runtime' must be a multiple of 'frame_frequency'."
+                _logger.error(msg)
+                raise ValueError(msg)
+
             # Make sure the selection is valid.
-            if self._gcmc_selection is not None:
+            if self._config.gcmc_selection is not None:
                 try:
                     atoms = _sr.mol.selection_to_atoms(
                         self._system, self._config.gcmc_selection
@@ -497,6 +508,28 @@ class RunnerBase:
             "rest2_selection": config.rest2_selection,
             "map": config._extra_args,
         }
+
+        # Create the GCMC specific kwargs dictionary.
+        if self._config.gcmc:
+            self._gcmc_kwargs = {
+                "reference": self._config.gcmc_selection,
+                "excess_chemical_potential": str(
+                    self._config.gcmc_excess_chemical_potential
+                ),
+                "standard_volume": str(self._config.gcmc_standard_volume),
+                "radius": str(self._config.gcmc_radius),
+                "max_gcmc_waters": self._config.gcmc_num_ghosts,
+                "bulk_sampling_probability": self._config.gcmc_bulk_sampling_probability,
+                "cutoff_type": self._config.cutoff_type,
+                "cutoff": str(self._config.cutoff),
+                "temperature": str(self._config.temperature),
+                "lambda_schedule": self._config.lambda_schedule,
+                "coulomb_power": self._config.coulomb_power,
+                "shift_coulomb": str(self._config.shift_coulomb),
+                "shift_delta": str(self._config.shift_delta),
+                "log_level": self._config.log_level,
+                "overwrite": self._config.overwrite,
+            }
 
     def _check_space(self):
         """
@@ -785,6 +818,8 @@ class RunnerBase:
         filenames["energy_components"] = str(
             output_directory / f"energy_components_{lam}.txt"
         )
+        filenames["gcmc_log"] = str(output_directory / f"gcmc_log_{lam}.txt")
+        filenames["gcmc_ghosts"] = str(output_directory / f"gcmc_ghosts_{lam}.txt")
         if restart:
             filenames["config"] = str(
                 output_directory / increment_filename("config", "yaml")

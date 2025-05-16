@@ -472,6 +472,31 @@ class Runner(_RunnerBase):
         # Now sort the scaling factors.
         rest2_scale_factors = [rest2_scale_factors[i] for i in sorted_indices]
 
+        # Prepare the GCMC sampler.
+        if self._config.gcmc:
+            _logger.info(f"Preparing GCMC sampler for {_lam_sym} = {lambda_value:.5f}")
+
+            from loch import GCMCSampler
+
+            gcmc_sampler = GCMCSampler(
+                system,
+                device=int(device),
+                lambda_value=lambda_value,
+                log_file=self._filenames[0]["gcmc_log"],
+                ghost_file=self._filenames[0]["gcmc_ghosts"],
+                **self._gcmc_kwargs,
+            )
+
+            # Get the GCMC system.
+            system = gcmc_sampler.system()
+
+            # Write the end states so that we can later visualise trajectories.
+            if index == 0:
+                mols0 = _sr.morph.link_to_reference(system)
+                mols1 = _sr.morph.link_to_perturbed(system)
+                _sr.save(mols0, self._filenames["topology0"])
+                _sr.save(mols1, self._filenames["topology1"])
+
         _logger.info(f"Running dynamics at {_lam_sym} = {lambda_value:.5f}")
 
         # Copy the dynamics kwargs.
@@ -518,17 +543,54 @@ class Runner(_RunnerBase):
 
                 # Run the dynamics.
                 try:
-                    dynamics.run(
-                        self._config.checkpoint_frequency,
-                        energy_frequency=self._config.energy_frequency,
-                        frame_frequency=self._config.frame_frequency,
-                        lambda_windows=lambda_array,
-                        rest2_scale_factors=rest2_scale_factors,
-                        save_velocities=self._config.save_velocities,
-                        auto_fix_minimise=True,
-                        num_energy_neighbours=num_energy_neighbours,
-                        null_energy=self._config.null_energy,
-                    )
+                    # GCMC specific handling. Note that the frame and checkpoint
+                    # frequencies are multiples of the energy frequency so we can
+                    # run in energy frequency blocks with no remainder.
+                    if self._config.gcmc:
+                        # Initialise the run time and time at which the next frame is saved.
+                        runtime = _sr.u("0ps")
+                        save_frames = self._config.frame_frequency > 0
+                        next_frame = self._config.frame_frequency
+
+                        # Loop until we reach the runtime.
+                        while runtime <= self._config.checkpoint_frequency:
+                            # Run the dynamics in blocks of the energy frequency.
+                            dynamics.run(
+                                self._config.energy_frequency,
+                                energy_frequency=self._config.energy_frequency,
+                                frame_frequency=self._config.frame_frequency,
+                                lambda_windows=lambda_array,
+                                rest2_scale_factors=rest2_scale_factors,
+                                save_velocities=self._config.save_velocities,
+                                auto_fix_minimise=True,
+                                num_energy_neighbours=num_energy_neighbours,
+                                null_energy=self._config.null_energy,
+                            )
+
+                            # Perform a GCMC move.
+                            gcmc_sampler.move(dynamics.context())
+
+                            # Update the runtime.
+                            runtime += self._config.energy_frequency
+
+                            # If a frame is saved, then we need to save current indices
+                            # of the ghost water residues.
+                            if save_frames and runtime >= next_frame:
+                                gcmc_sampler.write_ghost_residues()
+                                next_frame += self._config.frame_frequency
+
+                    else:
+                        dynamics.run(
+                            self._config.checkpoint_frequency,
+                            energy_frequency=self._config.energy_frequency,
+                            frame_frequency=self._config.frame_frequency,
+                            lambda_windows=lambda_array,
+                            rest2_scale_factors=rest2_scale_factors,
+                            save_velocities=self._config.save_velocities,
+                            auto_fix_minimise=True,
+                            num_energy_neighbours=num_energy_neighbours,
+                            null_energy=self._config.null_energy,
+                        )
                 except Exception as e:
                     raise RuntimeError(
                         f"Dynamics block {block+1} for {_lam_sym} = {lambda_value:.5f} failed: {e}"
@@ -580,7 +642,7 @@ class Runner(_RunnerBase):
                         f"Checkpoint failed for {_lam_sym} = {lambda_value:.5f}: {e}"
                     )
 
-            # Handle the remainder time.
+            # Handle the remainder time. (There will be no remainer when GCMC sampling.)
             if rem > 0:
                 block += 1
                 try:
@@ -635,17 +697,50 @@ class Runner(_RunnerBase):
                     )
         else:
             try:
-                dynamics.run(
-                    time,
-                    energy_frequency=self._config.energy_frequency,
-                    frame_frequency=self._config.frame_frequency,
-                    lambda_windows=lambda_array,
-                    rest2_scale_factors=rest2_scale_factors,
-                    save_velocities=self._config.save_velocities,
-                    auto_fix_minimise=True,
-                    num_energy_neighbours=num_energy_neighbours,
-                    null_energy=self._config.null_energy,
-                )
+                if self._config.gcmc:
+                    # Initialise the run time and time at which the next frame is saved.
+                    runtime = _sr.u("0ps")
+                    save_frames = self._config.frame_frequency > 0
+                    next_frame = self._config.frame_frequency
+
+                    # Loop until we reach the runtime.
+                    while runtime <= time:
+                        # Run the dynamics in blocks of the energy frequency.
+                        dynamics.run(
+                            self._config.energy_frequency,
+                            energy_frequency=self._config.energy_frequency,
+                            frame_frequency=self._config.frame_frequency,
+                            lambda_windows=lambda_array,
+                            rest2_scale_factors=rest2_scale_factors,
+                            save_velocities=self._config.save_velocities,
+                            auto_fix_minimise=True,
+                            num_energy_neighbours=num_energy_neighbours,
+                            null_energy=self._config.null_energy,
+                        )
+
+                        # Perform a GCMC move.
+                        gcmc_sampler.move(dynamics.context())
+
+                        # Update the runtime.
+                        runtime += self._config.energy_frequency
+
+                        # If a frame is saved, then we need to save current indices
+                        # of the ghost water residues.
+                        if save_frames and runtime >= next_frame:
+                            gcmc_sampler.write_ghost_residues()
+                            next_frame += self._config.frame_frequency
+                else:
+                    dynamics.run(
+                        time,
+                        energy_frequency=self._config.energy_frequency,
+                        frame_frequency=self._config.frame_frequency,
+                        lambda_windows=lambda_array,
+                        rest2_scale_factors=rest2_scale_factors,
+                        save_velocities=self._config.save_velocities,
+                        auto_fix_minimise=True,
+                        num_energy_neighbours=num_energy_neighbours,
+                        null_energy=self._config.null_energy,
+                    )
             except Exception as e:
                 raise RuntimeError(
                     f"Dynamics for {_lam_sym} = {lambda_value:.5f} failed: {e}"
