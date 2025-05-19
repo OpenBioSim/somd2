@@ -567,6 +567,9 @@ class Runner(_RunnerBase):
                             )
 
                             # Perform a GCMC move.
+                            _logger.info(
+                                f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
+                            )
                             gcmc_sampler.move(dynamics.context())
 
                             # Update the runtime.
@@ -718,6 +721,9 @@ class Runner(_RunnerBase):
                         )
 
                         # Perform a GCMC move.
+                        _logger.info(
+                            f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
+                        )
                         gcmc_sampler.move(dynamics.context())
 
                         # Update the runtime.

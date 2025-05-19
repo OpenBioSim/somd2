@@ -826,6 +826,7 @@ class RepexRunner(_RunnerBase):
                     gcmc_sampler.write_ghost_residues()
 
                 # Perform the GCMC move.
+                _logger.info(f"Performing GCMC move at {_lam_sym} = {lam:.5f}")
                 gcmc_sampler.move(dynamics.context())
 
             # Run the dynamics.
