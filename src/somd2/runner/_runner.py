@@ -474,7 +474,7 @@ class Runner(_RunnerBase):
 
         # Prepare the GCMC sampler.
         if self._config.gcmc:
-            _logger.info(f"Preparing GCMC sampler for {_lam_sym} = {lambda_value:.5f}")
+            _logger.info(f"Preparing GCMC sampler at {_lam_sym} = {lambda_value:.5f}")
 
             from loch import GCMCSampler
 

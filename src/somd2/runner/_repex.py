@@ -195,6 +195,10 @@ class DynamicsCache:
                 # Get the modified GCMC system.
                 mols = sampler.system()
 
+                _logger.info(
+                    f"Created GCMC sampler for lambda {lam:.5f} on device {device}"
+                )
+
             # Overload the device and lambda value.
             dynamics_kwargs["device"] = device
             dynamics_kwargs["lambda_value"] = lam
