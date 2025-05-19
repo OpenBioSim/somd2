@@ -521,6 +521,11 @@ class Runner(_RunnerBase):
         else:
             num_energy_neighbours = None
 
+        from time import time
+
+        # Store the checkpoint time in nanoseconds.
+        checkpoint_interval = self._config.checkpoint_frequency.to("ns")
+
         # Run the simulation, checkpointing in blocks.
         if self._config.checkpoint_frequency.value() > 0.0:
 
@@ -539,6 +544,9 @@ class Runner(_RunnerBase):
             for block in range(int(num_blocks)):
                 # Add the start block number.
                 block += self._start_block
+
+                # Record the start time.
+                start = time()
 
                 # Run the dynamics.
                 try:
@@ -607,8 +615,14 @@ class Runner(_RunnerBase):
                     # Commit the current system.
                     system = dynamics.commit()
 
-                    # Get the simulation speed.
-                    speed = dynamics.time_speed()
+                    # Record the end time.
+                    end = time()
+
+                    # Work how many fractional days the block took.
+                    block_time = (end - start) / 86400
+
+                    # Calculate the speed in nanoseconds per day.
+                    speed = checkpoint_interval / block_time
 
                     # Check if this is the final block.
                     is_final_block = (
@@ -647,6 +661,7 @@ class Runner(_RunnerBase):
             # Handle the remainder time. (There will be no remainer when GCMC sampling.)
             if rem > 0:
                 block += 1
+                start = time()
                 try:
                     dynamics.run(
                         rem,
@@ -667,8 +682,14 @@ class Runner(_RunnerBase):
                     # Commit the current system.
                     system = dynamics.commit()
 
-                    # Get the simulation speed.
-                    speed = dynamics.time_speed()
+                    # Record the end time.
+                    end = time()
+
+                    # Work how many fractional days the block took.
+                    block_time = (end - start) / 86400
+
+                    # Calculate the speed in nanoseconds per day.
+                    speed = checkpoint_interval / block_time
 
                     # Checkpoint.
                     self._checkpoint(
@@ -698,6 +719,9 @@ class Runner(_RunnerBase):
                         f"Final dynamics block for {lam_sym} = {lambda_value:.5f} failed: {e}"
                     )
         else:
+            # Record the start time.
+            start = time()
+
             try:
                 if self._config.gcmc:
                     # Initialise the run time and time at which the next frame is saved.
@@ -754,8 +778,14 @@ class Runner(_RunnerBase):
             # Commit the current system.
             system = dynamics.commit()
 
-            # Get the simulation speed.
-            speed = dynamics.time_speed()
+            # Record the end time.
+            end = time()
+
+            # Work how many fractional days the simulation took.
+            prod_time = (end - start) / 86400
+
+            # Calculate the speed in nanoseconds per day.
+            speed = time.to("ns") / prod_time
 
             # Checkpoint.
             self._checkpoint(system, index, 0, speed, is_final_block=True)
