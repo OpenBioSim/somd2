@@ -530,6 +530,8 @@ class RunnerBase:
                 "log_level": self._config.gcmc_log_level,
                 "overwrite": self._config.overwrite,
             }
+        else:
+            self._gcmc_kwargs = None
 
     def _check_space(self):
         """
