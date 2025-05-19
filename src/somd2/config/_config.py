@@ -70,7 +70,6 @@ class Config:
             "charge_scaled_morph",
         ],
         "log_level": [level.lower() for level in _logger._core.levels],
-        "gcmc_log_level": [level.lower() for level in _logger._core.levels],
     }
 
     # A dictionary of nargs for the various options.
@@ -134,7 +133,6 @@ class Config:
         gcmc_num_ghosts=10,
         gcmc_radius="4 A",
         gcmc_bulk_sampling_probability=0.1,
-        gcmc_log_level="error",
         rest2_scale=1.0,
         rest2_selection=None,
         output_directory="output",
@@ -341,9 +339,6 @@ class Config:
             density, i.e. acting as a barostat. (This option has no affect when
             'gcmc_selection=None'.)
 
-        gcmc_log_level: str
-            Log level to use for GCMC sampling.
-
         rest2_scale: float, list(float)
             The scaling factor for Replica Exchange with Solute Tempering (REST) simulations.
             This is the factor by which the temperature of the solute is scaled with respect to
@@ -462,7 +457,6 @@ class Config:
         self.gcmc_num_ghosts = gcmc_num_ghosts
         self.gcmc_radius = gcmc_radius
         self.gcmc_bulk_sampling_probability = gcmc_bulk_sampling_probability
-        self.gcmc_log_level = gcmc_log_level
         self.rest2_scale = rest2_scale
         self.rest2_selection = rest2_selection
         self.restart = restart
@@ -1514,21 +1508,6 @@ class Config:
                 "'gcmc_bulk_sampling_probability' must be between 0.0 and 1.0"
             )
         self._gcmc_bulk_sampling_probability = gcmc_bulk_sampling_probability
-
-    @property
-    def gcmc_log_level(self):
-        return self._gcmc_log_level
-
-    @gcmc_log_level.setter
-    def gcmc_log_level(self, log_level):
-        if not isinstance(log_level, str):
-            raise TypeError("'log_level' must be of type 'str'")
-        log_level = log_level.lower().replace(" ", "")
-        if log_level not in self._choices["log_level"]:
-            raise ValueError(
-                f"Log level not recognised. Valid log levels are: {', '.join(self._choices['log_level'])}"
-            )
-        self._gcmc_log_level = log_level
 
     @property
     def rest2_scale(self):

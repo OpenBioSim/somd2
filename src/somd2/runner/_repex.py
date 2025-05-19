@@ -179,7 +179,6 @@ class DynamicsCache:
             if gcmc_kwargs is not None:
                 from local import GCMCSampler
 
-                log_file = str(output_directory / f"gcmc_{lam:.5f}.log")
                 ghost_file = str(output_directory / f"gcmc_{lam:.5f}.ghost")
 
                 # Create the GCMC sampler.
@@ -188,7 +187,6 @@ class DynamicsCache:
                         mols,
                         device=int(device),
                         lambda_value=lam,
-                        log_file=log_file,
                         ghost_file=ghost_file,
                         **gcmc_kwargs,
                     )

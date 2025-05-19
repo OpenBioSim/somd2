@@ -527,8 +527,8 @@ class RunnerBase:
                 "coulomb_power": self._config.coulomb_power,
                 "shift_coulomb": str(self._config.shift_coulomb),
                 "shift_delta": str(self._config.shift_delta),
-                "log_level": self._config.gcmc_log_level,
                 "overwrite": self._config.overwrite,
+                "no_logger": True,
             }
         else:
             self._gcmc_kwargs = None
@@ -820,7 +820,6 @@ class RunnerBase:
         filenames["energy_components"] = str(
             output_directory / f"energy_components_{lam}.txt"
         )
-        filenames["gcmc_log"] = str(output_directory / f"gcmc_log_{lam}.txt")
         filenames["gcmc_ghosts"] = str(output_directory / f"gcmc_ghosts_{lam}.txt")
         if restart:
             filenames["config"] = str(
