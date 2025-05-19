@@ -355,6 +355,30 @@ class Runner(_RunnerBase):
                 lam_vals = [lambda_base - increment, lambda_base + increment]
             return lam_vals
 
+        # Prepare the GCMC sampler.
+        if self._config.gcmc:
+            _logger.info(f"Preparing GCMC sampler at {_lam_sym} = {lambda_value:.5f}")
+
+            from loch import GCMCSampler
+
+            gcmc_sampler = GCMCSampler(
+                system,
+                device=int(device),
+                lambda_value=lambda_value,
+                ghost_file=self._filenames[index]["gcmc_ghosts"],
+                **self._gcmc_kwargs,
+            )
+
+            # Get the GCMC system.
+            system = gcmc_sampler.system()
+
+            # Write the end states so that we can later visualise trajectories.
+            if index == 0:
+                mols0 = _sr.morph.link_to_reference(system)
+                mols1 = _sr.morph.link_to_perturbed(system)
+                _sr.save(mols0, self._filenames["topology0"])
+                _sr.save(mols1, self._filenames["topology1"])
+
         # Minimisation.
         if self._config.minimise:
             # Minimise with no constraints if we need to equilibrate first.
@@ -409,6 +433,15 @@ class Runner(_RunnerBase):
 
                 # Create the dynamics object.
                 dynamics = system.dynamics(**dynamics_kwargs)
+
+                # Equilibrate with GCMC moves.
+                if self._config.gcmc:
+                    _logger.info(
+                        f"Euilibraing with GCMC moves at {_lam_sym} = {lambda_value:.5f}"
+                    )
+
+                    for i in range(100):
+                        gcmc_sampler.move(dynamics.context())
 
                 # Run without saving energies or frames.
                 dynamics.run(
@@ -471,30 +504,6 @@ class Runner(_RunnerBase):
 
         # Now sort the scaling factors.
         rest2_scale_factors = [rest2_scale_factors[i] for i in sorted_indices]
-
-        # Prepare the GCMC sampler.
-        if self._config.gcmc:
-            _logger.info(f"Preparing GCMC sampler at {_lam_sym} = {lambda_value:.5f}")
-
-            from loch import GCMCSampler
-
-            gcmc_sampler = GCMCSampler(
-                system,
-                device=int(device),
-                lambda_value=lambda_value,
-                ghost_file=self._filenames[index]["gcmc_ghosts"],
-                **self._gcmc_kwargs,
-            )
-
-            # Get the GCMC system.
-            system = gcmc_sampler.system()
-
-            # Write the end states so that we can later visualise trajectories.
-            if index == 0:
-                mols0 = _sr.morph.link_to_reference(system)
-                mols1 = _sr.morph.link_to_perturbed(system)
-                _sr.save(mols0, self._filenames["topology0"])
-                _sr.save(mols1, self._filenames["topology1"])
 
         _logger.info(f"Running dynamics at {_lam_sym} = {lambda_value:.5f}")
 
