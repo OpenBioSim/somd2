@@ -114,7 +114,14 @@ class DynamicsCache:
         return d
 
     def _create_dynamics(
-        self, system, lambdas, rest2_scale_factors, num_gpus, dynamics_kwargs
+        self,
+        system,
+        lambdas,
+        rest2_scale_factors,
+        num_gpus,
+        dynamics_kwargs,
+        gcmc_kwargs=None,
+        output_directory=None,
     ):
         """
         Create the dynamics objects.
@@ -136,13 +143,26 @@ class DynamicsCache:
 
         dynamics_kwargs: dict
             A dictionary of default dynamics keyword arguments.
+
+        gcmc_kwargs: dict
+            GCMC specific keyword arguments. If None, then GCMC is not used.
+
+        output_directory: pathlib.Path
+            The directory for simulation output.
         """
 
         # Copy the dynamics keyword arguments.
         dynamics_kwargs = dynamics_kwargs.copy()
 
+        # Copy the GCMC keyword arguments.
+        if gcmc_kwargs is not None:
+            gcmc_kwargs = gcmc_kwargs.copy()
+
         # Initialise the dynamics object list.
         self._dynamics = []
+
+        # Initialise the GCMC object list.
+        self._gcmc = []
 
         # Create the dynamics objects in serial.
         for i, (lam, scale) in enumerate(zip(lambdas, rest2_scale_factors)):
@@ -155,6 +175,27 @@ class DynamicsCache:
             # This is a new simulation.
             else:
                 mols = system
+
+            if gcmc_kwargs is not None:
+                from local import GCMCSampler
+
+                log_file = str(output_directory / f"gcmc_{lam:.5f}.log")
+                ghost_file = str(output_directory / f"gcmc_{lam:.5f}.ghost")
+
+                # Create the GCMC sampler.
+                self._gcmc.append(
+                    GCMCSampler(
+                        mols,
+                        device=int(device),
+                        lambda_value=lam,
+                        log_file=log_file,
+                        ghost_file=ghost_file,
+                        **gcmc_kwargs,
+                    )
+                )
+
+                # Get the modified GCMC system.
+                mols = sampler.system()
 
             # Overload the device and lambda value.
             dynamics_kwargs["device"] = device
@@ -178,7 +219,7 @@ class DynamicsCache:
 
     def get(self, index):
         """
-        Get the dynamics object for a given index.
+        Get the dynamics object (and GCMC sampler) for a given index.
 
         Parameters
         ----------
@@ -190,9 +231,14 @@ class DynamicsCache:
         -------
 
         tuple
-            The dynamics object for the replica.
+            The dynamics object for the replica and its GCMC sampler.
         """
-        return self._dynamics[index]
+        try:
+            gcmc_sampler = self._gcmc[index]
+        except:
+            gcmc_sampler = None
+
+        return self._dynamics[index], gcmc_sampler
 
     def set(self, index, dynamics):
         """
@@ -437,6 +483,8 @@ class RepexRunner(_RunnerBase):
                 self._rest2_scale_factors,
                 self._num_gpus,
                 self._dynamics_kwargs,
+                gcmc_kwargs=self._config.gcmc_kwargs,
+                output_directory=self._config.output_directory,
             )
 
         # Conversion factor for reduced potential.
@@ -574,6 +622,14 @@ class RepexRunner(_RunnerBase):
         # Record the start time for the production block.
         prod_start = time()
 
+        # Store the number of blocks per-frame. For GCMC, we need to write the
+        # indices of the current ghost water residues each time a frame is saved.
+        # For GCMC simulations, the frame frequency is guaranteed to be a multiple
+        # of the energy frequency.
+        cycles_per_frame = int(
+            self._config.frame_frequency / self._config.energy_frequency
+        )
+
         # Perform the replica exchange simulation.
         for i in range(cycles):
             _logger.info(f"Running dynamics for cycle {i+1} of {cycles}")
@@ -593,6 +649,9 @@ class RepexRunner(_RunnerBase):
             # Whether to checkpoint.
             is_checkpoint = i > 0 and i % cycles_per_checkpoint == 0
 
+            # Whether a frame was saved after the previous block.
+            write_gcmc_ghosts = i > 0 and (i - 1) % cycles_per_frame == 0
+
             # Run a dynamics block for each replica, making sure only each GPU is only
             # oversubscribed by a factor of self._config.oversubscription_factor.
             for j in range(num_batches):
@@ -608,6 +667,7 @@ class RepexRunner(_RunnerBase):
                             repeat(i == cycles - 1),
                             repeat(block),
                             repeat(num_blocks + int(rem > 0)),
+                            repeat(write_gcmc_ghosts),
                         ):
                             if not result:
                                 _logger.error(
@@ -688,6 +748,7 @@ class RepexRunner(_RunnerBase):
         is_final_block,
         block,
         num_blocks,
+        write_gcmc_ghosts=False,
     ):
         """
         Run a dynamics block for a given replica.
@@ -719,6 +780,10 @@ class RepexRunner(_RunnerBase):
         num_blocks: int
             The total number of blocks.
 
+        write_gcmc_ghosts: bool
+            Whether to write the indices of GCMC ghost residues to
+            file.
+
         Returns
         -------
 
@@ -737,8 +802,8 @@ class RepexRunner(_RunnerBase):
         lam = lambdas[index]
 
         try:
-            # Get the dynamics object.
-            dynamics = self._dynamics_cache.get(index)
+            # Get the dynamics object (and GCMC sampler).
+            dynamics, gcmc_sampler = self._dynamics_cache.get(index)
 
             # Minimise the system if this is a restart simulation and this is
             # the first block.
@@ -751,6 +816,19 @@ class RepexRunner(_RunnerBase):
 
             # Draw new velocities from the Maxwell-Boltzmann distribution.
             dynamics.randomise_velocities()
+
+            # Perform a GCMC move. For repex this needs to be done before the
+            # dynamics block so that the final energies, which are used in the
+            # repex acceptance criteria, are correct.
+            if gcmc_sampler is not None:
+                # The frame frequency was hit after the previous block, so we
+                # need to write the current indices of the GCMC ghost residues
+                # to file.
+                if write_gcmc_ghosts:
+                    gcmc_sampler.write_ghost_residues()
+
+                # Perform the GCMC move.
+                gcmc_sampler.move(dynamics.context())
 
             # Run the dynamics.
             dynamics.run(
@@ -837,8 +915,15 @@ class RepexRunner(_RunnerBase):
         _logger.info(f"Minimising at {_lam_sym} = {self._lambda_values[index]:.5f}")
 
         try:
-            # Get the dynamics object.
-            dynamics = self._dynamics_cache.get(index)
+            # Get the dynamics object (and GCMC sampler).
+            dynamics, gcmc_sampler = self._dynamics_cache.get(index)
+
+            if gcmc_sampler is not None:
+                _logger.info(
+                    f"Pre-equilibrating with GCMC moves at {_lam_sym} = {lam:.5f}"
+                )
+                for i in range(100):
+                    gcmc_sampler.move(dynamics.context())
 
             # Minimise.
             dynamics.minimise(timeout=self._config.timeout)
@@ -873,8 +958,13 @@ class RepexRunner(_RunnerBase):
         _logger.info(f"Equilibrating at {_lam_sym} = {self._lambda_values[index]:.5f}")
 
         try:
-            # Get the dynamics object.
-            dynamics = self._dynamics_cache.get(index)
+            # Get the dynamics object (and GCMC sampler).
+            dynamics, gcmc_sampler = self._dynamics_cache.get(index)
+
+            if gcmc_sampler is not None:
+                _logger.info(f"Equilibrating with GCMC moves at {_lam_sym} = {lam:.5f}")
+                for i in range(100):
+                    gcmc_sampler.move(dynamics.context())
 
             # Equilibrate.
             dynamics.run(
@@ -961,7 +1051,7 @@ class RepexRunner(_RunnerBase):
         )
 
         # Get the dynamics object.
-        dynamics = self._dynamics_cache.get(index)
+        dynamics, _ = self._dynamics_cache.get(index)
 
         # Create an array to hold the energies.
         energies = _np.zeros(self._config.num_lambda)
