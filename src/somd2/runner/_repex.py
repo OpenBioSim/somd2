@@ -720,6 +720,11 @@ class RepexRunner(_RunnerBase):
         with open(self._repex_state, "wb") as f:
             _pickle.dump(self._dynamics_cache, f)
 
+        # Save the final GCMC ghost indices.
+        if self._config.gcmc and i % cycles_per_frame == 0:
+            for gcmc in self._dynamics_cache._gcmc:
+                gcmc.write_ghost_residues()
+
         # Record the end time.
         end = time()
 
