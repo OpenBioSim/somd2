@@ -482,8 +482,8 @@ class Runner(_RunnerBase):
                 system,
                 device=int(device),
                 lambda_value=lambda_value,
-                log_file=self._filenames[0]["gcmc_log"],
-                ghost_file=self._filenames[0]["gcmc_ghosts"],
+                log_file=self._filenames[index]["gcmc_log"],
+                ghost_file=self._filenames[index]["gcmc_ghosts"],
                 **self._gcmc_kwargs,
             )
 
