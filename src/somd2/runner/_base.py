@@ -869,8 +869,19 @@ class RunnerBase:
             for file in list(set(deleted)):
                 file.unlink()
 
-        filenames["topology0"] = str(self._config.output_directory / "system0.prm7")
-        filenames["topology1"] = str(self._config.output_directory / "system1.prm7")
+        # Use PDB format for GCMC simulations to allow trajectory post-processing
+        # and analysis with grand.
+        if self._config.gcmc:
+            top_ext = "pdb"
+        else:
+            top_ext = "prm7"
+
+        filenames["topology0"] = str(
+            self._config.output_directory / f"system0.{top_ext}"
+        )
+        filenames["topology1"] = str(
+            self._config.output_directory / f"system1.{top_ext}"
+        )
 
         return filenames
 
