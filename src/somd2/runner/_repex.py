@@ -203,18 +203,19 @@ class DynamicsCache:
                 ghost_file = str(output_directory / f"gcmc_{lam:.5f}.ghost")
 
                 # Create the GCMC sampler.
-                self._gcmc.append(
-                    GCMCSampler(
-                        mols,
-                        device=int(device),
-                        lambda_value=lam,
-                        ghost_file=ghost_file,
-                        **gcmc_kwargs,
-                    )
+                gcmc_sampler = GCMCSampler(
+                    mols,
+                    device=int(device),
+                    lambda_value=lam,
+                    ghost_file=ghost_file,
+                    **gcmc_kwargs,
                 )
 
                 # Get the modified GCMC system.
-                mols = sampler.system()
+                mols = gcmc_sampler.system()
+
+                # Store the GCMC sampler.
+                self._gcmc.append(gcmc_sampler)
 
                 _logger.info(
                     f"Created GCMC sampler for lambda {lam:.5f} on device {device}"
