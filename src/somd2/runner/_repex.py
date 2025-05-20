@@ -94,7 +94,12 @@ class DynamicsCache:
 
         # Create the dynamics objects.
         self._create_dynamics(
-            system, lambdas, rest2_scale_factors, num_gpus, dynamics_kwargs
+            system,
+            lambdas,
+            rest2_scale_factors,
+            num_gpus,
+            dynamics_kwargs,
+            gcmc_kwargs=gcmc_kwargs,
         )
 
     def __setstate__(self, state):
