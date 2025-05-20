@@ -436,37 +436,37 @@ class RunnerBase:
 
             # Make sure the frame frequency is a multiple of the energy frequency.
 
-            # Get the scale factor.
-            scale = (
+            # Get the ratio.
+            ratio = (
                 self._config.frame_frequency / self._config.energy_frequency
             ).value()
 
             # Make sure it's an integer.
-            if not isclose(scale, round(scale), abs_tol=1e-4):
+            if not isclose(ratio, round(ratio), abs_tol=1e-4):
                 msg = "'frame_frequency' must be a multiple of 'energy_frequency'."
                 _logger.error(msg)
                 raise ValueError(msg)
 
             # Make sure the checkpoint frequency is a multiple of the frame frequency.
 
-            # Get the scale factor.
-            scale = (
+            # Get the ratio.
+            ratio = (
                 self._config.checkpoint_frequency / self._config.frame_frequency
             ).value()
 
             # Make sure it's an integer.
-            if not isclose(scale, round(scale), abs_tol=1e-4):
+            if not isclose(ratio, round(ratio), abs_tol=1e-4):
                 msg = "'checkpoint_frequency' must be a multiple of 'frame_frequency'."
                 _logger.error(msg)
                 raise ValueError(msg)
 
             # Make sure the runtime is a multiple of the frame frequency.
 
-            # Get the scale factor.
-            scale = (self._config.runtime / self._config.frame_frequency).value()
+            # Get the ratio.
+            ratio = (self._config.runtime / self._config.frame_frequency).value()
 
             # Make sure it's an integer.
-            if not isclose(scale, round(scale), abs_tol=1e-4):
+            if not isclose(ratio, round(ratio), abs_tol=1e-4):
                 msg = "'runtime' must be a multiple of 'frame_frequency'."
                 _logger.error(msg)
                 raise ValueError(msg)
