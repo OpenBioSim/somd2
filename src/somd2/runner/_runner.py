@@ -21,6 +21,8 @@
 
 __all__ = ["Runner"]
 
+from time import time as _timer
+
 import sire as _sr
 
 from somd2 import _logger
@@ -144,10 +146,8 @@ class Runner(_RunnerBase):
         Use concurrent.futures to run lambda windows in parallel
         """
 
-        from time import time
-
         # Record the start time.
-        start = time()
+        start = _timer()
 
         # Create shared resources.
         self._create_shared_resources()
@@ -199,7 +199,7 @@ class Runner(_RunnerBase):
                     executor._processes[pid].terminate()
 
         # Record the end time.
-        end = time()
+        end = _timer()
 
         # Log the run time in minutes.
         _logger.success(
@@ -530,8 +530,6 @@ class Runner(_RunnerBase):
         else:
             num_energy_neighbours = None
 
-        from time import time
-
         # Store the checkpoint time in nanoseconds.
         checkpoint_interval = self._config.checkpoint_frequency.to("ns")
 
@@ -555,7 +553,7 @@ class Runner(_RunnerBase):
                 block += self._start_block
 
                 # Record the start time.
-                start = time()
+                start = _timer()
 
                 # Run the dynamics.
                 try:
@@ -625,7 +623,7 @@ class Runner(_RunnerBase):
                     system = dynamics.commit()
 
                     # Record the end time.
-                    end = time()
+                    end = _timer()
 
                     # Work how many fractional days the block took.
                     block_time = (end - start) / 86400
@@ -670,7 +668,7 @@ class Runner(_RunnerBase):
             # Handle the remainder time. (There will be no remainer when GCMC sampling.)
             if rem > 0:
                 block += 1
-                start = time()
+                start = _timer()
                 try:
                     dynamics.run(
                         rem,
@@ -692,7 +690,7 @@ class Runner(_RunnerBase):
                     system = dynamics.commit()
 
                     # Record the end time.
-                    end = time()
+                    end = _timer()
 
                     # Work how many fractional days the block took.
                     block_time = (end - start) / 86400
@@ -729,7 +727,7 @@ class Runner(_RunnerBase):
                     )
         else:
             # Record the start time.
-            start = time()
+            start = _timer()
 
             try:
                 if self._config.gcmc:
@@ -788,7 +786,7 @@ class Runner(_RunnerBase):
             system = dynamics.commit()
 
             # Record the end time.
-            end = time()
+            end = _timer()
 
             # Work how many fractional days the simulation took.
             prod_time = (end - start) / 86400
