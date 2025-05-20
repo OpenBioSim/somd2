@@ -193,7 +193,7 @@ class DynamicsCache:
                 mols = system
 
             if gcmc_kwargs is not None:
-                from local import GCMCSampler
+                from loch import GCMCSampler
 
                 ghost_file = str(output_directory / f"gcmc_{lam:.5f}.ghost")
 
