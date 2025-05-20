@@ -855,6 +855,9 @@ class RepexRunner(_RunnerBase):
             # dynamics block so that the final energies, which are used in the
             # repex acceptance criteria, are correct.
             if gcmc_sampler is not None:
+                # Push the PyCUDA context to the top of the stack.
+                gcmc_sampler._pycuda_context.push()
+
                 # The frame frequency was hit after the previous block, so we
                 # need to write the current indices of the GCMC ghost residues
                 # to file.
@@ -864,6 +867,9 @@ class RepexRunner(_RunnerBase):
                 # Perform the GCMC move.
                 _logger.info(f"Performing GCMC move at {_lam_sym} = {lam:.5f}")
                 gcmc_sampler.move(dynamics.context())
+
+                # Pop the PyCUDA context from the stack.
+                gcmc_sampler._pycuda_context.pop()
 
             # Run the dynamics.
             dynamics.run(
@@ -954,11 +960,17 @@ class RepexRunner(_RunnerBase):
             dynamics, gcmc_sampler = self._dynamics_cache.get(index)
 
             if gcmc_sampler is not None:
+                # Push the PyCUDA context to the top of the stack.
+                gcmc_sampler._pycuda_context.push()
+
                 _logger.info(
                     f"Pre-equilibrating with GCMC moves at {_lam_sym} = {self._lambda_values[index]:.5f}"
                 )
                 for i in range(100):
                     gcmc_sampler.move(dynamics.context())
+
+                # Pop the PyCUDA context from the stack.
+                gcmc_sampler._pycuda_context.pop()
 
             # Minimise.
             dynamics.minimise(timeout=self._config.timeout)
@@ -997,11 +1009,17 @@ class RepexRunner(_RunnerBase):
             dynamics, gcmc_sampler = self._dynamics_cache.get(index)
 
             if gcmc_sampler is not None:
+                # Push the PyCUDA context to the top of the stack.
+                gcmc_sampler._pycuda_context.push()
+
                 _logger.info(
                     f"Equilibrating with GCMC moves at {_lam_sym} = {self._lambda_values[index]:.5f}"
                 )
                 for i in range(100):
                     gcmc_sampler.move(dynamics.context())
+
+                # Pop the PyCUDA context from the stack.
+                gcmc_sampler._pycuda_context.pop()
 
             # Equilibrate.
             dynamics.run(
