@@ -48,6 +48,7 @@ class DynamicsCache:
         num_gpus,
         dynamics_kwargs,
         gcmc_kwargs=None,
+        output_directory=None,
     ):
         """
         Constructor.
@@ -72,6 +73,9 @@ class DynamicsCache:
 
         gcmc_kwargs: dict
             GCMC specific keyword arguments. If None, then GCMC is not used.
+
+        output_directory: pathlib.Path
+            The directory for simulation output.
         """
 
         # Warn if the number of replicas is not a multiple of the number of GPUs.
@@ -100,6 +104,7 @@ class DynamicsCache:
             num_gpus,
             dynamics_kwargs,
             gcmc_kwargs=gcmc_kwargs,
+            output_directory=output_directory,
         )
 
     def __setstate__(self, state):
@@ -471,6 +476,7 @@ class RepexRunner(_RunnerBase):
                 self._num_gpus,
                 dynamics_kwargs,
                 self._gcmc_kwargs,
+                output_directory=self._config.output_directory,
             )
         else:
             # Check to see if the simulation is already complete.
