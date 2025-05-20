@@ -40,7 +40,15 @@ class DynamicsCache:
     A class for caching dynamics objects.
     """
 
-    def __init__(self, system, lambdas, rest2_scale_factors, num_gpus, dynamics_kwargs):
+    def __init__(
+        self,
+        system,
+        lambdas,
+        rest2_scale_factors,
+        num_gpus,
+        dynamics_kwargs,
+        gcmc_kwargs=None,
+    ):
         """
         Constructor.
 
@@ -61,6 +69,9 @@ class DynamicsCache:
 
         dynamics_kwargs: dict
             A dictionary of default dynamics keyword arguments.
+
+        gcmc_kwargs: dict
+            GCMC specific keyword arguments. If None, then GCMC is not used.
         """
 
         # Warn if the number of replicas is not a multiple of the number of GPUs.
@@ -454,6 +465,7 @@ class RepexRunner(_RunnerBase):
                 self._rest2_scale_factors,
                 self._num_gpus,
                 dynamics_kwargs,
+                self._gcmc_kwargs,
             )
         else:
             # Check to see if the simulation is already complete.
