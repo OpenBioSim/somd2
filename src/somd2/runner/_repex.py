@@ -955,7 +955,7 @@ class RepexRunner(_RunnerBase):
 
             if gcmc_sampler is not None:
                 _logger.info(
-                    f"Pre-equilibrating with GCMC moves at {_lam_sym} = {lam:.5f}"
+                    f"Pre-equilibrating with GCMC moves at {_lam_sym} = {self._lambda_values[index]:.5f}"
                 )
                 for i in range(100):
                     gcmc_sampler.move(dynamics.context())
@@ -997,7 +997,9 @@ class RepexRunner(_RunnerBase):
             dynamics, gcmc_sampler = self._dynamics_cache.get(index)
 
             if gcmc_sampler is not None:
-                _logger.info(f"Equilibrating with GCMC moves at {_lam_sym} = {lam:.5f}")
+                _logger.info(
+                    f"Equilibrating with GCMC moves at {_lam_sym} = {self._lambda_values[index]:.5f}"
+                )
                 for i in range(100):
                     gcmc_sampler.move(dynamics.context())
 
