@@ -205,7 +205,7 @@ class DynamicsCache:
                 # Create the GCMC sampler.
                 gcmc_sampler = GCMCSampler(
                     mols,
-                    device=int(device),
+                    device=device,
                     lambda_value=lam,
                     ghost_file=ghost_file,
                     **gcmc_kwargs,
