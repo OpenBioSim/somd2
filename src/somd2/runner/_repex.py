@@ -304,8 +304,10 @@ class DynamicsCache:
         from openmm.unit import angstrom
 
         # Get the current OpenMM state.
-        state = self._dynamics[index]._d._omm_mols.getState(
-            getPositions=True, getVelocities=True
+        state = (
+            self._dynamics[index]
+            ._d.context()
+            .getState(getPositions=True, getVelocities=True)
         )
 
         # Store the state.
@@ -1114,14 +1116,14 @@ class RepexRunner(_RunnerBase):
         # Loop over the states.
         for i in range(self._config.num_lambda):
             # Set the state.
-            dynamics._d._omm_mols.setState(self._dynamics_cache._openmm_states[i])
+            dynamics._d.context().setState(self._dynamics_cache._openmm_states[i])
             dynamics._d._clear_state()
 
             # Compute and store the energy for this state.
             energies[i] = dynamics.current_potential_energy().value()
 
         # Reset the state.
-        dynamics._d._omm_mols.setState(self._dynamics_cache._openmm_states[index])
+        dynamics._d.context().setState(self._dynamics_cache._openmm_states[index])
 
         return index, energies
 
