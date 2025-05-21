@@ -92,6 +92,7 @@ class DynamicsCache:
         self._old_states = _np.array(range(len(lambdas)))
         self._openmm_states = [None] * len(lambdas)
         self._openmm_volumes = [None] * len(lambdas)
+        self._gcmc_states = [None] * len(lambdas)
         self._num_proposed = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
         self._num_accepted = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
         self._num_swaps = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
@@ -318,6 +319,22 @@ class DynamicsCache:
             angstrom**3
         )
 
+    def save_gcmc_state(self, index):
+        """
+        Save the current GCMC water state for the replica.
+
+        Parameters
+        ----------
+
+        index: int
+            The index of the replica.
+        """
+        # Get the GCMC sampler.
+        gcmc_sampler = self._gcmc[index]
+
+        # Store the state.
+        self._gcmc_states[index] = gcmc_sampler.water_state()
+
     def get_states(self):
         """
         Get the states of the dynamics objects.
@@ -351,7 +368,23 @@ class DynamicsCache:
             # The state has changed.
             if i != state:
                 _logger.debug(f"Replica {i} seeded from state {state}")
-                self._dynamics[i]._d._omm_mols.setState(self._openmm_states[state])
+                self._dynamics[i]._d.context().setState(self._openmm_states[state])
+
+                # Swap the water state in the GCMCSamplers.
+                if self._gcmc[i] is not None:
+                    for j, (state0, state1) in enumerate(
+                        zip(self._gcmc_states[i], self._gcmc_states[state])
+                    ):
+                        # The states are different and one of them is a ghost.
+                        if state0 != state1 and (state0 == 0 or state1 == 0):
+                            _logger.debug(
+                                f"Swapping GCMC water state {state0} with {state1} for replica {i}"
+                            )
+                            self._gcmc[i].push()
+                            self._gcmc[i]._set_water_state(
+                                j, state1, self._dynamics[i].context()
+                            )
+                            self._gcmc[i].pop()
 
             # Update the swap matrix.
             old_state = self._old_states[i]
@@ -888,6 +921,10 @@ class RepexRunner(_RunnerBase):
 
             # Set the state.
             self._dynamics_cache.save_openmm_state(index)
+
+            # Save the GCMC state.
+            if gcmc_sampler is not None:
+                self._dynamics_cache.save_gcmc_state(index)
 
             # Get the energies at each lambda value.
             energies = (
