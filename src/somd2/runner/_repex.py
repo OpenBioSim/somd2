@@ -307,7 +307,7 @@ class DynamicsCache:
         # Get the current OpenMM state.
         state = (
             self._dynamics[index]
-            ._d.context()
+            .context()
             .getState(getPositions=True, getVelocities=True)
         )
 
@@ -368,7 +368,7 @@ class DynamicsCache:
             # The state has changed.
             if i != state:
                 _logger.debug(f"Replica {i} seeded from state {state}")
-                self._dynamics[i]._d.context().setState(self._openmm_states[state])
+                self._dynamics[i].context().setState(self._openmm_states[state])
 
                 # Swap the water state in the GCMCSamplers.
                 if self._gcmc[i] is not None:
@@ -1153,14 +1153,14 @@ class RepexRunner(_RunnerBase):
         # Loop over the states.
         for i in range(self._config.num_lambda):
             # Set the state.
-            dynamics._d.context().setState(self._dynamics_cache._openmm_states[i])
+            dynamics.context().setState(self._dynamics_cache._openmm_states[i])
             dynamics._d._clear_state()
 
             # Compute and store the energy for this state.
             energies[i] = dynamics.current_potential_energy().value()
 
         # Reset the state.
-        dynamics._d.context().setState(self._dynamics_cache._openmm_states[index])
+        dynamics.context().setState(self._dynamics_cache._openmm_states[index])
 
         return index, energies
 
