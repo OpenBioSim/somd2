@@ -372,13 +372,6 @@ class Runner(_RunnerBase):
             # Get the GCMC system.
             system = gcmc_sampler.system()
 
-            # Write the end states so that we can later visualise trajectories.
-            if index == 0:
-                mols0 = _sr.morph.link_to_reference(system)
-                mols1 = _sr.morph.link_to_perturbed(system)
-                _sr.save(mols0, self._filenames["topology0"])
-                _sr.save(mols1, self._filenames["topology1"])
-
         # Minimisation.
         if self._config.minimise:
             # Minimise with no constraints if we need to equilibrate first.

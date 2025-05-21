@@ -402,13 +402,6 @@ class RunnerBase:
                 mols, water, rng, self._config.gcmc_num_ghosts
             )
 
-        # For GCMC, we need to save the system with the ghost waters.
-        if not self._config.gcmc:
-            mols0 = _sr.morph.link_to_reference(mols)
-            mols1 = _sr.morph.link_to_perturbed(mols)
-            _sr.save(mols0, self._filenames["topology0"])
-            _sr.save(mols1, self._filenames["topology1"])
-
         # Append only this number of lines from the end of the dataframe during checkpointing.
         self._energy_per_block = int(
             self._config.checkpoint_frequency / self._config.energy_frequency
@@ -1271,6 +1264,13 @@ class RunnerBase:
         """
 
         from somd2 import __version__, _sire_version, _sire_revisionid
+
+        # Save the end-state topologies for trajectory analysis and visualisation.
+        if block == 0 and index == 0:
+            mols0 = _sr.morph.link_to_reference(system)
+            mols1 = _sr.morph.link_to_perturbed(system)
+            _sr.save(mols0, self._filenames["topology0"])
+            _sr.save(mols1, self._filenames["topology1"])
 
         # Get the lambda value.
         lam = self._lambda_values[index]
