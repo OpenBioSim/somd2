@@ -713,8 +713,8 @@ class RepexRunner(_RunnerBase):
             # Whether to checkpoint.
             is_checkpoint = i > 0 and i % cycles_per_checkpoint == 0
 
-            # Whether a frame was saved after the previous block.
-            write_gcmc_ghosts = i > 0 and (i - 1) % cycles_per_frame == 0
+            # Whether a frame is saved at the end of the cycle.
+            write_gcmc_ghosts = i > 0 and i % cycles_per_frame == 0
 
             # Run a dynamics block for each replica, making sure only each GPU is only
             # oversubscribed by a factor of self._config.oversubscription_factor.
@@ -785,11 +785,6 @@ class RepexRunner(_RunnerBase):
         _logger.info("Saving final replica exchange state")
         with open(self._repex_state, "wb") as f:
             _pickle.dump(self._dynamics_cache, f)
-
-        # Save the final GCMC ghost indices.
-        if self._config.gcmc and i % cycles_per_frame == 0:
-            for gcmc in self._dynamics_cache._gcmc:
-                gcmc.write_ghost_residues()
 
         # Record the end time.
         end = time()
@@ -893,12 +888,6 @@ class RepexRunner(_RunnerBase):
                 # Push the PyCUDA context on top of the stack.
                 gcmc_sampler.push()
 
-                # The frame frequency was hit after the previous block, so we
-                # need to write the current indices of the GCMC ghost residues
-                # to file.
-                if write_gcmc_ghosts:
-                    gcmc_sampler.write_ghost_residues()
-
                 # Perform the GCMC move.
                 _logger.info(f"Performing GCMC move at {_lam_sym} = {lam:.5f}")
                 gcmc_sampler.move(dynamics.context())
@@ -918,6 +907,11 @@ class RepexRunner(_RunnerBase):
                 num_energy_neighbours=self._config.num_energy_neighbours,
                 null_energy=self._config.null_energy,
             )
+
+            # The frame frequency was hit, so writ the indices of the current
+            # ghost water residues to file.
+            if gcmc_sampler is not None and write_gcmc_ghosts:
+                gcmc_sampler.write_ghost_residues()
 
             # Set the state.
             self._dynamics_cache.save_openmm_state(index)
