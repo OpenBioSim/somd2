@@ -431,7 +431,7 @@ class RepexRunner(_RunnerBase):
         ----------
 
         system: str, :class: `System <sire.system.System>`
-            The perturbable system to be simulated. This can be either a path
+            The perturbable system to be simulated. This can either be a path
             to a stream file, or a Sire system object.
 
         config: :class: `Config <somd2.config.Config>`
