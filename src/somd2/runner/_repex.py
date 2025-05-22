@@ -333,7 +333,7 @@ class DynamicsCache:
         gcmc_sampler = self._gcmc[index]
 
         # Store the state.
-        self._gcmc_states[index] = gcmc_sampler.water_state()
+        self._gcmc_states[index] = gcmc_sampler.water_state().copy()
 
     def get_states(self):
         """
