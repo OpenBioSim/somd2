@@ -372,17 +372,22 @@ class DynamicsCache:
 
                 # Swap the water state in the GCMCSamplers.
                 if self._gcmc[i] is not None:
-                    for j, (state0, state1) in enumerate(
-                        zip(self._gcmc_states[i], self._gcmc_states[state])
-                    ):
-                        # The states are different and one of them is a ghost.
-                        if state0 != state1 and (state0 == 0 or state1 == 0):
+                    # Find the indices of the water states that differ.
+                    water_idxs = _np.where(
+                        self._gcmc_states[i] != self._gcmc_states[state]
+                    )[0]
+                    # Loop over the water indices and swap the states.
+                    for idx in water_idxs:
+                        state0 = self._gcmc_states[i][idx]
+                        state1 = self._gcmc_states[state][idx]
+                        # Only update if one of the states is a ghost water.
+                        if state0 == 0 or state1 == 0:
                             _logger.debug(
                                 f"Swapping GCMC water state {state0} with {state1} for replica {i}"
                             )
                             self._gcmc[i].push()
                             self._gcmc[i]._set_water_state(
-                                j, state1, self._dynamics[i].context()
+                                idx, state1, self._dynamics[i].context()
                             )
                             self._gcmc[i].pop()
 
