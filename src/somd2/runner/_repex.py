@@ -383,7 +383,8 @@ class DynamicsCache:
                         # Only update if one of the states is a ghost water.
                         if state0 == 0 or state1 == 0:
                             _logger.debug(
-                                f"Swapping GCMC water state {state0} with {state1} for replica {i}"
+                                f"Swapping state from {state0} to {state1} for "
+                                f"water index {idx} in replica {i}"
                             )
                             self._gcmc[i].push()
                             self._gcmc[i]._set_water_state(
