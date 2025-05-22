@@ -184,7 +184,7 @@ class DynamicsCache:
         self._dynamics = []
 
         # Initialise the GCMC object list.
-        self._gcmc = []
+        self._gcmc_samplers = []
 
         # Create the dynamics objects in serial.
         for i, (lam, scale) in enumerate(zip(lambdas, rest2_scale_factors)):
@@ -216,7 +216,7 @@ class DynamicsCache:
                 mols = gcmc_sampler.system()
 
                 # Store the GCMC sampler.
-                self._gcmc.append(gcmc_sampler)
+                self._gcmc_samplers.append(gcmc_sampler)
 
                 _logger.info(
                     f"Created GCMC sampler for lambda {lam:.5f} on device {device}"
@@ -259,7 +259,7 @@ class DynamicsCache:
             The dynamics object for the replica and its GCMC sampler.
         """
         try:
-            gcmc_sampler = self._gcmc[index]
+            gcmc_sampler = self._gcmc_samplers[index]
         except:
             gcmc_sampler = None
 
@@ -330,7 +330,7 @@ class DynamicsCache:
             The index of the replica.
         """
         # Get the GCMC sampler.
-        gcmc_sampler = self._gcmc[index]
+        gcmc_sampler = self._gcmc_samplers[index]
 
         # Store the state.
         self._gcmc_states[index] = gcmc_sampler.water_state().copy()
@@ -371,7 +371,7 @@ class DynamicsCache:
                 self._dynamics[i].context().setState(self._openmm_states[state])
 
                 # Swap the water state in the GCMCSamplers.
-                if self._gcmc[i] is not None:
+                if self._gcmc_samplers[i] is not None:
                     # Find the indices of the water states that differ.
                     water_idxs = _np.where(
                         self._gcmc_states[i] != self._gcmc_states[state]
@@ -386,11 +386,11 @@ class DynamicsCache:
                                 f"Swapping state from {state0} to {state1} for "
                                 f"water index {idx} in replica {i}"
                             )
-                            self._gcmc[i].push()
-                            self._gcmc[i]._set_water_state(
+                            self._gcmc_samplers[i].push()
+                            self._gcmc_samplers[i]._set_water_state(
                                 idx, state1, self._dynamics[i].context()
                             )
-                            self._gcmc[i].pop()
+                            self._gcmc_samplers[i].pop()
 
             # Update the swap matrix.
             old_state = self._old_states[i]
