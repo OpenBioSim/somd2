@@ -941,6 +941,10 @@ class RepexRunner(_RunnerBase):
                 # Commit the current system.
                 system = dynamics.commit()
 
+                # If performing GCMC, then we need to flag the ghost waters.
+                if self._config.gcmc:
+                    system = gcmc_sampler._flag_ghost_waters(system)
+
                 # Get the simulation speed.
                 speed = dynamics.time_speed()
 
