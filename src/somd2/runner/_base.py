@@ -940,6 +940,20 @@ class RunnerBase:
                 # Append the system to the list.
                 systems.append(_sr.morph.link_to_reference(system))
 
+        # If this is a GCMC simulation, then remove all ghost waters from each of the systems.
+        if self._config.gcmc:
+            _logger.info("Removing existing ghost waters from GCMC checkpoint systems")
+            for i, system in enumerate(systems):
+                # Remove the ghost waters from the system.
+                try:
+                    for mol in system["property is_ghost_water"].molecules():
+                        _logger.debug(
+                            f"Removing ghost water molecule {mol.number()} for {_lam_sym}={self._lambda_values[i]:.5f}"
+                        )
+                        system.remove(mol)
+                except:
+                    pass
+
         return True, systems
 
     @staticmethod
