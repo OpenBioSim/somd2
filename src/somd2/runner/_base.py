@@ -399,7 +399,7 @@ class RunnerBase:
 
             # Create the GCMC system.
             mols = GCMCSampler._prepare_system(
-                mols, water, rng, self._config.gcmc_num_ghosts
+                mols, water, rng, self._config.gcmc_num_waters
             )
 
         # Append only this number of lines from the end of the dataframe during checkpointing.
@@ -511,7 +511,7 @@ class RunnerBase:
                 ),
                 "standard_volume": str(self._config.gcmc_standard_volume),
                 "radius": str(self._config.gcmc_radius),
-                "max_gcmc_waters": self._config.gcmc_num_ghosts,
+                "max_gcmc_waters": self._config.gcmc_num_waters,
                 "bulk_sampling_probability": self._config.gcmc_bulk_sampling_probability,
                 "cutoff_type": self._config.cutoff_type,
                 "cutoff": str(self._config.cutoff),

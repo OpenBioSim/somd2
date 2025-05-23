@@ -130,7 +130,7 @@ class Config:
         gcmc_selection=None,
         gcmc_excess_chemical_potential="-6.09 kcal/mol",
         gcmc_standard_volume="30.543 A^3",
-        gcmc_num_ghosts=10,
+        gcmc_num_waters=20,
         gcmc_radius="4 A",
         gcmc_bulk_sampling_probability=0.1,
         rest2_scale=1.0,
@@ -326,9 +326,9 @@ class Config:
             The standard volume of a water molecule in A^3. The default value is calibrated
             from NPT simulation of TIP3P water.
 
-        gcmc_num_ghosts: int
-            The initial number of ghost water molecules to insert into the system. These
-            are used as placeholders for GCMC insertion moves.
+        gcmc_num_waters: int
+            The additional number of ghost water molecules to add to the system. These are
+            used as placeholders for GCMC insertion moves.
 
         gcmc_radius: str
             The radius of the GCMC sphere.
@@ -454,7 +454,7 @@ class Config:
         self.gcmc_selection = gcmc_selection
         self.gcmc_excess_chemical_potential = gcmc_excess_chemical_potential
         self.gcmc_standard_volume = gcmc_standard_volume
-        self.gcmc_num_ghosts = gcmc_num_ghosts
+        self.gcmc_num_waters = gcmc_num_waters
         self.gcmc_radius = gcmc_radius
         self.gcmc_bulk_sampling_probability = gcmc_bulk_sampling_probability
         self.rest2_scale = rest2_scale
@@ -1453,21 +1453,21 @@ class Config:
         self._gcmc_standard_volume = gcmc_v
 
     @property
-    def gcmc_num_ghosts(self):
-        return self._gcmc_num_ghosts
+    def gcmc_num_waters(self):
+        return self._gcmc_num_waters
 
-    @gcmc_num_ghosts.setter
-    def gcmc_num_ghosts(self, gcmc_num_ghosts):
-        if gcmc_num_ghosts is not None:
-            if not isinstance(gcmc_num_ghosts, int):
+    @gcmc_num_waters.setter
+    def gcmc_num_waters(self, gcmc_num_waters):
+        if gcmc_num_waters is not None:
+            if not isinstance(gcmc_num_waters, int):
                 try:
-                    gcmc_num_ghosts = int(gcmc_num_ghosts)
+                    gcmc_num_waters = int(gcmc_num_waters)
                 except:
-                    raise ValueError("'gcmc_num_ghosts' must be an integer")
+                    raise ValueError("'gcmc_num_waters' must be an integer")
 
-            if gcmc_num_ghosts < 0:
-                raise ValueError("'gcmc_num_ghosts' must be greater than or equal to 0")
-        self._gcmc_num_ghosts = gcmc_num_ghosts
+            if gcmc_num_waters < 0:
+                raise ValueError("'gcmc_num_waters' must be greater than or equal to 0")
+        self._gcmc_num_waters = gcmc_num_waters
 
     @property
     def gcmc_radius(self):
