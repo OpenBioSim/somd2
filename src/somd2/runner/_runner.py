@@ -540,13 +540,16 @@ class Runner(_RunnerBase):
             num_blocks = int(frac)
             rem = round(frac - num_blocks, 12)
 
+            # Store the star time.
+            start = _timer()
+
             # Run the dynamics in blocks.
             for block in range(int(num_blocks)):
                 # Add the start block number.
                 block += self._start_block
 
                 # Record the start time.
-                start = _timer()
+                block_start = _timer()
 
                 # Run the dynamics.
                 try:
@@ -620,10 +623,10 @@ class Runner(_RunnerBase):
                         system = gcmc_sampler._flag_ghost_waters(system)
 
                     # Record the end time.
-                    end = _timer()
+                    block_end = _timer()
 
                     # Work how many fractional days the block took.
-                    block_time = (end - start) / 86400
+                    block_time = (block_end - block_start) / 86400
 
                     # Calculate the speed in nanoseconds per day.
                     speed = checkpoint_interval / block_time
@@ -665,7 +668,7 @@ class Runner(_RunnerBase):
             # Handle the remainder time. (There will be no remainer when GCMC sampling.)
             if rem > 0:
                 block += 1
-                start = _timer()
+                block_start = _timer()
                 try:
                     dynamics.run(
                         rem,
@@ -687,10 +690,10 @@ class Runner(_RunnerBase):
                     system = dynamics.commit()
 
                     # Record the end time.
-                    end = _timer()
+                    block_end = _timer()
 
                     # Work how many fractional days the block took.
-                    block_time = (end - start) / 86400
+                    block_time = (block_end - block_start) / 86400
 
                     # Calculate the speed in nanoseconds per day.
                     speed = checkpoint_interval / block_time
@@ -723,9 +726,6 @@ class Runner(_RunnerBase):
                         f"Final dynamics block for {lam_sym} = {lambda_value:.5f} failed: {e}"
                     )
         else:
-            # Record the start time.
-            start = _timer()
-
             try:
                 if self._config.gcmc:
                     # Initialise the run time and time at which the next frame is saved.
