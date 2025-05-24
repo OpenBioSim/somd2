@@ -187,7 +187,6 @@ class Runner(_RunnerBase):
                     try:
                         success, time = job.result()
                     except Exception as e:
-                        success = False
                         _logger.error(
                             f"Exception raised for {_lam_sym} = {lambda_value}: {e}"
                         )
