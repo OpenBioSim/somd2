@@ -202,13 +202,13 @@ class Runner(_RunnerBase):
         end = _timer()
 
         # Work how many fractional days the simulation took.
-        prod_time = (end - start) / 86400
+        days = (end - start) / 86400
 
         # Calculate the speed in nanoseconds per day.
-        speed = time.to("ns") / prod_time
+        speed = time.to("ns") / days
 
         # Log the speed.
-        _logger.info(f"Average speed: {prod_speed:.2f} ns day-1")
+        _logger.info(f"Average speed: {speed:.2f} ns day-1")
 
         # Log the run time in minutes.
         _logger.success(
