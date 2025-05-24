@@ -185,9 +185,9 @@ class Runner(_RunnerBase):
                 for job in _futures.as_completed(jobs):
                     lambda_value = jobs[job]
                     try:
-                        result = job.result()
+                        success, time = job.result()
                     except Exception as e:
-                        result = False
+                        success = False
                         _logger.error(
                             f"Exception raised for {_lam_sym} = {lambda_value}: {e}"
                         )
@@ -200,6 +200,15 @@ class Runner(_RunnerBase):
 
         # Record the end time.
         end = _timer()
+
+        # Work how many fractional days the simulation took.
+        prod_time = (end - start) / 86400
+
+        # Calculate the speed in nanoseconds per day.
+        speed = time.to("ns") / prod_time
+
+        # Log the speed.
+        _logger.info(f"Average speed: {prod_speed:.2f} ns day-1")
 
         # Log the run time in minutes.
         _logger.success(
@@ -221,6 +230,9 @@ class Runner(_RunnerBase):
 
         success: bool
             Whether the simulation was successful.
+
+        time: sire.units.GeneralUnit
+            The duration of the simulation.
         """
 
         # Get the lambda value.
@@ -255,9 +267,9 @@ class Runner(_RunnerBase):
                         f"Running {_lam_sym} = {lambda_value} on GPU {gpu_num}"
                     )
 
-            # Run the smullation.
+            # Run the simulation.
             try:
-                self._run(
+                time = self._run(
                     system,
                     index,
                     device=gpu_num,
@@ -277,11 +289,11 @@ class Runner(_RunnerBase):
 
             # Run the simulation.
             try:
-                self._run(system, index, is_restart=self._is_restart)
+                time = self._run(system, index, is_restart=self._is_restart)
             except Exception as e:
                 _logger.error(f"Error running {_lam_sym} = {lambda_value}: {e}")
 
-        return True
+        return True, time
 
     def _run(
         self, system, index, device=None, lambda_minimisation=None, is_restart=False
@@ -310,8 +322,8 @@ class Runner(_RunnerBase):
         Returns
         -------
 
-        df : pandas dataframe
-            Dataframe containing the sire energy trajectory.
+        time: sire.units.GeneralUnit
+            The duration of the simulation.
         """
 
         # Get the lambda value.
@@ -330,7 +342,7 @@ class Runner(_RunnerBase):
                 _logger.success(
                     f"{_lam_sym} = {lambda_value} already complete. Skipping."
                 )
-                return
+                return _sr.u("0ps")
 
             # Work out the current block number.
             self._start_block = int(
@@ -797,6 +809,8 @@ class Runner(_RunnerBase):
             _logger.success(
                 f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"
             )
+
+            return time
 
     def _minimisation(
         self,
