@@ -92,6 +92,7 @@ class DynamicsCache:
         self._old_states = _np.array(range(len(lambdas)))
         self._openmm_states = [None] * len(lambdas)
         self._openmm_volumes = [None] * len(lambdas)
+        self._gcmc_samplers = [None] * len(lambdas)
         self._gcmc_states = [None] * len(lambdas)
         self._num_proposed = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
         self._num_accepted = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
@@ -183,9 +184,6 @@ class DynamicsCache:
         # Initialise the dynamics object list.
         self._dynamics = []
 
-        # Initialise the GCMC object list.
-        self._gcmc_samplers = []
-
         # Create the dynamics objects in serial.
         for i, (lam, scale) in enumerate(zip(lambdas, rest2_scale_factors)):
             # Work out the device index.
@@ -216,7 +214,7 @@ class DynamicsCache:
                 mols = gcmc_sampler.system()
 
                 # Store the GCMC sampler.
-                self._gcmc_samplers.append(gcmc_sampler)
+                self._gcmc_samplers[i] = gcmc_sampler
 
                 _logger.info(
                     f"Created GCMC sampler for lambda {lam:.5f} on device {device}"
@@ -258,12 +256,7 @@ class DynamicsCache:
         tuple
             The dynamics object for the replica and its GCMC sampler.
         """
-        try:
-            gcmc_sampler = self._gcmc_samplers[index]
-        except:
-            gcmc_sampler = None
-
-        return self._dynamics[index], gcmc_sampler
+        return self._dynamics[index], self._gcmc_samplers[index]
 
     def set(self, index, dynamics):
         """
