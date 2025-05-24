@@ -369,23 +369,15 @@ class DynamicsCache:
                     water_idxs = _np.where(
                         self._gcmc_states[i] != self._gcmc_states[state]
                     )[0]
-                    # Loop over the water indices and swap the states.
-                    for idx in water_idxs:
-                        # Get the water state in the two replicas.
-                        state0 = self._gcmc_states[i][idx]
-                        state1 = self._gcmc_states[state][idx]
 
-                        _logger.debug(
-                            f"Swapping state from {state0} to {state1} for "
-                            f"water index {idx} in replica {i}"
-                        )
-
-                        # Update the water state in the GCMCSampler.
-                        self._gcmc_samplers[i].push()
-                        self._gcmc_samplers[i]._set_water_state(
-                            idx, state1, self._dynamics[i].context()
-                        )
-                        self._gcmc_samplers[i].pop()
+                    # Update the water state in the GCMCSampler.
+                    self._gcmc_samplers[i].push()
+                    self._gcmc_samplers[i]._set_water_state(
+                        water_idxs,
+                        self._gcmc_states[state][water_idxs],
+                        self._dynamics[i].context(),
+                    )
+                    self._gcmc_samplers[i].pop()
 
             # Update the swap matrix.
             old_state = self._old_states[i]
