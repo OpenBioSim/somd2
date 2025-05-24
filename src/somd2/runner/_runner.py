@@ -810,7 +810,7 @@ class Runner(_RunnerBase):
                 f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"
             )
 
-            return time
+        return time
 
     def _minimisation(
         self,
