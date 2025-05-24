@@ -797,10 +797,10 @@ class Runner(_RunnerBase):
             end = _timer()
 
             # Work how many fractional days the simulation took.
-            prod_time = (end - start) / 86400
+            days = (end - start) / 86400
 
             # Calculate the speed in nanoseconds per day.
-            speed = time.to("ns") / prod_time
+            speed = time.to("ns") / days
 
             # Checkpoint.
             self._checkpoint(system, index, 0, speed, is_final_block=True)
