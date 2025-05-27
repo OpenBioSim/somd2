@@ -91,7 +91,6 @@ class DynamicsCache:
         self._states = _np.array(range(len(lambdas)))
         self._old_states = _np.array(range(len(lambdas)))
         self._openmm_states = [None] * len(lambdas)
-        self._openmm_volumes = [None] * len(lambdas)
         self._gcmc_samplers = [None] * len(lambdas)
         self._gcmc_states = [None] * len(lambdas)
         self._num_proposed = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
@@ -128,7 +127,6 @@ class DynamicsCache:
             "_states": self._states,
             "_old_states": self._old_states,
             "_openmm_states": self._openmm_states,
-            "_openmm_volumes": self._openmm_volumes,
             "_num_proposed": self._num_proposed,
             "_num_accepted": self._num_accepted,
             "_num_swaps": self._num_swaps,
@@ -306,11 +304,6 @@ class DynamicsCache:
 
         # Store the state.
         self._openmm_states[index] = state
-
-        # Store the volume.
-        self._openmm_volumes[index] = state.getPeriodicBoxVolume().value_in_unit(
-            angstrom**3
-        )
 
     def save_gcmc_state(self, index):
         """
