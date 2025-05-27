@@ -900,7 +900,9 @@ class RepexRunner(_RunnerBase):
                 num_energy_neighbours=self._config.num_energy_neighbours,
                 null_energy=self._config.null_energy,
                 # GCMC specific options.
-                adams_value=gcmc_sampler._B_bulk if gcmc_sampler is not None else None,
+                excess_chemical_potential=(
+                    self._mu_ex if gcmc_sampler is not None else None
+                ),
                 num_waters=(
                     _np.sum(gcmc_sampler.water_state())
                     if gcmc_sampler is not None
@@ -1188,9 +1190,7 @@ class RepexRunner(_RunnerBase):
                     )
                 # Add the GCMC term if applicable.
                 if self._config.gcmc:
-                    matrix[
-                        i, j
-                    ] += self._dynamics_cache._gcmc_samplers[i]._B_bulk * _np.sum(
+                    matrix[i, j] += self._mu_ex * _np.sum(
                         self._dynamics_cache._gcmc_states[i]
                     )
 

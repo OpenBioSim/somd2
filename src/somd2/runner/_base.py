@@ -402,6 +402,9 @@ class RunnerBase:
                 mols, water, rng, self._config.gcmc_num_waters
             )
 
+            # Store the excess chemical potential.
+            self._mu_ex = self._config.gcmc_excess_chemical_potential.value()
+
         # Append only this number of lines from the end of the dataframe during checkpointing.
         self._energy_per_block = int(
             self._config.checkpoint_frequency / self._config.energy_frequency
