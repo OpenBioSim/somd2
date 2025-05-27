@@ -1190,7 +1190,7 @@ class RepexRunner(_RunnerBase):
                 if self._config.gcmc:
                     matrix[
                         i, j
-                    ] += self._dynamics_cache._gcmc_samplers._B_bulk * _np.sum(
+                    ] += self._dynamics_cache._gcmc_samplers[i]._B_bulk * _np.sum(
                         self._dynamics_cache._gcmc_states[i]
                     )
 
