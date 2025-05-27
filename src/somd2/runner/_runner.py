@@ -207,7 +207,7 @@ class Runner(_RunnerBase):
         speed = time.to("ns") / days
 
         # Log the speed.
-        _logger.info(f"Average speed: {speed:.2f} ns day-1")
+        _logger.info(f"Overall performance: {speed:.2f} ns day-1")
 
         # Log the run time in minutes.
         _logger.success(

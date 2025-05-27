@@ -789,7 +789,7 @@ class RepexRunner(_RunnerBase):
         prod_speed = self._config.runtime.to("ns") / prod_time
 
         # Record the average production speed.
-        _logger.info(f"Average replica speed: {prod_speed:.2f} ns day-1")
+        _logger.info(f"Overall performance: {prod_speed:.2f} ns day-1")
 
         # Log the run time in minutes.
         _logger.success(
