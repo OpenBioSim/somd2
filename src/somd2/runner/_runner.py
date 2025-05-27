@@ -586,6 +586,17 @@ class Runner(_RunnerBase):
                                 auto_fix_minimise=True,
                                 num_energy_neighbours=num_energy_neighbours,
                                 null_energy=self._config.null_energy,
+                                # GCMC specific options.
+                                adams_value=(
+                                    gcmc_sampler._B_bulk
+                                    if gcmc_sampler is not None
+                                    else None
+                                ),
+                                num_waters=(
+                                    _np.sum(gcmc_sampler.water_state())
+                                    if gcmc_sampler is not None
+                                    else None
+                                ),
                             )
 
                             # Perform a GCMC move.
