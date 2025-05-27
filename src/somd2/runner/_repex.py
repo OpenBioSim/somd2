@@ -1190,8 +1190,10 @@ class RepexRunner(_RunnerBase):
                     )
                 # Add the GCMC term if applicable.
                 if self._config.gcmc:
-                    matrix[i, j] += self._mu_ex * _np.sum(
-                        self._dynamics_cache._gcmc_states[i]
+                    matrix[i, j] += (
+                        self._beta
+                        * self._mu_ex
+                        * _np.sum(self._dynamics_cache._gcmc_states[i])
                     )
 
         return matrix
