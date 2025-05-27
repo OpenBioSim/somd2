@@ -23,6 +23,8 @@ __all__ = ["Runner"]
 
 from time import time as _timer
 
+import numpy as _np
+
 import sire as _sr
 
 from somd2 import _logger
