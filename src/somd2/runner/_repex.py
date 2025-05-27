@@ -922,7 +922,7 @@ class RepexRunner(_RunnerBase):
             if gcmc_sampler is not None:
                 self._dynamics_cache.save_gcmc_state(index)
 
-            # Get the energies at each lambda value.
+            # Get the energy at each lambda value.
             energies = (
                 dynamics._d.energy_trajectory()
                 .to_pandas(to_alchemlyb=True, energy_unit="kcal/mol")
@@ -1177,24 +1177,11 @@ class RepexRunner(_RunnerBase):
         # Create the matrix.
         matrix = _np.zeros((len(results), len(results)))
 
-        # Fill the matrix.
+        # Fill the matrix. The energy returned by the dynamics block already
+        # includes the pressure and grand canonical contributions.
         for i, energies in results:
             for j, energy in enumerate(energies):
                 matrix[i, j] = self._beta * energy
-                # Add the pressure term if applicable.
-                if self._pressure is not None:
-                    matrix[i, j] += (
-                        self._beta
-                        * self._config.pressure
-                        * self._dynamics_cache._openmm_volumes[j]
-                    )
-                # Add the GCMC term if applicable.
-                if self._config.gcmc:
-                    matrix[i, j] += (
-                        self._beta
-                        * self._mu_ex
-                        * _np.sum(self._dynamics_cache._gcmc_states[i])
-                    )
 
         return matrix
 
