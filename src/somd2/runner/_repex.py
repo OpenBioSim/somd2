@@ -1172,11 +1172,19 @@ class RepexRunner(_RunnerBase):
         for i, energies in results:
             for j, energy in enumerate(energies):
                 matrix[i, j] = self._beta * energy
+                # Add the pressure term if applicable.
                 if self._pressure is not None:
                     matrix[i, j] += (
                         self._beta
                         * self._config.pressure
                         * self._dynamics_cache._openmm_volumes[j]
+                    )
+                # Add the GCMC term if applicable.
+                if self._config.gcmc:
+                    matrix[
+                        i, j
+                    ] += self._dynamics_cache._gcmc_samplers._B_bulk * _np.sum(
+                        self._dynamics_cache._gcmc_states[i]
                     )
 
         return matrix
