@@ -423,8 +423,8 @@ class RunnerBase:
 
         # GCMC specific validation.
         if self._config.gcmc:
-            if not self._is_gpu:
-                msg = "GCMC simulations require a GPU platform."
+            if self._config.platform != "cuda":
+                msg = "GCMC simulations require the CUDA platform."
                 _logger.error(msg)
                 raise ValueError(msg)
 
