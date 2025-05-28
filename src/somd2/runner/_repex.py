@@ -862,7 +862,7 @@ class RepexRunner(_RunnerBase):
                     _logger.info(f"Minimising restart at {_lam_sym} = {lam:.5f}")
                     dynamics.minimise(timeout=self._config.timeout)
 
-            _logger.info(f"Running dynamics for {_lam_sym} = {lam:.5f}")
+            _logger.info(f"Running dynamics at {_lam_sym} = {lam:.5f}")
 
             # Draw new velocities from the Maxwell-Boltzmann distribution.
             dynamics.randomise_velocities()
