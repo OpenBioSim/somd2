@@ -383,17 +383,25 @@ class RunnerBase:
             mols = self._system
         # Add ghost waters to the system.
         if self._config.gcmc and self._has_space:
+            # Make sure that a pressure has not been set.
+            if self._config.pressure is not None:
+                msg = "GCMC simulations must be run in the NVT ensemble."
+                _logger.error(msg)
+                raise ValueError(msg)
+
             from loch import GCMCSampler
             from numpy.random import default_rng
 
             # Create a random number generator.
             rng = default_rng()
 
-            # Get a water template.
+            # Check that the system is solvated with water molecules. This
+            # is required for GCMC simulations since the existing waters
+            # provide a template for the ghost waters.
             try:
                 water = mols["water"].molecules()[0]
             except:
-                msg = "No water molecules in the system."
+                msg = "No water molecules in the system. Cannot perform GCMC."
                 _logger.error(msg)
                 raise ValueError(msg)
 
