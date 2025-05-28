@@ -197,7 +197,7 @@ class DynamicsCache:
             if gcmc_kwargs is not None:
                 from loch import GCMCSampler
 
-                ghost_file = str(output_directory / f"gcmc_{lam:.5f}.ghost")
+                ghost_file = str(output_directory / f"gcmc_ghosts_{lam:.5f}.txt")
 
                 # Create the GCMC sampler.
                 gcmc_sampler = GCMCSampler(
