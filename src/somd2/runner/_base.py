@@ -877,19 +877,10 @@ class RunnerBase:
             for file in list(set(deleted)):
                 file.unlink()
 
-        # Use PDB format for GCMC simulations to allow trajectory post-processing
-        # and analysis with grand.
-        if self._config.gcmc:
-            top_ext = "pdb"
-        else:
-            top_ext = "prm7"
-
-        filenames["topology0"] = str(
-            self._config.output_directory / f"system0.{top_ext}"
-        )
-        filenames["topology1"] = str(
-            self._config.output_directory / f"system1.{top_ext}"
-        )
+        # File names for end-state topologies. This can be used for trajectory
+        # visulation and analysis.
+        filenames["topology0"] = str(self._config.output_directory / "system0.prm7")
+        filenames["topology1"] = str(self._config.output_directory / "system1.prm7")
 
         return filenames
 
@@ -1300,6 +1291,18 @@ class RunnerBase:
             mols1 = _sr.morph.link_to_perturbed(system)
             _sr.save(mols0, self._filenames["topology0"])
             _sr.save(mols1, self._filenames["topology1"])
+
+            # If this is a GCMC simulation, then save the end state
+            # topologies to PDB format to allow analysis with grand.
+            if self._config.gcmc:
+                _sr.save(
+                    mols0,
+                    self._filenames["topology0"].replace(".prm7", ".pdb"),
+                )
+                _sr.save(
+                    mols1,
+                    self._filenames["topology1"].replace(".prm7", ".pdb"),
+                )
 
         # Get the lambda value.
         lam = self._lambda_values[index]
