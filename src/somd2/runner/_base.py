@@ -100,8 +100,12 @@ class RunnerBase:
                 raise IOError(msg)
 
             # If we're not using SOMD1 compatibility, then reconstruct the original
-            # perturbable system.
-            if not self._config.somd1_compatibility:
+            # perturbable system. We only need to do this if applying modifications
+            # to ghost atom bonded terms.
+            if (
+                not self._config.somd1_compatibility
+                and self._config.ghost_modifications
+            ):
                 from .._utils._somd1 import reconstruct_system
 
                 self._system = reconstruct_system(self._system)
