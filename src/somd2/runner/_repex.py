@@ -954,7 +954,7 @@ class RepexRunner(_RunnerBase):
                 if gcmc_sampler is not None:
                     _logger.info(
                         f"Number of waters in GCMC volume for {_lam_sym} = {lam:.5f}: "
-                        f"{gcmc_sampler.num_waters_in_volume()}"
+                        f"{gcmc_sampler.num_waters()}"
                     )
 
                 if is_final_block:
