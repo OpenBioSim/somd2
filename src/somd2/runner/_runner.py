@@ -385,6 +385,9 @@ class Runner(_RunnerBase):
             # Get the GCMC system.
             system = gcmc_sampler.system()
 
+        else:
+            gcmc_sampler = None
+
         # Minimisation.
         if self._config.minimise:
             # Minimise with no constraints if we need to equilibrate first.
@@ -441,7 +444,7 @@ class Runner(_RunnerBase):
                 dynamics = system.dynamics(**dynamics_kwargs)
 
                 # Equilibrate with GCMC moves.
-                if self._config.gcmc:
+                if gcmc_sampler is not None:
                     _logger.info(
                         f"Euilibraing with GCMC moves at {_lam_sym} = {lambda_value:.5f}"
                     )
@@ -641,7 +644,7 @@ class Runner(_RunnerBase):
                     system = dynamics.commit()
 
                     # If performing GCMC, then we need to flag the ghost waters.
-                    if self._config.gcmc:
+                    if gcmc_sampler is not None:
                         system = gcmc_sampler._flag_ghost_waters(system)
 
                     # Record the end time.
@@ -677,6 +680,13 @@ class Runner(_RunnerBase):
                         f"Finished block {block+1} of {self._start_block + num_blocks} "
                         f"for {_lam_sym} = {lambda_value:.5f}"
                     )
+
+                    # Log the number of waters within the GCMC sampling volume.
+                    if gcmc_sampler is not None:
+                        _logger.info(
+                            f"Number of waters in GCMC volume for {_lam_sym} = {lambda_value:.5f}: "
+                            f"{gcmc_sampler.num_waters_in_volume()}"
+                        )
 
                     if is_final_block:
                         _logger.success(
@@ -749,7 +759,7 @@ class Runner(_RunnerBase):
                     )
         else:
             try:
-                if self._config.gcmc:
+                if gcmc_sampler is not None:
                     # Initialise the run time and time at which the next frame is saved.
                     runtime = _sr.u("0ps")
                     save_frames = self._config.frame_frequency > 0
