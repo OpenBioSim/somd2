@@ -952,10 +952,16 @@ class RepexRunner(_RunnerBase):
 
                 # Log the number of waters within the GCMC sampling volume.
                 if gcmc_sampler is not None:
+                    # Push the PyCUDA context on top of the stack.
+                    gcmc_sampler.push()
+
                     _logger.info(
                         f"Current number of waters in GCMC volume at {_lam_sym} = {lam:.5f} "
                         f"is {gcmc_sampler.num_waters()}"
                     )
+
+                    # Remove the PyCUDA context from the stack.
+                    gcmc_sampler.pop()
 
                 if is_final_block:
                     _logger.success(f"{_lam_sym} = {lam:.5f} complete")
