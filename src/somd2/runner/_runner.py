@@ -684,8 +684,8 @@ class Runner(_RunnerBase):
                     # Log the number of waters within the GCMC sampling volume.
                     if gcmc_sampler is not None:
                         _logger.info(
-                            f"Number of waters in GCMC volume for {_lam_sym} = {lambda_value:.5f}: "
-                            f"{gcmc_sampler.num_waters()}"
+                            f"Current number of waters in GCMC volume at {_lam_sym} = {lambda_value:.5f} "
+                            f"is {gcmc_sampler.num_waters()}"
                         )
 
                     if is_final_block:
