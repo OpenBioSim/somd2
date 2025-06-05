@@ -92,22 +92,27 @@ class Runner(_RunnerBase):
         Also intialises the list with all available GPUs.
         """
         if self._is_gpu:
-            if self._config.max_gpus is None:
-                self._gpu_pool = self._manager.list(
-                    self._zero_gpu_devices(self._get_gpu_devices(self._config.platform))
-                )
-            else:
-                self._gpu_pool = self._manager.list(
-                    self._zero_gpu_devices(
-                        self._get_gpu_devices(self._config.platform)[
-                            : self._config.max_gpus
-                        ]
+            devices = self._get_gpu_devices(self._config.platform)
+            if self._config.max_gpus is not None:
+                if self._config.max_gpus > len(devices):
+                    _logger.warning(
+                        f"Requested {self._config.max_gpus} GPUs, but only {len(devices)} are available."
                     )
+                num_devices = min(len(devices), self._config.max_gpus)
+            else:
+                num_devices = len(devices)
+
+            # Create the GPU pool from the available devices.
+            self._gpu_pool = self._manager.list(
+                self._initialise_gpu_devices(
+                    num_devices,
+                    self._config.oversubscription_factor,
                 )
+            )
 
     def _update_gpu_pool(self, gpu_num):
         """
-        Updates the GPU pool to remove the GPU that has been assigned to a worker.
+        Updates the GPU pool to add the GPU assigned to a worker that has finished.
 
         Parameters
         ----------
@@ -119,7 +124,7 @@ class Runner(_RunnerBase):
 
     def _remove_gpu_from_pool(self, gpu_num):
         """
-        Removes a GPU from the GPU pool.
+        Removes a GPU from the GPU pool when it is assigned to a worker.
 
         Parameters
         ----------
@@ -130,18 +135,31 @@ class Runner(_RunnerBase):
         self._gpu_pool.remove(gpu_num)
 
     @staticmethod
-    def _zero_gpu_devices(devices):
+    def _initialise_gpu_devices(num_devices, oversubscription_factor=1):
         """
-        Set all device numbers relative to the lowest (the device number becomes
-        equal to its index in the list).
+        Create the list of avaiable GPU devices.
+
+        Parameters
+        ----------
+
+        num_devices: int
+            The number of GPU devices to use.
+
+        oversubscription_factor: int
+            The oversubscription factor for the GPUs. This is the number of
+            workers that can use a single GPU at the same time.
 
         Returns
         -------
 
-        devices : [int]
-            List of zeroed available device numbers.
+        devices : [(str, int)]
+            List of available device numbers with oversubscription factor.
         """
-        return [str(devices.index(value)) for value in devices]
+        devices = []
+        for i in range(oversubscription_factor):
+            for j in range(num_devices):
+                devices.append((str(j), i))
+        return devices
 
     def run(self):
         """
@@ -261,8 +279,9 @@ class Runner(_RunnerBase):
         if self._is_gpu:
             # Get a GPU from the pool.
             with self._lock:
-                gpu_num = self._gpu_pool[0]
-                self._remove_gpu_from_pool(gpu_num)
+                gpu = self._gpu_pool[0]
+                gpu_num = gpu[0]
+                self._remove_gpu_from_pool(gpu)
                 if lambda_value is not None:
                     _logger.info(
                         f"Running {_lam_sym} = {lambda_value} on GPU {gpu_num}"
@@ -278,10 +297,10 @@ class Runner(_RunnerBase):
                 )
 
                 with self._lock:
-                    self._update_gpu_pool(gpu_num)
+                    self._update_gpu_pool(gpu)
             except Exception as e:
                 with self._lock:
-                    self._update_gpu_pool(gpu_num)
+                    self._update_gpu_pool(gpu)
                 _logger.error(f"Error running {_lam_sym} = {lambda_value}: {e}")
 
         # All other platforms.

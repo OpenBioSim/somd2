@@ -303,7 +303,7 @@ class Config:
             Does nothing if platform is set to CPU.
 
         oversubscription_factor: int
-            Factor by which to oversubscribe jobs on GPUs during replica exchange simulations.
+            The number of OpenMM contexts that can be run on a single GPU at the same time.
 
         replica_exchange: bool
             Whether to run replica exchange simulation. Currently this can only be used when
