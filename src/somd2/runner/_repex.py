@@ -443,7 +443,9 @@ class RepexRunner(_RunnerBase):
 
         # Get the number of available GPUs.
         try:
-            gpu_devices = self._get_gpu_devices("cuda")
+            gpu_devices = self._get_gpu_devices(
+                "cuda", self._config.oversubscription_factor
+            )
         except Exception as e:
             _logger.error(f"Could not determine available GPU devices: {e}")
             raise e

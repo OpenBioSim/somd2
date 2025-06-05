@@ -92,7 +92,9 @@ class Runner(_RunnerBase):
         Also intialises the list with all available GPUs.
         """
         if self._is_gpu:
-            devices = self._get_gpu_devices(self._config.platform)
+            devices = self._get_gpu_devices(
+                self._config.platform, self._config.oversubscription_factor
+            )
             if self._config.max_gpus is not None:
                 if self._config.max_gpus > len(devices):
                     _logger.warning(

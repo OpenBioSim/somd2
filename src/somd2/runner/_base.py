@@ -1110,7 +1110,7 @@ class RunnerBase:
         return True, None
 
     @staticmethod
-    def _get_gpu_devices(platform):
+    def _get_gpu_devices(platform, oversubscription_factor=1):
         """
         Get list of available GPUs from CUDA_VISIBLE_DEVICES,
         OPENCL_VISIBLE_DEVICES, or HIP_VISIBLE_DEVICES.
@@ -1120,6 +1120,9 @@ class RunnerBase:
 
         platform: str
             The GPU platform to be used for simulations.
+
+        oversubscription_factor: int
+            The number of concurrent workers per GPU. Default is 1.
 
         Returns
         --------
@@ -1159,6 +1162,7 @@ class RunnerBase:
 
         num_gpus = len(available_devices)
         _logger.info(f"Number of GPUs available: {num_gpus}")
+        _logger.info(f"Number of concurrent workers per GPU: {oversubscription_factor}")
 
         return available_devices
 
