@@ -149,6 +149,22 @@ can be controlled via the `--null-energy` option. The number of neighbours shoul
 be chosen as a trade off between accuracy and computational cost. A value of around
 20% of the number of replicas has been found to be a good starting point.
 
+## Ghost atom modifications
+
+We support the modification of ghost atom bonded terms to avoid spurious coupling
+to the physical system using the approach described in [this](https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328) paper.
+These are enabled by default, but can be disabled using the ``--no-ghost-modifications``
+option. Alternatively, we also provide the `ghostly` command-line tool that can
+be used to apply the modifications to perturbable system without running a simulation,
+e.g. for use elsewhere. This can be used via:
+
+```bash
+ghostly perturbable_system.bss --output ghosted --log-level debug
+```
+
+(Here the log level is set to debug to provide more information on the modifications
+that are applied.)
+
 ## Note for SOMD1 users
 
 For existing users of `somd1`, it's possible to generate input for `somd2` by passing

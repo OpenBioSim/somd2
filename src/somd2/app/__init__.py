@@ -28,7 +28,8 @@ Functions
 .. autosummary::
     :toctree: generated/
 
-    cli
+    somd2
+    ghostly
 """
 
-from .run import *
+from ._cli import *
