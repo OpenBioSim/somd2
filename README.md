@@ -188,3 +188,20 @@ somd2 somd1.bss --pert-file somd1.pert --somd1-compatibility
 If you want to load an existing system from a perturbation file and use the
 new `somd2` ghost atom bonded-term modifications, then simply omit the
 `--somd1-compatibility` option.
+
+## GPU oversubscription
+
+If you have an NVIDIA GPU that supports the multi-process service (MPS), you can
+oversubscibe the GPU to run multiple OpenMM contexts on the same GPU at once,
+increasing the throughput of your simulation. To do this, you will need to first
+enable MPS by running the following command:
+
+```
+nvidia-cuda-mps-control -d
+```
+
+The number of contexts that can be run in parallel is then controlled by the
+`--oversubscription-factor` option, which defaults to 1.
+
+More details on MPS, including tuning options, can be found i nthe following
+[techical blog](https://developer.nvidia.com/blog/maximizing-openmm-molecular-dynamics-throughput-with-nvidia-multi-process-service/).
