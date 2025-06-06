@@ -658,13 +658,6 @@ class RepexRunner(_RunnerBase):
                             replica_list[i * num_workers : (i + 1) * num_workers],
                         ):
                             if not success:
-                                try:
-                                    context = self._dynamics_cache.get(index)[
-                                        0
-                                    ].context()
-                                    self._save_energy_components(index, context)
-                                except:
-                                    pass
                                 _logger.error(
                                     f"Equilibration failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
                                 )
@@ -727,13 +720,6 @@ class RepexRunner(_RunnerBase):
                             repeat(write_gcmc_ghosts),
                         ):
                             if not result:
-                                try:
-                                    context = self._dynamics_cache.get(index)[
-                                        0
-                                    ].context()
-                                    self._save_energy_components(index, context)
-                                except:
-                                    pass
                                 _logger.error(
                                     f"Dynamics failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {energies}"
                                 )
@@ -981,6 +967,11 @@ class RepexRunner(_RunnerBase):
                     _logger.success(f"{_lam_sym} = {lam:.5f} complete")
 
         except Exception as e:
+            try:
+                # Save the energy components for debugging purposes.
+                self._save_energy_components(index, dynamics.context())
+            except:
+                pass
             return False, index, e
 
         # Return the index and the energies.
@@ -1131,6 +1122,11 @@ class RepexRunner(_RunnerBase):
             )
 
         except Exception as e:
+            try:
+                # Save the energy components for debugging purposes.
+                self._save_energy_components(index, dynamics.context())
+            except:
+                pass
             return False, index, e
 
         return True, index, None
