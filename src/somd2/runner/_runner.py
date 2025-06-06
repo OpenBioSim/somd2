@@ -467,7 +467,7 @@ class Runner(_RunnerBase):
                 # Equilibrate with GCMC moves.
                 if gcmc_sampler is not None:
                     _logger.info(
-                        f"Euilibraing with GCMC moves at {_lam_sym} = {lambda_value:.5f}"
+                        f"Euilibrating with GCMC moves at {_lam_sym} = {lambda_value:.5f}"
                     )
 
                     for i in range(100):
@@ -503,6 +503,10 @@ class Runner(_RunnerBase):
                         perturbable_constraint=self._config.perturbable_constraint,
                     )
             except Exception as e:
+                try:
+                    self._save_energy_components(index, dynamics.context())
+                except:
+                    pass
                 raise RuntimeError(f"Equilibration failed: {e}")
 
         # Work out the lambda values for finite-difference gradient analysis.
@@ -651,6 +655,10 @@ class Runner(_RunnerBase):
                             null_energy=self._config.null_energy,
                         )
                 except Exception as e:
+                    try:
+                        self._save_energy_components(index, dynamics.context())
+                    except:
+                        pass
                     raise RuntimeError(
                         f"Dynamics block {block+1} for {_lam_sym} = {lambda_value:.5f} failed: {e}"
                     )
@@ -775,6 +783,10 @@ class Runner(_RunnerBase):
                         f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"
                     )
                 except Exception as e:
+                    try:
+                        self._save_energy_components(index, dynamics.context())
+                    except:
+                        pass
                     raise RuntimeError(
                         f"Final dynamics block for {lam_sym} = {lambda_value:.5f} failed: {e}"
                     )
@@ -828,6 +840,10 @@ class Runner(_RunnerBase):
                         null_energy=self._config.null_energy,
                     )
             except Exception as e:
+                try:
+                    self._save_energy_components(index, dynamics.context())
+                except:
+                    pass
                 raise RuntimeError(
                     f"Dynamics for {_lam_sym} = {lambda_value:.5f} failed: {e}"
                 )
