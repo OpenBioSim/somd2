@@ -1071,6 +1071,12 @@ class RepexRunner(_RunnerBase):
                 # Remove the PyCUDA context from the stack.
                 gcmc_sampler.pop()
 
+                # Reset the GCMC sampler. This resets the sampling statistics and
+                # clears the associated OpenMM forces. This is required if a new
+                # context is created following equilibration, e.g. if the constraints
+                # are different for the production phase.
+                gcmc_sampler.reset()
+
             # Equilibrate.
             dynamics.run(
                 self._config.equilibration_time,

@@ -556,6 +556,13 @@ class Runner(_RunnerBase):
         # Create the dynamics object.
         dynamics = system.dynamics(**dynamics_kwargs)
 
+        # Reset the GCMC sampler. This resets the sampling statistics and clears
+        # the associated OpenMM forces. This is required if a new context is
+        # created following equilibration, e.g. if the constraints are different
+        # for the production phase.
+        if gcmc_sampler is not None:
+            gcmc_sampler.reset()
+
         # Set the number of neighbours used for the energy calculation.
         # If not None, then we add one to account for the extra windows
         # used for finite-difference gradient analysis.
