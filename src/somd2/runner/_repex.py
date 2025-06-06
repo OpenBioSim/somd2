@@ -591,9 +591,7 @@ class RepexRunner(_RunnerBase):
 
         if self._config.checkpoint_frequency.value() > 0.0:
             # Calculate the number of blocks and the remainder time.
-            frac = (
-                self._config.runtime.value() / self._config.checkpoint_frequency.value()
-            )
+            frac = (self._config.runtime / self._config.checkpoint_frequency).value()
 
             # Handle the case where the runtime is less than the checkpoint frequency.
             if frac < 1.0:
