@@ -272,7 +272,7 @@ class Runner(_RunnerBase):
                 _logger.success(
                     f"{_lam_sym} = {lambda_value} already complete. Skipping."
                 )
-                return True
+                return True, time
             else:
                 _logger.info(
                     f"Restarting {_lam_sym} = {lambda_value} at time {time}, "
@@ -308,6 +308,7 @@ class Runner(_RunnerBase):
                 with self._lock:
                     self._update_gpu_pool(gpu)
                 _logger.error(f"Error running {_lam_sym} = {lambda_value}: {e}")
+                return False, _sr.u("0ps")
 
         # All other platforms.
         else:
@@ -318,6 +319,7 @@ class Runner(_RunnerBase):
                 time = self._run(system, index, is_restart=self._is_restart)
             except Exception as e:
                 _logger.error(f"Error running {_lam_sym} = {lambda_value}: {e}")
+                return False, _sr.u("0ps")
 
         return True, time
 
