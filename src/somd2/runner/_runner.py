@@ -199,6 +199,7 @@ class Runner(_RunnerBase):
 
         import concurrent.futures as _futures
 
+        success = True
         with _futures.ProcessPoolExecutor(max_workers=self.max_workers) as executor:
             jobs = {}
             for index, lambda_value in enumerate(self._lambda_values):
@@ -212,6 +213,7 @@ class Runner(_RunnerBase):
                         _logger.error(
                             f"Exception raised for {_lam_sym} = {lambda_value}: {e}"
                         )
+                        success = False
 
             # Kill all current and future jobs if keyboard interrupt.
             except KeyboardInterrupt:
@@ -219,22 +221,23 @@ class Runner(_RunnerBase):
                 for pid in executor._processes:
                     executor._processes[pid].terminate()
 
-        # Record the end time.
-        end = _timer()
+        if success:
+            # Record the end time.
+            end = _timer()
 
-        # Work how many fractional days the simulation took.
-        days = (end - start) / 86400
+            # Work how many fractional days the simulation took.
+            days = (end - start) / 86400
 
-        # Calculate the speed in nanoseconds per day.
-        speed = time.to("ns") / days
+            # Calculate the speed in nanoseconds per day.
+            speed = time.to("ns") / days
 
-        # Log the speed.
-        _logger.info(f"Overall performance: {speed:.2f} ns day-1")
+            # Log the speed.
+            _logger.info(f"Overall performance: {speed:.2f} ns day-1")
 
-        # Log the run time in minutes.
-        _logger.success(
-            f"Simulation finished. Run time: {(end - start) / 60:.2f} minutes"
-        )
+            # Log the run time in minutes.
+            _logger.success(
+                f"Simulation finished. Run time: {(end - start) / 60:.2f} minutes"
+            )
 
     def run_window(self, index):
         """
