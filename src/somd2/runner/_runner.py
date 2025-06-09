@@ -220,6 +220,7 @@ class Runner(_RunnerBase):
                 _logger.error("Cancelling job...")
                 for pid in executor._processes:
                     executor._processes[pid].terminate()
+                success = False
 
         if success:
             # Record the end time.
