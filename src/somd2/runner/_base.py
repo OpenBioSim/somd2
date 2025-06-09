@@ -526,7 +526,7 @@ class RunnerBase:
                 ),
                 "standard_volume": str(self._config.gcmc_standard_volume),
                 "radius": str(self._config.gcmc_radius),
-                "max_gcmc_waters": self._config.gcmc_num_waters,
+                "num_ghost_waters": self._config.gcmc_num_waters,
                 "bulk_sampling_probability": self._config.gcmc_bulk_sampling_probability,
                 "cutoff_type": self._config.cutoff_type,
                 "cutoff": str(self._config.cutoff),
