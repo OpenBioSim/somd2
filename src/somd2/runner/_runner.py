@@ -473,7 +473,7 @@ class Runner(_RunnerBase):
                 # Equilibrate with GCMC moves.
                 if gcmc_sampler is not None:
                     _logger.info(
-                        f"Euilibrating with GCMC moves at {_lam_sym} = {lambda_value:.5f}"
+                        f"Equilibrating with GCMC moves at {_lam_sym} = {lambda_value:.5f}"
                     )
 
                     for i in range(100):
