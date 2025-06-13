@@ -1324,7 +1324,6 @@ class RunnerBase:
             "somd2 version": __version__,
             "sire version": f"{_sire_version}+{_sire_revisionid}",
             "lambda": str(lam),
-            "lambda_array": lambda_energy,
             "speed": speed,
             "temperature": str(self._config.temperature.value()),
         }
