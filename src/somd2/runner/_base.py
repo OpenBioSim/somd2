@@ -734,6 +734,7 @@ class RunnerBase:
             Dictionary of file names for each lambda value.
         """
         from pathlib import Path as _Path
+        from sys import exit as _exit
 
         filenames = {}
         deleted = []
@@ -755,7 +756,7 @@ class RunnerBase:
                 _logger.error(
                     f"The following files already exist, use --overwrite to overwrite them: {list(set((deleted_str)))} \n"
                 )
-                exit(1)
+                _exit(1)
             # Loop over files to be deleted, ignoring duplicates.
             for file in list(set(deleted)):
                 file.unlink()

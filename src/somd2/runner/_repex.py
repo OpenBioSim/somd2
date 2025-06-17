@@ -25,6 +25,7 @@ from numba import njit as _njit
 
 import numpy as _np
 import pickle as _pickle
+import sys as _sys
 
 import sire as _sr
 
@@ -412,7 +413,7 @@ class RepexRunner(_RunnerBase):
             time = self._system[0].time()
             if time > self._config.runtime - self._config.timestep:
                 _logger.success(f"Simulation already complete. Exiting.")
-                exit(0)
+                _sys.exit(0)
 
             try:
                 with open(self._repex_state, "rb") as f:
@@ -548,7 +549,7 @@ class RepexRunner(_RunnerBase):
                                 raise e
                     except KeyboardInterrupt:
                         _logger.error("Minimisation cancelled. Exiting.")
-                        exit(1)
+                        _sys.exit(1)
 
         # Equilibrate the system.
         if self._is_equilibration:
@@ -566,7 +567,7 @@ class RepexRunner(_RunnerBase):
                                 raise e
                     except KeyboardInterrupt:
                         _logger.error("Equilibration cancelled. Exiting.")
-                        exit(1)
+                        _sys.exit(1)
 
         # Current block number.
         block = self._start_block
@@ -617,7 +618,7 @@ class RepexRunner(_RunnerBase):
                             results.append((index, energies))
                     except KeyboardInterrupt:
                         _logger.error("Dynamics cancelled. Exiting.")
-                        exit(1)
+                        _sys.exit(1)
 
             if i < cycles:
                 # Assemble and energy matrix from the results.

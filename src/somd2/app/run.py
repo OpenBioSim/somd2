@@ -36,6 +36,7 @@ def cli():
     """
 
     from argparse import Namespace
+    from sys import exit
 
     from somd2 import _logger
     from somd2.config import Config
