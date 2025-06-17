@@ -165,9 +165,9 @@ class DynamicsCache:
             try:
                 dynamics = mols.dynamics(**dynamics_kwargs)
             except Exception as e:
-                _logger.error(
-                    f"Could not create dynamics object for lambda {lam:.5f}: {e}"
-                )
+                msg = f"Could not create dynamics object for lambda {lam:.5f} on device {device}: {e}"
+                _logger.error(msg)
+                raise RuntimeError(msg) from e
 
             # Append the dynamics object.
             self._dynamics.append(dynamics)
