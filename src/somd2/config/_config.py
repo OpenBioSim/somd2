@@ -389,7 +389,7 @@ class Config:
             This is useful when debugging crashes.
 
         timeout: str
-            Timeout for the minimiser.
+            Timeout for the minimiser and file lock.
 
         num_energy_neighbours: int
             The number of neighbouring windows to use when computing the energy
