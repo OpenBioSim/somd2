@@ -533,7 +533,7 @@ class RepexRunner(_RunnerBase):
                 self._rest2_scale_factors,
                 self._num_gpus,
                 self._dynamics_kwargs,
-                gcmc_kwargs=self._config.gcmc_kwargs,
+                gcmc_kwargs=self._gcmc_kwargs,
                 output_directory=self._config.output_directory,
             )
 
