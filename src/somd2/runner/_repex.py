@@ -21,6 +21,7 @@
 
 __all__ = ["RepexRunner"]
 
+from filelock import FileLock as _FileLock
 from numba import njit as _njit
 
 import numpy as _np
@@ -128,6 +129,8 @@ class DynamicsCache:
             "_states": self._states,
             "_old_states": self._old_states,
             "_openmm_states": self._openmm_states,
+            "_gcmc_samplers": self._gcmc_samplers,
+            "_gcmc_states": self._gcmc_states,
             "_num_proposed": self._num_proposed,
             "_num_accepted": self._num_accepted,
             "_num_swaps": self._num_swaps,
@@ -752,26 +755,31 @@ class RepexRunner(_RunnerBase):
                     # Update the block number.
                     block += 1
 
-                    # Save the transition matrix.
-                    _logger.info("Saving replica exchange transition matrix")
-                    self._save_transition_matrix()
+                    # Guard the repex state and transition matrix saving with a file lock.
+                    lock = _FileLock(self._lock_file)
+                    with lock.acquire(timeout=self._config.timeout):
+                        # Save the transition matrix.
+                        _logger.info("Saving replica exchange transition matrix")
+                        self._save_transition_matrix()
 
-                    # Pickle the dynamics cache.
-                    _logger.info("Saving replica exchange state")
-                    with open(self._repex_state, "wb") as f:
-                        _pickle.dump(self._dynamics_cache, f)
+                        # Pickle the dynamics cache.
+                        _logger.info("Saving replica exchange state")
+                        with open(self._repex_state, "wb") as f:
+                            _pickle.dump(self._dynamics_cache, f)
 
         # Record the end time for the production block.
         prod_end = time()
 
-        # Save the final transition matrix.
-        _logger.info("Saving final replica exchange transition matrix")
-        self._save_transition_matrix()
+        lock = _FileLock(self._lock_file)
+        with lock.acquire(timeout=self._config.timeout):
+            # Save the final transition matrix.
+            _logger.info("Saving final replica exchange transition matrix")
+            self._save_transition_matrix()
 
-        # Pickle final state of the dynamics cache.
-        _logger.info("Saving final replica exchange state")
-        with open(self._repex_state, "wb") as f:
-            _pickle.dump(self._dynamics_cache, f)
+            # Pickle final state of the dynamics cache.
+            _logger.info("Saving final replica exchange state")
+            with open(self._repex_state, "wb") as f:
+                _pickle.dump(self._dynamics_cache, f)
 
         # Record the end time.
         end = time()
