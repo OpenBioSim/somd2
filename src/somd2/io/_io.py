@@ -142,6 +142,13 @@ def yaml_to_dict(path):
     except Exception as e:
         raise ValueError(f"Could not load YAML file: {e}")
 
+    # Convert Sire containers to lists.
+    for key, value in d.items():
+        try:
+            d[key] = value.to_list()
+        except:
+            pass
+
     return d
 
 
