@@ -1016,6 +1016,16 @@ class RunnerBase:
                 if isinstance(v2, _GeneralUnit):
                     v2 = str(v2)
 
+                # Convert Sire containers to lists for comparison.
+                try:
+                    v1 = v1.to_list()
+                except:
+                    pass
+                try:
+                    v2 = v2.to_list()
+                except:
+                    pass
+
                 # If one is from sire and the other is not, will raise error
                 # even though they are the same.
                 if (v1 == None and v2 == False) or (v2 == None and v1 == False):
