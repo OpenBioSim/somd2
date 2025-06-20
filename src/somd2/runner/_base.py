@@ -880,12 +880,22 @@ class RunnerBase:
                 if isinstance(v2, _GeneralUnit):
                     v2 = str(v2)
 
-                # If one is from sire and the other is not, will raise error even though they are the same.
+                # Convert Sire containers to lists for comparison.
+                try:
+                    v1 = v1.to_list()
+                except:
+                    pass
+                try:
+                    v2 = v2.to_list()
+                except:
+                    pass
+
                 if (v1 == None and v2 == False) or (v2 == None and v1 == False):
                     continue
                 elif v1 != v2:
                     raise ValueError(
-                        f"{key} has changed since the last run. This is not allowed when using the restart option."
+                        f"{key} has changed since the last run. This is not "
+                        "allowed when using the restart option."
                     )
 
     def _verify_restart_config(self):
