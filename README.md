@@ -112,6 +112,20 @@ the value of `--rest2-scale`. By passing multiple values for `--rest2-scale`, th
 user can fully control the schedule. When doing so, the number of values must
 match the number of lambda windows.
 
+## GCMC
+
+SOMD2 also supports grand canonical Monte Carlo (GCMC) water sampling using
+the [loch](https://github.com/OpenBioSim/loch) package. This can be enabled
+using the `--gcmc` option. To define a GCMC region, use the `--gcmc-selection`
+option, which should be a `Sire` selection string that specifies the atoms
+defining the centre of geometry for the GCMC region. The radius of the GCMC
+sphere can be controlled using the `--gcmc-radius` option. To see all GCMC
+related options, run:
+
+```
+somd2 --help | grep -A2 '  --gcmc'
+```
+
 ## Analysis
 
 Simulation output will be written to the directory specified using the
@@ -152,7 +166,7 @@ be chosen as a trade off between accuracy and computational cost. A value of aro
 ## Ghost atom modifications
 
 We support modification of ghost atom bonded terms to avoid spurious coupling
-to the physical system using the approach described in 
+to the physical system using the approach described in
 [this](https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328) paper.
 These are enabled by default, but can be disabled using the ``--no-ghost-modifications``
 option. Alternatively, we also provide the `ghostly` command-line tool that can
