@@ -1116,7 +1116,9 @@ class RepexRunner(_RunnerBase):
             # Create the production dynamics object.
             dynamics = system.dynamics(**dynamics_kwargs)
 
-            # Reset the GCMC water state.
+            # Reset the GCMC water state. The dynamics object is created from
+            # the original Sire system, so the water state in the context does
+            # not match the current GCMC water state.
             if gcmc_sampler is not None:
                 # Reset the GCMC sampler. This resets the sampling statistics and
                 # clears the associated OpenMM forces. This is required since a new
