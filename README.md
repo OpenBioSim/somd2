@@ -130,8 +130,9 @@ somd2 --help | grep -A2 '  --gcmc'
 
 Simulation output will be written to the directory specified using the
 `--output-directory` parameter. This will contain a number of files, including
-Parquet files for the energy trajectories of each λ window. These can be
-processed using [BioSimSpace](https://github.com/OpenBioSim/biosimspace) as follows:
+[Parquet filesa](https://en.wikipedia.org/wiki/Apache_Parquet) for the energy
+trajectories of each λ window. These can be processed using
+[BioSimSpace](https://github.com/OpenBioSim/biosimspace) as follows:
 
 ```python
 import BioSimSpace as BSS
