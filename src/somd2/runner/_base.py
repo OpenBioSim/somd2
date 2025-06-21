@@ -1026,8 +1026,6 @@ class RunnerBase:
                 except:
                     pass
 
-                # If one is from sire and the other is not, will raise error
-                # even though they are the same.
                 if (v1 == None and v2 == False) or (v2 == None and v1 == False):
                     continue
                 elif v1 != v2:
