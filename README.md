@@ -126,6 +126,9 @@ related options, run:
 somd2 --help | grep -A2 '  --gcmc'
 ```
 
+> [!NOTE]  
+> GCMC is currently only supported when using the CUDA platform.
+
 ## Analysis
 
 Simulation output will be written to the directory specified using the
