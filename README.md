@@ -151,8 +151,9 @@ be chosen as a trade off between accuracy and computational cost. A value of aro
 
 ## Ghost atom modifications
 
-We support the modification of ghost atom bonded terms to avoid spurious coupling
-to the physical system using the approach described in [this](https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328) paper.
+We support modification of ghost atom bonded terms to avoid spurious coupling
+to the physical system using the approach described in 
+[this](https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328) paper.
 These are enabled by default, but can be disabled using the ``--no-ghost-modifications``
 option. Alternatively, we also provide the `ghostly` command-line tool that can
 be used to apply the modifications to perturbable system without running a simulation,
@@ -219,5 +220,5 @@ nvidia-cuda-mps-control -d
 The number of contexts that can be run in parallel is then controlled by the
 `--oversubscription-factor` option, which defaults to 1.
 
-More details on MPS, including tuning options, can be found i nthe following
+More details on MPS, including tuning options, can be found in the following
 [techical blog](https://developer.nvidia.com/blog/maximizing-openmm-molecular-dynamics-throughput-with-nvidia-multi-process-service/).
