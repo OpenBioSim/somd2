@@ -143,7 +143,7 @@ def ghostly():
         system = sr.morph.link_to_reference(system)
     except Exception as e:
         _logger.error(f"An error occurred while loading the system: {e}")
-        exit(1)
+        sys.exit(1)
 
     # Try to apply the modifications.
     try:
@@ -152,7 +152,7 @@ def ghostly():
         _logger.error(
             f"An error occurred while applying the ghost atom modifications: {e}"
         )
-        exit(1)
+        sys.exit(1)
 
     # Try to save the system.
     try:
@@ -161,4 +161,4 @@ def ghostly():
         sr.stream.save(system, f"{output}.bss")
     except Exception as e:
         _logger.error(f"An error occurred while saving the system: {e}")
-        exit(1)
+        sys.exit(1)
