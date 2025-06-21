@@ -324,7 +324,7 @@ class DynamicsCache:
         gcmc_sampler = self._gcmc_samplers[index]
 
         # Store the state.
-        self._gcmc_states[index] = gcmc_sampler.water_state().copy()
+        self._gcmc_states[index] = gcmc_sampler.water_state()
 
     def get_states(self):
         """
@@ -1081,11 +1081,8 @@ class RepexRunner(_RunnerBase):
                 # Remove the PyCUDA context from the stack.
                 gcmc_sampler.pop()
 
-                # Reset the GCMC sampler. This resets the sampling statistics and
-                # clears the associated OpenMM forces. This is required if a new
-                # context is created following equilibration, e.g. if the constraints
-                # are different for the production phase.
-                gcmc_sampler.reset()
+                # Store the current water state.
+                water_state = gcmc_sampler.water_state()
 
             # Equilibrate.
             dynamics.run(
@@ -1118,6 +1115,28 @@ class RepexRunner(_RunnerBase):
 
             # Create the production dynamics object.
             dynamics = system.dynamics(**dynamics_kwargs)
+
+            # Reset the GCMC water state.
+            if gcmc_sampler is not None:
+                # Reset the GCMC sampler. This resets the sampling statistics and
+                # clears the associated OpenMM forces. This is required since a new
+                # context is created following equilibration, e.g. because constraints
+                # or the timestep are different for the production phase.
+                gcmc_sampler.reset()
+
+                # Push the PyCUDA context on top of the stack.
+                gcmc_sampler.push()
+
+                # Set the water state.
+                gcmc_sampler._set_water_state(
+                    _np.arange(len(water_state)),
+                    water_state,
+                    dynamics.context(),
+                    force=True,
+                )
+
+                # Remove the PyCUDA context from the stack.
+                gcmc_sampler.pop()
 
             # Perform minimisation at the end of equilibration only if the
             # timestep is increasing, or the constraint is changing.
