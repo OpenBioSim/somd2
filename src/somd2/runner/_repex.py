@@ -717,11 +717,7 @@ class RepexRunner(_RunnerBase):
                             self._run_block,
                             replicas,
                             repeat(self._lambda_values),
-                            repeat(is_checkpoint),
                             repeat(i == 0),
-                            repeat(i == cycles - 1),
-                            repeat(block),
-                            repeat(num_blocks + int(rem > 0)),
                             repeat(write_gcmc_ghosts),
                         ):
                             if not result:
@@ -733,6 +729,30 @@ class RepexRunner(_RunnerBase):
                     except KeyboardInterrupt:
                         _logger.error("Dynamics cancelled. Exiting.")
                         _sys.exit(1)
+
+            # Checkpoint.
+            if is_checkpoint or i == cycles - 1:
+                for j in range(num_batches):
+                    # Get the indices of the replicas in this batch.
+                    replicas = replica_list[j * num_workers : (j + 1) * num_workers]
+                    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                        try:
+                            for result, error in executor.map(
+                                self._checkpoint,
+                                replicas,
+                                repeat(self._lambda_values),
+                                repeat(block),
+                                repeat(num_blocks + int(rem > 0)),
+                                repeat(i == cycles - 1),
+                            ):
+                                if not result:
+                                    _logger.error(
+                                        f"Checkpoint failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {error}"
+                                    )
+                                    raise error
+                        except KeyboardInterrupt:
+                            _logger.error("Checkpoint cancelled. Exiting.")
+                            _sys.exit(1)
 
             if i < cycles:
                 # Assemble and energy matrix from the results.
@@ -803,11 +823,7 @@ class RepexRunner(_RunnerBase):
         self,
         index,
         lambdas,
-        is_checkpoint,
         is_first_block,
-        is_final_block,
-        block,
-        num_blocks,
         write_gcmc_ghosts=False,
     ):
         """
@@ -822,20 +838,8 @@ class RepexRunner(_RunnerBase):
         lambdas: np.ndarray
             The lambda values for each replica.
 
-        rest2_scale: np.ndarray
-            The REST2 scaling factor for each replica.
-
-        is_checkpoint: bool
-            Whether to checkpoint.
-
         is_first_block: bool
             Whether this is the first block.
-
-        is_final_block: bool
-            Whether this is the final block.
-
-        block: int
-            The block number.
 
         num_blocks: int
             The total number of blocks.
@@ -913,7 +917,7 @@ class RepexRunner(_RunnerBase):
                 ),
             )
 
-            # The frame frequency was hit, so writ the indices of the current
+            # The frame frequency was hit, so write the indices of the current
             # ghost water residues to file.
             if gcmc_sampler is not None and write_gcmc_ghosts:
                 gcmc_sampler.write_ghost_residues()
@@ -932,49 +936,6 @@ class RepexRunner(_RunnerBase):
                 .iloc[-1, :]
                 .to_numpy()
             )
-
-            # Checkpoint.
-            if is_checkpoint or is_final_block:
-                # Commit the current system.
-                system = dynamics.commit()
-
-                # If performing GCMC, then we need to flag the ghost waters.
-                if self._config.gcmc:
-                    system = gcmc_sampler._flag_ghost_waters(system)
-
-                # Get the simulation speed.
-                speed = dynamics.time_speed()
-
-                # Checkpoint.
-                with self._lock:
-                    self._checkpoint(
-                        system, index, block, speed, is_final_block=is_final_block
-                    )
-
-                # Delete all trajectory frames from the Sire system within the
-                # dynamics object.
-                dynamics._d._sire_mols.delete_all_frames()
-
-                _logger.info(
-                    f"Finished block {block+1} of {self._start_block + num_blocks} "
-                    f"for {_lam_sym} = {lam:.5f}"
-                )
-
-                # Log the number of waters within the GCMC sampling volume.
-                if gcmc_sampler is not None:
-                    # Push the PyCUDA context on top of the stack.
-                    gcmc_sampler.push()
-
-                    _logger.info(
-                        f"Current number of waters in GCMC volume at {_lam_sym} = {lam:.5f} "
-                        f"is {gcmc_sampler.num_waters()}"
-                    )
-
-                    # Remove the PyCUDA context from the stack.
-                    gcmc_sampler.pop()
-
-                if is_final_block:
-                    _logger.success(f"{_lam_sym} = {lam:.5f} complete")
 
         except Exception as e:
             try:
@@ -1237,6 +1198,81 @@ class RepexRunner(_RunnerBase):
                 matrix[i, j] = self._beta * energy
 
         return matrix
+
+    def _checkpoint(self, index, lambdas, block, num_blocks, is_final_block=False):
+        """
+        Checkpoint the simulation.
+
+        Parameters
+        ----------
+
+        index: int
+            The index of the replica.
+
+        lambdas: np.ndarray
+            The lambda values for each replica.
+
+        block: int
+            The current block number.
+
+        num_blocks: int
+            The total number of blocks in the simulation.
+
+        is_final_block: bool
+            Whether this is the final block.
+        """
+        try:
+            # Get the lambda value.
+            lam = lambdas[index]
+
+            # Get the dynamics object (and GCMC sampler).
+            dynamics, gcmc_sampler = self._dynamics_cache.get(index)
+
+            # Commit the current system.
+            system = dynamics.commit()
+
+            # If performing GCMC, then we need to flag the ghost waters.
+            if gcmc_sampler is not None:
+                system = gcmc_sampler._flag_ghost_waters(system)
+
+            # Get the simulation speed.
+            speed = dynamics.time_speed()
+
+            # Call the base class checkpoint method to save the system state.
+            with self._lock:
+                super()._checkpoint(
+                    system, index, block, speed, is_final_block=is_final_block
+                )
+
+            # Delete all trajectory frames from the Sire system within the
+            # dynamics object.
+            dynamics._d._sire_mols.delete_all_frames()
+
+            _logger.info(
+                f"Finished block {block+1} of {self._start_block + num_blocks} "
+                f"for {_lam_sym} = {lam:.5f}"
+            )
+
+            # Log the number of waters within the GCMC sampling volume.
+            if gcmc_sampler is not None:
+                # Push the PyCUDA context on top of the stack.
+                gcmc_sampler.push()
+
+                _logger.info(
+                    f"Current number of waters in GCMC volume at {_lam_sym} = {lam:.5f} "
+                    f"is {gcmc_sampler.num_waters()}"
+                )
+
+                # Remove the PyCUDA context from the stack.
+                gcmc_sampler.pop()
+
+            if is_final_block:
+                _logger.success(f"{_lam_sym} = {lam:.5f} complete")
+
+            return True, None
+
+        except Exception as e:
+            return False, e
 
     @staticmethod
     @_njit
