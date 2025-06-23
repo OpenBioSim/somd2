@@ -130,7 +130,7 @@ class DynamicsCache:
             "_old_states": self._old_states,
             "_openmm_states": self._openmm_states,
             # Don't pickle the GCMC samplers since they need to be recreated.
-            "_gcmc_samplers": None * len(self._gcmc_samplers),
+            "_gcmc_samplers": len(self._gcmc_samplers) * [None],
             "_gcmc_states": self._gcmc_states,
             "_num_proposed": self._num_proposed,
             "_num_accepted": self._num_accepted,
