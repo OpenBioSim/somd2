@@ -491,8 +491,8 @@ class Runner(_RunnerBase):
                 # Commit the system.
                 system = dynamics.commit()
 
-                # Reset the timer to zero.
-                system.set_time(_sr.u("0ps"))
+                # Reset the timer.
+                system.set_time(self._system.time())
 
                 # Perform minimisation at the end of equilibration only if the
                 # timestep is increasing, or the constraint is changing.

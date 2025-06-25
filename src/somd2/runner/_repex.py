@@ -1057,8 +1057,8 @@ class RepexRunner(_RunnerBase):
             # Commit the system.
             system = dynamics.commit()
 
-            # Reset the timer to zero.
-            system.set_time(_sr.u("0ps"))
+            # Reset the timer.
+            system.set_time(self._system.time())
 
             # Delete the dynamics object.
             self._dynamics_cache.delete(index)

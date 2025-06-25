@@ -490,6 +490,12 @@ class RunnerBase:
                     _logger.error(msg)
                     raise ValueError(msg)
 
+        # Store the initial system time.
+        if isinstance(self._system, list):
+            self._initial_time = self._system[0].time()
+        else:
+            self._initial_time = system.time()
+
         # Create the lock file name.
         self._lock_file = str(self._config.output_directory / "somd2.lock")
 
