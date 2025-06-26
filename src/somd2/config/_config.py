@@ -205,7 +205,7 @@ class Config:
         swap_end_states: bool
             Whether to perform the perturbation in the reverse direction.
 
-        couloumb_power : float
+        coulomb_power : float
             Power to use for the soft-core Coulomb interaction. This is used
             to soften the electrostatic interaction.
 
