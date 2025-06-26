@@ -919,17 +919,16 @@ class RepexRunner(_RunnerBase):
                 ),
             )
 
-            # The frame frequency was hit, so write the indices of the current
-            # ghost water residues to file.
-            if gcmc_sampler is not None and write_gcmc_ghosts:
-                gcmc_sampler.write_ghost_residues()
-
             # Set the state.
             self._dynamics_cache.save_openmm_state(index)
 
             # Save the GCMC state.
             if gcmc_sampler is not None:
                 self._dynamics_cache.save_gcmc_state(index)
+                # The frame frequency was hit, so write the indices of the
+                # current ghost water residues to file.
+                if write_gcmc_ghosts:
+                    gcmc_sampler.write_ghost_residues()
 
             # Get the energy at each lambda value.
             energies = (
