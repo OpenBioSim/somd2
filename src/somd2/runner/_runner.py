@@ -472,6 +472,9 @@ class Runner(_RunnerBase):
 
                 # Equilibrate with GCMC moves.
                 if gcmc_sampler is not None:
+                    # Bind the GCMC sampler to the dynamics object.
+                    dynamics._d._gcmc_sampler = gcmc_sampler
+
                     _logger.info(
                         f"Equilibrating with GCMC moves at {_lam_sym} = {lambda_value:.5f}"
                     )
@@ -566,6 +569,9 @@ class Runner(_RunnerBase):
         # the associated OpenMM forces.
         if gcmc_sampler is not None:
             gcmc_sampler.reset()
+
+            # Bind the GCMC sampler to the dynamics object.
+            dynamics._d._gcmc_sampler = gcmc_sampler
 
         # Set the number of neighbours used for the energy calculation.
         # If not None, then we add one to account for the extra windows

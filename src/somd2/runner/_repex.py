@@ -236,6 +236,12 @@ class DynamicsCache:
                 _logger.error(msg)
                 raise RuntimeError(msg) from e
 
+            # Bind the GCMC sampler to the dynamics object. This allows the
+            # dynamics object to reset the water state in its internal OpenMM
+            # context following a crash recovery.
+            if gcmc_kwargs is not None:
+                dynamics._d._gcmc_sampler = gcmc_sampler
+
             # Append the dynamics object.
             self._dynamics.append(dynamics)
 
@@ -370,11 +376,7 @@ class DynamicsCache:
 
                     # Update the water state in the GCMCSampler.
                     self._gcmc_samplers[i].push()
-                    self._gcmc_samplers[i]._set_water_state(
-                        water_idxs,
-                        self._gcmc_states[state][water_idxs],
-                        self._dynamics[i].context(),
-                    )
+                    self._gcmc_samplers[i]._set_water_state(self._dynamics[i].context())
                     self._gcmc_samplers[i].pop()
 
             # Update the swap matrix.
@@ -1091,15 +1093,13 @@ class RepexRunner(_RunnerBase):
                 gcmc_sampler.push()
 
                 # Set the water state.
-                gcmc_sampler._set_water_state(
-                    _np.arange(len(water_state)),
-                    water_state,
-                    dynamics.context(),
-                    force=True,
-                )
+                gcmc_sampler._set_water_state(dynamics.context())
 
                 # Remove the PyCUDA context from the stack.
                 gcmc_sampler.pop()
+
+                # Re-bind the GCMC sampler to the dynamics object.
+                dynamics._d._gcmc_sampler = gcmc_sampler
 
             # Perform minimisation at the end of equilibration only if the
             # timestep is increasing, or the constraint is changing.
