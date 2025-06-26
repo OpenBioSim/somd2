@@ -376,7 +376,11 @@ class DynamicsCache:
 
                     # Update the water state in the GCMCSampler.
                     self._gcmc_samplers[i].push()
-                    self._gcmc_samplers[i]._set_water_state(self._dynamics[i].context())
+                    self._gcmc_samplers[i]._set_water_state(
+                        self._dynamics[i].context(),
+                        indices=water_idxs,
+                        states=self._gcmc_states[state][water_idxs],
+                    )
                     self._gcmc_samplers[i].pop()
 
             # Update the swap matrix.
