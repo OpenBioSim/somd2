@@ -23,7 +23,7 @@
 SOMD2 command line interface.
 """
 
-__all__ = ["somd2", "ghostly"]
+__all__ = ["somd2"]
 
 
 def somd2():
@@ -88,77 +88,3 @@ def somd2():
     except Exception as e:
         _logger.error(f"An error occurred during the simulation: {e}")
         exit(1)
-
-
-def ghostly():
-    """
-    SOMD2: Command line interface.
-    """
-
-    import argparse
-    import os
-    import sys
-
-    import sire as sr
-
-    from somd2 import _logger
-    from somd2._utils._ghosts import boresch
-
-    parser = argparse.ArgumentParser(
-        description="Ghostly: ghost atom bonded term modifications"
-    )
-
-    parser.add_argument(
-        "input",
-        type=str,
-        help="Path to a stream file containing the perturbable system.",
-    )
-
-    parser.add_argument(
-        "--output",
-        type=str,
-        help="File prefix for the output file.",
-        required=False,
-    )
-
-    parser.add_argument(
-        "--log-level",
-        type=str,
-        help="Log level for the logger.",
-        default="info",
-        choices=["debug", "info", "warning", "error", "critical"],
-        required=False,
-    )
-
-    # Parse the arguments.
-    args = parser.parse_args()
-
-    # Set the logger level.
-    _logger.remove()
-    _logger.add(sys.stderr, level=args.log_level.upper(), enqueue=True)
-
-    # Try to load the system.
-    try:
-        system = sr.stream.load(args.input)
-        system = sr.morph.link_to_reference(system)
-    except Exception as e:
-        _logger.error(f"An error occurred while loading the system: {e}")
-        sys.exit(1)
-
-    # Try to apply the modifications.
-    try:
-        system = boresch(system)
-    except Exception as e:
-        _logger.error(
-            f"An error occurred while applying the ghost atom modifications: {e}"
-        )
-        sys.exit(1)
-
-    # Try to save the system.
-    try:
-        input = os.path.splitext(args.input)[0]
-        output = args.output if args.output else input + "_ghostly"
-        sr.stream.save(system, f"{output}.bss")
-    except Exception as e:
-        _logger.error(f"An error occurred while saving the system: {e}")
-        sys.exit(1)

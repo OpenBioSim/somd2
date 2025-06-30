@@ -126,7 +126,7 @@ related options, run:
 somd2 --help | grep -A2 '  --gcmc'
 ```
 
-> [!NOTE]  
+> [!NOTE]
 > GCMC is currently only supported when using the CUDA platform.
 
 ## Analysis
@@ -173,16 +173,8 @@ We support modification of ghost atom bonded terms to avoid spurious coupling
 to the physical system using the approach described in
 [this](https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328) paper.
 These are enabled by default, but can be disabled using the ``--no-ghost-modifications``
-option. Alternatively, we also provide the `ghostly` command-line tool that can
-be used to apply the modifications to perturbable system without running a simulation,
-e.g. for use elsewhere. This can be used via:
-
-```bash
-ghostly perturbable_system.bss --output ghosted --log-level debug
-```
-
-(Here the log level is set to debug to provide more information on the modifications
-that are applied.)
+option. Modifications are implemented using the [ghostly](https://gitbub.com/OpenBioSim/ghostly)
+package.
 
 ## Note for SOMD1 users
 

@@ -184,9 +184,9 @@ class RunnerBase:
         # Apply Boresch modifications to bonded terms involving ghost atoms to
         # avoid spurious couplings to the physical system at the end states.
         elif self._config.ghost_modifications:
-            from .._utils._ghosts import boresch
+            from ghostly import modify
 
-            self._system = boresch(self._system)
+            self._system = modify(self._system)
 
         # Check for a periodic space.
         self._has_space = self._check_space()
