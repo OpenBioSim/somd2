@@ -186,6 +186,7 @@ class RunnerBase:
         elif self._config.ghost_modifications:
             from ghostly import modify
 
+            _logger.info("Applying Boresch modifications to ghost atom bonded terms")
             self._system = modify(self._system)
 
         # Check for a periodic space.
