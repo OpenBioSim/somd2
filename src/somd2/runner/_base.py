@@ -192,6 +192,14 @@ class RunnerBase:
         # Check for a periodic space.
         self._has_space = self._check_space()
 
+        # Check for water.
+        try:
+            # The search will fail if there are no water molecules.
+            water = self._system["water"].molecules()
+            self._has_water = True
+        except:
+            self._has_water = False
+
         # Check the end state contraints.
         self._check_end_state_constraints()
 
@@ -505,7 +513,7 @@ class RunnerBase:
         self._dynamics_kwargs = {
             "integrator": config.integrator,
             "temperature": config.temperature,
-            "pressure": config.pressure if self._has_space else None,
+            "pressure": config.pressure if self._has_water else None,
             "barostat_frequency": config.barostat_frequency,
             "timestep": config.timestep,
             "restraints": config.restraints,
