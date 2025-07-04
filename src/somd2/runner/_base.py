@@ -1324,7 +1324,7 @@ class RunnerBase:
 
         # Acquire the file lock to ensure that the checkpoint files are in a consistent
         # state if read by another process.
-        with lock.acquire(timeout=self._config.timeout):
+        with lock.acquire(timeout=self._config.timeout.to("seconds")):
 
             # Save the end-state topologies for trajectory analysis and visualisation.
             if block == 0 and index == 0:

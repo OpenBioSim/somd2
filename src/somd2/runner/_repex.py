@@ -784,7 +784,7 @@ class RepexRunner(_RunnerBase):
 
                     # Guard the repex state and transition matrix saving with a file lock.
                     lock = _FileLock(self._lock_file)
-                    with lock.acquire(timeout=self._config.timeout):
+                    with lock.acquire(timeout=self._config.timeout.to("seconds")):
                         # Save the transition matrix.
                         _logger.info("Saving replica exchange transition matrix")
                         self._save_transition_matrix()
@@ -798,7 +798,7 @@ class RepexRunner(_RunnerBase):
         prod_end = time()
 
         lock = _FileLock(self._lock_file)
-        with lock.acquire(timeout=self._config.timeout):
+        with lock.acquire(timeout=self._config.timeout.to("seconds")):
             # Save the final transition matrix.
             _logger.info("Saving final replica exchange transition matrix")
             self._save_transition_matrix()
