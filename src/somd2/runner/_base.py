@@ -576,11 +576,11 @@ class RunnerBase:
             return True
         else:
             _logger.info("No periodic space detected. Assuming vacuum simulation.")
-            if self._config.cutoff_type == "pme":
+            if self._config.cutoff_type != "none":
                 _logger.info(
-                    "Cannot use PME for non-periodic simulations. Using RF cutoff instead."
+                    "Cannot use PME for non-periodic simulations. Using no cutoff instead."
                 )
-                self._config.cutoff_type = "rf"
+                self._config.cutoff_type = "none"
             return False
 
     def _check_end_state_constraints(self):
