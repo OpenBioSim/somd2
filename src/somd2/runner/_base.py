@@ -508,6 +508,12 @@ class RunnerBase:
         # Create the lock file name.
         self._lock_file = str(self._config.output_directory / "somd2.lock")
 
+        # Write the end-state topologies to the output directory.
+        mols0 = _sr.morph.link_to_reference(self._system)
+        mols1 = _sr.morph.link_to_perturbed(self._system)
+        _sr.save(mols0, self._filenames["topology0"])
+        _sr.save(mols1, self._filenames["topology1"])
+
         # Create the default dynamics kwargs dictionary. These can be overloaded
         # as needed.
         self._dynamics_kwargs = {
@@ -1326,24 +1332,19 @@ class RunnerBase:
         # state if read by another process.
         with lock.acquire(timeout=self._config.timeout.to("seconds")):
 
-            # Save the end-state topologies for trajectory analysis and visualisation.
-            if block == 0 and index == 0:
+            # Save the end-state GCMC topologies for trajectory analysis and visualisation.
+            if self._config.gcmc and block == 0 and index == 0:
                 mols0 = _sr.morph.link_to_reference(system)
                 mols1 = _sr.morph.link_to_perturbed(system)
-                _sr.save(mols0, self._filenames["topology0"])
-                _sr.save(mols1, self._filenames["topology1"])
 
-                # If this is a GCMC simulation, then save the end state
-                # topologies to PDB format to allow analysis with grand.
-                if self._config.gcmc:
-                    _sr.save(
-                        mols0,
-                        self._filenames["topology0"].replace(".prm7", ".pdb"),
-                    )
-                    _sr.save(
-                        mols1,
-                        self._filenames["topology1"].replace(".prm7", ".pdb"),
-                    )
+                _sr.save(
+                    mols0,
+                    self._filenames["topology0"].replace(".prm7", ".pdb"),
+                )
+                _sr.save(
+                    mols1,
+                    self._filenames["topology1"].replace(".prm7", ".pdb"),
+                )
 
             # Get the lambda value.
             lam = self._lambda_values[index]
