@@ -161,10 +161,23 @@ class RunnerBase:
                         # Here we assume TIP3p for any 3-point water model.
                         model = "tip3p"
                     elif num_atoms == 4:
-                        model = "tip4p"
+                        # Check for OPC water.
+                        try:
+                            if (
+                                waters[0]
+                                .search("element Xx")
+                                .atoms()[0]
+                                .charge()
+                                .value()
+                                < -1.1
+                            ):
+                                model = "opc"
+                            else:
+                                model = "tip4p"
+                        except:
+                            model = "tip4p"
                     elif num_atoms == 5:
                         model = "tip5p"
-
                     try:
                         self._system = _System(
                             _setAmberWater(self._system._system, model)
