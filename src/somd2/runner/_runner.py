@@ -198,9 +198,12 @@ class Runner(_RunnerBase):
             self._max_workers = 1
 
         import concurrent.futures as _futures
+        import multiprocessing as _mp
 
         success = True
-        with _futures.ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+        with _futures.ProcessPoolExecutor(
+            max_workers=self.max_workers, mp_context=_mp.get_context("spawn")
+        ) as executor:
             jobs = {}
             for index, lambda_value in enumerate(self._lambda_values):
                 jobs[executor.submit(self.run_window, index)] = lambda_value

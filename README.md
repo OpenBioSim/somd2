@@ -232,3 +232,10 @@ The number of contexts that can be run in parallel is then controlled by the
 
 More details on MPS, including tuning options, can be found in the following
 [techical blog](https://developer.nvidia.com/blog/maximizing-openmm-molecular-dynamics-throughput-with-nvidia-multi-process-service/).
+
+## Python API
+
+``SOMD2`` can also be used as a Python API, allowing it to be embedded
+within other Python scripts. When doing so, it is important to to wrap
+code within a ``if __name__ == "__main__":`` block since multiprocessing
+is used with the ``spawn`` start method.
