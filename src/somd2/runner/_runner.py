@@ -882,7 +882,15 @@ class Runner(_RunnerBase):
             speed = time.to("ns") / days
 
             # Checkpoint.
-            self._checkpoint(system, index, 0, speed, is_final_block=True)
+            self._checkpoint(
+                system,
+                index,
+                0,
+                speed,
+                is_final_block=True,
+                lambda_energy=lambda_energy,
+                lambda_grad=lambda_grad,
+            )
 
             _logger.success(
                 f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"
