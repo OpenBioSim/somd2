@@ -1026,7 +1026,6 @@ class RunnerBase:
             "save_trajectory",
             "frame_frequency",
             "save_velocities",
-            "checkpoint_frequency",
             "platform",
             "max_threads",
             "max_gpus",
