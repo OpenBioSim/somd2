@@ -389,6 +389,9 @@ class RunnerBase:
         # Check the output directories and create names of output files.
         self._filenames = self._prepare_output()
 
+        # Store the current system as a reference.
+        self._reference_system = self._system.clone()
+
         # Check for a valid restart.
         if self._config.restart:
             self._is_restart, self._system = self._check_restart()
@@ -514,16 +517,41 @@ class RunnerBase:
 
         # Store the initial system time.
         if isinstance(self._system, list):
-            self._initial_time = self._system[0].time()
+            self._initial_time = []
+            for system in self._system:
+                if system is None:
+                    self._initial_time.append(_sr.u("0 ps"))
+                else:
+                    self._initial_time.append(system.time())
         else:
-            self._initial_time = self._system.time()
+            self._initial_time = [self._system.time()] * len(self._lambda_values)
+
+        # Check for missing systems in a multi-system simulation.
+        if isinstance(self._system, list):
+            ref_system = None
+            missing_systems = []
+            for i, system in enumerate(self._system):
+                if system is not None:
+                    ref_system = None
+                else:
+                    missing_systems.append(i)
+            if ref_system is None:
+                ref_system = self._reference_system
+
+            # Fill in any missing systems.
+            for i in missing_systems:
+                self._system[i] = ref_system.clone()
 
         # Create the lock file name.
         self._lock_file = str(self._config.output_directory / "somd2.lock")
 
         # Write the end-state topologies to the output directory.
-        mols0 = _sr.morph.link_to_reference(self._system)
-        mols1 = _sr.morph.link_to_perturbed(self._system)
+        if isinstance(self._system, list):
+            mols = self._system[0]
+        else:
+            mols = self._system
+        mols0 = _sr.morph.link_to_reference(mols)
+        mols1 = _sr.morph.link_to_perturbed(mols)
         _sr.save(mols0, self._filenames["topology0"])
         _sr.save(mols1, self._filenames["topology1"])
 
@@ -937,17 +965,22 @@ class RunnerBase:
         """
 
         # List to store systems for each lambda value.
-        systems = []
+        systems = [None] * len(self._lambda_values)
 
         for i, lambda_value in enumerate(self._lambda_values):
             # Try to load the checkpoint file.
             try:
                 system = _sr.stream.load(self._filenames[i]["checkpoint"])
             except:
-                _logger.warning(
-                    f"Unable to load checkpoint file for {_lam_sym}={lambda_value:.5f}, starting from scratch."
-                )
-                return False, self._system
+                if not self._config.replica_exchange:
+                    _logger.warning(
+                        f"Unable to load checkpoint file for {_lam_sym}={lambda_value:.5f}, starting from scratch."
+                    )
+                # Repex requires all files to be present.
+                else:
+                    msg = f"Unable to load checkpoint file for {_lam_sym}={lambda_value:.5f}."
+                    _logger.error(msg)
+                    raise ValueError(msg)
             else:
                 # Check the system is the same as the reference system.
                 are_same, reason = self._systems_are_same(self._system, system)
@@ -960,15 +993,14 @@ class RunnerBase:
                     self._compare_configs(
                         self._last_config, dict(system.property("config"))
                     )
-                except:
+                except Exception as e:
                     config = dict(system.property("config"))
                     _logger.debug(
                         f"last config: {self._last_config}, current config: {config}"
                     )
-                    _logger.error(
-                        f"Config for {_lam_sym}={lambda_value} does not match previous config."
-                    )
-                    raise
+                    msg = f"Config for {_lam_sym}={lambda_value} does not match previous config: {str(e)}"
+                    _logger.error(msg)
+                    raise ValueError(msg)
                 # Make sure the lambda value is consistent.
                 else:
                     lambda_restart = system.property("lambda")
@@ -976,27 +1008,30 @@ class RunnerBase:
                         lambda_restart == lambda_value
                     except:
                         filename = self._filenames[i]["checkpoint"]
-                        raise ValueError(
-                            f"Lambda value from checkpoint file {filename} for {lambda_restart} "
-                            f"does not match expected value {lambda_value}."
+                        msg = (
+                            f"Lambda value from checkpoint file {filename} for {_lam_sym}={lambda_restart} "
+                            f"does not match expected value {_lam_sym}={lambda_value}."
                         )
+                        _logger.error(msg)
+                        raise ValueError(msg)
 
-                # Append the system to the list.
-                systems.append(_sr.morph.link_to_reference(system))
+                # Store the system to the list.
+                systems[i] = _sr.morph.link_to_perturbed(system)
 
         # If this is a GCMC simulation, then remove all ghost waters from each of the systems.
         if self._config.gcmc:
             _logger.info("Removing existing ghost waters from GCMC checkpoint systems")
             for i, system in enumerate(systems):
-                # Remove the ghost waters from the system.
-                try:
-                    for mol in system["property is_ghost_water"].molecules():
-                        _logger.debug(
-                            f"Removing ghost water molecule {mol.number()} for {_lam_sym}={self._lambda_values[i]:.5f}"
-                        )
-                        system.remove(mol)
-                except:
-                    pass
+                if system is not None:
+                    # Remove the ghost waters from the system.
+                    try:
+                        for mol in system["property is_ghost_water"].molecules():
+                            _logger.debug(
+                                f"Removing ghost water molecule {mol.number()} for {_lam_sym}={self._lambda_values[i]:.5f}"
+                            )
+                            system.remove(mol)
+                    except:
+                        pass
 
         return True, systems
 
