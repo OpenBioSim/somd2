@@ -1240,7 +1240,7 @@ class Config:
                 "Checkpoint frequency is low. Should be greater min(energy_frequency, frame_frequency)"
             )
         if t.value() > self._runtime.value():
-            _logger.debug(
+            _logger.warning(
                 "Checkpoint frequency < runtime, checkpointing will not occur before runtime is reached."
             )
             t = _sr.u("0ps")
