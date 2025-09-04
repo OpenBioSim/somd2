@@ -376,9 +376,12 @@ class Runner(_RunnerBase):
                 return _sr.u("0ps")
 
             # Work out the current block number.
-            self._start_block = int(
-                round(time.value() / self._config.checkpoint_frequency.value(), 12)
-            )
+            if self._config.checkpoint_frequency.value() > 0.0:
+                self._start_block = int(
+                    round(time.value() / self._config.checkpoint_frequency.value(), 12)
+                )
+            else:
+                self._start_block = 0
 
             # Subtract the current time from the runtime.
             time = self._config.runtime - time

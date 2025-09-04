@@ -564,9 +564,12 @@ class RepexRunner(_RunnerBase):
             self._config.runtime = str(self._config.runtime - time)
 
             # Work out the current block number.
-            self._start_block = int(
-                round(time.value() / self._config.checkpoint_frequency.value(), 12)
-            )
+            if self._config.checkpoint_frequency.value() > 0.0:
+                self._start_block = int(
+                    round(time.value() / self._config.checkpoint_frequency.value(), 12)
+                )
+            else:
+                self._start_block = 0
         else:
             self._start_block = 0
 
