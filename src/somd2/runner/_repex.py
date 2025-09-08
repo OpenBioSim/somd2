@@ -601,7 +601,14 @@ class RepexRunner(_RunnerBase):
         start = time()
 
         # Work out the number of repex cycles.
-        cycles = ceil(self._config.runtime / self._config.energy_frequency)
+        cycles = (self._config.runtime / self._config.energy_frequency).value()
+
+        # Handle rounding errors to to internal time representation.
+        if abs(cycles - round(cycles)) < 1e-6:
+            cycles = int(round(cycles))
+        # Round up to ensure we run at least the requested time.
+        else:
+            cycles = int(ceil(cycles))
 
         if self._config.checkpoint_frequency.value() > 0.0:
             # Calculate the number of blocks and the remainder time.
@@ -613,7 +620,7 @@ class RepexRunner(_RunnerBase):
                 self._config.checkpoint_frequency = str(self._config.runtime)
 
             num_blocks = int(frac)
-            rem = frac - num_blocks
+            rem = round(frac - num_blocks, 12)
 
             # Work out the number of repex cycles per block.
             frac = (
