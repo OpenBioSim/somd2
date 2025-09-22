@@ -34,7 +34,7 @@ from . import _is_ghost
 from . import _lam_sym
 
 
-def boresch(system, k_hard=100, k_soft=5, optimise_angles=True):
+def boresch(system, k_hard=100, k_soft=5, optimise_angles=True, num_optimise=10):
     """
     Apply Boresch modifications to ghost atom bonded terms to avoid non-physical
     coupling between the ghost atoms and the physical region.
@@ -56,6 +56,11 @@ def boresch(system, k_hard=100, k_soft=5, optimise_angles=True):
     optimise_angles : bool, optional
         Whether to optimise the equilibrium value of the angle terms involving
         ghost atoms for non-planar triple junctions.
+
+    num_optimise : int, optional
+        The number of repeats to average over when optimising the equilibrium
+        value of the angle terms involving ghost atoms for non-planar triple
+        junctions.
 
     Returns
     -------
@@ -209,6 +214,7 @@ def boresch(system, k_hard=100, k_soft=5, optimise_angles=True):
                     k_hard=k_hard,
                     k_soft=k_soft,
                     optimise_angles=optimise_angles,
+                    num_optimise=num_optimise,
                 )
 
             # Higher order junction.
@@ -221,6 +227,7 @@ def boresch(system, k_hard=100, k_soft=5, optimise_angles=True):
                     k_hard=k_hard,
                     k_soft=k_soft,
                     optimise_angles=optimise_angles,
+                    num_optimise=num_optimise,
                 )
 
         # Now lambda = 1.
@@ -244,6 +251,7 @@ def boresch(system, k_hard=100, k_soft=5, optimise_angles=True):
                     k_hard=k_hard,
                     k_soft=k_soft,
                     optimise_angles=optimise_angles,
+                    num_optimise=num_optimise,
                     is_lambda1=True,
                 )
 
@@ -257,6 +265,7 @@ def boresch(system, k_hard=100, k_soft=5, optimise_angles=True):
                     k_hard=k_hard,
                     k_soft=k_soft,
                     optimise_angles=optimise_angles,
+                    num_optimise=num_optimise,
                     is_lambda1=True,
                 )
 
@@ -589,6 +598,7 @@ def _triple(
     k_hard=100,
     k_soft=5,
     optimise_angles=True,
+    num_optimise=10,
     is_lambda1=False,
 ):
     r"""
@@ -629,6 +639,10 @@ def _triple(
 
     optimise_angles : bool, optional
         Whether to optimise the equilibrium value of the angle terms involving
+        ghost atoms for non-planar triple junctions.
+
+    num_optimise : int, optional
+        The number of repeats to use when optimising the angle terms involving
         ghost atoms for non-planar triple junctions.
 
     is_lambda1 : bool, optional
@@ -862,33 +876,47 @@ def _triple(
             .commit()
         )
 
-        # Optimise the equilibrium value of theta0 for the softened angle term.
+        # Optimise the equilibrium value of theta0 for the softened angle terms.
         if optimise_angles:
             _logger.debug("  Optimising equilibrium values for softened angles.")
 
             import sire.morph as _morph
             from sire.units import radian as _radian
 
-            # Link properties to the appropriate end state.
-            if is_lambda1:
-                min_mol = _morph.link_to_perturbed(mol)
-            else:
-                min_mol = _morph.link_to_reference(mol)
-
-            # Minimise the molecule.
-            minimiser = min_mol.minimisation(constraint="none", platform="cpu")
-            minimiser.run()
-
-            # Commit the changes.
-            min_mol = minimiser.commit()
-
-            # Get the equilibrium angle values.
+            # Initialise the equilibrium angle values.
             theta0s = {}
             for idx in angle_idxs:
-                try:
-                    theta0s[idx] = min_mol.angles(*idx).sizes()[0].to(_radian)
-                except:
-                    raise ValueError(f"Could not find optimised angle term: {idx}")
+                theta0s[idx] = []
+
+            # Perform multiple minimisations to get an average for the theta0 values.
+            for _ in range(num_optimise):
+                # Minimise the molecule.
+                min_mol = _morph.link_to_reference(mol)
+                minimiser = min_mol.minimisation(
+                    lambda_value=1.0 if is_lambda1 else 0.0,
+                    constraint="none",
+                    platform="cpu",
+                )
+                minimiser.run()
+
+                # Commit the changes.
+                min_mol = minimiser.commit()
+
+                # Get the equilibrium angle values.
+                for idx in angle_idxs:
+                    try:
+                        theta0s[idx].append(min_mol.angles(*idx).sizes()[0].to(_radian))
+                    except:
+                        raise ValueError(f"Could not find optimised angle term: {idx}")
+
+            # Compute the mean and standard error.
+            import numpy as _np
+
+            theta0_means = {}
+            theta0_stds = {}
+            for idx in theta0s:
+                theta0_means[idx] = _np.mean(theta0s[idx])
+                theta0_stds[idx] = _np.std(theta0s[idx]) / _np.sqrt(len(theta0s[idx]))
 
             # Get the existing angles.
             angles = mol.property("angle" + suffix)
@@ -906,7 +934,8 @@ def _triple(
                 # This is the softened angle term.
                 if idx in angle_idxs:
                     # Get the optimised equilibrium angle.
-                    theta0 = theta0s[idx]
+                    theta0 = theta0_means[idx]
+                    std = theta0_stds[idx]
 
                     # Create the new angle function.
                     amber_angle = _SireMM.AmberAngle(k_soft, theta0)
@@ -919,7 +948,7 @@ def _triple(
 
                     _logger.debug(
                         f"  Optimising angle: [{idx0.value()}-{idx1.value()}-{idx2.value()}], "
-                        f"{p.function()} --> {expression}"
+                        f"{p.function()} --> {expression} (std err: {std:.3f} radian)"
                     )
 
                 else:
@@ -945,6 +974,7 @@ def _higher(
     k_hard=100,
     k_soft=5,
     optimise_angles=True,
+    num_optimise=10,
     is_lambda1=False,
 ):
     r"""
@@ -975,6 +1005,10 @@ def _higher(
 
     optimise_angles : bool, optional
         Whether to optimise the equilibrium value of the angle terms involving
+        ghost atoms for non-planar triple junctions.
+
+    num_optimise : int, optional
+        The number of repeats to use when optimising the angle terms involving
         ghost atoms for non-planar triple junctions.
 
     is_lambda1 : bool, optional
@@ -1065,6 +1099,8 @@ def _higher(
         k_hard=k_hard,
         k_soft=k_soft,
         optimise_angles=optimise_angles,
+        num_optimise=num_optimise,
+        is_lambda1=is_lambda1,
     )
 
 
