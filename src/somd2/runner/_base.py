@@ -158,7 +158,7 @@ class RunnerBase:
                     num_atoms = waters[0].num_atoms()
 
                     if num_atoms == 3:
-                        # Here we assume TIP3p for any 3-point water model.
+                        # Here we assume TIP3P for any 3-point water model.
                         model = "tip3p"
                     elif num_atoms == 4:
                         # Check for OPC water.
