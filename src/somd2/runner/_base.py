@@ -1384,6 +1384,11 @@ class RunnerBase:
                 mols0 = _sr.morph.link_to_reference(system)
                 mols1 = _sr.morph.link_to_perturbed(system)
 
+                # Save to AMBER format.
+                _sr.save(mols0, self._filenames["topology0"])
+                _sr.save(mols1, self._filenames["topology1"])
+
+                # Save to PDB format.
                 _sr.save(
                     mols0,
                     self._filenames["topology0"].replace(".prm7", ".pdb"),
