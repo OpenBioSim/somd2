@@ -382,7 +382,7 @@ class RunnerBase:
         # Flag whether this is a GPU simulation.
         self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]
 
-        # Need to verify before doing any directory checks
+        # Need to verify before doing any directory checks.
         if self._config.restart:
             self._verify_restart_config()
 
@@ -397,8 +397,9 @@ class RunnerBase:
             self._is_restart, self._system = self._check_restart()
         else:
             self._is_restart = False
+            self._cleanup()
 
-        # Save config whenever 'configure' is called to keep it up to date
+        # Save config whenever 'configure' is called to keep it up to date.
         if self._config.write_config:
             _dict_to_yaml(
                 self._config.as_dict(),
@@ -1370,6 +1371,7 @@ class RunnerBase:
         """
 
         from filelock import FileLock as _FileLock
+        from shutil import copyfile as _copyfile
         from somd2 import __version__, _sire_version, _sire_revisionid
 
         # Create the lock.
@@ -1476,8 +1478,24 @@ class RunnerBase:
                 )
                 system.set_property("lambda", lam)
 
+                # Backup the existing checkpoint file, if it exists.
+                path = _Path(self._filenames[index]["checkpoint"])
+                if path.exists() and path.stat().st_size > 0:
+                    _copyfile(
+                        self._filenames[index]["checkpoint"],
+                        str(self._filenames[index]["checkpoint"]) + ".bak",
+                    )
+
                 # Stream the final system to file.
                 _sr.stream.save(system, self._filenames[index]["checkpoint"])
+
+                # Backup the existing energy trajectory file, if it exists.
+                path = _Path(self._filenames[index]["energy_traj"])
+                if path.exists() and path.stat().st_size > 0:
+                    _copyfile(
+                        self._filenames[index]["energy_traj"],
+                        str(self._filenames[index]["energy_traj"]) + ".bak",
+                    )
 
                 # Create the final parquet file.
                 _dataframe_to_parquet(
@@ -1509,6 +1527,14 @@ class RunnerBase:
                 )
                 system.set_property("lambda", lam)
 
+                # Backup the existing checkpoint file, if it exists.
+                path = _Path(self._filenames[index]["checkpoint"])
+                if path.exists() and path.stat().st_size > 0:
+                    _copyfile(
+                        self._filenames[index]["checkpoint"],
+                        str(self._filenames[index]["checkpoint"]) + ".bak",
+                    )
+
                 # Stream the checkpoint to file.
                 _sr.stream.save(system, self._filenames[index]["checkpoint"])
 
@@ -1520,6 +1546,14 @@ class RunnerBase:
                     _dataframe_to_parquet(df, metadata=metadata, filename=filename)
                 # Append to the parquet file.
                 else:
+                    # Backup the existing energy trajectory file, if it exists.
+                    path = _Path(self._filenames[index]["energy_traj"])
+                    if path.exists() and path.stat().st_size > 0:
+                        _copyfile(
+                            self._filenames[index]["energy_traj"],
+                            str(self._filenames[index]["energy_traj"]) + ".bak",
+                        )
+
                     _parquet_append(
                         filename,
                         df.iloc[-self._energy_per_block :],
@@ -1575,3 +1609,20 @@ class RunnerBase:
 
         # Increment the sample number.
         self._nrg_sample += 1
+
+    def _cleanup(self):
+        """
+        Clean up backup files from the working directory.
+        """
+
+        from glob import glob as _glob
+
+        # Find all files with a .bak extension in the working directory.
+        backup_files = _glob(str(self._config.output_directory / "*.bak"))
+
+        for file in backup_files:
+            path = _Path(file)
+            try:
+                path.unlink()
+            except Exception as e:
+                _logger.warning(f"Unable to delete backup file {file}: {str(e)}")

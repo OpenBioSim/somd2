@@ -243,6 +243,9 @@ class Runner(_RunnerBase):
                 f"Simulation finished. Run time: {(end - start) / 60:.2f} minutes"
             )
 
+            # Cleanup backup files.
+            self._cleanup()
+
     def run_window(self, index):
         """
         Run a single lamdba window.

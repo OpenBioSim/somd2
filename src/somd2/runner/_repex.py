@@ -23,6 +23,7 @@ __all__ = ["RepexRunner"]
 
 from filelock import FileLock as _FileLock
 from numba import njit as _njit
+from shutil import copyfile as _copyfile
 
 import numpy as _np
 import pickle as _pickle
@@ -799,6 +800,13 @@ class RepexRunner(_RunnerBase):
                         _logger.info("Saving replica exchange transition matrix")
                         self._save_transition_matrix()
 
+                        # Backup the dynamics cache pickle file, if it exists.
+                        if self._repex_state.exists():
+                            _copyfile(
+                                self._repex_state,
+                                self._repex_state.with_suffix(".pkl.bak"),
+                            )
+
                         # Pickle the dynamics cache.
                         _logger.info("Saving replica exchange state")
                         with open(self._repex_state, "wb") as f:
@@ -812,6 +820,13 @@ class RepexRunner(_RunnerBase):
             # Save the final transition matrix.
             _logger.info("Saving final replica exchange transition matrix")
             self._save_transition_matrix()
+
+            # Backup the dynamics cache pickle file, if it exists.
+            if self._repex_state.exists():
+                _copyfile(
+                    self._repex_state,
+                    self._repex_state.with_suffix(".pkl.bak"),
+                )
 
             # Pickle final state of the dynamics cache.
             _logger.info("Saving final replica exchange state")
@@ -834,6 +849,9 @@ class RepexRunner(_RunnerBase):
         _logger.success(
             f"Simulation finished. Run time: {(end - start) / 60:.2f} minutes"
         )
+
+        # Delete all backup files from the working directory.
+        self._cleanup()
 
     def _run_block(
         self,
@@ -1366,6 +1384,13 @@ class RepexRunner(_RunnerBase):
                     ) / denom
             else:
                 t[i_state, i_state] = 1.0
+
+        # Backup the existing transition matrix, if it exists.
+        if self._repex_matrix.exists():
+            _copyfile(
+                self._repex_matrix,
+                self._repex_matrix.with_suffix(".txt.bak"),
+            )
 
         # Save the replica exchange swap acceptance matrix.
         _np.savetxt(
