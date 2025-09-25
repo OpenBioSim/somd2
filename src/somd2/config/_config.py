@@ -137,6 +137,7 @@ class Config:
         rest2_selection=None,
         output_directory="output",
         restart=False,
+        use_backup=False,
         write_config=True,
         overwrite=False,
         somd1_compatibility=False,
@@ -364,6 +365,12 @@ class Config:
         restart: bool
             Whether to restart from a previous simulation using files found in 'output-directory'.
 
+        use_backup: bool
+            Whether to use backup files when restarting a simulation. If True, then
+            files from the last but one checkpoint will be used, rather than the most
+            recent checkpoint files. This can be useful if the most recent checkpoint
+            files are corrupted, or incomplete, e.g. you are recovering from a crash.
+
         write_config: bool
             Whether to write the configuration options to a YAML file in the output directory.
 
@@ -460,6 +467,7 @@ class Config:
         self.rest2_scale = rest2_scale
         self.rest2_selection = rest2_selection
         self.restart = restart
+        self.use_backup = use_backup
         self.somd1_compatibility = somd1_compatibility
         self.pert_file = pert_file
         self.save_energy_components = save_energy_components
@@ -1554,6 +1562,16 @@ class Config:
         if not isinstance(restart, bool):
             raise ValueError("'restart' must be of type 'bool'")
         self._restart = restart
+
+    @property
+    def use_backup(self):
+        return self._use_backup
+
+    @use_backup.setter
+    def use_backup(self, use_backup):
+        if not isinstance(use_backup, bool):
+            raise ValueError("'use_backup' must be of type 'bool'")
+        self._use_backup = use_backup
 
     @property
     def somd1_compatibility(self):

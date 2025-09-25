@@ -394,6 +394,8 @@ class RunnerBase:
 
         # Check for a valid restart.
         if self._config.restart:
+            if self._config.use_backup:
+                self._restore_backup_files()
             self._is_restart, self._system = self._check_restart()
         else:
             self._is_restart = False
@@ -1609,6 +1611,28 @@ class RunnerBase:
 
         # Increment the sample number.
         self._nrg_sample += 1
+
+    def _restore_backup_files(self):
+        """
+        Restore backup files in the working directory.
+        """
+
+        from glob import glob as _glob
+        from shutil import copyfile as _copyfile
+
+        # Find all files with a .bak extension in the working directory.
+        backup_files = _glob(str(self._config.output_directory / "*.bak"))
+
+        # Strip the .bak extension and copy to the original file name.
+        for file in backup_files:
+            path = _Path(file)
+            new_path = _Path(str(path)[:-4])
+            try:
+                _copyfile(file, new_path)
+            except Exception as e:
+                msg = f"Unable to restore backup file {file}: {str(e)}"
+                _logger.error(msg)
+                raise IOError(msg)
 
     def _cleanup(self):
         """
