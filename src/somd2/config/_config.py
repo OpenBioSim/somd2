@@ -119,6 +119,7 @@ class Config:
         frame_frequency="20 ps",
         save_velocities=False,
         checkpoint_frequency="100 ps",
+        num_checkpoint_workers=None,
         num_energy_neighbours=None,
         null_energy="10000 kcal/mol",
         platform="auto",
@@ -292,6 +293,14 @@ class Config:
             min(energy_frequency, frame_frequency). If zero, then no checkpointing
             will be performed.
 
+        num_checkpoint_workers: int
+            The number of parallel workers to use when checkpointing during a replica
+            exchange simulation. By default, this is set to the number of concurrent
+            GPU contexts, i.e. the number of GPUs multiplied by the oversubscription
+            factor. The option can be used to reduce the number of workers, which
+            can be useful when the system size is large, i.e. when many large
+            trajectory files could be written simultaneously.
+
         platform: str
             Platform to run simulation on.
 
@@ -452,6 +461,7 @@ class Config:
         self.frame_frequency = frame_frequency
         self.save_velocities = save_velocities
         self.checkpoint_frequency = checkpoint_frequency
+        self.num_checkpoint_workers = num_checkpoint_workers
         self.platform = platform
         self.max_threads = max_threads
         self.max_gpus = max_gpus
@@ -1253,6 +1263,21 @@ class Config:
             )
             t = _sr.u("0ps")
         self._checkpoint_frequency = t
+
+    @property
+    def num_checkpoint_workers(self):
+        return self._num_checkpoint_workers
+
+    @num_checkpoint_workers.setter
+    def num_checkpoint_workers(self, num_checkpoint_workers):
+        if num_checkpoint_workers is not None:
+            if not isinstance(num_checkpoint_workers, int):
+                try:
+                    num_checkpoint_workers = int(num_checkpoint_workers)
+                except:
+                    raise ValueError("'num_checkpoint_workers' must be of type 'int'")
+            if num_checkpoint_workers < 1:
+                raise ValueError("'num_checkpoint_workers' must be greater than 0")
 
     @property
     def platform(self):

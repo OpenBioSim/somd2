@@ -646,8 +646,17 @@ class RepexRunner(_RunnerBase):
         # Store the number of concurrent workers.
         num_workers = self._num_gpus * self._config.oversubscription_factor
 
+        # Store the number of workers to use for checkpointing.
+        if self._config.num_checkpoint_workers is None:
+            num_checkpoint_workers = num_workers
+        else:
+            num_checkpoint_workers = min(
+                self._config.num_checkpoint_workers, num_workers
+            )
+
         # Work out the required number of batches.
         num_batches = ceil(self._config.num_lambda / num_workers)
+        num_checkpoint_batches = ceil(self._config.num_lambda / num_checkpoint_workers)
 
         # Create the replica list.
         replica_list = list(range(self._config.num_lambda))
@@ -749,9 +758,11 @@ class RepexRunner(_RunnerBase):
 
             # Checkpoint.
             if is_checkpoint or i == cycles - 1:
-                for j in range(num_batches):
+                for j in range(num_checkpoint_batches):
                     # Get the indices of the replicas in this batch.
-                    replicas = replica_list[j * num_workers : (j + 1) * num_workers]
+                    replicas = replica_list[
+                        j * num_checkpoint_workers : (j + 1) * num_checkpoint_workers
+                    ]
                     with ThreadPoolExecutor(max_workers=num_workers) as executor:
                         try:
                             for result, error in executor.map(
