@@ -326,6 +326,13 @@ class RunnerBase:
             # Work out the current hydrogen mass factor.
             factor_non_water, factor_water = self._get_h_mass_factor(self._system)
 
+            # If using SOMD1 compatibility, then adjust the default value.
+            if self._config.somd1_compatibility and self._config.h_mass_factor == 3.0:
+                self._config.h_mass_factor = 1.5
+                _logger.info(
+                    "Using hydrogen mass repartitioning factor of 1.5 for SOMD1 compatibility."
+                )
+
             # We don't support repartiioning water molecules, so check those first.
             if factor_water is not None:
                 if not isclose(factor_water, 1.0, abs_tol=1e-4):
