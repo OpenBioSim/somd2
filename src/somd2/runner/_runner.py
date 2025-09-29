@@ -726,7 +726,7 @@ class Runner(_RunnerBase):
                     # in a consistent state if read by another process.
                     with lock.acquire(timeout=self._config.timeout.to("seconds")):
                         # Backup any existing checkpoint files.
-                        self._backup_checkpoint_files(index)
+                        self._backup_checkpoint(index)
 
                         # Write the checkpoint files.
                         self._checkpoint(
