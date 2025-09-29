@@ -1457,8 +1457,8 @@ class RunnerBase:
                 if self._config.restart:
                     path = _Path(traj_filename)
                     if path.exists() and path.stat().st_size > 0:
-                        _copyfile(traj_filename, f"{traj_filename}.bak")
-                        traj_chunks = [f"{traj_filename}.bak"] + traj_chunks
+                        _copyfile(traj_filename, f"{traj_filename}.prev")
+                        traj_chunks = [f"{traj_filename}.prev"] + traj_chunks
 
                 # Load the topology and chunked trajectory files.
                 mols = _sr.load([topology0] + traj_chunks)
