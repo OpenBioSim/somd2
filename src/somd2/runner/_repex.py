@@ -765,6 +765,31 @@ class RepexRunner(_RunnerBase):
                 # Acquire the file lock to ensure that the checkpoint files are
                 # in a consistent state if read by another process.
                 with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                    # First backup existing checkpoint files.
+                    for j in range(num_checkpoint_batches):
+                        # Get the indices of the replicas in this batch.
+                        replicas = replica_list[
+                            j
+                            * num_checkpoint_workers : (j + 1)
+                            * num_checkpoint_workers
+                        ]
+                        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                            try:
+                                for result, error in executor.map(
+                                    self._backup_checkpoint,
+                                    replicas,
+                                ):
+                                    if not result:
+                                        _logger.error(
+                                            f"Backup failed for {_lam_sym} = "
+                                            "{self._lambda_values[index]:.5f}: {error}"
+                                        )
+                                        raise error
+                            except KeyboardInterrupt:
+                                _logger.error("Backup cancelled. Exiting.")
+                                _sys.exit(1)
+
+                    # Now write the new checkpoint files.
                     for j in range(num_checkpoint_batches):
                         # Get the indices of the replicas in this batch.
                         replicas = replica_list[

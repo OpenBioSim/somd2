@@ -21,7 +21,9 @@
 
 __all__ = ["RunnerBase"]
 
+from glob import glob as _glob
 from pathlib import Path as _Path
+from shutil import copyfile as _copyfile
 
 import sire as _sr
 from sire.system import System as _System
@@ -1379,7 +1381,6 @@ class RunnerBase:
             Whether this is the final block of the simulation.
         """
 
-        from shutil import copyfile as _copyfile
         from somd2 import __version__, _sire_version, _sire_revisionid
 
         # Save the end-state GCMC topologies for trajectory analysis and visualisation.
@@ -1446,10 +1447,8 @@ class RunnerBase:
                 traj_filename = self._filenames[index]["trajectory"]
 
                 # Glob for the trajectory chunks.
-                from glob import glob
-
                 traj_chunks = sorted(
-                    glob(f"{self._filenames[index]['trajectory_chunk']}*")
+                    _glob(f"{self._filenames[index]['trajectory_chunk']}*")
                 )
 
                 # If this is a restart, then we need to check for an existing
@@ -1458,9 +1457,7 @@ class RunnerBase:
                 if self._config.restart:
                     path = _Path(traj_filename)
                     if path.exists() and path.stat().st_size > 0:
-                        from shutil import copyfile
-
-                        copyfile(traj_filename, f"{traj_filename}.bak")
+                        _copyfile(traj_filename, f"{traj_filename}.bak")
                         traj_chunks = [f"{traj_filename}.bak"] + traj_chunks
 
                 # Load the topology and chunked trajectory files.
@@ -1477,24 +1474,8 @@ class RunnerBase:
             system.set_property("config", self._config.as_dict(sire_compatible=True))
             system.set_property("lambda", lam)
 
-            # Backup the existing checkpoint file, if it exists.
-            path = _Path(self._filenames[index]["checkpoint"])
-            if path.exists() and path.stat().st_size > 0:
-                _copyfile(
-                    self._filenames[index]["checkpoint"],
-                    str(self._filenames[index]["checkpoint"]) + ".bak",
-                )
-
             # Stream the final system to file.
             _sr.stream.save(system, self._filenames[index]["checkpoint"])
-
-            # Backup the existing energy trajectory file, if it exists.
-            path = _Path(self._filenames[index]["energy_traj"])
-            if path.exists() and path.stat().st_size > 0:
-                _copyfile(
-                    self._filenames[index]["energy_traj"],
-                    str(self._filenames[index]["energy_traj"]) + ".bak",
-                )
 
             # Create the final parquet file.
             _dataframe_to_parquet(
@@ -1524,14 +1505,6 @@ class RunnerBase:
             system.set_property("config", self._config.as_dict(sire_compatible=True))
             system.set_property("lambda", lam)
 
-            # Backup the existing checkpoint file, if it exists.
-            path = _Path(self._filenames[index]["checkpoint"])
-            if path.exists() and path.stat().st_size > 0:
-                _copyfile(
-                    self._filenames[index]["checkpoint"],
-                    str(self._filenames[index]["checkpoint"]) + ".bak",
-                )
-
             # Stream the checkpoint to file.
             _sr.stream.save(system, self._filenames[index]["checkpoint"])
 
@@ -1543,18 +1516,46 @@ class RunnerBase:
                 _dataframe_to_parquet(df, metadata=metadata, filename=filename)
             # Append to the parquet file.
             else:
-                # Backup the existing energy trajectory file, if it exists.
-                path = _Path(self._filenames[index]["energy_traj"])
-                if path.exists() and path.stat().st_size > 0:
-                    _copyfile(
-                        self._filenames[index]["energy_traj"],
-                        str(self._filenames[index]["energy_traj"]) + ".bak",
-                    )
-
                 _parquet_append(
                     filename,
                     df.iloc[-self._energy_per_block :],
                 )
+
+    def _backup_checkpoint(self, index):
+        """
+        Create a backup of the previous checkpoint files.
+
+        Parameters
+        ----------
+
+        index : int
+            The index of the window or replica.
+        """
+
+        try:
+            # Backup the existing checkpoint file, if it exists.
+            path = _Path(self._filenames[index]["checkpoint"])
+            if path.exists() and path.stat().st_size > 0:
+                _copyfile(
+                    self._filenames[index]["checkpoint"],
+                    str(self._filenames[index]["checkpoint"]) + ".bak",
+                )
+            traj_filename = self._filenames[index]["trajectory"]
+        except Exception as e:
+            return False, e
+
+        try:
+            # Backup the existing energy trajectory file, if it exists.
+            path = _Path(self._filenames[index]["energy_traj"])
+            if path.exists() and path.stat().st_size > 0:
+                _copyfile(
+                    self._filenames[index]["energy_traj"],
+                    str(self._filenames[index]["energy_traj"]) + ".bak",
+                )
+        except Exception as e:
+            return False, e
+
+        return True, None
 
     def _save_energy_components(self, index, context):
         """
@@ -1612,9 +1613,6 @@ class RunnerBase:
         Restore backup files in the working directory.
         """
 
-        from glob import glob as _glob
-        from shutil import copyfile as _copyfile
-
         # Find all files with a .bak extension in the working directory.
         backup_files = _glob(str(self._config.output_directory / "*.bak"))
 
@@ -1633,8 +1631,6 @@ class RunnerBase:
         """
         Clean up backup files from the working directory.
         """
-
-        from glob import glob as _glob
 
         # Find all files with a .bak extension in the working directory.
         backup_files = _glob(str(self._config.output_directory / "*.bak"))

@@ -725,6 +725,10 @@ class Runner(_RunnerBase):
                     # Acquire the file lock to ensure that the checkpoint files are
                     # in a consistent state if read by another process.
                     with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                        # Backup any existing checkpoint files.
+                        self._backup_checkpoint_files(index)
+
+                        # Write the checkpoint files.
                         self._checkpoint(
                             system,
                             index,
