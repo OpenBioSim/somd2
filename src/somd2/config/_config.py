@@ -1278,6 +1278,7 @@ class Config:
                     raise ValueError("'num_checkpoint_workers' must be of type 'int'")
             if num_checkpoint_workers < 1:
                 raise ValueError("'num_checkpoint_workers' must be greater than 0")
+        self._num_checkpoint_workers = num_checkpoint_workers
 
     @property
     def platform(self):

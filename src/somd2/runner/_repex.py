@@ -758,29 +758,38 @@ class RepexRunner(_RunnerBase):
 
             # Checkpoint.
             if is_checkpoint or i == cycles - 1:
-                for j in range(num_checkpoint_batches):
-                    # Get the indices of the replicas in this batch.
-                    replicas = replica_list[
-                        j * num_checkpoint_workers : (j + 1) * num_checkpoint_workers
-                    ]
-                    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                        try:
-                            for result, error in executor.map(
-                                self._checkpoint,
-                                replicas,
-                                repeat(self._lambda_values),
-                                repeat(block),
-                                repeat(num_blocks + int(rem > 0)),
-                                repeat(i == cycles - 1),
-                            ):
-                                if not result:
-                                    _logger.error(
-                                        f"Checkpoint failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {error}"
-                                    )
-                                    raise error
-                        except KeyboardInterrupt:
-                            _logger.error("Checkpoint cancelled. Exiting.")
-                            _sys.exit(1)
+                # Create the lock.
+                lock = _FileLock(self._lock_file)
+
+                # Acquire the file lock to ensure that the checkpoint files are
+                # in a consistent state if read by another process.
+                with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                    for j in range(num_checkpoint_batches):
+                        # Get the indices of the replicas in this batch.
+                        replicas = replica_list[
+                            j
+                            * num_checkpoint_workers : (j + 1)
+                            * num_checkpoint_workers
+                        ]
+                        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                            try:
+                                for result, error in executor.map(
+                                    self._checkpoint,
+                                    replicas,
+                                    repeat(self._lambda_values),
+                                    repeat(block),
+                                    repeat(num_blocks + int(rem > 0)),
+                                    repeat(i == cycles - 1),
+                                ):
+                                    if not result:
+                                        _logger.error(
+                                            f"Checkpoint failed for {_lam_sym} = "
+                                            "{self._lambda_values[index]:.5f}: {error}"
+                                        )
+                                        raise error
+                            except KeyboardInterrupt:
+                                _logger.error("Checkpoint cancelled. Exiting.")
+                                _sys.exit(1)
 
             if i < cycles:
                 # Assemble and energy matrix from the results.

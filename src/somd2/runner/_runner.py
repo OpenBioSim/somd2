@@ -21,6 +21,7 @@
 
 __all__ = ["Runner"]
 
+from filelock import FileLock as _FileLock
 from time import time as _timer
 
 import numpy as _np
@@ -717,16 +718,21 @@ class Runner(_RunnerBase):
                         block - self._start_block
                     ) == num_blocks - 1 and rem == 0
 
-                    # Checkpoint.
-                    self._checkpoint(
-                        system,
-                        index,
-                        block,
-                        speed,
-                        lambda_energy=lambda_energy,
-                        lambda_grad=lambda_grad,
-                        is_final_block=is_final_block,
-                    )
+                    # Create the lock.
+                    lock = _FileLock(self._lock_file)
+
+                    # Acquire the file lock to ensure that the checkpoint files are
+                    # in a consistent state if read by another process.
+                    with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                        self._checkpoint(
+                            system,
+                            index,
+                            block,
+                            speed,
+                            lambda_energy=lambda_energy,
+                            lambda_grad=lambda_grad,
+                            is_final_block=is_final_block,
+                        )
 
                     # Delete all trajectory frames from the Sire system within the
                     # dynamics object.
@@ -786,16 +792,21 @@ class Runner(_RunnerBase):
                     # Calculate the speed in nanoseconds per day.
                     speed = checkpoint_interval / block_time
 
-                    # Checkpoint.
-                    self._checkpoint(
-                        system,
-                        index,
-                        block,
-                        speed,
-                        lambda_energy=lambda_energy,
-                        lambda_grad=lambda_grad,
-                        is_final_block=True,
-                    )
+                    # Create the lock.
+                    lock = _FileLock(self._lock_file)
+
+                    # Acquire the file lock to ensure that the checkpoint files are
+                    # in a consistent state if read by another process.
+                    with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                        self._checkpoint(
+                            system,
+                            index,
+                            block,
+                            speed,
+                            lambda_energy=lambda_energy,
+                            lambda_grad=lambda_grad,
+                            is_final_block=True,
+                        )
 
                     # Delete all trajectory frames from the Sire system within the
                     # dynamics object.
