@@ -411,12 +411,24 @@ class Runner(_RunnerBase):
 
             from loch import GCMCSampler
 
+            # Copy the dynamics kwargs.
+            dynamics_kwargs = self._dynamics_kwargs.copy()
+
+            # Overload the dynamics kwargs with the simulation options.
+            dynamics_kwargs.update(
+                {
+                    "device": device,
+                    "lambda_value": lambda_value,
+                    "rest2_scale": rest2_scale,
+                }
+            )
+
+            # Create the GCMC sampler.
             gcmc_sampler = GCMCSampler(
                 system,
-                device=int(device),
-                lambda_value=lambda_value,
                 ghost_file=self._filenames[index]["gcmc_ghosts"],
                 **self._gcmc_kwargs,
+                **dynamics_kwargs,
             )
 
             # Get the GCMC system.

@@ -200,6 +200,11 @@ class DynamicsCache:
             else:
                 mols = system
 
+            # Overload the device and lambda value.
+            dynamics_kwargs["device"] = device
+            dynamics_kwargs["lambda_value"] = lam
+            dynamics_kwargs["rest2_scale"] = scale
+
             if gcmc_kwargs is not None:
                 from loch import GCMCSampler
 
@@ -208,10 +213,9 @@ class DynamicsCache:
                 # Create the GCMC sampler.
                 gcmc_sampler = GCMCSampler(
                     mols,
-                    device=device,
-                    lambda_value=lam,
                     ghost_file=ghost_file,
                     **gcmc_kwargs,
+                    **dynamics_kwargs,
                 )
 
                 # Get the modified GCMC system.
@@ -223,11 +227,6 @@ class DynamicsCache:
                 _logger.info(
                     f"Created GCMC sampler for lambda {lam:.5f} on device {device}"
                 )
-
-            # Overload the device and lambda value.
-            dynamics_kwargs["device"] = device
-            dynamics_kwargs["lambda_value"] = lam
-            dynamics_kwargs["rest2_scale"] = scale
 
             # Create the dynamics object.
             try:
