@@ -213,9 +213,11 @@ class DynamicsCache:
                 # Create the GCMC sampler.
                 gcmc_sampler = GCMCSampler(
                     mols,
+                    device=device,
+                    lambda_value=lam,
+                    rest2_scale=scale,
                     ghost_file=ghost_file,
                     **gcmc_kwargs,
-                    **dynamics_kwargs,
                 )
 
                 # Get the modified GCMC system.
