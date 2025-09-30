@@ -450,7 +450,9 @@ class Runner(_RunnerBase):
                 raise RuntimeError(f"Minimisation failed: {e}")
 
         # Equilibration.
+        is_equilibrated = False
         if self._config.equilibration_time.value() > 0.0 and not is_restart:
+            is_equilibrated = True
             try:
                 # Run without saving energies or frames.
                 _logger.info(f"Equilibrating at {_lam_sym} = {lambda_value:.5f}")
@@ -584,6 +586,39 @@ class Runner(_RunnerBase):
 
             # Bind the GCMC sampler to the dynamics object.
             dynamics._d._gcmc_sampler = gcmc_sampler
+
+            # If this is a restart, then we need to reset the GCMC water state
+            # to match that of the restart system.
+            if self._is_restart:
+                from openmm.unit import angstrom
+
+                # First set all waters to non-ghosts.
+                gcmc_sampler.set_water_state(
+                    dynamics.context(),
+                    states=_np.ones(len(gcmc_sampler._water_indices)),
+                    force=True,
+                )
+
+                # Now set the ghost waters.
+                gcmc_sampler.set_water_state(
+                    dynamics.context(),
+                    self._restart_ghost_waters[index],
+                    states=_np.zeros(len(gcmc_sampler._water_indices)),
+                    force=True,
+                )
+
+                # Finally, reset the context positions to match the restart system.
+                dynamics.context().setPositions(
+                    self._restart_positions[index] * angstrom
+                )
+            # Otherwise, if we've performed equilibration, then we need to reset
+            # the water state in the new context to match the equilibrated system.
+            elif is_equilibrated:
+                # Reset the water state.
+                gcmc_sampler.set_water_state(
+                    dynamics.context(),
+                    force=True,
+                )
 
         # Set the number of neighbours used for the energy calculation.
         # If not None, then we add one to account for the extra windows

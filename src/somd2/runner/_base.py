@@ -1032,11 +1032,30 @@ class RunnerBase:
 
         # If this is a GCMC simulation, then remove all ghost waters from each of the systems.
         if self._config.gcmc:
+            # List to store the indices of the current ghost waters.
+            self._restart_ghost_waters = []
+            # List to store the current positions.
+            self._restart_positions = []
             _logger.info("Removing existing ghost waters from GCMC checkpoint systems")
             for i, system in enumerate(systems):
+                # Store the positions of all atoms.
+                self._restart_positions.append(_sr.io.get_coords_array(system))
                 if system is not None:
                     # Remove the ghost waters from the system.
                     try:
+                        # Get the water molecule indices.
+                        waters = system.molecules().find(system["water"].molecules())
+
+                        # Get the ghost waters and their indices.
+                        ghost_waters = system["property is_ghost_water"].molecules()
+                        ghost_waters = system.molecules().find(ghost_waters)
+
+                        # Store the indices of the ghost waters in the waters list.
+                        idxs = []
+                        for index in ghost_waters:
+                            idxs.append(waters.index(index))
+                        self._restart_ghost_waters.append(idxs)
+
                         for mol in system["property is_ghost_water"].molecules():
                             _logger.debug(
                                 f"Removing ghost water molecule {mol.number()} for {_lam_sym}={self._lambda_values[i]:.5f}"

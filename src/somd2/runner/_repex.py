@@ -549,6 +549,23 @@ class RepexRunner(_RunnerBase):
                 output_directory=self._config.output_directory,
             )
 
+            # Reset the state of the OpenMM contexts and GCMC samplers.
+            for i in range(len(self._lambda_values)):
+                dynamics, gcmc_sampler = self._dynamics_cache.get(index)
+
+                # Reset the OpenMM state.
+                dynamics.context().setState(self._dynamics_cache._openmm_states[i])
+
+                # Reset the GCMC water state.
+                if gcmc_sampler is not None:
+                    gcmc_sampler.push()
+                    gcmc_sampler._set_water_state(
+                        dynamics.context(),
+                        states=self._dynamics_cache._gcmc_states[i],
+                        force=True,
+                    )
+                    gcmc_sampler.pop()
+
         # Conversion factor for reduced potential.
         kT = (_sr.units.k_boltz * self._config.temperature).to(_sr.units.kcal_per_mol)
         self._beta = 1.0 / kT
