@@ -91,7 +91,7 @@ class Config:
         integrator="langevin_middle",
         cutoff_type="pme",
         cutoff="7.5 A",
-        h_mass_factor=3,
+        h_mass_factor=1.5,
         hmr=True,
         num_lambda=11,
         lambda_values=None,
