@@ -799,7 +799,7 @@ class RepexRunner(_RunnerBase):
                                     if not result:
                                         _logger.error(
                                             f"Backup failed for {_lam_sym} = "
-                                            "{self._lambda_values[index]:.5f}: {error}"
+                                            f"{self._lambda_values[index]:.5f}: {error}"
                                         )
                                         raise error
                             except KeyboardInterrupt:
@@ -827,7 +827,7 @@ class RepexRunner(_RunnerBase):
                                     if not result:
                                         _logger.error(
                                             f"Checkpoint failed for {_lam_sym} = "
-                                            "{self._lambda_values[index]:.5f}: {error}"
+                                            f"{self._lambda_values[index]:.5f}: {error}"
                                         )
                                         raise error
                             except KeyboardInterrupt:
