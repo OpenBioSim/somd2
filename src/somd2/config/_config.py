@@ -134,6 +134,7 @@ class Config:
         gcmc_num_waters=20,
         gcmc_radius="4 A",
         gcmc_bulk_sampling_probability=0.1,
+        gcmc_tolerance=0.0,
         rest2_scale=1.0,
         rest2_selection=None,
         output_directory="output",
@@ -349,6 +350,11 @@ class Config:
             density, i.e. acting as a barostat. (This option has no affect when
             'gcmc_selection=None'.)
 
+        gcmc_tolerance: float
+            The tolerance for the GCMC acceptance probability, i.e. the minimum probability
+            of acceptance for a move. This can be used to exclude low probability candidates
+            that can cause instabilities or crashes for the MD engine.
+
         rest2_scale: float, list(float)
             The scaling factor for Replica Exchange with Solute Tempering (REST) simulations.
             This is the factor by which the temperature of the solute is scaled with respect to
@@ -474,6 +480,7 @@ class Config:
         self.gcmc_num_waters = gcmc_num_waters
         self.gcmc_radius = gcmc_radius
         self.gcmc_bulk_sampling_probability = gcmc_bulk_sampling_probability
+        self.gcmc_tolerance = gcmc_tolerance
         self.rest2_scale = rest2_scale
         self.rest2_selection = rest2_selection
         self.restart = restart
@@ -1542,6 +1549,21 @@ class Config:
                 "'gcmc_bulk_sampling_probability' must be between 0.0 and 1.0"
             )
         self._gcmc_bulk_sampling_probability = gcmc_bulk_sampling_probability
+
+    @property
+    def gcmc_tolerance(self):
+        return self._gcmc_tolerance
+
+    @gcmc_tolerance.setter
+    def gcmc_tolerance(self, gcmc_tolerance):
+        if not isinstance(gcmc_tolerance, float):
+            try:
+                gcmc_tolerance = float(gcmc_tolerance)
+            except Exception:
+                raise ValueError("'gcmc_tolerance' must be a float")
+        if gcmc_tolerance < 0.0:
+            raise ValueError("'gcmc_tolerance' must be greater than or equal to 0.0")
+        self._gcmc_tolerance = gcmc_tolerance
 
     @property
     def rest2_scale(self):

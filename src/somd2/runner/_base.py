@@ -612,6 +612,7 @@ class RunnerBase:
                 "coulomb_power": self._config.coulomb_power,
                 "shift_coulomb": str(self._config.shift_coulomb),
                 "shift_delta": str(self._config.shift_delta),
+                "tolerance": self._config.gcmc_tolerance,
                 "overwrite": self._config.overwrite,
                 "no_logger": True,
             }
