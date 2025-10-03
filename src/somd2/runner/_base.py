@@ -87,6 +87,19 @@ class RunnerBase:
         _logger.info(f"somd2 version: {__version__}")
         _logger.info(f"sire version: {_sire_version}+{_sire_revisionid}")
 
+        # Make sure the frame frequency doesn't exceed the checkpoint frequency.
+        # This constraint is currently required to avoid issues with missing
+        # frames when restarting from a checkpoint. This could be fixed by
+        # temporarily adjusting the frame frequency for the first checkpoint
+        # interval after a restart.
+        if (
+            self._config.frame_frequency > 0
+            and self._config.frame_frequency > self._config.checkpoint_frequency
+        ):
+            msg = "'frame_frequency' cannot be greater than 'checkpoint_frequency'."
+            _logger.error(msg)
+            raise ValueError(msg)
+
         # Check whether we need to apply a perturbation to the reference system.
         if self._config.pert_file is not None:
             _logger.info(
