@@ -3,11 +3,9 @@ name: Build and test
 on:
   workflow_dispatch:
   push:
-    branches:
-      - "**"
+    branches: [devel, main]
   pull_request:
-    branches:
-      - "main"
+    branches: [devel, main]
 
 jobs:
   pre_job:
