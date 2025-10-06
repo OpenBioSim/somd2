@@ -267,6 +267,10 @@ class Runner(_RunnerBase):
             The duration of the simulation.
         """
 
+        # Since this method is called in a separate process with the "spawn"
+        # method, we need to re-set the logger.
+        self._config._reset_logger(_logger)
+
         # Get the lambda value.
         lambda_value = self._lambda_values[index]
 

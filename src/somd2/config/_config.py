@@ -1895,3 +1895,20 @@ class Config:
                     )
 
         return parser
+
+    def _reset_logger(self, logger):
+        """
+        Internal method to reset the logger.
+
+        This can be used when a parallel process is spawned to ensure that
+        the logger is correctly configured.
+        """
+
+        import sys
+
+        logger.remove()
+        logger.add(sys.stderr, level=self.log_level.upper(), enqueue=True)
+        if self.log_file is not None and self.output_directory is not None:
+            logger.add(
+                self.output_directory / self.log_file, level=self.log_level.upper()
+            )
