@@ -439,43 +439,6 @@ class RunnerBase:
                 self._filenames[0]["config"],
             )
 
-        # Save the end state topologies to the output directory.
-        if isinstance(self._system, list):
-            mols = self._system[0]
-        else:
-            mols = self._system
-        # Add ghost waters to the system.
-        if self._config.gcmc and self._has_space:
-            # Make sure that a pressure has not been set.
-            if self._config.pressure is not None:
-                msg = "GCMC simulations must be run in the NVT ensemble."
-                _logger.error(msg)
-                raise ValueError(msg)
-
-            from loch import GCMCSampler
-            from numpy.random import default_rng
-
-            # Create a random number generator.
-            rng = default_rng()
-
-            # Check that the system is solvated with water molecules. This
-            # is required for GCMC simulations since the existing waters
-            # provide a template for the ghost waters.
-            try:
-                water = mols["water"].molecules()[0]
-            except:
-                msg = "No water molecules in the system. Cannot perform GCMC."
-                _logger.error(msg)
-                raise ValueError(msg)
-
-            # Create the GCMC system.
-            mols = GCMCSampler._prepare_system(
-                mols, water, rng, self._config.gcmc_num_waters
-            )
-
-            # Store the excess chemical potential.
-            self._mu_ex = self._config.gcmc_excess_chemical_potential.value()
-
         # Append only this number of lines from the end of the dataframe during checkpointing.
         self._energy_per_block = int(
             self._config.checkpoint_frequency / self._config.energy_frequency
@@ -498,6 +461,21 @@ class RunnerBase:
 
             if self._config.pressure != None:
                 msg = "GCMC simulations must be run in the NVT ensemble."
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            if isinstance(self._system, list):
+                mols = self._system[0]
+            else:
+                mols = self._system
+
+            # Check that the system is solvated with water molecules. This
+            # is required for GCMC simulations since the existing waters
+            # provide a template for the ghost waters.
+            try:
+                water = mols["water"].molecules()[0]
+            except:
+                msg = "No water molecules in the system. Cannot perform GCMC."
                 _logger.error(msg)
                 raise ValueError(msg)
 
@@ -548,6 +526,9 @@ class RunnerBase:
                     msg = "Invalid 'gcmc_selection' value."
                     _logger.error(msg)
                     raise ValueError(msg)
+
+            # Store the excess chemcical potential value.
+            self._mu_ex = self._config.gcmc_excess_chemical_potential.value()
 
         # Store the initial system time.
         if isinstance(self._system, list):
