@@ -1407,23 +1407,25 @@ class RunnerBase:
         from somd2 import __version__, _sire_version, _sire_revisionid
 
         # Save the end-state GCMC topologies for trajectory analysis and visualisation.
-        if self._config.gcmc and block == 0 and index == 0:
-            mols0 = _sr.morph.link_to_reference(system)
-            mols1 = _sr.morph.link_to_perturbed(system)
+        if self._config.gcmc:
+            # Only save for first replica if performing replica exchange.
+            if not self._config.replica_exchange or (block == 0 and index == 0):
+                mols0 = _sr.morph.link_to_reference(system)
+                mols1 = _sr.morph.link_to_perturbed(system)
 
-            # Save to AMBER format.
-            _sr.save(mols0, self._filenames["topology0"])
-            _sr.save(mols1, self._filenames["topology1"])
+                # Save to AMBER format.
+                _sr.save(mols0, self._filenames["topology0"])
+                _sr.save(mols1, self._filenames["topology1"])
 
-            # Save to PDB format.
-            _sr.save(
-                mols0,
-                self._filenames["topology0"].replace(".prm7", ".pdb"),
-            )
-            _sr.save(
-                mols1,
-                self._filenames["topology1"].replace(".prm7", ".pdb"),
-            )
+                # Save to PDB format.
+                _sr.save(
+                    mols0,
+                    self._filenames["topology0"].replace(".prm7", ".pdb"),
+                )
+                _sr.save(
+                    mols1,
+                    self._filenames["topology1"].replace(".prm7", ".pdb"),
+                )
 
         # Get the lambda value.
         lam = self._lambda_values[index]
