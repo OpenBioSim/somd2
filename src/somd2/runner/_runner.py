@@ -597,14 +597,14 @@ class Runner(_RunnerBase):
                 from openmm.unit import angstrom
 
                 # First set all waters to non-ghosts.
-                gcmc_sampler.set_water_state(
+                gcmc_sampler._set_water_state(
                     dynamics.context(),
                     states=_np.ones(len(gcmc_sampler._water_indices)),
                     force=True,
                 )
 
                 # Now set the ghost waters.
-                gcmc_sampler.set_water_state(
+                gcmc_sampler._set_water_state(
                     dynamics.context(),
                     self._restart_ghost_waters[index],
                     states=_np.zeros(len(gcmc_sampler._water_indices)),
@@ -619,7 +619,7 @@ class Runner(_RunnerBase):
             # the water state in the new context to match the equilibrated system.
             elif is_equilibrated:
                 # Reset the water state.
-                gcmc_sampler.set_water_state(
+                gcmc_sampler._set_water_state(
                     dynamics.context(),
                     force=True,
                 )
