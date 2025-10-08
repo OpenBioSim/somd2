@@ -490,7 +490,7 @@ class Runner(_RunnerBase):
                 # Equilibrate with GCMC moves.
                 if gcmc_sampler is not None:
                     # Bind the GCMC sampler to the dynamics object.
-                    dynamics._d._gcmc_sampler = gcmc_sampler
+                    gcmc_sampler.bind_dynamics(dynamics)
 
                     _logger.info(
                         f"Equilibrating with GCMC moves at {_lam_sym} = {lambda_value:.5f}"
@@ -589,7 +589,7 @@ class Runner(_RunnerBase):
             gcmc_sampler.reset()
 
             # Bind the GCMC sampler to the dynamics object.
-            dynamics._d._gcmc_sampler = gcmc_sampler
+            gcmc_sampler.bind_dynamics(dynamics)
 
             # If this is a restart, then we need to reset the GCMC water state
             # to match that of the restart system.

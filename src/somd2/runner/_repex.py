@@ -242,7 +242,7 @@ class DynamicsCache:
             # dynamics object to reset the water state in its internal OpenMM
             # context following a crash recovery.
             if gcmc_kwargs is not None:
-                dynamics._d._gcmc_sampler = gcmc_sampler
+                gcmc_sampler.bind_dynamics(dynamics)
 
             # Append the dynamics object.
             self._dynamics.append(dynamics)
