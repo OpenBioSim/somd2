@@ -81,6 +81,21 @@ class RunnerBase:
         self._config = config
         self._config._extra_args = {}
 
+        if self._config.replica_exchange and self._config.perturbed_system is not None:
+            # Make sure the number of positions is correct.
+            num_atoms = self._system.num_atoms()
+            num_pert_atoms = self._config.perturbed_system.num_atoms()
+            if num_atoms != num_pert_atoms:
+                msg = (
+                    f"Number of atoms in 'perturbed_system' ({num_pert_atoms}) does not match "
+                    f"the number of atoms in the 'system' ({num_atoms})."
+                )
+                _logger.error(msg)
+                raise ValueError(msg)
+            self._perturbed_system = self._config.perturbed_system.clone()
+        else:
+            self._perturbed_system = None
+
         # Log the versions of somd2 and sire.
         from somd2 import __version__, _sire_version, _sire_revisionid
 
@@ -118,6 +133,10 @@ class RunnerBase:
                 from .._utils._somd1 import apply_pert
 
                 self._system = apply_pert(self._system, self._config.pert_file)
+                if self._perturbed_system is not None:
+                    self._perturbed_system = apply_pert(
+                        self._perturbed_system, self._config.pert_file
+                    )
             except Exception as e:
                 msg = f"Unable to apply perturbation to reference system: {e}"
                 _logger.error(msg)
@@ -133,6 +152,8 @@ class RunnerBase:
                 from .._utils._somd1 import reconstruct_system
 
                 self._system = reconstruct_system(self._system)
+                if self._perturbed_system is not None:
+                    self._perturbed_system = reconstruct_system(self._perturbed_system)
 
         # Make sure the system contains perturbable molecules.
         try:
@@ -144,6 +165,8 @@ class RunnerBase:
 
         # Link properties to the lambda = 0 end state.
         self._system = _sr.morph.link_to_reference(self._system)
+        if self._perturbed_system is not None:
+            self._perturbed_system = _sr.morph.link_to_reference(self._perturbed_system)
 
         # Set the default configuration options.
 
@@ -166,6 +189,11 @@ class RunnerBase:
             _logger.info("Applying SOMD1 perturbation compatibility.")
             self._system = make_compatible(self._system)
             self._system = _sr.morph.link_to_reference(self._system)
+            if self._perturbed_system is not None:
+                self._perturbed_system = make_compatible(self._perturbed_system)
+                self._perturbed_system = _sr.morph.link_to_reference(
+                    self._perturbed_system
+                )
 
             # Next, swap the water topology so that it is in AMBER format.
 
@@ -206,6 +234,10 @@ class RunnerBase:
                         self._system = _System(
                             _setAmberWater(self._system._system, model)
                         )
+                        if self._perturbed_system is not None:
+                            self._perturbed_system = _System(
+                                _setAmberWater(self._perturbed_system._system, model)
+                            )
                         _logger.info(
                             "Converting water topology to AMBER format for SOMD1 compatibility."
                         )
@@ -225,6 +257,8 @@ class RunnerBase:
 
             _logger.info("Applying Boresch modifications to ghost atom bonded terms")
             self._system = modify(self._system)
+            if self._perturbed_system is not None:
+                self._perturbed_system = modify(self._perturbed_system)
 
         # Check for a periodic space.
         self._has_space = self._check_space()
@@ -274,6 +308,10 @@ class RunnerBase:
         # Create alchemical ions.
         if charge_diff != 0:
             self._system = self._create_alchemical_ions(self._system, charge_diff)
+            if self._perturbed_system is not None:
+                self._perturbed_system = self._create_alchemical_ions(
+                    self._perturbed_system, charge_diff
+                )
 
         # Set the lambda values.
         if self._config.lambda_values:
@@ -387,11 +425,19 @@ class RunnerBase:
                         self._system = self._repartition_h_mass(
                             self._system, new_factor
                         )
+                        if self._perturbed_system is not None:
+                            self._perturbed_system = self._repartition_h_mass(
+                                self._perturbed_system, new_factor
+                            )
 
                 else:
                     self._system = self._repartition_h_mass(
                         self._system, self._config.h_mass_factor
                     )
+                    if self._perturbed_system is not None:
+                        self._perturbed_system = self._repartition_h_mass(
+                            self._perturbed_system, self._config.h_mass_factor
+                        )
 
         # Make sure the REST2 selection is valid.
         if self._config.rest2_selection is not None:

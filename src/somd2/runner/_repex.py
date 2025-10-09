@@ -52,6 +52,7 @@ class DynamicsCache:
         dynamics_kwargs,
         gcmc_kwargs=None,
         output_directory=None,
+        perturbed_system=None,
     ):
         """
         Constructor.
@@ -79,6 +80,10 @@ class DynamicsCache:
 
         output_directory: pathlib.Path
             The directory for simulation output.
+
+        perturbed_system: sire.system.System
+            The system for the perturbed state. If None, then the perturbed state
+            is not used.
         """
 
         # Warn if the number of replicas is not a multiple of the number of GPUs.
@@ -109,6 +114,7 @@ class DynamicsCache:
             dynamics_kwargs,
             gcmc_kwargs=gcmc_kwargs,
             output_directory=output_directory,
+            perturbed_system=perturbed_system,
         )
 
     def __setstate__(self, state):
@@ -149,6 +155,7 @@ class DynamicsCache:
         dynamics_kwargs,
         gcmc_kwargs=None,
         output_directory=None,
+        perturbed_system=None,
     ):
         """
         Create the dynamics objects.
@@ -176,6 +183,10 @@ class DynamicsCache:
 
         output_directory: pathlib.Path
             The directory for simulation output.
+
+        perturbed_system: sire.system.System
+            The system for the perturbed state. If None, then the perturbed state
+            is not used.
         """
 
         # Copy the dynamics keyword arguments.
@@ -198,7 +209,10 @@ class DynamicsCache:
                 mols = system[i]
             # This is a new simulation.
             else:
-                mols = system
+                if perturbed_system is not None and lam > 0.5:
+                    mols = perturbed_system
+                else:
+                    mols = system
 
             # Overload the device and lambda value.
             dynamics_kwargs["device"] = device
@@ -512,7 +526,8 @@ class RepexRunner(_RunnerBase):
                 self._rest2_scale_factors,
                 self._num_gpus,
                 dynamics_kwargs,
-                self._gcmc_kwargs,
+                gcmc_kwargs=self._gcmc_kwargs,
+                perturbed_system=self._perturbed_system,
                 output_directory=self._config.output_directory,
             )
         else:

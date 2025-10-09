@@ -127,6 +127,7 @@ class Config:
         max_gpus=None,
         oversubscription_factor=1,
         replica_exchange=False,
+        perturbed_system=None,
         gcmc=False,
         gcmc_selection=None,
         gcmc_excess_chemical_potential="-6.09 kcal/mol",
@@ -320,6 +321,11 @@ class Config:
             Whether to run replica exchange simulation. Currently this can only be used when
             GPU resources are available.
 
+        perturbed_system: str
+            The path to a stream file containing a Sire system for the equilibrated perturbed
+            end state (lambda = 1). This will be used as the starting conformation all lambda
+            windows > 0.5 when performing a replica exchange simulation.
+
         gcmc: bool
             Whether to perform Grand Canonical Monte Carlo (GCMC) water insertions/deletions.
 
@@ -473,6 +479,7 @@ class Config:
         self.max_gpus = max_gpus
         self.oversubscription_factor = oversubscription_factor
         self.replica_exchange = replica_exchange
+        self.perturbed_system = perturbed_system
         self.gcmc = gcmc
         self.gcmc_selection = gcmc_selection
         self.gcmc_excess_chemical_potential = gcmc_excess_chemical_potential
@@ -582,6 +589,13 @@ class Config:
             self._charge_scale_factor
         ):
             d["lambda_schedule"] = "charge_scaled_morph"
+
+        # Use the path for the perturbed_system option, since the system
+        # isn't serializable.
+        if self.perturbed_system is not None:
+            d["perturbed_system"] = str(self._perturbed_system_file)
+            d.pop("perturbed_system_file", None)
+
         return d
 
     @property
@@ -1423,6 +1437,34 @@ class Config:
         if not isinstance(replica_exchange, bool):
             raise ValueError("'replica_exchange' must be of type 'bool'")
         self._replica_exchange = replica_exchange
+
+    @property
+    def perturbed_system(self):
+        return self._perturbed_system
+
+    @perturbed_system.setter
+    def perturbed_system(self, perturbed_system):
+        if perturbed_system is not None:
+            if isinstance(perturbed_system, str):
+                import os
+
+                if not os.path.exists(perturbed_system):
+                    raise ValueError(
+                        f"'perturbed_system' stream file does not exist: {perturbed_system}"
+                    )
+
+                try:
+                    self._perturbed_system = _sr.stream.load(perturbed_system)
+                    self._perturbed_system_file = perturbed_system
+                except Exception as e:
+                    raise ValueError(
+                        f"Unable to load 'perturbed_system' stream file: {e}"
+                    )
+            else:
+                raise TypeError("'perturbed_system' must be of type 'str'")
+        else:
+            self._perturbed_system = None
+            self._perturbed_system_file = None
 
     @property
     def gcmc(self):
