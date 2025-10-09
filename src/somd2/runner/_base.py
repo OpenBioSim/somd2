@@ -1194,7 +1194,7 @@ class RunnerBase:
                 # Save the final trajectory chunk to file.
                 if system.num_frames() > 0:
                     traj_filename = (
-                        self._filenames[index]["trajectory_chunk"] + f"{block}.dcd"
+                        self._filenames[index]["trajectory_chunk"] + f"{block:05d}.dcd"
                     )
                     _sr.save(
                         system.trajectory(),
@@ -1259,7 +1259,7 @@ class RunnerBase:
             if self._config.save_trajectories:
                 if system.num_frames() > 0:
                     traj_filename = (
-                        self._filenames[index]["trajectory_chunk"] + f"{block}.dcd"
+                        self._filenames[index]["trajectory_chunk"] + f"{block:05d}.dcd"
                     )
                     _sr.save(
                         system.trajectory(),
