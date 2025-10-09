@@ -52,7 +52,8 @@ class DynamicsCache:
         dynamics_kwargs,
         gcmc_kwargs=None,
         output_directory=None,
-        perturbed_system=None,
+        perturbed_positions=None,
+        perturbed_box=None,
     ):
         """
         Constructor.
@@ -81,8 +82,12 @@ class DynamicsCache:
         output_directory: pathlib.Path
             The directory for simulation output.
 
-        perturbed_system: sire.system.System
-            The system for the perturbed state. If None, then the perturbed state
+        perturbed_positions: numpy.ndarray
+            The positions for the perturbed state. If None, then the perturbed state
+            is not used.
+
+        perturbed_box: numpy.ndarray
+            The box vectors for the perturbed state. If None, then the perturbed state
             is not used.
         """
 
@@ -114,7 +119,8 @@ class DynamicsCache:
             dynamics_kwargs,
             gcmc_kwargs=gcmc_kwargs,
             output_directory=output_directory,
-            perturbed_system=perturbed_system,
+            perturbed_positions=perturbed_positions,
+            perturbed_box=perturbed_box,
         )
 
     def __setstate__(self, state):
@@ -155,7 +161,8 @@ class DynamicsCache:
         dynamics_kwargs,
         gcmc_kwargs=None,
         output_directory=None,
-        perturbed_system=None,
+        perturbed_positions=None,
+        perturbed_box=None,
     ):
         """
         Create the dynamics objects.
@@ -184,8 +191,12 @@ class DynamicsCache:
         output_directory: pathlib.Path
             The directory for simulation output.
 
-        perturbed_system: sire.system.System
-            The system for the perturbed state. If None, then the perturbed state
+        perturbed_positions: numpy.ndarray
+            The positions for the perturbed state. If None, then the perturbed state
+            is not used.
+
+        perturbed_box: numpy.ndarray
+            The box vectors for the perturbed state. If None, then the perturbed state
             is not used.
         """
 
@@ -209,10 +220,7 @@ class DynamicsCache:
                 mols = system[i]
             # This is a new simulation.
             else:
-                if perturbed_system is not None and lam > 0.5:
-                    mols = perturbed_system
-                else:
-                    mols = system
+                mols = system
 
             # Overload the device and lambda value.
             dynamics_kwargs["device"] = device
@@ -251,6 +259,17 @@ class DynamicsCache:
                 msg = f"Could not create dynamics object for lambda {lam:.5f} on device {device}: {e}"
                 _logger.error(msg)
                 raise RuntimeError(msg) from e
+
+            # Update the box vectors and positions if the perturbed state is used.
+            if (
+                perturbed_positions is not None
+                and perturbed_box is not None
+                and lam > 0.5
+            ):
+                from openmm.unit import angstrom
+
+                dynamics.context().setPeriodicBoxVectors(*perturbed_box * angstrom)
+                dynamics.context().setPositions(perturbed_positions * angstrom)
 
             # Bind the GCMC sampler to the dynamics object. This allows the
             # dynamics object to reset the water state in its internal OpenMM
@@ -527,7 +546,8 @@ class RepexRunner(_RunnerBase):
                 self._num_gpus,
                 dynamics_kwargs,
                 gcmc_kwargs=self._gcmc_kwargs,
-                perturbed_system=self._perturbed_system,
+                perturbed_positions=self._perturbed_positions,
+                perturbed_box=self._perturbed_box,
                 output_directory=self._config.output_directory,
             )
         else:
