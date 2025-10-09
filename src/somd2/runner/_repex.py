@@ -566,7 +566,7 @@ class RepexRunner(_RunnerBase):
 
             # Reset the state of the OpenMM contexts and GCMC samplers.
             for i in range(len(self._lambda_values)):
-                dynamics, gcmc_sampler = self._dynamics_cache.get(index)
+                dynamics, gcmc_sampler = self._dynamics_cache.get(i)
 
                 # Reset the OpenMM state.
                 dynamics.context().setState(self._dynamics_cache._openmm_states[i])
