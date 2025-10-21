@@ -239,3 +239,12 @@ More details on MPS, including tuning options, can be found in the following
 within other Python scripts. When doing so, it is important to to wrap
 code within a ``if __name__ == "__main__":`` block since multiprocessing
 is used with the ``spawn`` start method.
+
+**## Known issues**
+
+During a checkpoint cycle trajectory frames are stored in memory before being
+paged to disk. When running replica exchange simulations with a large number
+of replicas this can lead to exceeding the temporary file storage limit on
+some systems, causing the simulation to hang. This can be resolved by either
+reducing the frequency at which frames are stored, or checkpointing more.
+(Frames are written to disk and cleared from memory at each checkpoint.)
