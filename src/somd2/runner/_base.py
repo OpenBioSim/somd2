@@ -253,12 +253,12 @@ class RunnerBase:
             # Ghost atoms are considered light when adding bond constraints.
             self._config._extra_args["ghosts_are_light"] = True
 
-        # Apply Boresch modifications to bonded terms involving ghost atoms to
-        # avoid spurious couplings to the physical system at the end states.
+        # Apply modifications to bonded terms involving ghost atoms to avoid
+        # spurious couplings to the physical system at the end states.
         elif self._config.ghost_modifications:
             from ghostly import modify
 
-            _logger.info("Applying Boresch modifications to ghost atom bonded terms")
+            _logger.info("Applying modifications to ghost atom bonded terms")
             self._system = modify(self._system)
 
         # Check for a periodic space.
