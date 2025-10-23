@@ -611,6 +611,7 @@ class RunnerBase:
             "integrator": config.integrator,
             "temperature": config.temperature,
             "pressure": config.pressure if self._has_water else None,
+            "surface_tension": config.surface_tension,
             "barostat_frequency": config.barostat_frequency,
             "timestep": config.timestep,
             "restraints": config.restraints,

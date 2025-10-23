@@ -87,6 +87,7 @@ class Config:
         timestep="4 fs",
         temperature="300 K",
         pressure="1 atm",
+        surface_tension=None,
         barostat_frequency=25,
         integrator="langevin_middle",
         cutoff_type="pme",
@@ -166,6 +167,9 @@ class Config:
         pressure: str
             Simulation pressure. (Simulations will run in the NVT ensemble unless
             a pressure is specified.)
+
+        surface_tension: str
+            Surface tension to use for NPT simulations with a membrane barostat.
 
         barostat_frequency: int
             The number of integration steps between barostat updates.
@@ -440,6 +444,7 @@ class Config:
         self.runtime = runtime
         self.temperature = temperature
         self.pressure = pressure
+        self.surface_tension = surface_tension
         self.barostat_frequency = barostat_frequency
         self.integrator = integrator
         self.cutoff_type = cutoff_type
@@ -692,6 +697,35 @@ class Config:
             raise ValueError("'barostat_frequency' must be a positive integer")
 
         self._barostat_frequency = barostat_frequency
+
+    @property
+    def surface_tension(self):
+        return self._surface_tension
+
+    @surface_tension.setter
+    def surface_tension(self, surface_tension):
+        if surface_tension is not None and not isinstance(surface_tension, str):
+            raise TypeError("'surface_tension' must be of type 'str'")
+
+        from sire.units import atm, angstrom
+
+        if surface_tension is not None:
+            try:
+                st = _sr.u(surface_tension)
+            except:
+                raise ValueError(
+                    f"Unable to parse 'surface_tension' as a Sire GeneralUnit: {surface_tension}"
+                )
+            # Make sure we can handle a value of zero.
+            if st == 0:
+                st = 0 * atm * angstrom
+            elif not st.has_same_units(atm * angstrom):
+                raise ValueError("'surface_tension' units are invalid.")
+
+            self._surface_tension = st
+
+        else:
+            self._surface_tension = surface_tension
 
     @property
     def integrator(self):
