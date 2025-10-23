@@ -242,6 +242,10 @@ is used with the ``spawn`` start method.
 
 **## Known issues**
 
+If using the regular `Runner` class via the Python API, then you will need to
+guard calls to its `run()` method within a `if __name__ == "__main__":` block
+since it uses multiprocessing with the `spawn` start method.
+
 During a checkpoint cycle trajectory frames are stored in memory before being
 paged to disk. When running replica exchange simulations with a large number
 of replicas this can lead to exceeding the temporary file storage limit on
