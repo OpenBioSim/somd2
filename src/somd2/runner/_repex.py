@@ -605,13 +605,6 @@ class RepexRunner(_RunnerBase):
         kT = (_sr.units.k_boltz * self._config.temperature).to(_sr.units.kcal_per_mol)
         self._beta = 1.0 / kT
 
-        # Store the pressure times Avaogadro's number.
-        if self._config.pressure is not None:
-            NA = 6.02214076e23 / _sr.units.mole
-            self._pressure = (self._config.pressure * NA).value()
-        else:
-            self._pressure = None
-
         # If restarting, subtract the time already run from the total runtime
         if self._config.restart:
             time = self._system[0].time()
