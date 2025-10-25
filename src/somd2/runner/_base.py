@@ -605,6 +605,14 @@ class RunnerBase:
         _sr.save(mols0, self._filenames["topology0"])
         _sr.save(mols1, self._filenames["topology1"])
 
+        # Update the tajectory page size.
+        if self._config.page_size is not None:
+            # Convert from MB to bytes.
+            page_size = int(self._config.page_size * 1024 * 1024)
+
+            # Set the new page size.
+            _sr.base.PageCache.set_max_page_size(page_size)
+
         # Create the default dynamics kwargs dictionary. These can be overloaded
         # as needed.
         self._dynamics_kwargs = {

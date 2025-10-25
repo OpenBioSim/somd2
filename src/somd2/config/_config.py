@@ -147,6 +147,7 @@ class Config:
         somd1_compatibility=False,
         pert_file=None,
         save_energy_components=False,
+        page_size=None,
         timeout="300 s",
     ):
         """
@@ -420,6 +421,10 @@ class Config:
             Whether to save the energy contribution for each force when checkpointing.
             This is useful when debugging crashes.
 
+        page_size: int
+            The page size for trajectory handling in megabytes. If None, then Sire
+            will automatically set the page size.
+
         timeout: str
             Timeout for the minimiser and file lock.
 
@@ -503,6 +508,7 @@ class Config:
         self.timeout = timeout
         self.num_energy_neighbours = num_energy_neighbours
         self.null_energy = null_energy
+        self.page_size = page_size
 
         self.write_config = write_config
 
@@ -1732,6 +1738,24 @@ class Config:
         if not isinstance(save_energy_components, bool):
             raise ValueError("'save_energy_components' must be of type 'bool'")
         self._save_energy_components = save_energy_components
+
+    @property
+    def page_size(self):
+        return self._page_size
+
+    @page_size.setter
+    def page_size(self, page_size):
+        if page_size is not None:
+            if not isinstance(page_size, int):
+                try:
+                    page_size = int(page_size)
+                except:
+                    raise ValueError("'page_size' must be of type 'int'")
+
+            if page_size < 1:
+                raise ValueError("'page_size' must be greater than 0")
+
+        self._page_size = page_size
 
     @property
     def timeout(self):
