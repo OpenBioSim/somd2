@@ -117,7 +117,7 @@ class Config:
         equilibration_constraints=False,
         energy_frequency="1 ps",
         save_trajectories=True,
-        frame_frequency="20 ps",
+        frame_frequency="100 ps",
         save_velocities=False,
         checkpoint_frequency="100 ps",
         num_checkpoint_workers=None,
