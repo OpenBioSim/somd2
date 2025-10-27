@@ -212,7 +212,7 @@ class Config:
             Factor by which to scale charges for charge scaled morph.
 
         swap_end_states: bool
-            Whether to perform the perturbation in the reverse direction.
+            Whether to swap the end states of the alchemical system.
 
         coulomb_power : float
             Power to use for the soft-core Coulomb interaction. This is used
