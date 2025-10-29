@@ -102,7 +102,7 @@ class Config:
         swap_end_states=False,
         coulomb_power=0.0,
         shift_coulomb="1 A",
-        shift_delta="2.25 A",
+        shift_delta="1.5 A",
         restraints=None,
         constraint="h_bonds",
         perturbable_constraint="h_bonds_not_heavy_perturbed",
