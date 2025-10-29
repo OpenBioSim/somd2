@@ -1453,8 +1453,8 @@ class RunnerBase:
 
         # Save the end-state GCMC topologies for trajectory analysis and visualisation.
         if self._config.gcmc:
-            # Only save for first replica if performing replica exchange.
-            if not self._config.replica_exchange or (block == 0 and index == 0):
+            # Only save for first block.
+            if block == 0:
                 mols0 = _sr.morph.link_to_reference(system)
                 mols1 = _sr.morph.link_to_perturbed(system)
 
