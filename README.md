@@ -112,12 +112,30 @@ the value of `--rest2-scale`. By passing multiple values for `--rest2-scale`, th
 user can fully control the schedule. When doing so, the number of values must
 match the number of lambda windows.
 
+## GCMC
+
+SOMD2 also supports grand canonical Monte Carlo (GCMC) water sampling using
+the [loch](https://github.com/OpenBioSim/loch) package. This can be enabled
+using the `--gcmc` option. To define a GCMC region, use the `--gcmc-selection`
+option, which should be a `Sire` selection string that specifies the atoms
+defining the centre of geometry for the GCMC region. The radius of the GCMC
+sphere can be controlled using the `--gcmc-radius` option. To see all GCMC
+related options, run:
+
+```
+somd2 --help | grep -A2 '  --gcmc'
+```
+
+> [!NOTE]
+> GCMC is currently only supported when using the CUDA platform.
+
 ## Analysis
 
 Simulation output will be written to the directory specified using the
 `--output-directory` parameter. This will contain a number of files, including
-Parquet files for the energy trajectories of each λ window. These can be
-processed using [BioSimSpace](https://github.com/OpenBioSim/biosimspace) as follows:
+[Parquet files](https://en.wikipedia.org/wiki/Apache_Parquet) for the energy
+trajectories of each λ window. These can be processed using
+[BioSimSpace](https://github.com/OpenBioSim/biosimspace) as follows:
 
 ```python
 import BioSimSpace as BSS
@@ -148,6 +166,15 @@ its two neighbours on either side. The value assigned to the remaining windows
 can be controlled via the `--null-energy` option. The number of neighbours should
 be chosen as a trade off between accuracy and computational cost. A value of around
 20% of the number of replicas has been found to be a good starting point.
+
+## Ghost atom modifications
+
+We support modification of ghost atom bonded terms to avoid spurious coupling
+to the physical system using the approach described in
+[this](https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328) paper.
+These are enabled by default, but can be disabled using the ``--no-ghost-modifications``
+option. Modifications are implemented using the [ghostly](https://gitbub.com/OpenBioSim/ghostly)
+package.
 
 ## Note for SOMD1 users
 
@@ -186,5 +213,42 @@ somd2 somd1.bss --pert-file somd1.pert --somd1-compatibility
 (This only shows the limited options required. Others will take default values and can be set accordingly.)
 
 If you want to load an existing system from a perturbation file and use the
-new `somd2` ghost atom bonded-term modifications, then simply omit the
-`--somd1-compatibility` option.
+new `somd2` [ghost atom bonded-term modifications](https://github.com/OpenBioSim/ghostly),
+then simply omit the `--somd1-compatibility` option.
+
+## GPU oversubscription
+
+If you have an NVIDIA GPU that supports the multi-process service (MPS), you can
+oversubscibe the GPU to run multiple OpenMM contexts on the same GPU at once,
+increasing the throughput of your simulation. To do this, you will need to first
+enable MPS by running the following command:
+
+```
+nvidia-cuda-mps-control -d
+```
+
+The number of contexts that can be run in parallel is then controlled by the
+`--oversubscription-factor` option, which defaults to 1.
+
+More details on MPS, including tuning options, can be found in the following
+[techical blog](https://developer.nvidia.com/blog/maximizing-openmm-molecular-dynamics-throughput-with-nvidia-multi-process-service/).
+
+## Python API
+
+``SOMD2`` can also be used as a Python API, allowing it to be embedded
+within other Python scripts. When doing so, it is important to to wrap
+code within a ``if __name__ == "__main__":`` block since multiprocessing
+is used with the ``spawn`` start method.
+
+**## Known issues**
+
+If using the regular `Runner` class via the Python API, then you will need to
+guard calls to its `run()` method within a `if __name__ == "__main__":` block
+since it uses multiprocessing with the `spawn` start method.
+
+During a checkpoint cycle trajectory frames are stored in memory before being
+paged to disk. When running replica exchange simulations with a large number
+of replicas this can lead to exceeding the temporary file storage limit on
+some systems, causing the simulation to hang. This can be resolved by either
+reducing the frequency at which frames are stored, or checkpointing more.
+(Frames are written to disk and cleared from memory at each checkpoint.)

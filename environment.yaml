@@ -7,5 +7,10 @@ channels:
 dependencies:
   - biosimspace
   - git
+  - filelock
   - loguru
   - numba
+  - pycuda
+  - pip:
+      - git+https://github.com/openbiosim/ghostly
+      - git+https://github.com/openbiosim/loch

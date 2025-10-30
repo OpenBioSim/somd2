@@ -21,7 +21,9 @@
 
 __all__ = ["RunnerBase"]
 
+from glob import glob as _glob
 from pathlib import Path as _Path
+from shutil import copyfile as _copyfile
 
 import sire as _sr
 from sire.system import System as _System
@@ -79,11 +81,68 @@ class RunnerBase:
         self._config = config
         self._config._extra_args = {}
 
+        if self._config.replica_exchange and self._config.perturbed_system is not None:
+            # Make sure the number of positions is correct.
+            num_atoms = self._system.num_atoms()
+            num_pert_atoms = self._config.perturbed_system.num_atoms()
+
+            if num_atoms != num_pert_atoms:
+                msg = (
+                    f"Number of atoms in 'perturbed_system' ({num_pert_atoms}) does not match "
+                    f"the number of atoms in the 'system' ({num_atoms})."
+                )
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            # Make sure the coordinates property is linked.
+            perturbed_system = _sr.morph.link_to_perturbed(
+                self._config.perturbed_system
+            )
+
+            # Store the positions.
+            self._perturbed_positions = _sr.io.get_coords_array(perturbed_system)
+
+            # Store the box vectors.
+            cell = self._config.perturbed_system.space().box_matrix()
+            c0 = cell.column0()
+            c1 = cell.column1()
+            c2 = cell.column2()
+            self._perturbed_box = (
+                (c0.x().value(), c0.y().value(), c0.z().value()),
+                (c1.x().value(), c1.y().value(), c1.z().value()),
+                (c2.x().value(), c2.y().value(), c2.z().value()),
+            )
+        else:
+            self._perturbed_positions = None
+            self._perturbed_box = None
+
         # Log the versions of somd2 and sire.
         from somd2 import __version__, _sire_version, _sire_revisionid
 
         _logger.info(f"somd2 version: {__version__}")
         _logger.info(f"sire version: {_sire_version}+{_sire_revisionid}")
+
+        # Flag whether frames are being saved.
+        if (
+            self._config.frame_frequency > 0
+            and self._config.frame_frequency <= self._config.runtime
+        ):
+            self._save_frames = True
+        else:
+            self._save_frames = False
+
+        # Make sure the frame frequency doesn't exceed the checkpoint frequency.
+        # This constraint is currently required to avoid issues with missing
+        # frames when restarting from a checkpoint. This could be fixed by
+        # temporarily adjusting the frame frequency for the first checkpoint
+        # interval after a restart.
+        if (
+            self._save_frames
+            and self._config.frame_frequency > self._config.checkpoint_frequency
+        ):
+            msg = "'frame_frequency' cannot be greater than 'checkpoint_frequency'."
+            _logger.error(msg)
+            raise ValueError(msg)
 
         # Check whether we need to apply a perturbation to the reference system.
         if self._config.pert_file is not None:
@@ -158,13 +217,26 @@ class RunnerBase:
                     num_atoms = waters[0].num_atoms()
 
                     if num_atoms == 3:
-                        # Here we assume TIP3p for any 3-point water model.
+                        # Here we assume TIP3P for any 3-point water model.
                         model = "tip3p"
                     elif num_atoms == 4:
-                        model = "tip4p"
+                        # Check for OPC water.
+                        try:
+                            if (
+                                waters[0]
+                                .search("element Xx")
+                                .atoms()[0]
+                                .charge()
+                                .value()
+                                < -1.1
+                            ):
+                                model = "opc"
+                            else:
+                                model = "tip4p"
+                        except:
+                            model = "tip4p"
                     elif num_atoms == 5:
                         model = "tip5p"
-
                     try:
                         self._system = _System(
                             _setAmberWater(self._system._system, model)
@@ -181,15 +253,24 @@ class RunnerBase:
             # Ghost atoms are considered light when adding bond constraints.
             self._config._extra_args["ghosts_are_light"] = True
 
-        # Apply Boresch modifications to bonded terms involving ghost atoms to
-        # avoid spurious couplings to the physical system at the end states.
+        # Apply modifications to bonded terms involving ghost atoms to avoid
+        # spurious couplings to the physical system at the end states.
         elif self._config.ghost_modifications:
-            from .._utils._ghosts import boresch
+            from ghostly import modify
 
-            self._system = boresch(self._system)
+            _logger.info("Applying modifications to ghost atom bonded terms")
+            self._system = modify(self._system)
 
         # Check for a periodic space.
         self._has_space = self._check_space()
+
+        # Check for water.
+        try:
+            # The search will fail if there are no water molecules.
+            water = self._system["water"].molecules()
+            self._has_water = True
+        except:
+            self._has_water = False
 
         # Check the end state contraints.
         self._check_end_state_constraints()
@@ -304,6 +385,13 @@ class RunnerBase:
             # Work out the current hydrogen mass factor.
             factor_non_water, factor_water = self._get_h_mass_factor(self._system)
 
+            # If using SOMD1 compatibility, then adjust the default value.
+            if self._config.somd1_compatibility and self._config.h_mass_factor == 3.0:
+                self._config.h_mass_factor = 1.5
+                _logger.info(
+                    "Using hydrogen mass repartitioning factor of 1.5 for SOMD1 compatibility."
+                )
+
             # We don't support repartiioning water molecules, so check those first.
             if factor_water is not None:
                 if not isclose(factor_water, 1.0, abs_tol=1e-4):
@@ -360,35 +448,31 @@ class RunnerBase:
         # Flag whether this is a GPU simulation.
         self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]
 
-        # Need to verify before doing any directory checks
+        # Need to verify before doing any directory checks.
         if self._config.restart:
             self._verify_restart_config()
 
         # Check the output directories and create names of output files.
         self._filenames = self._prepare_output()
 
+        # Store the current system as a reference.
+        self._reference_system = self._system.clone()
+
         # Check for a valid restart.
         if self._config.restart:
+            if self._config.use_backup:
+                self._restore_backup_files()
             self._is_restart, self._system = self._check_restart()
         else:
             self._is_restart = False
+            self._cleanup()
 
-        # Save config whenever 'configure' is called to keep it up to date
+        # Save config whenever 'configure' is called to keep it up to date.
         if self._config.write_config:
             _dict_to_yaml(
                 self._config.as_dict(),
                 self._filenames[0]["config"],
             )
-
-        # Save the end state topologies to the output directory.
-        if isinstance(self._system, list):
-            mols = self._system[0]
-        else:
-            mols = self._system
-        mols0 = _sr.morph.link_to_reference(mols)
-        mols1 = _sr.morph.link_to_perturbed(mols)
-        _sr.save(mols0, self._filenames["topology0"])
-        _sr.save(mols1, self._filenames["topology1"])
 
         # Append only this number of lines from the end of the dataframe during checkpointing.
         self._energy_per_block = int(
@@ -398,12 +482,144 @@ class RunnerBase:
         # Zero the energy sample.
         self._nrg_sample = 0
 
+        # GCMC specific validation.
+        if self._config.gcmc:
+            if self._config.platform != "cuda":
+                msg = "GCMC simulations require the CUDA platform."
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            if not self._has_space:
+                msg = "GCMC simulations require a periodic space."
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            if self._config.pressure != None:
+                msg = "GCMC simulations must be run in the NVT ensemble."
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            if isinstance(self._system, list):
+                mols = self._system[0]
+            else:
+                mols = self._system
+
+            # Check that the system is solvated with water molecules. This
+            # is required for GCMC simulations since the existing waters
+            # provide a template for the ghost waters.
+            try:
+                water = mols["water"].molecules()[0]
+            except:
+                msg = "No water molecules in the system. Cannot perform GCMC."
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            # Make sure the frame frequency is a multiple of the energy frequency.
+
+            # Get the ratio.
+            ratio = (
+                self._config.frame_frequency / self._config.energy_frequency
+            ).value()
+
+            # Make sure it's an integer.
+            if not isclose(ratio, round(ratio), abs_tol=1e-4):
+                msg = "'frame_frequency' must be a multiple of 'energy_frequency'."
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            # Make sure the checkpoint frequency is a multiple of the frame frequency.
+
+            # Get the ratio.
+            ratio = (
+                self._config.checkpoint_frequency / self._config.frame_frequency
+            ).value()
+
+            # Make sure it's an integer.
+            if not isclose(ratio, round(ratio), abs_tol=1e-4):
+                msg = "'checkpoint_frequency' must be a multiple of 'frame_frequency'."
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            # Make sure the runtime is a multiple of the frame frequency.
+
+            # Get the ratio.
+            ratio = (self._config.runtime / self._config.frame_frequency).value()
+
+            # Make sure it's an integer.
+            if not isclose(ratio, round(ratio), abs_tol=1e-4):
+                msg = "'runtime' must be a multiple of 'frame_frequency'."
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            # Make sure the selection is valid.
+            if self._config.gcmc_selection is not None:
+                try:
+                    atoms = _sr.mol.selection_to_atoms(
+                        self._system, self._config.gcmc_selection
+                    )
+                except:
+                    msg = "Invalid 'gcmc_selection' value."
+                    _logger.error(msg)
+                    raise ValueError(msg)
+
+            # Store the excess chemcical potential value.
+            self._mu_ex = self._config.gcmc_excess_chemical_potential.value()
+
+        # Store the initial system time.
+        if isinstance(self._system, list):
+            self._initial_time = []
+            for system in self._system:
+                if system is None:
+                    self._initial_time.append(_sr.u("0 ps"))
+                else:
+                    self._initial_time.append(system.time())
+        else:
+            self._initial_time = [self._system.time()] * len(self._lambda_values)
+
+        # Check for missing systems in a multi-system simulation.
+        if isinstance(self._system, list):
+            ref_system = None
+            missing_systems = []
+            for i, system in enumerate(self._system):
+                if system is not None:
+                    ref_system = None
+                else:
+                    missing_systems.append(i)
+            if ref_system is None:
+                ref_system = self._reference_system
+
+            # Fill in any missing systems.
+            for i in missing_systems:
+                self._system[i] = ref_system.clone()
+
+        # Create the lock file name.
+        self._lock_file = str(self._config.output_directory / "somd2.lock")
+
+        # Write the end-state topologies to the output directory.
+        if isinstance(self._system, list):
+            mols = self._system[0]
+        else:
+            mols = self._system
+        mols0 = _sr.morph.link_to_reference(mols)
+        mols1 = _sr.morph.link_to_perturbed(mols)
+        _sr.save(mols0, self._filenames["topology0"])
+        _sr.save(mols1, self._filenames["topology1"])
+
+        # Update the tajectory page size.
+        if self._config.page_size is not None:
+            # Convert from MB to bytes.
+            page_size = int(self._config.page_size * 1024 * 1024)
+
+            # Set the new page size.
+            _sr.base.PageCache.set_max_page_size(page_size)
+
         # Create the default dynamics kwargs dictionary. These can be overloaded
         # as needed.
         self._dynamics_kwargs = {
             "integrator": config.integrator,
             "temperature": config.temperature,
-            "pressure": config.pressure if self._has_space else None,
+            "pressure": config.pressure if self._has_water else None,
+            "surface_tension": config.surface_tension,
             "barostat_frequency": config.barostat_frequency,
             "timestep": config.timestep,
             "restraints": config.restraints,
@@ -425,6 +641,32 @@ class RunnerBase:
             "map": config._extra_args,
         }
 
+        # Create the GCMC specific kwargs dictionary.
+        if self._config.gcmc:
+            self._gcmc_kwargs = {
+                "reference": self._config.gcmc_selection,
+                "excess_chemical_potential": str(
+                    self._config.gcmc_excess_chemical_potential
+                ),
+                "standard_volume": str(self._config.gcmc_standard_volume),
+                "radius": str(self._config.gcmc_radius),
+                "num_ghost_waters": self._config.gcmc_num_waters,
+                "bulk_sampling_probability": self._config.gcmc_bulk_sampling_probability,
+                "cutoff_type": self._config.cutoff_type,
+                "cutoff": str(self._config.cutoff),
+                "temperature": str(self._config.temperature),
+                "lambda_schedule": self._config.lambda_schedule,
+                "coulomb_power": self._config.coulomb_power,
+                "shift_coulomb": str(self._config.shift_coulomb),
+                "shift_delta": str(self._config.shift_delta),
+                "swap_end_states": self._config.swap_end_states,
+                "tolerance": self._config.gcmc_tolerance,
+                "overwrite": self._config.overwrite,
+                "no_logger": True,
+            }
+        else:
+            self._gcmc_kwargs = None
+
     def _check_space(self):
         """
         Check if the system has a periodic space.
@@ -442,11 +684,11 @@ class RunnerBase:
             return True
         else:
             _logger.info("No periodic space detected. Assuming vacuum simulation.")
-            if self._config.cutoff_type == "pme":
+            if self._config.cutoff_type != "none":
                 _logger.info(
-                    "Cannot use PME for non-periodic simulations. Using RF cutoff instead."
+                    "Cannot use PME for non-periodic simulations. Using no cutoff instead."
                 )
-                self._config.cutoff_type = "rf"
+                self._config.cutoff_type = "none"
             return False
 
     def _check_end_state_constraints(self):
@@ -712,6 +954,7 @@ class RunnerBase:
         filenames["energy_components"] = str(
             output_directory / f"energy_components_{lam}.txt"
         )
+        filenames["gcmc_ghosts"] = str(output_directory / f"gcmc_ghosts_{lam}.txt")
         if restart:
             filenames["config"] = str(
                 output_directory / increment_filename("config", "yaml")
@@ -761,6 +1004,8 @@ class RunnerBase:
             for file in list(set(deleted)):
                 file.unlink()
 
+        # File names for end-state topologies. This can be used for trajectory
+        # visulation and analysis.
         filenames["topology0"] = str(self._config.output_directory / "system0.prm7")
         filenames["topology1"] = str(self._config.output_directory / "system1.prm7")
 
@@ -781,17 +1026,22 @@ class RunnerBase:
         """
 
         # List to store systems for each lambda value.
-        systems = []
+        systems = [None] * len(self._lambda_values)
 
         for i, lambda_value in enumerate(self._lambda_values):
             # Try to load the checkpoint file.
             try:
                 system = _sr.stream.load(self._filenames[i]["checkpoint"])
             except:
-                _logger.warning(
-                    f"Unable to load checkpoint file for {_lam_sym}={lambda_value:.5f}, starting from scratch."
-                )
-                return False, self._system
+                if not self._config.replica_exchange:
+                    _logger.warning(
+                        f"Unable to load checkpoint file for {_lam_sym}={lambda_value:.5f}, starting from scratch."
+                    )
+                # Repex requires all files to be present.
+                else:
+                    msg = f"Unable to load checkpoint file for {_lam_sym}={lambda_value:.5f}."
+                    _logger.error(msg)
+                    raise ValueError(msg)
             else:
                 # Check the system is the same as the reference system.
                 are_same, reason = self._systems_are_same(self._system, system)
@@ -804,15 +1054,14 @@ class RunnerBase:
                     self._compare_configs(
                         self._last_config, dict(system.property("config"))
                     )
-                except:
+                except Exception as e:
                     config = dict(system.property("config"))
                     _logger.debug(
                         f"last config: {self._last_config}, current config: {config}"
                     )
-                    _logger.error(
-                        f"Config for {_lam_sym}={lambda_value} does not match previous config."
-                    )
-                    raise
+                    msg = f"Config for {_lam_sym}={lambda_value} does not match previous config: {str(e)}"
+                    _logger.error(msg)
+                    raise ValueError(msg)
                 # Make sure the lambda value is consistent.
                 else:
                     lambda_restart = system.property("lambda")
@@ -820,13 +1069,49 @@ class RunnerBase:
                         lambda_restart == lambda_value
                     except:
                         filename = self._filenames[i]["checkpoint"]
-                        raise ValueError(
-                            f"Lambda value from checkpoint file {filename} for {lambda_restart} "
-                            f"does not match expected value {lambda_value}."
+                        msg = (
+                            f"Lambda value from checkpoint file {filename} for {_lam_sym}={lambda_restart} "
+                            f"does not match expected value {_lam_sym}={lambda_value}."
                         )
+                        _logger.error(msg)
+                        raise ValueError(msg)
 
-                # Append the system to the list.
-                systems.append(_sr.morph.link_to_reference(system))
+                # Store the system to the list.
+                systems[i] = _sr.morph.link_to_perturbed(system)
+
+        # If this is a GCMC simulation, then remove all ghost waters from each of the systems.
+        if self._config.gcmc:
+            # List to store the indices of the current ghost waters.
+            self._restart_ghost_waters = []
+            # List to store the current positions.
+            self._restart_positions = []
+            _logger.info("Removing existing ghost waters from GCMC checkpoint systems")
+            for i, system in enumerate(systems):
+                # Store the positions of all atoms.
+                self._restart_positions.append(_sr.io.get_coords_array(system))
+                if system is not None:
+                    # Remove the ghost waters from the system.
+                    try:
+                        # Get the water molecule indices.
+                        waters = system.molecules().find(system["water"].molecules())
+
+                        # Get the ghost waters and their indices.
+                        ghost_waters = system["property is_ghost_water"].molecules()
+                        ghost_waters = system.molecules().find(ghost_waters)
+
+                        # Store the indices of the ghost waters in the waters list.
+                        idxs = []
+                        for index in ghost_waters:
+                            idxs.append(waters.index(index))
+                        self._restart_ghost_waters.append(idxs)
+
+                        for mol in system["property is_ghost_water"].molecules():
+                            _logger.debug(
+                                f"Removing ghost water molecule {mol.number()} for {_lam_sym}={self._lambda_values[i]:.5f}"
+                            )
+                            system.remove(mol)
+                    except:
+                        pass
 
         return True, systems
 
@@ -856,7 +1141,6 @@ class RunnerBase:
             "save_trajectory",
             "frame_frequency",
             "save_velocities",
-            "checkpoint_frequency",
             "platform",
             "max_threads",
             "max_gpus",
@@ -988,7 +1272,7 @@ class RunnerBase:
         return True, None
 
     @staticmethod
-    def _get_gpu_devices(platform):
+    def _get_gpu_devices(platform, oversubscription_factor=1):
         """
         Get list of available GPUs from CUDA_VISIBLE_DEVICES,
         OPENCL_VISIBLE_DEVICES, or HIP_VISIBLE_DEVICES.
@@ -998,6 +1282,9 @@ class RunnerBase:
 
         platform: str
             The GPU platform to be used for simulations.
+
+        oversubscription_factor: int
+            The number of concurrent workers per GPU. Default is 1.
 
         Returns
         --------
@@ -1037,6 +1324,7 @@ class RunnerBase:
 
         num_gpus = len(available_devices)
         _logger.info(f"Number of GPUs available: {num_gpus}")
+        _logger.info(f"Number of concurrent workers per GPU: {oversubscription_factor}")
 
         return available_devices
 
@@ -1163,6 +1451,27 @@ class RunnerBase:
 
         from somd2 import __version__, _sire_version, _sire_revisionid
 
+        # Save the end-state GCMC topologies for trajectory analysis and visualisation.
+        if self._config.gcmc:
+            # Only save for first block.
+            if block == 0:
+                mols0 = _sr.morph.link_to_reference(system)
+                mols1 = _sr.morph.link_to_perturbed(system)
+
+                # Save to AMBER format.
+                _sr.save(mols0, self._filenames["topology0"])
+                _sr.save(mols1, self._filenames["topology1"])
+
+                # Save to PDB format.
+                _sr.save(
+                    mols0,
+                    self._filenames["topology0"].replace(".prm7", ".pdb"),
+                )
+                _sr.save(
+                    mols1,
+                    self._filenames["topology1"].replace(".prm7", ".pdb"),
+                )
+
         # Get the lambda value.
         lam = self._lambda_values[index]
 
@@ -1179,7 +1488,6 @@ class RunnerBase:
             "somd2 version": __version__,
             "sire version": f"{_sire_version}+{_sire_revisionid}",
             "lambda": str(lam),
-            "lambda_array": lambda_energy,
             "speed": speed,
             "temperature": str(self._config.temperature.value()),
         }
@@ -1192,7 +1500,7 @@ class RunnerBase:
             # Assemble and save the final trajectory.
             if self._config.save_trajectories:
                 # Save the final trajectory chunk to file.
-                if system.num_frames() > 0:
+                if self._save_frames and system.num_frames() > 0:
                     traj_filename = (
                         self._filenames[index]["trajectory_chunk"] + f"{block:05d}.dcd"
                     )
@@ -1209,10 +1517,8 @@ class RunnerBase:
                 traj_filename = self._filenames[index]["trajectory"]
 
                 # Glob for the trajectory chunks.
-                from glob import glob
-
                 traj_chunks = sorted(
-                    glob(f"{self._filenames[index]['trajectory_chunk']}*")
+                    _glob(f"{self._filenames[index]['trajectory_chunk']}*")
                 )
 
                 # If this is a restart, then we need to check for an existing
@@ -1221,10 +1527,8 @@ class RunnerBase:
                 if self._config.restart:
                     path = _Path(traj_filename)
                     if path.exists() and path.stat().st_size > 0:
-                        from shutil import copyfile
-
-                        copyfile(traj_filename, f"{traj_filename}.bak")
-                        traj_chunks = [f"{traj_filename}.bak"] + traj_chunks
+                        _copyfile(traj_filename, f"{traj_filename}.prev")
+                        traj_chunks = [f"{traj_filename}.prev"] + traj_chunks
 
                 # Load the topology and chunked trajectory files.
                 mols = _sr.load([topology0] + traj_chunks)
@@ -1257,7 +1561,7 @@ class RunnerBase:
 
             # Save the current trajectory chunk to file.
             if self._config.save_trajectories:
-                if system.num_frames() > 0:
+                if self._save_frames and system.num_frames() > 0:
                     traj_filename = (
                         self._filenames[index]["trajectory_chunk"] + f"{block:05d}.dcd"
                     )
@@ -1286,6 +1590,42 @@ class RunnerBase:
                     filename,
                     df.iloc[-self._energy_per_block :],
                 )
+
+    def _backup_checkpoint(self, index):
+        """
+        Create a backup of the previous checkpoint files.
+
+        Parameters
+        ----------
+
+        index : int
+            The index of the window or replica.
+        """
+
+        try:
+            # Backup the existing checkpoint file, if it exists.
+            path = _Path(self._filenames[index]["checkpoint"])
+            if path.exists() and path.stat().st_size > 0:
+                _copyfile(
+                    self._filenames[index]["checkpoint"],
+                    str(self._filenames[index]["checkpoint"]) + ".bak",
+                )
+            traj_filename = self._filenames[index]["trajectory"]
+        except Exception as e:
+            return False, e
+
+        try:
+            # Backup the existing energy trajectory file, if it exists.
+            path = _Path(self._filenames[index]["energy_traj"])
+            if path.exists() and path.stat().st_size > 0:
+                _copyfile(
+                    self._filenames[index]["energy_traj"],
+                    str(self._filenames[index]["energy_traj"]) + ".bak",
+                )
+        except Exception as e:
+            return False, e
+
+        return True, None
 
     def _save_energy_components(self, index, context):
         """
@@ -1321,8 +1661,10 @@ class RunnerBase:
         # Process the records.
         for i, f in enumerate(system.getForces()):
             state = new_context.getState(getEnergy=True, groups={i})
-            header += f"{f.getName():>25}"
-            record += f"{state.getPotentialEnergy().value_in_unit(openmm.unit.kilocalories_per_mole):>25.2f}"
+            name = f.getName()
+            name_len = len(name)
+            header += f"{f.getName():>{name_len+2}}"
+            record += f"{state.getPotentialEnergy().value_in_unit(openmm.unit.kilocalories_per_mole):>{name_len+2}.2f}"
 
         # Write to file.
         if self._nrg_sample == 0:
@@ -1335,3 +1677,37 @@ class RunnerBase:
 
         # Increment the sample number.
         self._nrg_sample += 1
+
+    def _restore_backup_files(self):
+        """
+        Restore backup files in the working directory.
+        """
+
+        # Find all files with a .bak extension in the working directory.
+        backup_files = _glob(str(self._config.output_directory / "*.bak"))
+
+        # Strip the .bak extension and copy to the original file name.
+        for file in backup_files:
+            path = _Path(file)
+            new_path = _Path(str(path)[:-4])
+            try:
+                _copyfile(file, new_path)
+            except Exception as e:
+                msg = f"Unable to restore backup file {file}: {str(e)}"
+                _logger.error(msg)
+                raise IOError(msg)
+
+    def _cleanup(self):
+        """
+        Clean up backup files from the working directory.
+        """
+
+        # Find all files with a .bak extension in the working directory.
+        backup_files = _glob(str(self._config.output_directory / "*.bak"))
+
+        for file in backup_files:
+            path = _Path(file)
+            try:
+                path.unlink()
+            except Exception as e:
+                _logger.warning(f"Unable to delete backup file {file}: {str(e)}")
