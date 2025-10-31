@@ -20,17 +20,13 @@
 #####################################################################
 
 """
-The somd2 command line program.
-
-Usage:
-    To get the help for this program and list all of the
-    arguments (with defaults) use:
-
-    somd2 --help
+SOMD2 command line interface.
 """
 
+__all__ = ["somd2"]
 
-def cli():
+
+def somd2():
     """
     SOMD2: Command line interface.
     """
