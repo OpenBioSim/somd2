@@ -241,12 +241,10 @@ More details on MPS, including tuning options, can be found in the following
 
 ## Python API
 
-``SOMD2`` can also be used as a Python API, allowing it to be embedded
-within other Python scripts. When doing so, it is important to to wrap
-code within a ``if __name__ == "__main__":`` block since multiprocessing
-is used with the ``spawn`` start method.
+`SOMD2` can also be used as a Python API, allowing it to be embedded
+within other Python scripts.
 
-**## Known issues**
+## Known issues
 
 If using the regular `Runner` class via the Python API, then you will need to
 guard calls to its `run()` method within a `if __name__ == "__main__":` block
@@ -256,5 +254,6 @@ During a checkpoint cycle trajectory frames are stored in memory before being
 paged to disk. When running replica exchange simulations with a large number
 of replicas this can lead to exceeding the temporary file storage limit on
 some systems, causing the simulation to hang. This can be resolved by either
-reducing the frequency at which frames are stored, or checkpointing more.
-(Frames are written to disk and cleared from memory at each checkpoint.)
+reducing the frequency at which frames are stored, or checkpointing more
+frequently. (Frames are written to disk and cleared from memory at each
+checkpoint.)
