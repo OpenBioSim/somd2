@@ -1514,6 +1514,14 @@ class Config:
     def gcmc(self, gcmc):
         if not isinstance(gcmc, bool):
             raise ValueError("'gcmc' must be of type 'bool'")
+
+        # GCMC isn't supported on macOS.
+        if gcmc:
+            import platform as _platform
+
+            if _platform.system() == "Darwin":
+                raise ValueError("GCMC is not supported on macOS systems.")
+
         self._gcmc = gcmc
 
     @property

@@ -16,6 +16,9 @@ conda env create -f environment.yaml
 
 (We recommend using [Miniforge](https://github.com/conda-forge/miniforge).)
 
+> [!NOTE]
+> On macOS, you will need to use the `environment_macos.yaml` file instead.
+
 Now install `somd2` into the environment:
 
 ```
@@ -33,8 +36,10 @@ somd2 --help
 
 In order to run an alchemical free-energy simulation you will need to
 first create a stream file containing the _perturbable_ system of interest.
-This can be created using [BioSimSpace](https://github.com/OpenBioSim/biosimspace). For example, following the tutorial
-[here](https://biosimspace.openbiosim.org/versions/2023.4.0/tutorials/hydration_freenrg.html). Once the system is created, it can be streamed to file using, e.g.:
+This can be created using [BioSimSpace](https://github.com/OpenBioSim/biosimspace).
+For example, following the tutorial
+[here](https://biosimspace.openbiosim.org/versions/2023.4.0/tutorials/hydration_freenrg.html).
+Once the system is created, it can be streamed to file using, e.g.:
 
 ```python
 import BioSimSpace as BSS
@@ -127,7 +132,8 @@ somd2 --help | grep -A2 '  --gcmc'
 ```
 
 > [!NOTE]
-> GCMC is currently only supported when using the CUDA platform.
+> GCMC is currently only supported when using the CUDA platform and isn't
+> available on macOS, where the `pycuda` package is not available.
 
 ## Analysis
 

@@ -228,7 +228,11 @@ class DynamicsCache:
             dynamics_kwargs["rest2_scale"] = scale
 
             if gcmc_kwargs is not None:
-                from loch import GCMCSampler
+                try:
+                    from loch import GCMCSampler
+                except:
+                    msg = "loch is not installed. GCMC sampling cannot be performed."
+                    _logger.error(msg)
 
                 ghost_file = str(output_directory / f"gcmc_ghosts_{lam:.5f}.txt")
 

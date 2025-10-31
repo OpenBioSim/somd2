@@ -34,6 +34,8 @@ jobs:
     defaults:
       run:
         shell: ${{ matrix.platform.shell }}
+    env:
+      ENVIRONMENT_FILE: ${{ matrix.platform.name == 'macos' && 'environment_macos.yaml' || 'environment.yaml' }}
     steps:
 #
       - name: Checkout the repository (commit)
@@ -51,7 +53,7 @@ jobs:
           auto-update-conda: true
           python-version: ${{ matrix.python-version }}
           activate-environment: somd2
-          environment-file: environment.yaml
+          environment-file: ${{ env.ENVIRONMENT_FILE }}
           miniforge-version: latest
           run-post: ${{ matrix.platform.name != 'windows' }}
 #

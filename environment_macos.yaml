@@ -1,0 +1,14 @@
+name: somd2
+
+channels:
+  - conda-forge
+  - openbiosim/label/dev
+
+dependencies:
+  - biosimspace
+  - git
+  - filelock
+  - loguru
+  - numba
+  - pip:
+      - git+https://github.com/openbiosim/ghostly

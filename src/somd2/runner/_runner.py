@@ -413,7 +413,11 @@ class Runner(_RunnerBase):
         if self._config.gcmc:
             _logger.info(f"Preparing GCMC sampler at {_lam_sym} = {lambda_value:.5f}")
 
-            from loch import GCMCSampler
+            try:
+                from loch import GCMCSampler
+            except:
+                msg = "loch is not installed. GCMC sampling cannot be performed."
+                _logger.error(msg)
 
             gcmc_sampler = GCMCSampler(
                 system,
