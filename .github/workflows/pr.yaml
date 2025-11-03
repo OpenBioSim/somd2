@@ -1,12 +1,8 @@
-name: Release Main
+name: Pull-Request
 
 on:
-  workflow_dispatch:
-    inputs:
-      upload_packages:
-        required: true
-        description: "Upload packages to anaconda?"
-        type: boolean
+  pull_request:
+    branches: [devel, main]
 
 jobs:
   build:
@@ -18,12 +14,22 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
         platform:
+          - { name: "windows", os: "windows-latest", shell: "pwsh" }
           - { name: "linux", os: "ubuntu-latest", shell: "bash -l {0}" }
           - { name: "macos", os: "macos-latest", shell: "bash -l {0}" }
         exclude:
+          # Exclude all but the latest Python from all
+          # but Linux
+          - platform:
+              { name: "macos", os: "macos-latest", shell: "bash -l {0}" }
+            python-version: "3.10"
+          - platform: { name: "windows", os: "windows-latest", shell: "pwsh" }
+            python-version: "3.10"
           - platform:
               { name: "macos", os: "macos-latest", shell: "bash -l {0}" }
             python-version: "3.12"  # MacOS can't run 3.12 yet...
+          - platform: { name: "windows", os: "windows-latest", shell: "pwsh" }
+            python-version: "3.11"
     environment:
       name: somd2-build
     defaults:
@@ -32,6 +38,7 @@ jobs:
     env:
       SIRE_DONT_PHONEHOME: 1
       SIRE_SILENT_PHONEHOME: 1
+      REPO: "${{ github.event.pull_request.head.repo.full_name || github.repository }}"
     steps:
       - uses: conda-incubator/setup-miniconda@v3
         with:
@@ -40,8 +47,8 @@ jobs:
           activate-environment: somd2_build
           miniforge-version: latest
 #
-      - name: Clone the main branch
-        run: git clone -b main https://github.com/openbiosim/somd2
+      - name: Clone the feature branch
+        run: git clone -b ${{ github.head_ref }} --single-branch https://github.com/${{ env.REPO }} somd2
 #
       - name: Setup Conda
         run: conda install -y -c conda-forge boa anaconda-client packaging
@@ -52,12 +59,10 @@ jobs:
       - name: Prepare build location
         run: mkdir ${{ github.workspace }}/build
 #
-      - name: Build Conda package using conda build
+      - name: Build Conda package using conda build using main channel
+        if: ${{ github.base_ref == 'main' }}
         run: conda build -c conda-forge -c openbiosim/label/main ${{ github.workspace }}/somd2/recipes/somd2
 #
-      - name: Upload Conda package
-        run: python ${{ github.workspace }}/somd2/actions/upload_package.py
-        env:
-          ANACONDA_TOKEN: ${{ secrets.ANACONDA_TOKEN }}
-          ANACONDA_LABEL: main
-        if: github.event.inputs.upload_packages == 'true'
+      - name: Build Conda package using conda build using dev channel
+        if: ${{ github.base_ref != 'main' }}
+        run: conda build -c conda-forge -c openbiosim/label/dev ${{ github.workspace }}/somd2/recipes/somd2

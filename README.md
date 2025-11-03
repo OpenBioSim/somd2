@@ -1,6 +1,7 @@
 # SOMD2
 
-[![GitHub Actions](https://github.com/openbiosim/somd2/actions/workflows/main.yaml/badge.svg)](https://github.com/openbiosim/somd2/actions/workflows/main.yaml)
+[![GitHub Actions](https://github.com/openbiosim/somd2/actions/workflows/devel.yaml/badge.svg)](https://github.com/openbiosim/somd2/actions/workflows/devel.yaml)
+[![Conda Version](https://anaconda.org/openbiosim/somd2/badges/downloads.svg)](https://anaconda.org/openbiosim/somd2)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 Open-source GPU accelerated molecular dynamics engine for alchemical free-energy
@@ -24,6 +25,18 @@ Now install `somd2` into the environment:
 ```
 conda activate somd2
 pip install --editable .
+```
+
+Alternatively, to install into an existing conda environment:
+
+```
+conda install -c conda-forge -c openbiosim somd2
+```
+
+Or, for the development version:
+
+```
+conda install -c conda-forge -c openbiosim/label/dev somd2
 ```
 
 You should now have a `somd2` executable in your path. To test, run:

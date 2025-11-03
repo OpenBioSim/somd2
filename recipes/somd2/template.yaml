@@ -1,0 +1,76 @@
+{% set name = "somd2" %}
+
+package:
+  name: {{ name }}
+  version: {{ environ.get('GIT_DESCRIBE_TAG', 'PR') }}
+
+source:
+  git_url: SOMD2_REMOTE
+  git_tag: SOMD2_BRANCH
+
+build:
+  number: {{ environ.get('GIT_DESCRIBE_NUMBER', 0) }}
+  script: {{ PYTHON }} -m pip install . --no-deps --ignore-installed -vv
+
+requirements:
+  host:
+    - biosimspace
+    - ghostly
+    - loch # [not macos]
+    - loguru
+    - pip
+    - python
+    - numba
+    - setuptools
+    - versioningit
+  run:
+    - biosimspace
+    - ghostly
+    - loch # [not macos]
+    - loguru
+    - numba
+    - python
+
+test:
+  script_env:
+    - SIRE_DONT_PHONEHOME
+    - SIRE_SILENT_PHONEHOME
+  requires:
+    - black == 25   # [linux and x86_64 and py==311]
+    - pytest
+    - pytest-black  # [linux and x86_64 and py==311]
+  imports:
+    - somd2
+  source_files:
+    - src/somd2
+    - tests
+  commands:
+    - pytest -vvv --color=yes --black src/somd2 # [linux and x86_64 and py==311]
+    - pytest -vvv --color=yes --import-mode=importlib tests
+
+about:
+  home: https://github.com/openbiosim/somd2
+  license: GPL-3.0-or-later
+  license_file: '{{ environ["RECIPE_DIR"] }}/LICENSE'
+  summary: "GPU accelerated free-energy pertubation simulation engine"
+  dev_url: https://github.com/openbiosim/somd2
+  doc_url: https://github.com/openbiosim/somd2
+  description: |
+                somd2 is an open-source GPU accelerated molecular dynamics engine for
+                alchemical free-energy calculations. Built on top of Sire, BioSimSpace,
+                and OpenMM.
+
+                `conda install -c conda-forge -c openbiosim somd2`
+
+                To install the development version:
+
+                `conda install -c conda-forge -c openbiosim/label/dev somd2`
+
+                When updating the development version it is generally advised to
+                update Sire at the same time:
+
+                `conda install -c conda-forge -c openbiosim/label/dev somd2 sire`
+
+extra:
+  recipe-maintainers:
+    - lohedges
