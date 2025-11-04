@@ -308,7 +308,17 @@ class RunnerBase:
 
         # Create alchemical ions.
         if charge_diff != 0:
-            self._system = self._create_alchemical_ions(self._system, charge_diff)
+            self._system, coalchemical_restraints = self._create_alchemical_ions(
+                self._system,
+                charge_diff,
+                restraint_distance=self._config.coalchemical_restraint_dist,
+            )
+
+            # Add the coalchemical restraints to the extra args.
+            if coalchemical_restraints is not None:
+                self._config._extra_args["coalchemical_restraints"] = (
+                    coalchemical_restraints
+                )
 
         # Set the lambda values.
         if self._config.lambda_values:
@@ -762,7 +772,7 @@ class RunnerBase:
         return perturbed - reference
 
     @staticmethod
-    def _create_alchemical_ions(system, charge_diff):
+    def _create_alchemical_ions(system, charge_diff, restraint_distance=None):
         """
         Internal function to create alchemical ions to maintain a constant charge.
 
@@ -785,8 +795,32 @@ class RunnerBase:
         from sire.legacy.IO import createChlorineIon as _createChlorineIon
         from sire.legacy.IO import createSodiumIon as _createSodiumIon
 
+        from sire.maths import Vector as _Vector
+
         # Clone the system.
         system = system.clone()
+
+        # Work out the centre of mass for the perturbable region. If a restraint
+        # distance is specified, then we will keep ions away from this region.
+        if restraint_distance is not None:
+            # Store the space.
+            space = system.space()
+
+            # Work out the centre of geometry of the perturbable molecule.
+            pert_atoms = system["property is_perturbable"].atoms()
+
+            # Compute the centre of geometry.
+            centre = pert_atoms[0].coordinates()
+            target = centre.__deepcopy__()
+            for atom in pert_atoms[1:]:
+                delta = space.calc_dist_vector(target, atom.coordinates())
+                centre += target + _Vector(delta.x(), delta.y(), delta.z())
+            centre /= len(pert_atoms)
+
+            # Work out the atom closest to the centre of geometry.
+            com_atom = system[
+                f"closest 1 atoms to {centre.x().value(), centre.y().value(), centre.z().value()}"
+            ]
 
         # The number of waters to convert is the absolute charge difference.
         num_waters = abs(charge_diff)
@@ -817,6 +851,9 @@ class RunnerBase:
 
         # Store the molecule numbers for the system.
         numbers = system.numbers()
+
+        # Create a null set of coalchemical restraints.
+        restraints = None
 
         # Create the ions.
         for water in waters:
@@ -912,6 +949,24 @@ class RunnerBase:
             # Flag that this an alchemical ion.
             merged = merged.edit().set_property("is_alchemical_ion", True).commit()
 
+            # If necessary, add a restraint to keep the ion away from the
+            # perturbable molecule. The ion always maps to the oxygen atom of the
+            # water, which is the first atom in the merged molecule.
+            if restraint_distance is not None:
+                from sire.restraints import inverse_distance as _inverse_distance
+
+                restraint = _inverse_distance(
+                    system,
+                    com_atom,
+                    merged[0],
+                    restraint_distance,
+                )
+
+                try:
+                    restraints.add(restraint)
+                except:
+                    restraints = restraint
+
             # Update the system.
             system.update(merged)
 
@@ -930,7 +985,7 @@ class RunnerBase:
                     f"{ion_str} ion to keep charge constant."
                 )
 
-        return system
+        return system, restraints
 
     @staticmethod
     def _create_filenames(lambda_array, lambda_value, output_directory, restart=False):
