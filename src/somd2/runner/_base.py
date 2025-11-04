@@ -613,6 +613,12 @@ class RunnerBase:
             # Set the new page size.
             _sr.base.PageCache.set_max_page_size(page_size)
 
+        # Add the OpenCL platform index to the extra args.
+        if self._config.platform == "opencl":
+            self._config._extra_args["opencl_platform_index"] = (
+                self._config.opencl_platform_index
+            )
+
         # Create the default dynamics kwargs dictionary. These can be overloaded
         # as needed.
         self._dynamics_kwargs = {
@@ -1133,7 +1139,6 @@ class RunnerBase:
             "runtime",
             "restart",
             "minimise",
-            "max_threads",
             "equilibration_time",
             "equilibration_timestep",
             "equilibration_constraints",

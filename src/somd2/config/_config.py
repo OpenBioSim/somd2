@@ -126,6 +126,7 @@ class Config:
         platform="auto",
         max_threads=None,
         max_gpus=None,
+        opencl_platform_index=0,
         oversubscription_factor=1,
         replica_exchange=False,
         perturbed_system=None,
@@ -319,6 +320,10 @@ class Config:
             Maximum number of GPUs to use for simulation (Default None, uses all available.)
             Does nothing if platform is set to CPU.
 
+        opencl_platform_index: int
+            The OpenCL platform index to use when multiple OpenCL implementations are
+            available on the system.
+
         oversubscription_factor: int
             The number of OpenMM contexts that can be run on a single GPU at the same time.
 
@@ -487,6 +492,7 @@ class Config:
         self.platform = platform
         self.max_threads = max_threads
         self.max_gpus = max_gpus
+        self.opencl_platform_index = opencl_platform_index
         self.oversubscription_factor = oversubscription_factor
         self.replica_exchange = replica_exchange
         self.perturbed_system = perturbed_system
@@ -1450,6 +1456,23 @@ class Config:
                 _logger.warning(
                     "CPU platform requested but max_gpus set - ignoring max_gpus"
                 )
+
+    @property
+    def opencl_platform_index(self):
+        return self._opencl_platform_index
+
+    @opencl_platform_index.setter
+    def opencl_platform_index(self, opencl_platform_index):
+        if not isinstance(opencl_platform_index, int):
+            try:
+                opencl_platform_index = int(opencl_platform_index)
+            except:
+                raise ValueError("'opencl_platform_index' must be of type 'int'")
+        if opencl_platform_index < 0:
+            raise ValueError(
+                "'opencl_platform_index' must be greater than or equal to 0"
+            )
+        self._opencl_platform_index = opencl_platform_index
 
     @property
     def oversubscription_factor(self):
