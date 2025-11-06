@@ -132,6 +132,7 @@ class Config:
         replica_exchange=False,
         perturbed_system=None,
         gcmc=False,
+        gcmc_frequency=None,
         gcmc_selection=None,
         gcmc_excess_chemical_potential="-6.09 kcal/mol",
         gcmc_standard_volume="30.543 A^3",
@@ -293,7 +294,7 @@ class Config:
             then this will also be the frequency at which replica swaps are attempted.
             When performing Grand Canonical Monte Carlo (GCMC) water insertions/deletions
             via 'gcmc=True', this will also be the frequency at which GCMC moves are
-            attempted.
+            attempted unless 'gcmc_frequency' is set.
 
         save_trajectories: bool
             Whether to save trajectory files
@@ -346,6 +347,10 @@ class Config:
 
         gcmc: bool
             Whether to perform Grand Canonical Monte Carlo (GCMC) water insertions/deletions.
+
+        gcmc_frequency: str
+            Frequency at which to attempt GCMC moves. If None, then this will be set to the
+            same as 'energy_frequency'. This must be a multiple of 'energy_frequency'.
 
         gcmc_selection: str
             A sire sslection string specifying the atoms that define the centre of geometry
@@ -506,6 +511,7 @@ class Config:
         self.replica_exchange = replica_exchange
         self.perturbed_system = perturbed_system
         self.gcmc = gcmc
+        self.gcmc_frequency = gcmc_frequency
         self.gcmc_selection = gcmc_selection
         self.gcmc_excess_chemical_potential = gcmc_excess_chemical_potential
         self.gcmc_standard_volume = gcmc_standard_volume
@@ -1581,6 +1587,32 @@ class Config:
                 raise ValueError("GCMC is not supported on macOS systems.")
 
         self._gcmc = gcmc
+
+    @property
+    def gcmc_frequency(self):
+        return self._gcmc_frequency
+
+    @gcmc_frequency.setter
+    def gcmc_frequency(self, gcmc_frequency):
+        if gcmc_frequency is not None:
+            if not isinstance(gcmc_frequency, str):
+                raise TypeError("'gcmc_frequency' must be of type 'str'")
+
+            from sire.units import picosecond
+
+            try:
+                t = _sr.u(gcmc_frequency)
+            except:
+                raise ValueError(
+                    f"Unable to parse 'gcmc_frequency' as a Sire GeneralUnit: {gcmc_frequency}"
+                )
+
+            if t.value() != 0 and not t.has_same_units(picosecond):
+                raise ValueError("'gcmc_frequency' units are invalid.")
+
+            self._gcmc_frequency = t
+        else:
+            self._gcmc_frequency = None
 
     @property
     def gcmc_selection(self):

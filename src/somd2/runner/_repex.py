@@ -761,6 +761,11 @@ class RepexRunner(_RunnerBase):
             self._config.frame_frequency / self._config.energy_frequency
         )
 
+        # Work out the number of cycles per GCMC move.
+        cycles_per_gcmc = int(
+            self._config.gcmc_frequency / self._config.energy_frequency
+        )
+
         # Perform the replica exchange simulation.
         for i in range(cycles):
             _logger.info(f"Running dynamics for cycle {i+1} of {cycles}")
@@ -780,6 +785,9 @@ class RepexRunner(_RunnerBase):
             # Whether to checkpoint.
             is_checkpoint = i > 0 and i % cycles_per_checkpoint == 0
 
+            # Whether to perform a GCMC move before the dynamics block.
+            is_gcmc = i % cycles_per_gcmc == 0
+
             # Whether a frame is saved at the end of the cycle.
             write_gcmc_ghosts = i > 0 and i % cycles_per_frame == 0
 
@@ -794,6 +802,7 @@ class RepexRunner(_RunnerBase):
                             replicas,
                             repeat(self._lambda_values),
                             repeat(i == 0),
+                            repeat(is_gcmc),
                             repeat(write_gcmc_ghosts),
                         ):
                             if not result:
@@ -953,6 +962,7 @@ class RepexRunner(_RunnerBase):
         index,
         lambdas,
         is_first_block,
+        is_gcmc=False,
         write_gcmc_ghosts=False,
     ):
         """
@@ -972,6 +982,9 @@ class RepexRunner(_RunnerBase):
 
         num_blocks: int
             The total number of blocks.
+
+        is_gcmc: bool
+            Whether a GCMC move should be performed before the dynamics block.
 
         write_gcmc_ghosts: bool
             Whether to write the indices of GCMC ghost residues to
@@ -1013,7 +1026,7 @@ class RepexRunner(_RunnerBase):
             # Perform a GCMC move. For repex this needs to be done before the
             # dynamics block so that the final energies, which are used in the
             # repex acceptance criteria, are correct.
-            if gcmc_sampler is not None:
+            if is_gcmc and gcmc_sampler is not None:
                 # Push the PyCUDA context on top of the stack.
                 gcmc_sampler.push()
 

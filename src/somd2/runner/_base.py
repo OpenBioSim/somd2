@@ -525,6 +525,24 @@ class RunnerBase:
                 raise ValueError(msg)
 
             # Make sure the frame frequency is a multiple of the energy frequency.
+            if self._config.gcmc_frequency is None:
+                self._config.gcmc_frequency = self._config.energy_frequency
+                msg = (
+                    f"'gcmc_frequency' not specified. Setting to 'energy_frequency' of "
+                    f"{self._config.energy_frequency}."
+                )
+                _logger.info(msg)
+            else:
+                # Get the ratio.
+                ratio = (
+                    self._config.gcmc_frequency / self._config.energy_frequency
+                ).value()
+
+                # Make sure it's an integer.
+                if not isclose(ratio, round(ratio), abs_tol=1e-4):
+                    msg = "'gcmc_frequency' must be a multiple of 'energy_frequency'."
+                    _logger.error(msg)
+                    raise ValueError(msg)
 
             # Get the ratio.
             ratio = (

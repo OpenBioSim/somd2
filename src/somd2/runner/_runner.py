@@ -677,9 +677,9 @@ class Runner(_RunnerBase):
 
                         # Loop until we reach the runtime.
                         while runtime <= self._config.checkpoint_frequency:
-                            # Run the dynamics in blocks of the energy frequency.
+                            # Run the dynamics in blocks of the GCMC frequency.
                             dynamics.run(
-                                self._config.energy_frequency,
+                                self._config.gcmc_frequency,
                                 energy_frequency=self._config.energy_frequency,
                                 frame_frequency=self._config.frame_frequency,
                                 lambda_windows=lambda_array,
@@ -886,9 +886,9 @@ class Runner(_RunnerBase):
 
                     # Loop until we reach the runtime.
                     while runtime <= time:
-                        # Run the dynamics in blocks of the energy frequency.
+                        # Run the dynamics in blocks of the GCMC frequency.
                         dynamics.run(
-                            self._config.energy_frequency,
+                            self._config.gcmc_frequency,
                             energy_frequency=self._config.energy_frequency,
                             frame_frequency=self._config.frame_frequency,
                             lambda_windows=lambda_array,
