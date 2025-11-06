@@ -647,6 +647,11 @@ class RunnerBase:
                 self._config.opencl_platform_index
             )
 
+        # Set the initial constraint values. This can be modified
+        # by minimisation and equilibration option.
+        self._initial_constraint = self._config.constraint
+        self._initial_perturbable_constraint = self._config.perturbable_constraint
+
         # Create the default dynamics kwargs dictionary. These can be overloaded
         # as needed.
         self._dynamics_kwargs = {

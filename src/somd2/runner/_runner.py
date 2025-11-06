@@ -436,14 +436,27 @@ class Runner(_RunnerBase):
 
         # Minimisation.
         if self._config.minimise:
-            # Minimise with no constraints if we need to equilibrate first.
-            # This seems to improve the stability of the equilibration.
-            if self._config.equilibration_time.value() > 0.0 and not is_restart:
+            # Disable constraints.
+            if self._config.minimisation_constraints == False:
                 constraint = "none"
                 perturbable_constraint = "none"
             else:
-                constraint = self._config.constraint
-                perturbable_constraint = self._config.perturbable_constraint
+                if self._config.minimisation_constraints == True:
+                    constraint = self._config.constraint
+                    perturbable_constraint = self._config.perturbable_constraint
+                else:
+                    # Minimise with no constraints if we need to equilibrate first.
+                    # This seems to improve the stability of the equilibration.
+                    if self._config.equilibration_time.value() > 0.0 and not is_restart:
+                        constraint = "none"
+                        perturbable_constraint = "none"
+                    else:
+                        constraint = self._config.constraint
+                        perturbable_constraint = self._config.perturbable_constraint
+
+            # Update the initial constraint values.
+            self._initial_constraint = constraint
+            self._initial_perturbable_constraint = perturbable_constraint
 
             try:
                 system = self._minimisation(
@@ -521,17 +534,28 @@ class Runner(_RunnerBase):
 
                 # Perform minimisation at the end of equilibration only if the
                 # timestep is increasing, or the constraint is changing.
-                if (self._config.timestep > self._config.equilibration_timestep) or (
-                    not self._config.equilibration_constraints
-                    and self._config.perturbable_constraint != "none"
+                if (
+                    (self.config.timestep > self._config.equilibration_timestep)
+                    or (self._config.constraint != self._initial_constraint)
+                    or (
+                        self._config.perturbable_constraint
+                        != self._initial_perturbable_constraint
+                    )
                 ):
+                    # Set the constraint to use for minimisation after equilibration.
+                    constraint = self._config.constraint
+                    perturbable_constraint = self._config.perturbable_constraint
+                    if self._config.minimisation_constraints == False:
+                        constraint = "none"
+                        perturbable_constraint = "none"
+
                     system = self._minimisation(
                         system,
                         lambda_value=lambda_value,
                         rest2_scale=rest2_scale,
                         device=device,
-                        constraint=self._config.constraint,
-                        perturbable_constraint=self._config.perturbable_constraint,
+                        constraint=constraint,
+                        perturbable_constraint=perturbable_constraint,
                     )
             except Exception as e:
                 try:

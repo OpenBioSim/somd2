@@ -113,6 +113,7 @@ class Config:
         coalchemical_restraint_dist=None,
         com_reset_frequency=10,
         minimise=True,
+        minimisation_constraints=None,
         equilibration_time="0 ps",
         equilibration_timestep="1 fs",
         equilibration_constraints=False,
@@ -278,6 +279,13 @@ class Config:
 
         minimise: bool
             Whether to minimise the system before simulation.
+
+        minimisation_constraints: bool
+            Whether to use constraints during minimisation. If None, then this will
+            constraints will be decided on the basis of the specified simulation
+            constraints, and whether equilibration_constraints is set. Setting to False
+            will always disable constraints during minimisation. Setting to True will
+            always enable constraints during minimisation.
 
         equilibration_time: str
             Time interval for equilibration. Only simulations starting from
@@ -494,6 +502,7 @@ class Config:
         self.coalchemical_restraint_dist = coalchemical_restraint_dist
         self.com_reset_frequency = com_reset_frequency
         self.minimise = minimise
+        self.minimisation_constraints = minimisation_constraints
         self.equilibration_time = equilibration_time
         self.equilibration_timestep = equilibration_timestep
         self.equilibration_constraints = equilibration_constraints
@@ -1202,6 +1211,19 @@ class Config:
                 "Minimisation is highly recommended for increased stability."
             )
         self._minimise = minimise
+
+    @property
+    def minimisation_constraints(self):
+        return self._minimisation_constraints
+
+    @minimisation_constraints.setter
+    def minimisation_constraints(self, minimisation_constraints):
+        if minimisation_constraints is not None:
+            if not isinstance(minimisation_constraints, bool):
+                raise ValueError("'minimisation_constraints' must be of type 'bool'")
+            self._minimisation_constraints = minimisation_constraints
+        else:
+            self._minimisation_constraints = None
 
     @property
     def equilibration_time(self):

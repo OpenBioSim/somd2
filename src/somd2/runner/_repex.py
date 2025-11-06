@@ -523,25 +523,35 @@ class RepexRunner(_RunnerBase):
         if not self._is_restart:
             dynamics_kwargs = self._dynamics_kwargs.copy()
 
+            # Set the default options.
+            timestep = self._config.timestep
+            constraint = self._config.constraint
+            perturbable_constraint = self._config.perturbable_constraint
+
+            if self._config.minimise and not self._config.minimisation_constraints:
+                constraint = "none"
+                perturbable_constraint = "none"
+
             if self._config.equilibration_time.value() > 0.0:
                 self._is_equilibration = True
 
-                # Overload the dynamics kwargs with the equilibration options.
-                dynamics_kwargs.update(
-                    {
-                        "timestep": self._config.equilibration_timestep,
-                        "constraint": (
-                            "none"
-                            if not self._config.equilibration_constraints
-                            else self._config.constraint
-                        ),
-                        "perturbable_constraint": (
-                            "none"
-                            if not self._config.equilibration_constraints
-                            else self._config.perturbable_constraint
-                        ),
-                    }
-                )
+                # Set the equilibration specific options.
+                if not self._config.equilibration_constraints:
+                    constraint = "none"
+                    perturbable_constraint = "none"
+
+            # Update the initial constraint values.
+            self._initial_constraint = constraint
+            self._initial_perturbable_constraint = perturbable_constraint
+
+            # Overload the dynamics kwargs with any updated options.
+            dynamics_kwargs.update(
+                {
+                    "timestep": timestep,
+                    "constraint": constraint,
+                    "perturbable_constraint": perturbable_constraint,
+                }
+            )
 
             self._dynamics_cache = DynamicsCache(
                 self._system,
@@ -1195,6 +1205,20 @@ class RepexRunner(_RunnerBase):
                 auto_fix_minimise=True,
             )
 
+            # Whether we have minimised again.
+            has_minimised = False
+
+            # If the time step is changing and we are not using constraints
+            # for the initial equilibration, then minimise again.
+            if (
+                self._config.timestep > self._config.equilibration_timestep
+            ) and self._config.minimisation_contraints == False:
+                _logger.info(
+                    f"Minimising at {_lam_sym} = {self._lambda_values[index]:.5f}"
+                )
+                dynamics.minimise(timeout=self._config.timeout)
+                has_minimised = True
+
             # Commit the system.
             system = dynamics.commit()
 
@@ -1243,14 +1267,19 @@ class RepexRunner(_RunnerBase):
 
             # Perform minimisation at the end of equilibration only if the
             # timestep is increasing, or the constraint is changing.
-            if (self._config.timestep > self._config.equilibration_timestep) or (
-                not self._config.equilibration_constraints
-                and self._config.perturbable_constraint != "none"
-            ):
-                _logger.info(
-                    f"Minimising at {_lam_sym} = {self._lambda_values[index]:.5f}"
-                )
-                dynamics.minimise(timeout=self._config.timeout)
+            if not has_minimised:
+                if (
+                    (self._config.timestep > self._config.equilibration_timestep)
+                    or (self._initial_constaint != self._config.constraint)
+                    or (
+                        self._initial_perturbable_constaint
+                        != self._config.perturbable_constraint
+                    )
+                ):
+                    _logger.info(
+                        f"Minimising at {_lam_sym} = {self._lambda_values[index]:.5f}"
+                    )
+                    dynamics.minimise(timeout=self._config.timeout)
 
             # Set the new dynamics object.
             self._dynamics_cache.set(index, dynamics)
