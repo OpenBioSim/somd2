@@ -772,9 +772,12 @@ class RepexRunner(_RunnerBase):
         )
 
         # Work out the number of cycles per GCMC move.
-        cycles_per_gcmc = int(
-            self._config.gcmc_frequency / self._config.energy_frequency
-        )
+        if self.config.gcmc:
+            cycles_per_gcmc = int(
+                self._config.gcmc_frequency / self._config.energy_frequency
+            )
+        else:
+            cycles_per_gcmc = cycles + 1
 
         # Perform the replica exchange simulation.
         for i in range(cycles):
