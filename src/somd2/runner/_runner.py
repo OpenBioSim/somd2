@@ -535,7 +535,7 @@ class Runner(_RunnerBase):
                 # Perform minimisation at the end of equilibration only if the
                 # timestep is increasing, or the constraint is changing.
                 if (
-                    (self.config.timestep > self._config.equilibration_timestep)
+                    (self._config.timestep > self._config.equilibration_timestep)
                     or (self._config.constraint != self._initial_constraint)
                     or (
                         self._config.perturbable_constraint
