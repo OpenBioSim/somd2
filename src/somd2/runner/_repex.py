@@ -772,7 +772,7 @@ class RepexRunner(_RunnerBase):
         )
 
         # Work out the number of cycles per GCMC move.
-        if self.config.gcmc:
+        if self._config.gcmc:
             cycles_per_gcmc = int(
                 self._config.gcmc_frequency / self._config.energy_frequency
             )
