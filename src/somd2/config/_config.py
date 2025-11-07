@@ -124,7 +124,7 @@ class Config:
         checkpoint_frequency="100 ps",
         num_checkpoint_workers=None,
         num_energy_neighbours=None,
-        null_energy="100000 kcal/mol",
+        null_energy="1e6 kcal/mol",
         platform="auto",
         max_threads=None,
         max_gpus=None,
