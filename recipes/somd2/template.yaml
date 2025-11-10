@@ -22,6 +22,7 @@ requirements:
     - python
     - numba
     - setuptools
+    - sire
     - versioningit
   run:
     - biosimspace
@@ -30,6 +31,7 @@ requirements:
     - loguru
     - numba
     - python
+    - sire
 
 test:
   script_env:
