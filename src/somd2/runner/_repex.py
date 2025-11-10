@@ -528,7 +528,7 @@ class RepexRunner(_RunnerBase):
             constraint = self._config.constraint
             perturbable_constraint = self._config.perturbable_constraint
 
-            if self._config.minimise and not self._config.minimisation_constraints:
+            if self._config.minimise and self._config.minimisation_constraints == False:
                 constraint = "none"
                 perturbable_constraint = "none"
 
@@ -1198,8 +1198,6 @@ class RepexRunner(_RunnerBase):
 
                 # Store the current water state.
                 water_state = gcmc_sampler.water_state()
-
-            _logger.info(f"Equilibration constraints: {dynamics.perturbable_constraint()}")
 
             # Equilibrate.
             dynamics.run(
