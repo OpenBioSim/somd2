@@ -272,7 +272,7 @@ class RunnerBase:
         except:
             self._has_water = False
 
-        # Check the end state contraints.
+        # Check the end state constraints.
         self._check_end_state_constraints()
 
         # Get the charge difference between the two end states.

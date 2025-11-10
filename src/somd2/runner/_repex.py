@@ -1199,6 +1199,8 @@ class RepexRunner(_RunnerBase):
                 # Store the current water state.
                 water_state = gcmc_sampler.water_state()
 
+            _logger.info(f"Equilibration constraints: {dynamics.perturbable_constraint()}")
+
             # Equilibrate.
             dynamics.run(
                 self._config.equilibration_time,
@@ -1215,7 +1217,7 @@ class RepexRunner(_RunnerBase):
             # for the initial equilibration, then minimise again.
             if (
                 self._config.timestep > self._config.equilibration_timestep
-            ) and self._config.minimisation_contraints == False:
+            ) and self._config.minimisation_constraints == False:
                 _logger.info(
                     f"Minimising at {_lam_sym} = {self._lambda_values[index]:.5f}"
                 )
