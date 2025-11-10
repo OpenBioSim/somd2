@@ -1223,6 +1223,24 @@ class Config:
     @minimisation_constraints.setter
     def minimisation_constraints(self, minimisation_constraints):
         if minimisation_constraints is not None:
+            if isinstance(minimisation_constraints, str):
+                # Strip whitespace and convert to lower case.
+                minimisation_constraints = minimisation_constraints.lower().replace(
+                    " ", ""
+                )
+                # Handle special case of "none"
+                if minimisation_constraints == "none":
+                    self._minimisation_constraints = None
+                    return
+                # Convert to bool.
+                elif minimisation_constraints == "true":
+                    minimisation_constraints = True
+                elif minimisation_constraints == "false":
+                    minimisation_constraints = False
+                else:
+                    raise ValueError(
+                        "'minimisation_constraints' string must be 'true', 'false', or 'none'"
+                    )
             if not isinstance(minimisation_constraints, bool):
                 raise ValueError("'minimisation_constraints' must be of type 'bool'")
             self._minimisation_constraints = minimisation_constraints
