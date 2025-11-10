@@ -42,7 +42,7 @@ test:
     - pytest
     - pytest-black  # [linux and x86_64 and py==311]
   imports:
-    - somd2
+    - somd2 # [linux]
   source_files:
     - src/somd2
     - tests
