@@ -526,7 +526,7 @@ class RunnerBase:
 
             # Make sure the frame frequency is a multiple of the energy frequency.
             if self._config.gcmc_frequency is None:
-                self._config.gcmc_frequency = self._config.energy_frequency
+                self._config.gcmc_frequency = str(self._config.energy_frequency)
                 msg = (
                     f"'gcmc_frequency' not specified. Setting to 'energy_frequency' of "
                     f"{self._config.energy_frequency}."
