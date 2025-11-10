@@ -16,7 +16,7 @@ requirements:
   host:
     - biosimspace
     - ghostly
-    - loch # [not macos]
+    - loch # [linux]
     - loguru
     - pip
     - python
@@ -27,7 +27,7 @@ requirements:
   run:
     - biosimspace
     - ghostly
-    - loch # [not macos]
+    - loch # [linux]
     - loguru
     - numba
     - python
