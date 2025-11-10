@@ -537,8 +537,12 @@ class RepexRunner(_RunnerBase):
 
                 # Set the equilibration specific options.
                 if not self._config.equilibration_constraints:
-                    constraint = "none"
-                    perturbable_constraint = "none"
+                    if (
+                        not self._config.minimise
+                        or self._config.minimisation_constraints == False
+                    ):
+                        constraint = "none"
+                        perturbable_constraint = "none"
 
             # Update the initial constraint values.
             self._initial_constraint = constraint
@@ -1199,6 +1203,62 @@ class RepexRunner(_RunnerBase):
                 # Store the current water state.
                 water_state = gcmc_sampler.water_state()
 
+            # Store the current constraints.
+            current_constraint = self._initial_constraint
+            current_perturbable_constraint = self._initial_perturbable_constraint
+
+            # Work out whether the constraints have changed from the initial minimisation.
+            if self._config.minimise:
+                constraint = self._config.constraint
+                perturbable_constraint = self._config.perturbable_constraint
+
+                if not self._config.equilibration_constraints:
+                    constraint = "none"
+                    perturbable_constraint = "none"
+
+                constraints_changed = (self._initial_constraint != constraint) or (
+                    self._initial_perturbable_constraint != perturbable_constraint
+                )
+
+                # Update the current constraints.
+                current_constraint = constraint
+                current_perturbable_constraint = perturbable_constraint
+
+                # We need to create a new dynamics object if the constraints have changed.
+                if constraints_changed:
+                    _logger.info(
+                        f"Created dynamics object for {_lam_sym} = {self._lambda_values[index]:.5f}"
+                    )
+
+                    # Commit the current system.
+                    system = dynamics.commit()
+
+                    # Delete the current dynamics object.
+                    self._dynamics_cache.delete(index)
+
+                    # Work out the device index.
+                    device = index % self._num_gpus
+
+                    # Copy the dynamics keyword arguments.
+                    dynamics_kwargs = self._dynamics_kwargs.copy()
+
+                    # Overload the device and lambda value.
+                    dynamics_kwargs["device"] = device
+                    dynamics_kwargs["lambda_value"] = self._lambda_values[index]
+                    dynamics_kwargs["rest2_scale"] = self._rest2_scale_factors[index]
+                    dynamics_kwargs["constraint"] = constraint
+                    dynamics_kwargs["perturbable_constraint"] = perturbable_constraint
+
+                    # Create the new dynamics object.
+                    dynamics = system.dynamics(**dynamics_kwargs)
+
+                    # Reset the GCMC water state.
+                    if gcmc_sampler is not None:
+                        self._reset_gcmc_sampler(gcmc_sampler, dynamics)
+
+                    # Update the dynamics object in the cache.
+                    self._dynamics_cache.set(index, dynamics)
+
             # Equilibrate.
             dynamics.run(
                 self._config.equilibration_time,
@@ -1211,16 +1271,38 @@ class RepexRunner(_RunnerBase):
             # Whether we have minimised again.
             has_minimised = False
 
-            # If the time step is changing and we are not using constraints
-            # for the initial equilibration, then minimise again.
-            if (
-                self._config.timestep > self._config.equilibration_timestep
-            ) and self._config.minimisation_constraints == False:
-                _logger.info(
-                    f"Minimising at {_lam_sym} = {self._lambda_values[index]:.5f}"
+            # Minimise again if the timestep is increasing or the constraint is changing.
+            if self._config.minimise:
+                # Store the production constraint values.
+                constraint = self._config.constraint
+                perturbable_constraint = self._config.perturbable_constraint
+
+                # Disable constraints if requested.
+                if self._config.minimisation_constraints == False:
+                    constraint = "none"
+                    perturbable_constraint = "none"
+
+                # Are the constraints changing?
+                constraints_changing = (current_constraint != constraint) or (
+                    current_perturbable_constraint != perturbable_constraint
                 )
-                dynamics.minimise(timeout=self._config.timeout)
-                has_minimised = True
+
+                # Is the timestep increasing?
+                timestep_increasing = (
+                    self._config.timestep > self._config.equilibration_timestep
+                )
+
+                # Minimise here using the existing dynamics object if the timestep
+                # is increasing but the constraints are not changing. This avoids the
+                # need to recreate the dynamics object twice. This only happens when
+                # the equilibration is performed without constraints and minimisation
+                # constraints are disabled.
+                if timestep_increasing and not constraints_changing:
+                    _logger.info(
+                        f"Minimising at {_lam_sym} = {self._lambda_values[index]:.5f}"
+                    )
+                    dynamics.minimise(timeout=self._config.timeout)
+                    has_minimised = True
 
             # Commit the system.
             system = dynamics.commit()
@@ -1250,35 +1332,12 @@ class RepexRunner(_RunnerBase):
             # the original Sire system, so the water state in the context does
             # not match the current GCMC water state.
             if gcmc_sampler is not None:
-                # Reset the GCMC sampler. This resets the sampling statistics and
-                # clears the associated OpenMM forces. This is required since a new
-                # context is created following equilibration, e.g. because constraints
-                # or the timestep are different for the production phase.
-                gcmc_sampler.reset()
-
-                # Push the PyCUDA context on top of the stack.
-                gcmc_sampler.push()
-
-                # Set the water state.
-                gcmc_sampler._set_water_state(dynamics.context())
-
-                # Remove the PyCUDA context from the stack.
-                gcmc_sampler.pop()
-
-                # Re-bind the GCMC sampler to the dynamics object.
-                dynamics._d._gcmc_sampler = gcmc_sampler
+                self._reset_gcmc_sampler(gcmc_sampler, dynamics)
 
             # Perform minimisation at the end of equilibration only if the
             # timestep is increasing, or the constraint is changing.
-            if not has_minimised:
-                if (
-                    (self._config.timestep > self._config.equilibration_timestep)
-                    or (self._initial_constaint != self._config.constraint)
-                    or (
-                        self._initial_perturbable_constaint
-                        != self._config.perturbable_constraint
-                    )
-                ):
+            if self._config.minimise and not has_minimised:
+                if timestep_increasing or constraints_changing:
                     _logger.info(
                         f"Minimising at {_lam_sym} = {self._lambda_values[index]:.5f}"
                     )
@@ -1538,3 +1597,33 @@ class RepexRunner(_RunnerBase):
             t_ij,
             fmt="%.5f",
         )
+
+    @staticmethod
+    def _reset_gcmc_sampler(gcmc_sampler, dynamics):
+        """
+        Reset the GCMC sampler.
+
+        Parameters
+        ----------
+
+        gcmc_sampler: sire.gcmc.GCMCSampler
+            The GCMC sampler to reset.
+
+        dynamics: sire.mol.Dynamics
+            The dynamics object associated with the GCMC sampler.
+        """
+        # Reset the GCMC sampler. This resets the sampling statistics and
+        # clears the associated OpenMM forces.
+        gcmc_sampler.reset()
+
+        # Push the PyCUDA context on top of the stack.
+        gcmc_sampler.push()
+
+        # Set the water state.
+        gcmc_sampler._set_water_state(dynamics.context(), force=True)
+
+        # Remove the PyCUDA context from the stack.
+        gcmc_sampler.pop()
+
+        # Re-bind the GCMC sampler to the dynamics object.
+        gcmc_sampler.bind_dynamics(dynamics)
