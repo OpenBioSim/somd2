@@ -283,9 +283,11 @@ class Config:
         minimisation_constraints: bool
             Whether to use constraints during minimisation. If None, then this will
             constraints will be decided on the basis of the specified simulation
-            constraints, and whether equilibration_constraints is set. Setting to False
+            constraints, and whether 'equilibration_constraints' is set. Setting to False
             will always disable constraints during minimisation. Setting to True will
-            always enable constraints during minimisation.
+            always enable constraints during minimisation, using the values specified
+            by 'constraint' and 'perturbable_constraint', i.e. overriding
+            'equilibration_constraints'.
 
         equilibration_time: str
             Time interval for equilibration. Only simulations starting from
@@ -295,7 +297,9 @@ class Config:
             Equilibration timestep. (Can be different to simulation timestep.)
 
         equilibration_constraints: bool
-            Whether to use constraints during equilibration.
+            Whether to use constraints during equilibration. If False, then no constraints
+            will be used. If True, then the values specified by 'constraint' and
+            'perturbable_constraint' will be used.
 
         energy_frequency: str
             Frequency at which to output energy data. If running using 'replica_exchange',
