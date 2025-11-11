@@ -16,7 +16,7 @@ requirements:
   host:
     - biosimspace
     - ghostly
-    - loch # [linux]
+    - loch          # [linux]
     - loguru
     - pip
     - python
@@ -27,7 +27,7 @@ requirements:
   run:
     - biosimspace
     - ghostly
-    - loch # [linux]
+    - loch          # [linux]
     - loguru
     - numba
     - python
@@ -42,12 +42,12 @@ test:
     - pytest
     - pytest-black  # [linux and x86_64 and py==311]
   imports:
-    - somd2 # [linux]
+    - somd2         # [linux]
   source_files:
     - src/somd2
     - tests
   commands:
-    - pytest -vvv --color=yes --black src/somd2 # [linux and x86_64 and py==311]
+    - pytest -vvv --color=yes --black src/somd2             # [linux and x86_64 and py==311]
     - pytest -vvv --color=yes --import-mode=importlib tests # [linux]
 
 about:
