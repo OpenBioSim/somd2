@@ -532,31 +532,6 @@ class Runner(_RunnerBase):
                 if self._initial_time[index].value() != 0:
                     system.set_time(self._initial_time[index])
 
-                # Perform minimisation at the end of equilibration only if the
-                # timestep is increasing, or the constraint is changing.
-                if (
-                    (self._config.timestep > self._config.equilibration_timestep)
-                    or (self._config.constraint != self._initial_constraint)
-                    or (
-                        self._config.perturbable_constraint
-                        != self._initial_perturbable_constraint
-                    )
-                ):
-                    # Set the constraint to use for minimisation after equilibration.
-                    constraint = self._config.constraint
-                    perturbable_constraint = self._config.perturbable_constraint
-                    if self._config.minimisation_constraints == False:
-                        constraint = "none"
-                        perturbable_constraint = "none"
-
-                    system = self._minimisation(
-                        system,
-                        lambda_value=lambda_value,
-                        rest2_scale=rest2_scale,
-                        device=device,
-                        constraint=constraint,
-                        perturbable_constraint=perturbable_constraint,
-                    )
             except Exception as e:
                 try:
                     self._save_energy_components(index, dynamics.context())

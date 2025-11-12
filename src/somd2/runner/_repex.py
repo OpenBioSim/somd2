@@ -1268,42 +1268,6 @@ class RepexRunner(_RunnerBase):
                 auto_fix_minimise=True,
             )
 
-            # Whether we have minimised again.
-            has_minimised = False
-
-            # Minimise again if the timestep is increasing or the constraint is changing.
-            if self._config.minimise:
-                # Store the production constraint values.
-                constraint = self._config.constraint
-                perturbable_constraint = self._config.perturbable_constraint
-
-                # Disable constraints if requested.
-                if self._config.minimisation_constraints == False:
-                    constraint = "none"
-                    perturbable_constraint = "none"
-
-                # Are the constraints changing?
-                constraints_changing = (current_constraint != constraint) or (
-                    current_perturbable_constraint != perturbable_constraint
-                )
-
-                # Is the timestep increasing?
-                timestep_increasing = (
-                    self._config.timestep > self._config.equilibration_timestep
-                )
-
-                # Minimise here using the existing dynamics object if the timestep
-                # is increasing but the constraints are not changing. This avoids the
-                # need to recreate the dynamics object twice. This only happens when
-                # the equilibration is performed without constraints and minimisation
-                # constraints are disabled.
-                if timestep_increasing and not constraints_changing:
-                    _logger.info(
-                        f"Minimising at {_lam_sym} = {self._lambda_values[index]:.5f}"
-                    )
-                    dynamics.minimise(timeout=self._config.timeout)
-                    has_minimised = True
-
             # Commit the system.
             system = dynamics.commit()
 
@@ -1333,15 +1297,6 @@ class RepexRunner(_RunnerBase):
             # not match the current GCMC water state.
             if gcmc_sampler is not None:
                 self._reset_gcmc_sampler(gcmc_sampler, dynamics)
-
-            # Perform minimisation at the end of equilibration only if the
-            # timestep is increasing, or the constraint is changing.
-            if self._config.minimise and not has_minimised:
-                if timestep_increasing or constraints_changing:
-                    _logger.info(
-                        f"Minimising at {_lam_sym} = {self._lambda_values[index]:.5f}"
-                    )
-                    dynamics.minimise(timeout=self._config.timeout)
 
             # Set the new dynamics object.
             self._dynamics_cache.set(index, dynamics)
