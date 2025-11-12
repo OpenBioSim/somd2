@@ -519,44 +519,45 @@ class RepexRunner(_RunnerBase):
         # Flag that we haven't equilibrated.
         self._is_equilibration = False
 
-        # Create the dynamics cache.
-        if not self._is_restart:
-            dynamics_kwargs = self._dynamics_kwargs.copy()
+        # Store the default options.
+        timestep = self._config.timestep
+        constraint = self._config.constraint
+        perturbable_constraint = self._config.perturbable_constraint
 
-            # Set the default options.
-            timestep = self._config.timestep
-            constraint = self._config.constraint
-            perturbable_constraint = self._config.perturbable_constraint
+        # Don't use constraints during minimisation.
+        if self._config.minimise and not self._config.minimisation_constraints:
+            constraint = "none"
+            perturbable_constraint = "none"
 
-            if self._config.minimise and self._config.minimisation_constraints == False:
+        if not self._is_restart and self._config.equilibration_time.value() > 0.0:
+            self._is_equilibration = True
+
+            # Don't use constraints during equilibration.
+            if not self._config.equilibration_constraints:
                 constraint = "none"
                 perturbable_constraint = "none"
 
-            if self._config.equilibration_time.value() > 0.0:
-                self._is_equilibration = True
+            # Update the timestep.
+            timestep = self._config.equilibration_timestep
 
-                # Set the equilibration specific options.
-                if not self._config.equilibration_constraints:
-                    if (
-                        not self._config.minimise
-                        or self._config.minimisation_constraints == False
-                    ):
-                        constraint = "none"
-                        perturbable_constraint = "none"
+        # Update the initial constraint values.
+        self._initial_constraint = constraint
+        self._initial_perturbable_constraint = perturbable_constraint
 
-            # Update the initial constraint values.
-            self._initial_constraint = constraint
-            self._initial_perturbable_constraint = perturbable_constraint
+        # Copy the dynamics keyword arguments.
+        dynamics_kwargs = self._dynamics_kwargs.copy()
 
-            # Overload the dynamics kwargs with any updated options.
-            dynamics_kwargs.update(
-                {
-                    "timestep": timestep,
-                    "constraint": constraint,
-                    "perturbable_constraint": perturbable_constraint,
-                }
-            )
+        # Overload the dynamics kwargs with any updated options.
+        dynamics_kwargs.update(
+            {
+                "timestep": timestep,
+                "constraint": constraint,
+                "perturbable_constraint": perturbable_constraint,
+            }
+        )
 
+        # Create the dynamics cache.
+        if not self._is_restart:
             self._dynamics_cache = DynamicsCache(
                 self._system,
                 self._lambda_values,
@@ -726,7 +727,7 @@ class RepexRunner(_RunnerBase):
         replica_list = list(range(self._config.num_lambda))
 
         # Minimise at each lambda value.
-        if self._config.minimise and not self._is_restart:
+        if self._config.minimise:
             for i in range(num_batches):
                 with ThreadPoolExecutor(max_workers=num_workers) as executor:
                     try:
@@ -744,7 +745,7 @@ class RepexRunner(_RunnerBase):
                         _sys.exit(1)
 
         # Equilibrate the system.
-        if self._is_equilibration:
+        if self._is_equilibration and not self._is_restart:
             for i in range(num_batches):
                 with ThreadPoolExecutor(max_workers=num_workers) as executor:
                     try:
@@ -818,7 +819,6 @@ class RepexRunner(_RunnerBase):
                             self._run_block,
                             replicas,
                             repeat(self._lambda_values),
-                            repeat(i == 0),
                             repeat(is_gcmc),
                             repeat(write_gcmc_ghosts),
                         ):
@@ -978,7 +978,6 @@ class RepexRunner(_RunnerBase):
         self,
         index,
         lambdas,
-        is_first_block,
         is_gcmc=False,
         write_gcmc_ghosts=False,
     ):
@@ -993,9 +992,6 @@ class RepexRunner(_RunnerBase):
 
         lambdas: np.ndarray
             The lambda values for each replica.
-
-        is_first_block: bool
-            Whether this is the first block.
 
         num_blocks: int
             The total number of blocks.
@@ -1027,13 +1023,6 @@ class RepexRunner(_RunnerBase):
         try:
             # Get the dynamics object (and GCMC sampler).
             dynamics, gcmc_sampler = self._dynamics_cache.get(index)
-
-            # Minimise the system if this is a restart simulation and this is
-            # the first block.
-            if is_first_block and self._is_restart:
-                if self._config.minimise:
-                    _logger.info(f"Minimising restart at {_lam_sym} = {lam:.5f}")
-                    dynamics.minimise(timeout=self._config.timeout)
 
             _logger.info(f"Running dynamics at {_lam_sym} = {lam:.5f}")
 
@@ -1203,10 +1192,6 @@ class RepexRunner(_RunnerBase):
                 # Store the current water state.
                 water_state = gcmc_sampler.water_state()
 
-            # Store the current constraints.
-            current_constraint = self._initial_constraint
-            current_perturbable_constraint = self._initial_perturbable_constraint
-
             # Work out whether the constraints have changed from the initial minimisation.
             if self._config.minimise:
                 constraint = self._config.constraint
@@ -1219,10 +1204,6 @@ class RepexRunner(_RunnerBase):
                 constraints_changed = (self._initial_constraint != constraint) or (
                     self._initial_perturbable_constraint != perturbable_constraint
                 )
-
-                # Update the current constraints.
-                current_constraint = constraint
-                current_perturbable_constraint = perturbable_constraint
 
                 # We need to create a new dynamics object if the constraints have changed.
                 if constraints_changed:
@@ -1268,42 +1249,6 @@ class RepexRunner(_RunnerBase):
                 auto_fix_minimise=True,
             )
 
-            # Whether we have minimised again.
-            has_minimised = False
-
-            # Minimise again if the timestep is increasing or the constraint is changing.
-            if self._config.minimise:
-                # Store the production constraint values.
-                constraint = self._config.constraint
-                perturbable_constraint = self._config.perturbable_constraint
-
-                # Disable constraints if requested.
-                if self._config.minimisation_constraints == False:
-                    constraint = "none"
-                    perturbable_constraint = "none"
-
-                # Are the constraints changing?
-                constraints_changing = (current_constraint != constraint) or (
-                    current_perturbable_constraint != perturbable_constraint
-                )
-
-                # Is the timestep increasing?
-                timestep_increasing = (
-                    self._config.timestep > self._config.equilibration_timestep
-                )
-
-                # Minimise here using the existing dynamics object if the timestep
-                # is increasing but the constraints are not changing. This avoids the
-                # need to recreate the dynamics object twice. This only happens when
-                # the equilibration is performed without constraints and minimisation
-                # constraints are disabled.
-                if timestep_increasing and not constraints_changing:
-                    _logger.info(
-                        f"Minimising at {_lam_sym} = {self._lambda_values[index]:.5f}"
-                    )
-                    dynamics.minimise(timeout=self._config.timeout)
-                    has_minimised = True
-
             # Commit the system.
             system = dynamics.commit()
 
@@ -1333,15 +1278,6 @@ class RepexRunner(_RunnerBase):
             # not match the current GCMC water state.
             if gcmc_sampler is not None:
                 self._reset_gcmc_sampler(gcmc_sampler, dynamics)
-
-            # Perform minimisation at the end of equilibration only if the
-            # timestep is increasing, or the constraint is changing.
-            if self._config.minimise and not has_minimised:
-                if timestep_increasing or constraints_changing:
-                    _logger.info(
-                        f"Minimising at {_lam_sym} = {self._lambda_values[index]:.5f}"
-                    )
-                    dynamics.minimise(timeout=self._config.timeout)
 
             # Set the new dynamics object.
             self._dynamics_cache.set(index, dynamics)

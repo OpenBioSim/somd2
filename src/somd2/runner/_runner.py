@@ -436,27 +436,19 @@ class Runner(_RunnerBase):
 
         # Minimisation.
         if self._config.minimise:
-            # Disable constraints.
-            if self._config.minimisation_constraints == False:
+            constraint = self._config.constraint
+            perturbable_constraint = self._config.perturbable_constraint
+
+            # Don't use constraints during minimisation.
+            if not self._config.minimisation_constraints:
                 constraint = "none"
                 perturbable_constraint = "none"
-            else:
-                if self._config.minimisation_constraints == True:
-                    constraint = self._config.constraint
-                    perturbable_constraint = self._config.perturbable_constraint
-                else:
-                    # Minimise with no constraints if we need to equilibrate first.
-                    # This seems to improve the stability of the equilibration.
-                    if self._config.equilibration_time.value() > 0.0 and not is_restart:
-                        constraint = "none"
-                        perturbable_constraint = "none"
-                    else:
-                        constraint = self._config.constraint
-                        perturbable_constraint = self._config.perturbable_constraint
-
-            # Update the initial constraint values.
-            self._initial_constraint = constraint
-            self._initial_perturbable_constraint = perturbable_constraint
+            # We will be performing an equilibration stage.
+            elif not is_restart and self._config.equilibration_time.value() > 0.0:
+                # Don't use constraints during equilibration.
+                if not self._config.equilibration_constraints:
+                    constraint = "none"
+                    perturbable_constraint = "none"
 
             try:
                 system = self._minimisation(
@@ -472,7 +464,7 @@ class Runner(_RunnerBase):
 
         # Equilibration.
         is_equilibrated = False
-        if self._config.equilibration_time.value() > 0.0 and not is_restart:
+        if not is_restart and self._config.equilibration_time.value() > 0.0:
             is_equilibrated = True
             try:
                 # Run without saving energies or frames.
@@ -532,31 +524,6 @@ class Runner(_RunnerBase):
                 if self._initial_time[index].value() != 0:
                     system.set_time(self._initial_time[index])
 
-                # Perform minimisation at the end of equilibration only if the
-                # timestep is increasing, or the constraint is changing.
-                if (
-                    (self._config.timestep > self._config.equilibration_timestep)
-                    or (self._config.constraint != self._initial_constraint)
-                    or (
-                        self._config.perturbable_constraint
-                        != self._initial_perturbable_constraint
-                    )
-                ):
-                    # Set the constraint to use for minimisation after equilibration.
-                    constraint = self._config.constraint
-                    perturbable_constraint = self._config.perturbable_constraint
-                    if self._config.minimisation_constraints == False:
-                        constraint = "none"
-                        perturbable_constraint = "none"
-
-                    system = self._minimisation(
-                        system,
-                        lambda_value=lambda_value,
-                        rest2_scale=rest2_scale,
-                        device=device,
-                        constraint=constraint,
-                        perturbable_constraint=perturbable_constraint,
-                    )
             except Exception as e:
                 try:
                     self._save_energy_components(index, dynamics.context())
@@ -643,6 +610,7 @@ class Runner(_RunnerBase):
                 dynamics.context().setPositions(
                     self._restart_positions[index] * angstrom
                 )
+
             # Otherwise, if we've performed equilibration, then we need to reset
             # the water state in the new context to match the equilibrated system.
             elif is_equilibrated:
