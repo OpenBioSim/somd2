@@ -281,13 +281,9 @@ class Config:
             Whether to minimise the system before simulation.
 
         minimisation_constraints: bool
-            Whether to use constraints during minimisation. If None, then this will
-            constraints will be decided on the basis of the specified simulation
-            constraints, and whether 'equilibration_constraints' is set. Setting to False
-            will always disable constraints during minimisation. Setting to True will
-            always enable constraints during minimisation, using the values specified
-            by 'constraint' and 'perturbable_constraint', i.e. overriding
-            'equilibration_constraints'.
+            Whether to use constraints during minimisation. If False, then no
+            constraints will be used. If True, then the use of constraints will be
+            determined based on the value of 'equilibration_constraints'.
 
         equilibration_time: str
             Time interval for equilibration. Only simulations starting from
@@ -1222,30 +1218,9 @@ class Config:
 
     @minimisation_constraints.setter
     def minimisation_constraints(self, minimisation_constraints):
-        if minimisation_constraints is not None:
-            if isinstance(minimisation_constraints, str):
-                # Strip whitespace and convert to lower case.
-                minimisation_constraints = minimisation_constraints.lower().replace(
-                    " ", ""
-                )
-                # Handle special case of "none"
-                if minimisation_constraints == "none":
-                    self._minimisation_constraints = None
-                    return
-                # Convert to bool.
-                elif minimisation_constraints == "true":
-                    minimisation_constraints = True
-                elif minimisation_constraints == "false":
-                    minimisation_constraints = False
-                else:
-                    raise ValueError(
-                        "'minimisation_constraints' string must be 'true', 'false', or 'none'"
-                    )
-            if not isinstance(minimisation_constraints, bool):
-                raise ValueError("'minimisation_constraints' must be of type 'bool'")
-            self._minimisation_constraints = minimisation_constraints
-        else:
-            self._minimisation_constraints = None
+        if not isinstance(minimisation_constraints, bool):
+            raise ValueError("'minimisation_constraints' must be of type 'bool'")
+        self._minimisation_constraints = minimisation_constraints
 
     @property
     def equilibration_time(self):
