@@ -200,8 +200,13 @@ class DynamicsCache:
             is not used.
         """
 
+        from math import floor
+
         # Copy the dynamics keyword arguments.
         dynamics_kwargs = dynamics_kwargs.copy()
+
+        # Store the number of replicas.
+        num_replicas = len(lambdas)
 
         # Copy the GCMC keyword arguments.
         if gcmc_kwargs is not None:
@@ -210,10 +215,30 @@ class DynamicsCache:
         # Initialise the dynamics object list.
         self._dynamics = []
 
+        # A set of visited device indices.
+        devices = set()
+
+        # Determine whether there is a remainder in the number of replicas.
+        remainder = num_replicas % num_gpus
+
+        # Store the number of contexts for each device. The last device will
+        # have remainder contexts, while all others have
+        contexts_per_device = num_replicas * [floor(num_replicas / num_gpus)]
+
+        # Set the last device to have the remainder contexts.
+        contexts_per_device[-1] = remainder
+
         # Create the dynamics objects in serial.
         for i, (lam, scale) in enumerate(zip(lambdas, rest2_scale_factors)):
             # Work out the device index.
             device = i % num_gpus
+
+            # If we've not seen this device before then get the memory statistics
+            # prior to creating the dynamics object and GCMC sampler.
+            if device not in devices:
+                used_mem_before, free_mem_before, total_mem = self._check_device_memory(
+                    device
+                )
 
             # This is a restart, get the system for this replica.
             if isinstance(system, list):
@@ -283,6 +308,39 @@ class DynamicsCache:
 
             # Append the dynamics object.
             self._dynamics.append(dynamics)
+
+            # Check the memory footprint for this device.
+            if not device in devices:
+                # Add the device to the set of visited devices.
+                devices.add(device)
+
+                # Get the current memory usage.
+                used_mem, free_mem, total_mem = self._check_device_memory(device)
+
+                # Work out the memory used by this dynamics object and GCMC sampler.
+                mem_used = used_mem - used_mem_before
+
+                # Work out the estimate for all replicas on this device.
+                est_total = mem_used * contexts_per_device[device]
+
+                # If this exceeds the total memory, raise an error.
+                if est_total > total_mem:
+                    msg = (
+                        f"Not enough memory on device {device} for all assigned replicas. "
+                        f"Estimated memory usage: {est_total / 1e9:.2f} GB, "
+                        f"Available memory: {total_mem / 1e9:.2f} GB."
+                    )
+                    _logger.error(msg)
+                    raise MemoryError(msg)
+
+                # If there's less than 20% free memory, raise a warning.
+                elif ((total_mem - est_total) / total_mem) < 0.2:
+                    _logger.warning(
+                        f"Device {device} will have less than 20% free memory "
+                        f"after creating all assigned replicas. "
+                        f"{est_total / 1e9:.2f} GB, "
+                        f"Available memory: {total_mem / 1e9:.2f} GB."
+                    )
 
             _logger.info(
                 f"Created dynamics object for lambda {lam:.5f} on device {device}"
@@ -446,6 +504,30 @@ class DynamicsCache:
         Return the swap matrix.
         """
         return self._num_swaps
+
+    def _check_device_memory(self, index):
+        """
+        Check the memory usage of the specified CUDA device.
+
+        Parameters
+        ----------
+
+        index: int
+            The index of the CUDA device.
+        """
+        from pynvml import (
+            nvmlInit,
+            nvmlShutdown,
+            nvmlDeviceGetHandleByIndex,
+            nvmlDeviceGetMemoryInfo,
+        )
+
+        nvmlInit()
+        handle = nvmlDeviceGetHandleByIndex(index)
+        info = nvmlDeviceGetMemoryInfo(handle)
+        result = (info.used, info.free, info.total)
+        nvmlShutdown()
+        return result
 
 
 class RepexRunner(_RunnerBase):
@@ -1142,6 +1224,50 @@ class RepexRunner(_RunnerBase):
 
             # Minimise.
             dynamics.minimise(timeout=self._config.timeout)
+
+            # If we're not equilibrating and the production constraints will change,
+            # then we need to rebuild the context.
+            if not self._is_equilibration:
+                constraints_changed = (
+                    self._initial_constraint != self._config.constraint
+                ) or (
+                    self._initial_perturbable_constraint
+                    != self._config.perturbable_constraint
+                )
+
+                if constraints_changed:
+                    # Commit the current system.
+                    system = dynamics.commit()
+
+                    # Delete the dynamics object.
+                    self._dynamics_cache.delete(index)
+
+                    # Work out the device index.
+                    device = index % self._num_gpus
+
+                    # Copy the dynamics keyword arguments.
+                    dynamics_kwargs = self._dynamics_kwargs.copy()
+
+                    # Overload the device and lambda value.
+                    dynamics_kwargs["device"] = device
+                    dynamics_kwargs["lambda_value"] = self._lambda_values[index]
+                    dynamics_kwargs["rest2_scale"] = self._rest2_scale_factors[index]
+
+                    # Create the production dynamics object.
+                    dynamics = system.dynamics(**dynamics_kwargs)
+
+                    # Reset the GCMC water state. The dynamics object is created from
+                    # the original Sire system, so the water state in the context does
+                    # not match the current GCMC water state.
+                    if gcmc_sampler is not None:
+                        self._reset_gcmc_sampler(gcmc_sampler, dynamics)
+
+                    # Set the new dynamics object.
+                    self._dynamics_cache.set(index, dynamics)
+
+                    _logger.info(
+                        f"Created dynamics object for {_lam_sym} = {self._lambda_values[index]:.5f}"
+                    )
 
         except Exception as e:
             return False, index, e
