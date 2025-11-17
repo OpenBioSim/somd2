@@ -505,7 +505,8 @@ class DynamicsCache:
         """
         return self._num_swaps
 
-    def _check_device_memory(self, index):
+    @staticmethod
+    def _check_device_memory(index):
         """
         Check the memory usage of the specified CUDA device.
 
