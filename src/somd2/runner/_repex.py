@@ -1225,6 +1225,50 @@ class RepexRunner(_RunnerBase):
             # Minimise.
             dynamics.minimise(timeout=self._config.timeout)
 
+            # If we're not equilibrating and the production constraints will change,
+            # then we need to rebuild the context.
+            if not self._is_equilibration:
+                constraints_changed = (
+                    self._initial_constraint != self._config.constraint
+                ) or (
+                    self._initial_perturbable_constraint
+                    != self._config.perturbable_constraint
+                )
+
+                if constraints_changed:
+                    # Commit the current system.
+                    system = dynamics.commit()
+
+                    # Delete the dynamics object.
+                    self._dynamics_cache.delete(index)
+
+                    # Work out the device index.
+                    device = index % self._num_gpus
+
+                    # Copy the dynamics keyword arguments.
+                    dynamics_kwargs = self._dynamics_kwargs.copy()
+
+                    # Overload the device and lambda value.
+                    dynamics_kwargs["device"] = device
+                    dynamics_kwargs["lambda_value"] = self._lambda_values[index]
+                    dynamics_kwargs["rest2_scale"] = self._rest2_scale_factors[index]
+
+                    # Create the production dynamics object.
+                    dynamics = system.dynamics(**dynamics_kwargs)
+
+                    # Reset the GCMC water state. The dynamics object is created from
+                    # the original Sire system, so the water state in the context does
+                    # not match the current GCMC water state.
+                    if gcmc_sampler is not None:
+                        self._reset_gcmc_sampler(gcmc_sampler, dynamics)
+
+                    # Set the new dynamics object.
+                    self._dynamics_cache.set(index, dynamics)
+
+                    _logger.info(
+                        f"Created dynamics object for {_lam_sym} = {self._lambda_values[index]:.5f}"
+                    )
+
         except Exception as e:
             return False, index, e
 
