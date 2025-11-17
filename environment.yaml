@@ -11,4 +11,5 @@ dependencies:
   - loch
   - loguru
   - numba
+  - nvidia-ml-py
   - versioningit
