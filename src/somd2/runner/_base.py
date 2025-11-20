@@ -1127,8 +1127,14 @@ class RunnerBase:
                     _logger.error(msg)
                     raise ValueError(msg)
             else:
+                if self._config.gcmc:
+                    num_gcmc_waters = self._config.gcmc_num_waters
+                else:
+                    num_gcmc_waters = 0
                 # Check the system is the same as the reference system.
-                are_same, reason = self._systems_are_same(self._system, system)
+                are_same, reason = self._systems_are_same(
+                    self._system, system, num_gcmc_waters=num_gcmc_waters
+                )
                 if not are_same:
                     raise ValueError(
                         f"Checkpoint file does not match system for the following reason: {reason}."
@@ -1313,7 +1319,7 @@ class RunnerBase:
         self._compare_configs(self._last_config, config)
 
     @staticmethod
-    def _systems_are_same(system0, system1):
+    def _systems_are_same(system0, system1, num_gcmc_waters=0):
         """
         Check for equivalence between a pair of sire systems.
 
@@ -1326,6 +1332,9 @@ class RunnerBase:
         system1: sire.system.System
             The second system to be compared.
 
+        num_gcmc_waters: int
+            The number of GCMC ghost waters to ignore in the comparison.
+
         Returns
         -------
 
@@ -1337,18 +1346,25 @@ class RunnerBase:
         if not isinstance(system1, _System):
             raise TypeError("'system1' must be of type 'sire.system.System'")
 
+        try:
+            num_point = system0["water"].molecules()[0].num_atoms()
+        except:
+            num_point = 0
+
         # Check for matching number of molecules.
-        if not len(system0.molecules()) == len(system1.molecules()):
+        if not len(system0.molecules()) == len(system1.molecules()) - num_gcmc_waters:
             reason = "number of molecules do not match"
             return False, reason
 
         # Check for matching number of residues.
-        if not len(system0.residues()) == len(system1.residues()):
+        if not len(system0.residues()) == len(system1.residues()) - num_gcmc_waters:
             reason = "number of residues do not match"
             return False, reason
 
         # Check for matching number of atoms.
-        if not len(system0.atoms()) == len(system1.atoms()):
+        if not len(system0.atoms()) == len(system1.atoms()) - (
+            num_gcmc_waters * num_point
+        ):
             reason = "number of atoms do not match"
             return False, reason
 
