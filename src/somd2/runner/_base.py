@@ -581,9 +581,13 @@ class RunnerBase:
 
             # Make sure the selection is valid.
             if self._config.gcmc_selection is not None:
+                if isinstance(self._system, list):
+                    mols = self._system[0]
+                else:
+                    mols = self._system
                 try:
                     atoms = _sr.mol.selection_to_atoms(
-                        self._system, self._config.gcmc_selection
+                        mols, self._config.gcmc_selection
                     )
                 except:
                     msg = "Invalid 'gcmc_selection' value."
@@ -1175,12 +1179,14 @@ class RunnerBase:
             self._restart_ghost_waters = []
             # List to store the current positions.
             self._restart_positions = []
-            _logger.info("Removing existing ghost waters from GCMC checkpoint systems")
+            _logger.info(
+                "Determining existing ghost waters from GCMC checkpoint systems"
+            )
             for i, system in enumerate(systems):
                 # Store the positions of all atoms.
                 self._restart_positions.append(_sr.io.get_coords_array(system))
                 if system is not None:
-                    # Remove the ghost waters from the system.
+                    # Find and log the current ghost waters.
                     try:
                         # Get the water molecule indices.
                         waters = system.molecules().find(system["water"].molecules())
@@ -1195,13 +1201,15 @@ class RunnerBase:
                             idxs.append(waters.index(index))
                         self._restart_ghost_waters.append(idxs)
 
-                        for mol in system["property is_ghost_water"].molecules():
-                            _logger.debug(
-                                f"Removing ghost water molecule {mol.number()} for {_lam_sym}={self._lambda_values[i]:.5f}"
-                            )
-                            system.remove(mol)
                     except:
                         pass
+
+                    # Remove the additional GCMC waters from the end of the system.
+                    for mol in system.molecules()[-self._config.gcmc_num_waters :]:
+                        _logger.debug(
+                            f"Removing GCMC water molecule {mol.number()} for {_lam_sym}={self._lambda_values[i]:.5f}"
+                        )
+                        system.remove(mol)
 
         return True, systems
 
@@ -1264,6 +1272,9 @@ class RunnerBase:
                     pass
 
                 if (v1 == None and v2 == False) or (v2 == None and v1 == False):
+                    continue
+                # The GCMC frequency will be automaticall set if None.
+                elif key == "gcmc_frequency" and v1 is None:
                     continue
                 elif v1 != v2:
                     raise ValueError(
