@@ -581,9 +581,13 @@ class RunnerBase:
 
             # Make sure the selection is valid.
             if self._config.gcmc_selection is not None:
+                if isinstance(self._system, list):
+                    mols = self._system[0]
+                else:
+                    mols = self._system
                 try:
                     atoms = _sr.mol.selection_to_atoms(
-                        self._system, self._config.gcmc_selection
+                        mols, self._config.gcmc_selection
                     )
                 except:
                     msg = "Invalid 'gcmc_selection' value."
@@ -700,6 +704,7 @@ class RunnerBase:
                 "shift_delta": str(self._config.shift_delta),
                 "swap_end_states": self._config.swap_end_states,
                 "tolerance": self._config.gcmc_tolerance,
+                "restart": self._is_restart,
                 "overwrite": self._config.overwrite,
                 "no_logger": True,
             }
@@ -1127,8 +1132,14 @@ class RunnerBase:
                     _logger.error(msg)
                     raise ValueError(msg)
             else:
+                if self._config.gcmc:
+                    num_gcmc_waters = self._config.gcmc_num_waters
+                else:
+                    num_gcmc_waters = 0
                 # Check the system is the same as the reference system.
-                are_same, reason = self._systems_are_same(self._system, system)
+                are_same, reason = self._systems_are_same(
+                    self._system, system, num_gcmc_waters=num_gcmc_waters
+                )
                 if not are_same:
                     raise ValueError(
                         f"Checkpoint file does not match system for the following reason: {reason}."
@@ -1169,12 +1180,14 @@ class RunnerBase:
             self._restart_ghost_waters = []
             # List to store the current positions.
             self._restart_positions = []
-            _logger.info("Removing existing ghost waters from GCMC checkpoint systems")
+            _logger.info(
+                "Determining existing ghost waters from GCMC checkpoint systems"
+            )
             for i, system in enumerate(systems):
                 # Store the positions of all atoms.
                 self._restart_positions.append(_sr.io.get_coords_array(system))
                 if system is not None:
-                    # Remove the ghost waters from the system.
+                    # Find and log the current ghost waters.
                     try:
                         # Get the water molecule indices.
                         waters = system.molecules().find(system["water"].molecules())
@@ -1189,13 +1202,15 @@ class RunnerBase:
                             idxs.append(waters.index(index))
                         self._restart_ghost_waters.append(idxs)
 
-                        for mol in system["property is_ghost_water"].molecules():
-                            _logger.debug(
-                                f"Removing ghost water molecule {mol.number()} for {_lam_sym}={self._lambda_values[i]:.5f}"
-                            )
-                            system.remove(mol)
                     except:
                         pass
+
+                    # Remove the additional GCMC waters from the end of the system.
+                    for mol in system.molecules()[-self._config.gcmc_num_waters :]:
+                        _logger.debug(
+                            f"Removing GCMC water molecule {mol.number()} for {_lam_sym}={self._lambda_values[i]:.5f}"
+                        )
+                        system.remove(mol)
 
         return True, systems
 
@@ -1259,6 +1274,9 @@ class RunnerBase:
 
                 if (v1 == None and v2 == False) or (v2 == None and v1 == False):
                     continue
+                # The GCMC frequency will be automaticall set if None.
+                elif key == "gcmc_frequency" and v1 is None:
+                    continue
                 elif v1 != v2:
                     raise ValueError(
                         f"{key} has changed since the last run. This is not "
@@ -1313,7 +1331,7 @@ class RunnerBase:
         self._compare_configs(self._last_config, config)
 
     @staticmethod
-    def _systems_are_same(system0, system1):
+    def _systems_are_same(system0, system1, num_gcmc_waters=0):
         """
         Check for equivalence between a pair of sire systems.
 
@@ -1326,6 +1344,9 @@ class RunnerBase:
         system1: sire.system.System
             The second system to be compared.
 
+        num_gcmc_waters: int
+            The number of GCMC ghost waters to ignore in the comparison.
+
         Returns
         -------
 
@@ -1337,18 +1358,25 @@ class RunnerBase:
         if not isinstance(system1, _System):
             raise TypeError("'system1' must be of type 'sire.system.System'")
 
+        try:
+            num_point = system0["water"].molecules()[0].num_atoms()
+        except:
+            num_point = 0
+
         # Check for matching number of molecules.
-        if not len(system0.molecules()) == len(system1.molecules()):
+        if not len(system0.molecules()) == len(system1.molecules()) - num_gcmc_waters:
             reason = "number of molecules do not match"
             return False, reason
 
         # Check for matching number of residues.
-        if not len(system0.residues()) == len(system1.residues()):
+        if not len(system0.residues()) == len(system1.residues()) - num_gcmc_waters:
             reason = "number of residues do not match"
             return False, reason
 
         # Check for matching number of atoms.
-        if not len(system0.atoms()) == len(system1.atoms()):
+        if not len(system0.atoms()) == len(system1.atoms()) - (
+            num_gcmc_waters * num_point
+        ):
             reason = "number of atoms do not match"
             return False, reason
 

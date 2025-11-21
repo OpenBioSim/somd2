@@ -516,18 +516,23 @@ class DynamicsCache:
         index: int
             The index of the CUDA device.
         """
-        from pynvml import (
-            nvmlInit,
-            nvmlShutdown,
-            nvmlDeviceGetHandleByIndex,
-            nvmlDeviceGetMemoryInfo,
-        )
+        try:
+            from pynvml import (
+                nvmlInit,
+                nvmlShutdown,
+                nvmlDeviceGetHandleByIndex,
+                nvmlDeviceGetMemoryInfo,
+            )
 
-        nvmlInit()
-        handle = nvmlDeviceGetHandleByIndex(index)
-        info = nvmlDeviceGetMemoryInfo(handle)
-        result = (info.used, info.free, info.total)
-        nvmlShutdown()
+            nvmlInit()
+            handle = nvmlDeviceGetHandleByIndex(index)
+            info = nvmlDeviceGetMemoryInfo(handle)
+            result = (info.used, info.free, info.total)
+            nvmlShutdown()
+        except Exception as e:
+            msg = f"Could not determine memory usage for device {index}: {e}"
+            _logger.error(msg)
+
         return result
 
 
