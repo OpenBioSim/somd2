@@ -938,16 +938,22 @@ class Runner(_RunnerBase):
             # Calculate the speed in nanoseconds per day.
             speed = time.to("ns") / days
 
-            # Checkpoint.
-            self._checkpoint(
-                system,
-                index,
-                0,
-                speed,
-                is_final_block=True,
-                lambda_energy=lambda_energy,
-                lambda_grad=lambda_grad,
-            )
+            # Acquire the file lock to ensure that the checkpoint files are
+            # in a consistent state if read by another process.
+            with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                # Backup any existing checkpoint files.
+                self._backup_checkpoint(index)
+
+                # Write the checkpoint files.
+                self._checkpoint(
+                    system,
+                    index,
+                    0,
+                    speed,
+                    lambda_energy=lambda_energy,
+                    lambda_grad=lambda_grad,
+                    is_final_block=True,
+                )
 
             _logger.success(
                 f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"
