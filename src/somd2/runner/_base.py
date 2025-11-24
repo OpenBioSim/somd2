@@ -1562,27 +1562,6 @@ class RunnerBase:
 
         from somd2 import __version__, _sire_version, _sire_revisionid
 
-        # Save the end-state GCMC topologies for trajectory analysis and visualisation.
-        if self._config.gcmc:
-            # Only save for first block.
-            if block == 0:
-                mols0 = _sr.morph.link_to_reference(system)
-                mols1 = _sr.morph.link_to_perturbed(system)
-
-                # Save to AMBER format.
-                _sr.save(mols0, self._filenames["topology0"])
-                _sr.save(mols1, self._filenames["topology1"])
-
-                # Save to PDB format.
-                _sr.save(
-                    mols0,
-                    self._filenames["topology0"].replace(".prm7", ".pdb"),
-                )
-                _sr.save(
-                    mols1,
-                    self._filenames["topology1"].replace(".prm7", ".pdb"),
-                )
-
         # Get the lambda value.
         lam = self._lambda_values[index]
 
@@ -1608,6 +1587,27 @@ class RunnerBase:
             metadata["lambda_grad"] = lambda_grad
 
         if is_final_block:
+            # Save the end-state GCMC topologies for trajectory analysis and visualisation.
+            # This topology contains additional water molecules that are used for GCMC
+            # insertion moves.
+            if self._config.gcmc:
+                mols0 = _sr.morph.link_to_reference(system)
+                mols1 = _sr.morph.link_to_perturbed(system)
+
+                # Save to AMBER format.
+                _sr.save(mols0, self._filenames["topology0"])
+                _sr.save(mols1, self._filenames["topology1"])
+
+                # Save to PDB format.
+                _sr.save(
+                    mols0,
+                    self._filenames["topology0"].replace(".prm7", ".pdb"),
+                )
+                _sr.save(
+                    mols1,
+                    self._filenames["topology1"].replace(".prm7", ".pdb"),
+                )
+
             # Assemble and save the final trajectory.
             if self._config.save_trajectories:
                 # Save the final trajectory chunk to file.
