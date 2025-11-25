@@ -631,6 +631,9 @@ class Runner(_RunnerBase):
         # Store the checkpoint time in nanoseconds.
         checkpoint_interval = self._config.checkpoint_frequency.to("ns")
 
+        # Store the start time.
+        start = _timer()
+
         # Run the simulation, checkpointing in blocks.
         if self._config.checkpoint_frequency.value() > 0.0:
 
@@ -644,9 +647,6 @@ class Runner(_RunnerBase):
 
             num_blocks = int(frac)
             rem = round(frac - num_blocks, 12)
-
-            # Store the star time.
-            start = _timer()
 
             # Run the dynamics in blocks.
             for block in range(int(num_blocks)):
@@ -937,6 +937,9 @@ class Runner(_RunnerBase):
 
             # Calculate the speed in nanoseconds per day.
             speed = time.to("ns") / days
+
+            # Create the lock.
+            lock = _FileLock(self._lock_file)
 
             # Acquire the file lock to ensure that the checkpoint files are
             # in a consistent state if read by another process.
