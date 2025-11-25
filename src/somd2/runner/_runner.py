@@ -938,6 +938,9 @@ class Runner(_RunnerBase):
             # Calculate the speed in nanoseconds per day.
             speed = time.to("ns") / days
 
+            # Create the lock.
+            lock = _FileLock(self._lock_file)
+
             # Acquire the file lock to ensure that the checkpoint files are
             # in a consistent state if read by another process.
             with lock.acquire(timeout=self._config.timeout.to("seconds")):
