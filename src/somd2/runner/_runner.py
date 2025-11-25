@@ -631,6 +631,9 @@ class Runner(_RunnerBase):
         # Store the checkpoint time in nanoseconds.
         checkpoint_interval = self._config.checkpoint_frequency.to("ns")
 
+        # Store the start time.
+        start = _timer()
+
         # Run the simulation, checkpointing in blocks.
         if self._config.checkpoint_frequency.value() > 0.0:
 
@@ -644,9 +647,6 @@ class Runner(_RunnerBase):
 
             num_blocks = int(frac)
             rem = round(frac - num_blocks, 12)
-
-            # Store the star time.
-            start = _timer()
 
             # Run the dynamics in blocks.
             for block in range(int(num_blocks)):
