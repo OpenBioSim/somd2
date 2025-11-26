@@ -21,6 +21,7 @@ requirements:
     - pip
     - python
     - numba
+    - nvidia-ml-py  # [linux]
     - setuptools
     - sire
     - versioningit
@@ -30,6 +31,7 @@ requirements:
     - loch          # [linux]
     - loguru
     - numba
+    - nvidia-ml-py  # [linux]
     - python
     - sire
 
