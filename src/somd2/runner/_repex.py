@@ -1387,6 +1387,8 @@ class RepexRunner(_RunnerBase):
             # Reset the timer.
             if self._initial_time[index].value() != 0:
                 system.set_time(self._initial_time[index])
+            else:
+                system.set_time(_sr.u("0ps"))
 
             # Delete the dynamics object.
             self._dynamics_cache.delete(index)
