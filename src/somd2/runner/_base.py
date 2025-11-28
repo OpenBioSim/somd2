@@ -191,7 +191,7 @@ class RunnerBase:
 
         # Make sure that perturbable LJ sigmas aren't scaled to zero.
         self._config._extra_args["fix_perturbable_zero_sigmas"] = (
-            config.fix_perturbable_zero_sigmas
+            self._config.fix_perturbable_zero_sigmas
         )
 
         # We're running in SOMD1 compatibility mode.
@@ -203,7 +203,7 @@ class RunnerBase:
             _logger.info("Applying SOMD1 perturbation compatibility.")
             self._system = make_compatible(
                 self._system,
-                fix_perturbable_zero_sigmas=self.config.fix_perturbable_zero_sigmas,
+                fix_perturbable_zero_sigmas=self._config.fix_perturbable_zero_sigmas,
             )
             self._system = _sr.morph.link_to_reference(self._system)
 
