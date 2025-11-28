@@ -824,10 +824,12 @@ class RepexRunner(_RunnerBase):
                             replica_list[i * num_workers : (i + 1) * num_workers],
                         ):
                             if not success:
-                                _logger.error(
-                                    f"Minimisation failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
-                                )
-                                raise e
+                                msg = f"Minimisation failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
+                                if self.config.minimisation_errors:
+                                    _logger.error(msg)
+                                    raise e
+                                else:
+                                    _logger.warning(msg)
                     except KeyboardInterrupt:
                         _logger.error("Minimisation cancelled. Exiting.")
                         _sys.exit(1)

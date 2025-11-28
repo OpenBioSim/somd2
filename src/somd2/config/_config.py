@@ -115,6 +115,7 @@ class Config:
         com_reset_frequency=10,
         minimise=True,
         minimisation_constraints=False,
+        minimisation_errors=False,
         equilibration_time="0 ps",
         equilibration_timestep="2 fs",
         equilibration_constraints=True,
@@ -288,6 +289,9 @@ class Config:
             Whether to use constraints during minimisation. If False, then no
             constraints will be used. If True, then the use of constraints will be
             determined based on the value of 'equilibration_constraints'.
+
+        minimisation_errors: bool
+            Whether to raise an exception if a minimisation fails to converge.
 
         equilibration_time: str
             Time interval for equilibration. Only simulations starting from
@@ -508,6 +512,7 @@ class Config:
         self.com_reset_frequency = com_reset_frequency
         self.minimise = minimise
         self.minimisation_constraints = minimisation_constraints
+        self.minimisation_errors = minimisation_errors
         self.equilibration_time = equilibration_time
         self.equilibration_timestep = equilibration_timestep
         self.equilibration_constraints = equilibration_constraints
@@ -1236,6 +1241,16 @@ class Config:
         if not isinstance(minimisation_constraints, bool):
             raise ValueError("'minimisation_constraints' must be of type 'bool'")
         self._minimisation_constraints = minimisation_constraints
+
+    @property
+    def minimisation_errors(self):
+        return self._minimisation_errors
+
+    @minimisation_errors.setter
+    def minimisation_errors(self, minimisation_errors):
+        if not isinstance(minimisation_errors, bool):
+            raise ValueError("'minimisation_errors' must be of type 'bool'")
+        self._minimisation_errors = minimisation_errors
 
     @property
     def equilibration_time(self):
