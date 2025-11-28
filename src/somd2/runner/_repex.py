@@ -824,10 +824,12 @@ class RepexRunner(_RunnerBase):
                             replica_list[i * num_workers : (i + 1) * num_workers],
                         ):
                             if not success:
-                                _logger.error(
-                                    f"Minimisation failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
-                                )
-                                raise e
+                                msg = f"Minimisation failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
+                                if self.config.minimisation_errors:
+                                    _logger.error(msg)
+                                    raise e
+                                else:
+                                    _logger.warning(msg)
                     except KeyboardInterrupt:
                         _logger.error("Minimisation cancelled. Exiting.")
                         _sys.exit(1)
@@ -1387,6 +1389,8 @@ class RepexRunner(_RunnerBase):
             # Reset the timer.
             if self._initial_time[index].value() != 0:
                 system.set_time(self._initial_time[index])
+            else:
+                system.set_time(_sr.u("0ps"))
 
             # Delete the dynamics object.
             self._dynamics_cache.delete(index)

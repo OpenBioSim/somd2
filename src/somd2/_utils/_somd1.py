@@ -84,7 +84,7 @@ def apply_pert(system, pert_file):
     return system
 
 
-def make_compatible(system):
+def make_compatible(system, fix_perturbable_zero_sigams=False):
     """
     Makes a perturbation SOMD1 compatible.
 
@@ -93,6 +93,9 @@ def make_compatible(system):
 
     system : sire.system.System, sire.legacy.System.System
         The system containing the molecules to be perturbed.
+
+    fix_perturbable_zero_sigams : bool
+        Whether to prevent LJ sigma values being perturbed to zero.
 
     Returns
     -------
@@ -106,6 +109,9 @@ def make_compatible(system):
         raise TypeError(
             "'system' must of type 'sire.system.System' or 'sire.legacy.System.System'"
         )
+
+    if not isinstance(fix_perturbable_zero_sigams, bool):
+        raise TypeError("'fix_perturbable_zero_sigams' must be of type 'bool'.")
 
     # Extract the legacy system.
     if isinstance(system, _LegacySystem):
@@ -132,36 +138,36 @@ def make_compatible(system):
         ##################################
         # First fix zero LJ sigmas values.
         ##################################
+        if fix_perturbable_zero_sigams:
+            # Tolerance for zero sigma values.
+            null_lj_sigma = 1e-9
 
-        # Tolerance for zero sigma values.
-        null_lj_sigma = 1e-9
+            for atom in mol.atoms():
+                # Get the end state LJ sigma values.
+                lj0 = atom.property("LJ0")
+                lj1 = atom.property("LJ1")
 
-        for atom in mol.atoms():
-            # Get the end state LJ sigma values.
-            lj0 = atom.property("LJ0")
-            lj1 = atom.property("LJ1")
-
-            # Lambda = 0 state has a zero sigma value.
-            if abs(lj0.sigma().value()) <= null_lj_sigma:
-                # Use the sigma value from the lambda = 1 state.
-                edit_mol = (
-                    edit_mol.atom(atom.index())
-                    .set_property(
-                        "LJ0", _SireMM.LJParameter(lj1.sigma(), lj0.epsilon())
+                # Lambda = 0 state has a zero sigma value.
+                if abs(lj0.sigma().value()) <= null_lj_sigma:
+                    # Use the sigma value from the lambda = 1 state.
+                    edit_mol = (
+                        edit_mol.atom(atom.index())
+                        .set_property(
+                            "LJ0", _SireMM.LJParameter(lj1.sigma(), lj0.epsilon())
+                        )
+                        .molecule()
                     )
-                    .molecule()
-                )
 
-            # Lambda = 1 state has a zero sigma value.
-            if abs(lj1.sigma().value()) <= null_lj_sigma:
-                # Use the sigma value from the lambda = 0 state.
-                edit_mol = (
-                    edit_mol.atom(atom.index())
-                    .set_property(
-                        "LJ1", _SireMM.LJParameter(lj0.sigma(), lj1.epsilon())
+                # Lambda = 1 state has a zero sigma value.
+                if abs(lj1.sigma().value()) <= null_lj_sigma:
+                    # Use the sigma value from the lambda = 0 state.
+                    edit_mol = (
+                        edit_mol.atom(atom.index())
+                        .set_property(
+                            "LJ1", _SireMM.LJParameter(lj0.sigma(), lj1.epsilon())
+                        )
+                        .molecule()
                     )
-                    .molecule()
-                )
 
         ########################
         # Now process the bonds.
