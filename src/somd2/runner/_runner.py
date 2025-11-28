@@ -460,7 +460,11 @@ class Runner(_RunnerBase):
                     perturbable_constraint=perturbable_constraint,
                 )
             except Exception as e:
-                raise RuntimeError(f"Minimisation failed: {e}")
+                msg = f"Minimisation failed for {_lam_sym} = {lambda_value:.5f}: {e}"
+                if self.confing.minimisation_errors:
+                    raise RuntimeError(msg)
+                else:
+                    _logger.warning(msg)
 
         # Equilibration.
         is_equilibrated = False
@@ -523,6 +527,8 @@ class Runner(_RunnerBase):
                 # Reset the timer.
                 if self._initial_time[index].value() != 0:
                     system.set_time(self._initial_time[index])
+                else:
+                    system.set_time(_sr.u("0ps"))
 
             except Exception as e:
                 try:
