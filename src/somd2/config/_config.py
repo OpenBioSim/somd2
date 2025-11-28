@@ -109,6 +109,7 @@ class Config:
         include_constrained_energies=False,
         dynamic_constraints=True,
         ghost_modifications=True,
+        fix_perturbable_zero_sigmas=True,
         charge_difference=None,
         coalchemical_restraint_dist=None,
         com_reset_frequency=10,
@@ -257,6 +258,9 @@ class Config:
             system to avoid spurious coupling between the two, which can lead to
             sampling of non-physical conformations. We implement the recommended
             modifcations from https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328
+
+        fix_perturbable_zero_sigmas: bool
+            Whether to prevent LJ sigma values being perturbed to zero.
 
         charge_difference: int
             The charge difference between the two end states. (Perturbed minus
@@ -498,6 +502,7 @@ class Config:
         self.include_constrained_energies = include_constrained_energies
         self.dynamic_constraints = dynamic_constraints
         self.ghost_modifications = ghost_modifications
+        self.fix_perturbable_zero_sigmas = fix_perturbable_zero_sigmas
         self.charge_difference = charge_difference
         self.coalchemical_restraint_dist = coalchemical_restraint_dist
         self.com_reset_frequency = com_reset_frequency
@@ -1144,6 +1149,16 @@ class Config:
         if not isinstance(ghost_modifications, bool):
             raise ValueError("'ghost_modifications' must be of type 'bool'")
         self._ghost_modifications = ghost_modifications
+
+    @property
+    def fix_perturbable_zero_sigmas(self):
+        return self._fix_perturbable_zero_sigmas
+
+    @fix_perturbable_zero_sigmas.setter
+    def fix_perturbable_zero_sigmas(self, fix_perturbable_zero_sigmas):
+        if not isinstance(fix_perturbable_zero_sigmas, bool):
+            raise ValueError("'fix_perturbable_zero_sigmas' must be of type 'bool'")
+        self._fix_perturbable_zero_sigmas = fix_perturbable_zero_sigmas
 
     @property
     def charge_difference(self):
