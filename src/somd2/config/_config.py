@@ -109,11 +109,13 @@ class Config:
         include_constrained_energies=False,
         dynamic_constraints=True,
         ghost_modifications=True,
+        fix_perturbable_zero_sigmas=False,
         charge_difference=None,
         coalchemical_restraint_dist=None,
         com_reset_frequency=10,
         minimise=True,
         minimisation_constraints=False,
+        minimisation_errors=False,
         equilibration_time="0 ps",
         equilibration_timestep="2 fs",
         equilibration_constraints=True,
@@ -258,6 +260,9 @@ class Config:
             sampling of non-physical conformations. We implement the recommended
             modifcations from https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328
 
+        fix_perturbable_zero_sigmas: bool
+            Whether to prevent LJ sigma values being perturbed to zero.
+
         charge_difference: int
             The charge difference between the two end states. (Perturbed minus
             reference.) If None, then alchemical ions will automatically be
@@ -284,6 +289,9 @@ class Config:
             Whether to use constraints during minimisation. If False, then no
             constraints will be used. If True, then the use of constraints will be
             determined based on the value of 'equilibration_constraints'.
+
+        minimisation_errors: bool
+            Whether to raise an exception if a minimisation fails to converge.
 
         equilibration_time: str
             Time interval for equilibration. Only simulations starting from
@@ -498,11 +506,13 @@ class Config:
         self.include_constrained_energies = include_constrained_energies
         self.dynamic_constraints = dynamic_constraints
         self.ghost_modifications = ghost_modifications
+        self.fix_perturbable_zero_sigmas = fix_perturbable_zero_sigmas
         self.charge_difference = charge_difference
         self.coalchemical_restraint_dist = coalchemical_restraint_dist
         self.com_reset_frequency = com_reset_frequency
         self.minimise = minimise
         self.minimisation_constraints = minimisation_constraints
+        self.minimisation_errors = minimisation_errors
         self.equilibration_time = equilibration_time
         self.equilibration_timestep = equilibration_timestep
         self.equilibration_constraints = equilibration_constraints
@@ -1146,6 +1156,16 @@ class Config:
         self._ghost_modifications = ghost_modifications
 
     @property
+    def fix_perturbable_zero_sigmas(self):
+        return self._fix_perturbable_zero_sigmas
+
+    @fix_perturbable_zero_sigmas.setter
+    def fix_perturbable_zero_sigmas(self, fix_perturbable_zero_sigmas):
+        if not isinstance(fix_perturbable_zero_sigmas, bool):
+            raise ValueError("'fix_perturbable_zero_sigmas' must be of type 'bool'")
+        self._fix_perturbable_zero_sigmas = fix_perturbable_zero_sigmas
+
+    @property
     def charge_difference(self):
         return self._charge_difference
 
@@ -1221,6 +1241,16 @@ class Config:
         if not isinstance(minimisation_constraints, bool):
             raise ValueError("'minimisation_constraints' must be of type 'bool'")
         self._minimisation_constraints = minimisation_constraints
+
+    @property
+    def minimisation_errors(self):
+        return self._minimisation_errors
+
+    @minimisation_errors.setter
+    def minimisation_errors(self, minimisation_errors):
+        if not isinstance(minimisation_errors, bool):
+            raise ValueError("'minimisation_errors' must be of type 'bool'")
+        self._minimisation_errors = minimisation_errors
 
     @property
     def equilibration_time(self):

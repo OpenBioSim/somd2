@@ -190,7 +190,9 @@ class RunnerBase:
         self._config._extra_args["check_for_h_by_ambertype"] = False
 
         # Make sure that perturbable LJ sigmas aren't scaled to zero.
-        self._config._extra_args["fix_perturbable_zero_sigmas"] = True
+        self._config._extra_args["fix_perturbable_zero_sigmas"] = (
+            config.fix_perturbable_zero_sigmas
+        )
 
         # We're running in SOMD1 compatibility mode.
         if self._config.somd1_compatibility:
@@ -199,7 +201,10 @@ class RunnerBase:
             # First, try to make the perturbation SOMD1 compatible.
 
             _logger.info("Applying SOMD1 perturbation compatibility.")
-            self._system = make_compatible(self._system)
+            self._system = make_compatible(
+                self._system,
+                fix_perturbable_zero_sigmas=self.config.fix_perturbable_zero_sigmas,
+            )
             self._system = _sr.morph.link_to_reference(self._system)
 
             # Next, swap the water topology so that it is in AMBER format.
