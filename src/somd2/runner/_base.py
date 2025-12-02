@@ -264,7 +264,7 @@ class RunnerBase:
             from ghostly import modify
 
             _logger.info("Applying modifications to ghost atom bonded terms")
-            self._system = modify(self._system)
+            self._system, self._modifications = modify(self._system)
 
         # Check for a periodic space.
         self._has_space = self._check_space()
