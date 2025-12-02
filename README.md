@@ -215,7 +215,7 @@ follows. (This assumes that the output has a prefix `somd1`.)
 import BioSimSpace as BSS
 
 # Load the lambda = 0 state from prepareFEP.py
-system = BSS.IO.readMolecules(["somd1.prm7", "somd1.rst7"])
+system = BSS.IO.readMolecules(["somd1.prm7", "somd1.rst7"], reduce_box=True)
 
 # Write a stream file.
 BSS.Stream.save(system, "somd1")
