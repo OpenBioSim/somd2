@@ -660,6 +660,15 @@ def reconstruct_system(system):
     # Loop over all perturbable molecules.
     for mol in pert_mols:
 
+        # Delete an AmberParams properties.
+        try:
+            cursor = mol.cursor()
+            del cursor["parameters0"]
+            del cursor["parameters1"]
+            mol = cursor.commit()
+        except:
+            pass
+
         # Extract the end states.
         ref = _morph.extract_reference(mol)
         pert = _morph.extract_perturbed(mol)
