@@ -84,7 +84,7 @@ def apply_pert(system, pert_file):
     return system
 
 
-def make_compatible(system, fix_perturbable_zero_sigams=False):
+def make_compatible(system, fix_perturbable_zero_sigmas=False):
     """
     Makes a perturbation SOMD1 compatible.
 
@@ -94,7 +94,7 @@ def make_compatible(system, fix_perturbable_zero_sigams=False):
     system : sire.system.System, sire.legacy.System.System
         The system containing the molecules to be perturbed.
 
-    fix_perturbable_zero_sigams : bool
+    fix_perturbable_zero_sigmas : bool
         Whether to prevent LJ sigma values being perturbed to zero.
 
     Returns
@@ -110,8 +110,8 @@ def make_compatible(system, fix_perturbable_zero_sigams=False):
             "'system' must of type 'sire.system.System' or 'sire.legacy.System.System'"
         )
 
-    if not isinstance(fix_perturbable_zero_sigams, bool):
-        raise TypeError("'fix_perturbable_zero_sigams' must be of type 'bool'.")
+    if not isinstance(fix_perturbable_zero_sigmas, bool):
+        raise TypeError("'fix_perturbable_zero_sigmas' must be of type 'bool'.")
 
     # Extract the legacy system.
     if isinstance(system, _LegacySystem):
@@ -138,7 +138,7 @@ def make_compatible(system, fix_perturbable_zero_sigams=False):
         ##################################
         # First fix zero LJ sigmas values.
         ##################################
-        if fix_perturbable_zero_sigams:
+        if fix_perturbable_zero_sigmas:
             # Tolerance for zero sigma values.
             null_lj_sigma = 1e-9
 
