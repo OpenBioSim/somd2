@@ -124,7 +124,8 @@ class RunnerBase:
 
         # Flag whether frames are being saved.
         if (
-            self._config.frame_frequency > 0
+            self.config.save_trajectories
+            and self._config.frame_frequency > 0
             and self._config.frame_frequency <= self._config.runtime
         ):
             self._save_frames = True
