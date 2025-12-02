@@ -1242,7 +1242,6 @@ class RunnerBase:
             "equilibration_timestep",
             "equilibration_constraints",
             "energy_frequency",
-            "save_trajectory",
             "frame_frequency",
             "save_velocities",
             "platform",
