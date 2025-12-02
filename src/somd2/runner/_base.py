@@ -124,7 +124,8 @@ class RunnerBase:
 
         # Flag whether frames are being saved.
         if (
-            self._config.frame_frequency > 0
+            self._config.save_trajectories
+            and self._config.frame_frequency > 0
             and self._config.frame_frequency <= self._config.runtime
         ):
             self._save_frames = True
@@ -1241,7 +1242,6 @@ class RunnerBase:
             "equilibration_timestep",
             "equilibration_constraints",
             "energy_frequency",
-            "save_trajectory",
             "frame_frequency",
             "save_velocities",
             "platform",
@@ -1646,15 +1646,17 @@ class RunnerBase:
                         _copyfile(traj_filename, f"{traj_filename}.prev")
                         traj_chunks = [f"{traj_filename}.prev"] + traj_chunks
 
-                # Load the topology and chunked trajectory files.
-                mols = _sr.load([topology0] + traj_chunks)
+                # Make sure there are trajectory chunks to process.
+                if len(traj_chunks) > 0:
+                    # Load the topology and chunked trajectory files.
+                    mols = _sr.load([topology0] + traj_chunks)
 
-                # Save the final trajectory to a single file.
-                _sr.save(mols.trajectory(), traj_filename, format=["DCD"])
+                    # Save the final trajectory to a single file.
+                    _sr.save(mols.trajectory(), traj_filename, format=["DCD"])
 
-                # Now remove the chunked trajectory files.
-                for chunk in traj_chunks:
-                    _Path(chunk).unlink()
+                    # Now remove the chunked trajectory files.
+                    for chunk in traj_chunks:
+                        _Path(chunk).unlink()
 
             # Add config and lambda value to the system properties.
             system.set_property("config", self._config.as_dict(sire_compatible=True))
