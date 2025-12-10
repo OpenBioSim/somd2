@@ -825,7 +825,7 @@ class RepexRunner(_RunnerBase):
                         ):
                             if not success:
                                 msg = f"Minimisation failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
-                                if self.config.minimisation_errors:
+                                if self._config.minimisation_errors:
                                     _logger.error(msg)
                                     raise e
                                 else:
