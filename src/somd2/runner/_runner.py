@@ -461,7 +461,7 @@ class Runner(_RunnerBase):
                 )
             except Exception as e:
                 msg = f"Minimisation failed for {_lam_sym} = {lambda_value:.5f}: {e}"
-                if self.confing.minimisation_errors:
+                if self._config.minimisation_errors:
                     raise RuntimeError(msg)
                 else:
                     _logger.warning(msg)
