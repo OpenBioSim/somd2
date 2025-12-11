@@ -660,7 +660,7 @@ def reconstruct_system(system):
     # Loop over all perturbable molecules.
     for mol in pert_mols:
 
-        # Delete an AmberParams properties.
+        # Delete any AmberParams properties.
         try:
             cursor = mol.cursor()
             del cursor["parameters0"]

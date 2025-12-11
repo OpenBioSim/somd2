@@ -152,6 +152,7 @@ class Config:
         overwrite=False,
         somd1_compatibility=False,
         pert_file=None,
+        save_crash_report=False,
         save_energy_components=False,
         page_size=None,
         timeout="300 s",
@@ -451,6 +452,9 @@ class Config:
             The path to a SOMD1 perturbation file to apply to the reference system.
             When set, this will automatically set 'somd1_compatibility' to True.
 
+        save_crash_report: bool
+            Whether to save a crash report if the simulation crashes.
+
         save_energy_components: bool
             Whether to save the energy contribution for each force when checkpointing.
             This is useful when debugging crashes.
@@ -544,6 +548,7 @@ class Config:
         self.use_backup = use_backup
         self.somd1_compatibility = somd1_compatibility
         self.pert_file = pert_file
+        self.save_crash_report = save_crash_report
         self.save_energy_components = save_energy_components
         self.timeout = timeout
         self.num_energy_neighbours = num_energy_neighbours
@@ -1875,6 +1880,16 @@ class Config:
             raise ValueError(f"Perturbation file does not exist: {pert_file}")
 
         self._pert_file = pert_file
+
+    @property
+    def save_crash_report(self):
+        return self._save_crash_report
+
+    @save_crash_report.setter
+    def save_crash_report(self, save_crash_report):
+        if not isinstance(save_crash_report, bool):
+            raise ValueError("'save_crash_report' must be of type 'bool'")
+        self._save_crash_report = save_crash_report
 
     @property
     def save_energy_components(self):
