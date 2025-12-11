@@ -363,6 +363,7 @@ class RunnerBase:
         from math import isclose
 
         # Set the REST2 scale factors.
+        is_rest2 = False
         if self._config.rest2_scale is not None:
             # Single value. Interpolate between 1.0 at the end states and rest2_scale
             # at lambda = 0.5.
@@ -395,6 +396,39 @@ class RunnerBase:
                         _logger.error(msg)
                         raise ValueError(msg)
                 self._rest2_scale_factors = self._config.rest2_scale
+
+            # If there are any non-zero REST2 scale factors, then log it.
+            if any(
+                not isclose(factor, 1.0, abs_tol=1e-4)
+                for factor in self._rest2_scale_factors
+            ):
+                is_rest2 = True
+                _logger.info(f"REST2 scaling factors: {self._rest2_scale_factors}")
+
+        # Make sure the REST2 selection is valid.
+        if self._config.rest2_selection is not None:
+
+            try:
+                atoms = _sr.mol.selection_to_atoms(
+                    self._system, self._config.rest2_selection
+                )
+            except:
+                msg = "Invalid 'rest2_selection' value."
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            # Make sure the user hasn't selected all atoms.
+            if len(atoms) == self._system.num_atoms():
+                msg = "REST2 selection cannot contain all atoms in the system."
+                _logger.error(msg)
+                raise ValueError(msg)
+        else:
+            atoms = _sr.mol.selection_to_atoms(self._system, "property is_perturbable")
+
+        # Log the atom indices in the REST2 selection.
+        if is_rest2:
+            idxs = self._system.atoms().find(atoms)
+            _logger.info(f"REST2 selection contains {len(atoms)} atoms: {idxs}")
 
         # Apply hydrogen mass repartitioning.
         if self._config.hmr:
@@ -443,23 +477,6 @@ class RunnerBase:
                     self._system = self._repartition_h_mass(
                         self._system, self._config.h_mass_factor
                     )
-
-        # Make sure the REST2 selection is valid.
-        if self._config.rest2_selection is not None:
-            from sire.mol import selection_to_atoms
-
-            try:
-                atoms = selection_to_atoms(self._system, self._config.rest2_selection)
-            except:
-                msg = "Invalid 'rest2_selection' value."
-                _logger.error(msg)
-                raise ValueError(msg)
-
-            # Make sure the user hasn't selected all atoms.
-            if len(atoms) == self._system.num_atoms():
-                msg = "REST2 selection cannot contain all atoms in the system."
-                _logger.error(msg)
-                raise ValueError(msg)
 
         # Flag whether this is a GPU simulation.
         self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]
