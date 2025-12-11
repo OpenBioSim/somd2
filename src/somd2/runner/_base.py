@@ -172,7 +172,8 @@ class RunnerBase:
 
         # Make sure the system contains perturbable molecules.
         try:
-            self._system.molecules("property is_perturbable")
+            atoms = self._system["property is_perturbable"].atoms()
+            pert_idxs = self._system.atoms().find(atoms)
         except KeyError:
             msg = "No perturbable molecules in the system"
             _logger.error(msg)
@@ -433,12 +434,18 @@ class RunnerBase:
                 msg = "REST2 selection cannot contain all atoms in the system."
                 _logger.error(msg)
                 raise ValueError(msg)
+
+            # Get the atom indices.
+            idxs = self._system.atoms().find(atoms)
+
+            # If no indices are in the perturbable region, then add them.
+            if not any(i in pert_idxs for i in idxs):
+                idxs = sorted(pert_idxs + idxs)
         else:
-            atoms = _sr.mol.selection_to_atoms(self._system, "property is_perturbable")
+            idxs = pert_idxs
 
         # Log the atom indices in the REST2 selection.
         if is_rest2:
-            idxs = self._system.atoms().find(atoms)
             _logger.info(f"REST2 selection contains {len(atoms)} atoms: {idxs}")
 
         # Apply hydrogen mass repartitioning.
