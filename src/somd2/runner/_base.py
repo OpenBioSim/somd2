@@ -265,7 +265,18 @@ class RunnerBase:
             from ghostly import modify
 
             _logger.info("Applying modifications to ghost atom bonded terms")
-            self._system, self._modifications = modify(self._system)
+            try:
+                self._system, self._modifications = modify(self._system)
+            # Angle optimisation can sometimes fail.
+            except Exception as e1:
+                try:
+                    self._system, self._modifications = modify(
+                        self_system, optimise_angles=False
+                    )
+                except Exception as e2:
+                    msg = f"Unable to apply modifications to ghost atom bonded terms: {e1}; {e2}"
+                    _logger.error(msg)
+                    raise RuntimeError(msg)
 
         # Check for a periodic space.
         self._has_space = self._check_space()
