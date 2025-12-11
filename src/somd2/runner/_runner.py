@@ -519,6 +519,7 @@ class Runner(_RunnerBase):
                     frame_frequency=0,
                     save_velocities=False,
                     auto_fix_minimise=True,
+                    save_crash_report=self._config.save_crash_report,
                 )
 
                 # Commit the system.
@@ -686,6 +687,7 @@ class Runner(_RunnerBase):
                                 auto_fix_minimise=True,
                                 num_energy_neighbours=num_energy_neighbours,
                                 null_energy=self._config.null_energy,
+                                save_crash_report=self._config.save_crash_report,
                                 # GCMC specific options.
                                 excess_chemical_potential=(
                                     self._mu_ex if gcmc_sampler is not None else None
@@ -723,6 +725,7 @@ class Runner(_RunnerBase):
                             auto_fix_minimise=True,
                             num_energy_neighbours=num_energy_neighbours,
                             null_energy=self._config.null_energy,
+                            save_crash_report=self._config.save_crash_report,
                         )
                 except Exception as e:
                     try:
@@ -820,6 +823,7 @@ class Runner(_RunnerBase):
                         auto_fix_minimise=True,
                         num_energy_neighbours=num_energy_neighbours,
                         null_energy=self._config.null_energy,
+                        save_crash_report=self._config.save_crash_report,
                     )
 
                     # Save the energy contribution for each force.
@@ -895,6 +899,7 @@ class Runner(_RunnerBase):
                             auto_fix_minimise=True,
                             num_energy_neighbours=num_energy_neighbours,
                             null_energy=self._config.null_energy,
+                            save_crash_report=self._config.save_crash_report,
                         )
 
                         # Perform a GCMC move.
@@ -922,6 +927,7 @@ class Runner(_RunnerBase):
                         auto_fix_minimise=True,
                         num_energy_neighbours=num_energy_neighbours,
                         null_energy=self._config.null_energy,
+                        save_crash_report=self._config.save_crash_report,
                     )
             except Exception as e:
                 try:
