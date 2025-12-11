@@ -1144,6 +1144,7 @@ class RepexRunner(_RunnerBase):
                 auto_fix_minimise=True,
                 num_energy_neighbours=self._config.num_energy_neighbours,
                 null_energy=self._config.null_energy,
+                save_crash_report=self._config.save_crash_report,
                 # GCMC specific options.
                 excess_chemical_potential=(
                     self._mu_ex if gcmc_sampler is not None else None
@@ -1381,6 +1382,7 @@ class RepexRunner(_RunnerBase):
                 frame_frequency=0,
                 save_velocities=False,
                 auto_fix_minimise=True,
+                save_crash_report=self._config.save_crash_report,
             )
 
             # Commit the system.
