@@ -21,6 +21,11 @@
 
 __all__ = ["Runner"]
 
+from filelock import FileLock as _FileLock
+from time import time as _timer
+
+import numpy as _np
+
 import sire as _sr
 
 from somd2 import _logger
@@ -88,22 +93,29 @@ class Runner(_RunnerBase):
         Also intialises the list with all available GPUs.
         """
         if self._is_gpu:
-            if self._config.max_gpus is None:
-                self._gpu_pool = self._manager.list(
-                    self._zero_gpu_devices(self._get_gpu_devices(self._config.platform))
-                )
-            else:
-                self._gpu_pool = self._manager.list(
-                    self._zero_gpu_devices(
-                        self._get_gpu_devices(self._config.platform)[
-                            : self._config.max_gpus
-                        ]
+            devices = self._get_gpu_devices(
+                self._config.platform, self._config.oversubscription_factor
+            )
+            if self._config.max_gpus is not None:
+                if self._config.max_gpus > len(devices):
+                    _logger.warning(
+                        f"Requested {self._config.max_gpus} GPUs, but only {len(devices)} are available."
                     )
+                num_devices = min(len(devices), self._config.max_gpus)
+            else:
+                num_devices = len(devices)
+
+            # Create the GPU pool from the available devices.
+            self._gpu_pool = self._manager.list(
+                self._initialise_gpu_devices(
+                    num_devices,
+                    self._config.oversubscription_factor,
                 )
+            )
 
     def _update_gpu_pool(self, gpu_num):
         """
-        Updates the GPU pool to remove the GPU that has been assigned to a worker.
+        Updates the GPU pool to add the GPU assigned to a worker that has finished.
 
         Parameters
         ----------
@@ -115,7 +127,7 @@ class Runner(_RunnerBase):
 
     def _remove_gpu_from_pool(self, gpu_num):
         """
-        Removes a GPU from the GPU pool.
+        Removes a GPU from the GPU pool when it is assigned to a worker.
 
         Parameters
         ----------
@@ -126,28 +138,39 @@ class Runner(_RunnerBase):
         self._gpu_pool.remove(gpu_num)
 
     @staticmethod
-    def _zero_gpu_devices(devices):
+    def _initialise_gpu_devices(num_devices, oversubscription_factor=1):
         """
-        Set all device numbers relative to the lowest (the device number becomes
-        equal to its index in the list).
+        Create the list of avaiable GPU devices.
+
+        Parameters
+        ----------
+
+        num_devices: int
+            The number of GPU devices to use.
+
+        oversubscription_factor: int
+            The oversubscription factor for the GPUs. This is the number of
+            workers that can use a single GPU at the same time.
 
         Returns
         -------
 
-        devices : [int]
-            List of zeroed available device numbers.
+        devices : [(str, int)]
+            List of available device numbers with oversubscription factor.
         """
-        return [str(devices.index(value)) for value in devices]
+        devices = []
+        for i in range(oversubscription_factor):
+            for j in range(num_devices):
+                devices.append((str(j), i))
+        return devices
 
     def run(self):
         """
         Use concurrent.futures to run lambda windows in parallel
         """
 
-        from time import time
-
         # Record the start time.
-        start = time()
+        start = _timer()
 
         # Create shared resources.
         self._create_shared_resources()
@@ -176,8 +199,12 @@ class Runner(_RunnerBase):
             self._max_workers = 1
 
         import concurrent.futures as _futures
+        import multiprocessing as _mp
 
-        with _futures.ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+        success = True
+        with _futures.ProcessPoolExecutor(
+            max_workers=self.max_workers, mp_context=_mp.get_context("spawn")
+        ) as executor:
             jobs = {}
             for index, lambda_value in enumerate(self._lambda_values):
                 jobs[executor.submit(self.run_window, index)] = lambda_value
@@ -185,26 +212,40 @@ class Runner(_RunnerBase):
                 for job in _futures.as_completed(jobs):
                     lambda_value = jobs[job]
                     try:
-                        result = job.result()
+                        success, time = job.result()
                     except Exception as e:
-                        result = False
                         _logger.error(
                             f"Exception raised for {_lam_sym} = {lambda_value}: {e}"
                         )
+                        success = False
 
             # Kill all current and future jobs if keyboard interrupt.
             except KeyboardInterrupt:
                 _logger.error("Cancelling job...")
                 for pid in executor._processes:
                     executor._processes[pid].terminate()
+                success = False
 
-        # Record the end time.
-        end = time()
+        if success:
+            # Record the end time.
+            end = _timer()
 
-        # Log the run time in minutes.
-        _logger.success(
-            f"Simulation finished. Run time: {(end - start) / 60:.2f} minutes"
-        )
+            # Work how many fractional days the simulation took.
+            days = (end - start) / 86400
+
+            # Calculate the speed in nanoseconds per day.
+            speed = time.to("ns") / days
+
+            # Log the speed.
+            _logger.info(f"Overall performance: {speed:.2f} ns day-1")
+
+            # Log the run time in minutes.
+            _logger.success(
+                f"Simulation finished. Run time: {(end - start) / 60:.2f} minutes"
+            )
+
+            # Cleanup backup files.
+            self._cleanup()
 
     def run_window(self, index):
         """
@@ -221,7 +262,14 @@ class Runner(_RunnerBase):
 
         success: bool
             Whether the simulation was successful.
+
+        time: sire.units.GeneralUnit
+            The duration of the simulation.
         """
+
+        # Since this method is called in a separate process with the "spawn"
+        # method, we need to re-set the logger.
+        self._config._reset_logger(_logger)
 
         # Get the lambda value.
         lambda_value = self._lambda_values[index]
@@ -235,7 +283,7 @@ class Runner(_RunnerBase):
                 _logger.success(
                     f"{_lam_sym} = {lambda_value} already complete. Skipping."
                 )
-                return True
+                return True, time
             else:
                 _logger.info(
                     f"Restarting {_lam_sym} = {lambda_value} at time {time}, "
@@ -248,16 +296,17 @@ class Runner(_RunnerBase):
         if self._is_gpu:
             # Get a GPU from the pool.
             with self._lock:
-                gpu_num = self._gpu_pool[0]
-                self._remove_gpu_from_pool(gpu_num)
+                gpu = self._gpu_pool[0]
+                gpu_num = gpu[0]
+                self._remove_gpu_from_pool(gpu)
                 if lambda_value is not None:
                     _logger.info(
                         f"Running {_lam_sym} = {lambda_value} on GPU {gpu_num}"
                     )
 
-            # Run the smullation.
+            # Run the simulation.
             try:
-                self._run(
+                time = self._run(
                     system,
                     index,
                     device=gpu_num,
@@ -265,11 +314,12 @@ class Runner(_RunnerBase):
                 )
 
                 with self._lock:
-                    self._update_gpu_pool(gpu_num)
+                    self._update_gpu_pool(gpu)
             except Exception as e:
                 with self._lock:
-                    self._update_gpu_pool(gpu_num)
+                    self._update_gpu_pool(gpu)
                 _logger.error(f"Error running {_lam_sym} = {lambda_value}: {e}")
+                return False, _sr.u("0ps")
 
         # All other platforms.
         else:
@@ -277,11 +327,12 @@ class Runner(_RunnerBase):
 
             # Run the simulation.
             try:
-                self._run(system, index, is_restart=self._is_restart)
+                time = self._run(system, index, is_restart=self._is_restart)
             except Exception as e:
                 _logger.error(f"Error running {_lam_sym} = {lambda_value}: {e}")
+                return False, _sr.u("0ps")
 
-        return True
+        return True, time
 
     def _run(
         self, system, index, device=None, lambda_minimisation=None, is_restart=False
@@ -310,8 +361,8 @@ class Runner(_RunnerBase):
         Returns
         -------
 
-        df : pandas dataframe
-            Dataframe containing the sire energy trajectory.
+        time: sire.units.GeneralUnit
+            The duration of the simulation.
         """
 
         # Get the lambda value.
@@ -330,12 +381,15 @@ class Runner(_RunnerBase):
                 _logger.success(
                     f"{_lam_sym} = {lambda_value} already complete. Skipping."
                 )
-                return
+                return _sr.u("0ps")
 
             # Work out the current block number.
-            self._start_block = int(
-                round(time.value() / self._config.checkpoint_frequency.value(), 12)
-            )
+            if self._config.checkpoint_frequency.value() > 0.0:
+                self._start_block = int(
+                    round(time.value() / self._config.checkpoint_frequency.value(), 12)
+                )
+            else:
+                self._start_block = 0
 
             # Subtract the current time from the runtime.
             time = self._config.runtime - time
@@ -355,16 +409,46 @@ class Runner(_RunnerBase):
                 lam_vals = [lambda_base - increment, lambda_base + increment]
             return lam_vals
 
+        # Prepare the GCMC sampler.
+        if self._config.gcmc:
+            _logger.info(f"Preparing GCMC sampler at {_lam_sym} = {lambda_value:.5f}")
+
+            try:
+                from loch import GCMCSampler
+            except:
+                msg = "loch is not installed. GCMC sampling cannot be performed."
+                _logger.error(msg)
+
+            gcmc_sampler = GCMCSampler(
+                system,
+                device=int(device),
+                lambda_value=lambda_value,
+                rest2_scale=rest2_scale,
+                ghost_file=self._filenames[index]["gcmc_ghosts"],
+                **self._gcmc_kwargs,
+            )
+
+            # Get the GCMC system.
+            system = gcmc_sampler.system()
+
+        else:
+            gcmc_sampler = None
+
         # Minimisation.
         if self._config.minimise:
-            # Minimise with no constraints if we need to equilibrate first.
-            # This seems to improve the stability of the equilibration.
-            if self._config.equilibration_time.value() > 0.0 and not is_restart:
+            constraint = self._config.constraint
+            perturbable_constraint = self._config.perturbable_constraint
+
+            # Don't use constraints during minimisation.
+            if not self._config.minimisation_constraints:
                 constraint = "none"
                 perturbable_constraint = "none"
-            else:
-                constraint = self._config.constraint
-                perturbable_constraint = self._config.perturbable_constraint
+            # We will be performing an equilibration stage.
+            elif not is_restart and self._config.equilibration_time.value() > 0.0:
+                # Don't use constraints during equilibration.
+                if not self._config.equilibration_constraints:
+                    constraint = "none"
+                    perturbable_constraint = "none"
 
             try:
                 system = self._minimisation(
@@ -376,10 +460,16 @@ class Runner(_RunnerBase):
                     perturbable_constraint=perturbable_constraint,
                 )
             except Exception as e:
-                raise RuntimeError(f"Minimisation failed: {e}")
+                msg = f"Minimisation failed for {_lam_sym} = {lambda_value:.5f}: {e}"
+                if self._config.minimisation_errors:
+                    raise RuntimeError(msg)
+                else:
+                    _logger.warning(msg)
 
         # Equilibration.
-        if self._config.equilibration_time.value() > 0.0 and not is_restart:
+        is_equilibrated = False
+        if not is_restart and self._config.equilibration_time.value() > 0.0:
+            is_equilibrated = True
             try:
                 # Run without saving energies or frames.
                 _logger.info(f"Equilibrating at {_lam_sym} = {lambda_value:.5f}")
@@ -410,6 +500,18 @@ class Runner(_RunnerBase):
                 # Create the dynamics object.
                 dynamics = system.dynamics(**dynamics_kwargs)
 
+                # Equilibrate with GCMC moves.
+                if gcmc_sampler is not None:
+                    # Bind the GCMC sampler to the dynamics object.
+                    gcmc_sampler.bind_dynamics(dynamics)
+
+                    _logger.info(
+                        f"Equilibrating with GCMC moves at {_lam_sym} = {lambda_value:.5f}"
+                    )
+
+                    for i in range(100):
+                        gcmc_sampler.move(dynamics.context())
+
                 # Run without saving energies or frames.
                 dynamics.run(
                     self._config.equilibration_time,
@@ -417,29 +519,23 @@ class Runner(_RunnerBase):
                     frame_frequency=0,
                     save_velocities=False,
                     auto_fix_minimise=True,
+                    save_crash_report=self._config.save_crash_report,
                 )
 
                 # Commit the system.
                 system = dynamics.commit()
 
-                # Reset the timer to zero.
-                system.set_time(_sr.u("0ps"))
+                # Reset the timer.
+                if self._initial_time[index].value() != 0:
+                    system.set_time(self._initial_time[index])
+                else:
+                    system.set_time(_sr.u("0ps"))
 
-                # Perform minimisation at the end of equilibration only if the
-                # timestep is increasing, or the constraint is changing.
-                if (self._config.timestep > self._config.equilibration_timestep) or (
-                    not self._config.equilibration_constraints
-                    and self._config.perturbable_constraint != "none"
-                ):
-                    self._minimisation(
-                        system,
-                        lambda_value=lambda_value,
-                        rest2_scale=rest2_scale,
-                        device=device,
-                        constraint=self._config.constraint,
-                        perturbable_constraint=self._config.perturbable_constraint,
-                    )
             except Exception as e:
+                try:
+                    self._save_energy_components(index, dynamics.context())
+                except:
+                    pass
                 raise RuntimeError(f"Equilibration failed: {e}")
 
         # Work out the lambda values for finite-difference gradient analysis.
@@ -489,6 +585,48 @@ class Runner(_RunnerBase):
         # Create the dynamics object.
         dynamics = system.dynamics(**dynamics_kwargs)
 
+        # Reset the GCMC sampler. This resets the sampling statistics and clears
+        # the associated OpenMM forces.
+        if gcmc_sampler is not None:
+            gcmc_sampler.reset()
+
+            # Bind the GCMC sampler to the dynamics object.
+            gcmc_sampler.bind_dynamics(dynamics)
+
+            # If this is a restart, then we need to reset the GCMC water state
+            # to match that of the restart system.
+            if self._is_restart:
+                from openmm.unit import angstrom
+
+                # First set all waters to non-ghosts.
+                gcmc_sampler._set_water_state(
+                    dynamics.context(),
+                    states=_np.ones(len(gcmc_sampler._water_indices)),
+                    force=True,
+                )
+
+                # Now set the ghost waters.
+                gcmc_sampler._set_water_state(
+                    dynamics.context(),
+                    self._restart_ghost_waters[index],
+                    states=_np.zeros(len(gcmc_sampler._water_indices)),
+                    force=True,
+                )
+
+                # Finally, reset the context positions to match the restart system.
+                dynamics.context().setPositions(
+                    self._restart_positions[index] * angstrom
+                )
+
+            # Otherwise, if we've performed equilibration, then we need to reset
+            # the water state in the new context to match the equilibrated system.
+            elif is_equilibrated:
+                # Reset the water state.
+                gcmc_sampler._set_water_state(
+                    dynamics.context(),
+                    force=True,
+                )
+
         # Set the number of neighbours used for the energy calculation.
         # If not None, then we add one to account for the extra windows
         # used for finite-difference gradient analysis.
@@ -496,6 +634,12 @@ class Runner(_RunnerBase):
             num_energy_neighbours = self._config.num_energy_neighbours + 1
         else:
             num_energy_neighbours = None
+
+        # Store the checkpoint time in nanoseconds.
+        checkpoint_interval = self._config.checkpoint_frequency.to("ns")
+
+        # Store the start time.
+        start = _timer()
 
         # Run the simulation, checkpointing in blocks.
         if self._config.checkpoint_frequency.value() > 0.0:
@@ -516,20 +660,78 @@ class Runner(_RunnerBase):
                 # Add the start block number.
                 block += self._start_block
 
+                # Record the start time.
+                block_start = _timer()
+
                 # Run the dynamics.
                 try:
-                    dynamics.run(
-                        self._config.checkpoint_frequency,
-                        energy_frequency=self._config.energy_frequency,
-                        frame_frequency=self._config.frame_frequency,
-                        lambda_windows=lambda_array,
-                        rest2_scale_factors=rest2_scale_factors,
-                        save_velocities=self._config.save_velocities,
-                        auto_fix_minimise=True,
-                        num_energy_neighbours=num_energy_neighbours,
-                        null_energy=self._config.null_energy,
-                    )
+                    # GCMC specific handling. Note that the frame and checkpoint
+                    # frequencies are multiples of the energy frequency so we can
+                    # run in energy frequency blocks with no remainder.
+                    if self._config.gcmc:
+                        # Initialise the run time and time at which the next frame is saved.
+                        runtime = _sr.u("0ps")
+                        save_frames = self._config.frame_frequency > 0
+                        next_frame = self._config.frame_frequency
+
+                        # Loop until we reach the runtime.
+                        while runtime <= self._config.checkpoint_frequency:
+                            # Run the dynamics in blocks of the GCMC frequency.
+                            dynamics.run(
+                                self._config.gcmc_frequency,
+                                energy_frequency=self._config.energy_frequency,
+                                frame_frequency=self._config.frame_frequency,
+                                lambda_windows=lambda_array,
+                                rest2_scale_factors=rest2_scale_factors,
+                                save_velocities=self._config.save_velocities,
+                                auto_fix_minimise=True,
+                                num_energy_neighbours=num_energy_neighbours,
+                                null_energy=self._config.null_energy,
+                                save_crash_report=self._config.save_crash_report,
+                                # GCMC specific options.
+                                excess_chemical_potential=(
+                                    self._mu_ex if gcmc_sampler is not None else None
+                                ),
+                                num_waters=(
+                                    _np.sum(gcmc_sampler.water_state())
+                                    if gcmc_sampler is not None
+                                    else None
+                                ),
+                            )
+
+                            # Perform a GCMC move.
+                            _logger.info(
+                                f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
+                            )
+                            gcmc_sampler.move(dynamics.context())
+
+                            # Update the runtime.
+                            runtime += self._config.energy_frequency
+
+                            # If a frame is saved, then we need to save current indices
+                            # of the ghost water residues.
+                            if save_frames and runtime >= next_frame:
+                                gcmc_sampler.write_ghost_residues()
+                                next_frame += self._config.frame_frequency
+
+                    else:
+                        dynamics.run(
+                            self._config.checkpoint_frequency,
+                            energy_frequency=self._config.energy_frequency,
+                            frame_frequency=self._config.frame_frequency,
+                            lambda_windows=lambda_array,
+                            rest2_scale_factors=rest2_scale_factors,
+                            save_velocities=self._config.save_velocities,
+                            auto_fix_minimise=True,
+                            num_energy_neighbours=num_energy_neighbours,
+                            null_energy=self._config.null_energy,
+                            save_crash_report=self._config.save_crash_report,
+                        )
                 except Exception as e:
+                    try:
+                        self._save_energy_components(index, dynamics.context())
+                    except:
+                        pass
                     raise RuntimeError(
                         f"Dynamics block {block+1} for {_lam_sym} = {lambda_value:.5f} failed: {e}"
                     )
@@ -543,24 +745,43 @@ class Runner(_RunnerBase):
                     # Commit the current system.
                     system = dynamics.commit()
 
-                    # Get the simulation speed.
-                    speed = dynamics.time_speed()
+                    # If performing GCMC, then we need to flag the ghost waters.
+                    if gcmc_sampler is not None:
+                        system = gcmc_sampler._flag_ghost_waters(system)
+
+                    # Record the end time.
+                    block_end = _timer()
+
+                    # Work how many fractional days the block took.
+                    block_time = (block_end - block_start) / 86400
+
+                    # Calculate the speed in nanoseconds per day.
+                    speed = checkpoint_interval / block_time
 
                     # Check if this is the final block.
                     is_final_block = (
                         block - self._start_block
                     ) == num_blocks - 1 and rem == 0
 
-                    # Checkpoint.
-                    self._checkpoint(
-                        system,
-                        index,
-                        block,
-                        speed,
-                        lambda_energy=lambda_energy,
-                        lambda_grad=lambda_grad,
-                        is_final_block=is_final_block,
-                    )
+                    # Create the lock.
+                    lock = _FileLock(self._lock_file)
+
+                    # Acquire the file lock to ensure that the checkpoint files are
+                    # in a consistent state if read by another process.
+                    with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                        # Backup any existing checkpoint files.
+                        self._backup_checkpoint(index)
+
+                        # Write the checkpoint files.
+                        self._checkpoint(
+                            system,
+                            index,
+                            block,
+                            speed,
+                            lambda_energy=lambda_energy,
+                            lambda_grad=lambda_grad,
+                            is_final_block=is_final_block,
+                        )
 
                     # Delete all trajectory frames from the Sire system within the
                     # dynamics object.
@@ -571,6 +792,13 @@ class Runner(_RunnerBase):
                         f"for {_lam_sym} = {lambda_value:.5f}"
                     )
 
+                    # Log the number of waters within the GCMC sampling volume.
+                    if gcmc_sampler is not None:
+                        _logger.info(
+                            f"Current number of waters in GCMC volume at {_lam_sym} = {lambda_value:.5f} "
+                            f"is {gcmc_sampler.num_waters()}"
+                        )
+
                     if is_final_block:
                         _logger.success(
                             f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"
@@ -580,9 +808,10 @@ class Runner(_RunnerBase):
                         f"Checkpoint failed for {_lam_sym} = {lambda_value:.5f}: {e}"
                     )
 
-            # Handle the remainder time.
+            # Handle the remainder time. (There will be no remainer when GCMC sampling.)
             if rem > 0:
                 block += 1
+                block_start = _timer()
                 try:
                     dynamics.run(
                         rem,
@@ -594,6 +823,7 @@ class Runner(_RunnerBase):
                         auto_fix_minimise=True,
                         num_energy_neighbours=num_energy_neighbours,
                         null_energy=self._config.null_energy,
+                        save_crash_report=self._config.save_crash_report,
                     )
 
                     # Save the energy contribution for each force.
@@ -603,19 +833,30 @@ class Runner(_RunnerBase):
                     # Commit the current system.
                     system = dynamics.commit()
 
-                    # Get the simulation speed.
-                    speed = dynamics.time_speed()
+                    # Record the end time.
+                    block_end = _timer()
 
-                    # Checkpoint.
-                    self._checkpoint(
-                        system,
-                        index,
-                        block,
-                        speed,
-                        lambda_energy=lambda_energy,
-                        lambda_grad=lambda_grad,
-                        is_final_block=True,
-                    )
+                    # Work how many fractional days the block took.
+                    block_time = (block_end - block_start) / 86400
+
+                    # Calculate the speed in nanoseconds per day.
+                    speed = checkpoint_interval / block_time
+
+                    # Create the lock.
+                    lock = _FileLock(self._lock_file)
+
+                    # Acquire the file lock to ensure that the checkpoint files are
+                    # in a consistent state if read by another process.
+                    with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                        self._checkpoint(
+                            system,
+                            index,
+                            block,
+                            speed,
+                            lambda_energy=lambda_energy,
+                            lambda_grad=lambda_grad,
+                            is_final_block=True,
+                        )
 
                     # Delete all trajectory frames from the Sire system within the
                     # dynamics object.
@@ -630,23 +871,69 @@ class Runner(_RunnerBase):
                         f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"
                     )
                 except Exception as e:
+                    try:
+                        self._save_energy_components(index, dynamics.context())
+                    except:
+                        pass
                     raise RuntimeError(
                         f"Final dynamics block for {lam_sym} = {lambda_value:.5f} failed: {e}"
                     )
         else:
             try:
-                dynamics.run(
-                    time,
-                    energy_frequency=self._config.energy_frequency,
-                    frame_frequency=self._config.frame_frequency,
-                    lambda_windows=lambda_array,
-                    rest2_scale_factors=rest2_scale_factors,
-                    save_velocities=self._config.save_velocities,
-                    auto_fix_minimise=True,
-                    num_energy_neighbours=num_energy_neighbours,
-                    null_energy=self._config.null_energy,
-                )
+                if gcmc_sampler is not None:
+                    # Initialise the run time and time at which the next frame is saved.
+                    runtime = _sr.u("0ps")
+                    save_frames = self._config.frame_frequency > 0
+                    next_frame = self._config.frame_frequency
+
+                    # Loop until we reach the runtime.
+                    while runtime <= time:
+                        # Run the dynamics in blocks of the GCMC frequency.
+                        dynamics.run(
+                            self._config.gcmc_frequency,
+                            energy_frequency=self._config.energy_frequency,
+                            frame_frequency=self._config.frame_frequency,
+                            lambda_windows=lambda_array,
+                            rest2_scale_factors=rest2_scale_factors,
+                            save_velocities=self._config.save_velocities,
+                            auto_fix_minimise=True,
+                            num_energy_neighbours=num_energy_neighbours,
+                            null_energy=self._config.null_energy,
+                            save_crash_report=self._config.save_crash_report,
+                        )
+
+                        # Perform a GCMC move.
+                        _logger.info(
+                            f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
+                        )
+                        gcmc_sampler.move(dynamics.context())
+
+                        # Update the runtime.
+                        runtime += self._config.energy_frequency
+
+                        # If a frame is saved, then we need to save current indices
+                        # of the ghost water residues.
+                        if save_frames and runtime >= next_frame:
+                            gcmc_sampler.write_ghost_residues()
+                            next_frame += self._config.frame_frequency
+                else:
+                    dynamics.run(
+                        time,
+                        energy_frequency=self._config.energy_frequency,
+                        frame_frequency=self._config.frame_frequency,
+                        lambda_windows=lambda_array,
+                        rest2_scale_factors=rest2_scale_factors,
+                        save_velocities=self._config.save_velocities,
+                        auto_fix_minimise=True,
+                        num_energy_neighbours=num_energy_neighbours,
+                        null_energy=self._config.null_energy,
+                        save_crash_report=self._config.save_crash_report,
+                    )
             except Exception as e:
+                try:
+                    self._save_energy_components(index, dynamics.context())
+                except:
+                    pass
                 raise RuntimeError(
                     f"Dynamics for {_lam_sym} = {lambda_value:.5f} failed: {e}"
                 )
@@ -654,22 +941,40 @@ class Runner(_RunnerBase):
             # Commit the current system.
             system = dynamics.commit()
 
-            # Get the simulation speed.
-            speed = dynamics.time_speed()
-            # Checkpoint.
-            self._checkpoint(
-                system,
-                index,
-                0,
-                speed,
-                is_final_block=True,
-                lambda_grad=lambda_grad,
-                lambda_energy=lambda_energy,
-            )
+            # Record the end time.
+            end = _timer()
+
+            # Work how many fractional days the simulation took.
+            days = (end - start) / 86400
+
+            # Calculate the speed in nanoseconds per day.
+            speed = time.to("ns") / days
+
+            # Create the lock.
+            lock = _FileLock(self._lock_file)
+
+            # Acquire the file lock to ensure that the checkpoint files are
+            # in a consistent state if read by another process.
+            with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                # Backup any existing checkpoint files.
+                self._backup_checkpoint(index)
+
+                # Write the checkpoint files.
+                self._checkpoint(
+                    system,
+                    index,
+                    0,
+                    speed,
+                    lambda_energy=lambda_energy,
+                    lambda_grad=lambda_grad,
+                    is_final_block=True,
+                )
 
             _logger.success(
                 f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"
             )
+
+        return time
 
     def _minimisation(
         self,
@@ -703,6 +1008,12 @@ class Runner(_RunnerBase):
 
         perturbable_constraint: str
             The constraint for perturbable molecules.
+
+        Returns
+        -------
+
+        system: :class: `System <sire.system.System>`
+            The minimised system.
         """
 
         _logger.info(f"Minimising at {_lam_sym} = {lambda_value:.5f}")

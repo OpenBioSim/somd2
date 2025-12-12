@@ -41,9 +41,13 @@ def test_lambda_values(ethane_methanol):
             Path(tmpdir) / "energy_traj_0.00000.parquet"
         )
 
-        # Make sure the lambda_array in the metadata is correct. This is the
-        # lambda_values list in the config.
-        assert meta["lambda_array"] == [0.0, 0.5, 1.0]
+        # Make sure the energy trajectory has the expected columns.
+        cols = energy_traj.columns
+        found = 0
+        for col in cols:
+            if col in config["lambda_values"]:
+                found += 1
+        assert found == len(config["lambda_values"])
 
         # Make sure the second dimension of the energy trajectory is the correct
         # size. This is one for the current lambda value, one for its gradient,
@@ -84,9 +88,13 @@ def test_lambda_energy(ethane_methanol):
             Path(tmpdir) / "energy_traj_0.00000.parquet"
         )
 
-        # Make sure the lambda_array in the metadata is correct. This is the
-        # sampled lambda_values plus the lambda_energy values in the config.
-        assert meta["lambda_array"] == [0.0, 0.5, 1.0]
+        # Make sure the energy trajectory has the expected columns.
+        cols = energy_traj.columns
+        found = 0
+        for col in cols:
+            if col in config["lambda_values"] or col in config["lambda_energy"]:
+                found += 1
+        assert found == len(config["lambda_values"]) + len(config["lambda_energy"])
 
         # Make sure the second dimension of the energy trajectory is the correct.
         # This is the sampled lambda values, i.e. unique entries from lambda_values

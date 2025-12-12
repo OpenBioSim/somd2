@@ -1,6 +1,7 @@
 # SOMD2
 
-[![GitHub Actions](https://github.com/openbiosim/somd2/actions/workflows/main.yaml/badge.svg)](https://github.com/openbiosim/somd2/actions/workflows/main.yaml)
+[![GitHub Actions](https://github.com/openbiosim/somd2/actions/workflows/devel.yaml/badge.svg)](https://github.com/openbiosim/somd2/actions/workflows/devel.yaml)
+[![Conda Version](https://anaconda.org/openbiosim/somd2/badges/downloads.svg)](https://anaconda.org/openbiosim/somd2)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 Open-source GPU accelerated molecular dynamics engine for alchemical free-energy
@@ -16,11 +17,26 @@ conda env create -f environment.yaml
 
 (We recommend using [Miniforge](https://github.com/conda-forge/miniforge).)
 
+> [!NOTE]
+> On macOS, you will need to use the `environment_macos.yaml` file instead.
+
 Now install `somd2` into the environment:
 
 ```
 conda activate somd2
 pip install --editable .
+```
+
+Alternatively, to install into an existing conda environment:
+
+```
+conda install -c conda-forge -c openbiosim somd2
+```
+
+Or, for the development version:
+
+```
+conda install -c conda-forge -c openbiosim/label/dev somd2
 ```
 
 You should now have a `somd2` executable in your path. To test, run:
@@ -33,8 +49,10 @@ somd2 --help
 
 In order to run an alchemical free-energy simulation you will need to
 first create a stream file containing the _perturbable_ system of interest.
-This can be created using [BioSimSpace](https://github.com/OpenBioSim/biosimspace). For example, following the tutorial
-[here](https://biosimspace.openbiosim.org/versions/2023.4.0/tutorials/hydration_freenrg.html). Once the system is created, it can be streamed to file using, e.g.:
+This can be created using [BioSimSpace](https://github.com/OpenBioSim/biosimspace).
+For example, following the tutorial
+[here](https://biosimspace.openbiosim.org/versions/2023.4.0/tutorials/hydration_freenrg.html).
+Once the system is created, it can be streamed to file using, e.g.:
 
 ```python
 import BioSimSpace as BSS
@@ -112,12 +130,31 @@ the value of `--rest2-scale`. By passing multiple values for `--rest2-scale`, th
 user can fully control the schedule. When doing so, the number of values must
 match the number of lambda windows.
 
+## GCMC
+
+SOMD2 also supports grand canonical Monte Carlo (GCMC) water sampling using
+the [loch](https://github.com/OpenBioSim/loch) package. This can be enabled
+using the `--gcmc` option. To define a GCMC region, use the `--gcmc-selection`
+option, which should be a `Sire` selection string that specifies the atoms
+defining the centre of geometry for the GCMC region. The radius of the GCMC
+sphere can be controlled using the `--gcmc-radius` option. To see all GCMC
+related options, run:
+
+```
+somd2 --help | grep -A2 '  --gcmc'
+```
+
+> [!NOTE]
+> GCMC is currently only supported when using the CUDA platform and isn't
+> available on macOS, where the `pycuda` package is not available.
+
 ## Analysis
 
 Simulation output will be written to the directory specified using the
 `--output-directory` parameter. This will contain a number of files, including
-Parquet files for the energy trajectories of each λ window. These can be
-processed using [BioSimSpace](https://github.com/OpenBioSim/biosimspace) as follows:
+[Parquet files](https://en.wikipedia.org/wiki/Apache_Parquet) for the energy
+trajectories of each λ window. These can be processed using
+[BioSimSpace](https://github.com/OpenBioSim/biosimspace) as follows:
 
 ```python
 import BioSimSpace as BSS
@@ -149,6 +186,15 @@ can be controlled via the `--null-energy` option. The number of neighbours shoul
 be chosen as a trade off between accuracy and computational cost. A value of around
 20% of the number of replicas has been found to be a good starting point.
 
+## Ghost atom modifications
+
+We support modification of ghost atom bonded terms to avoid spurious coupling
+to the physical system using the approach described in
+[this](https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328) paper.
+These are enabled by default, but can be disabled using the ``--no-ghost-modifications``
+option. Modifications are implemented using the [ghostly](https://gitbub.com/OpenBioSim/ghostly)
+package.
+
 ## Note for SOMD1 users
 
 For existing users of `somd1`, it's possible to generate input for `somd2` by passing
@@ -169,7 +215,7 @@ follows. (This assumes that the output has a prefix `somd1`.)
 import BioSimSpace as BSS
 
 # Load the lambda = 0 state from prepareFEP.py
-system = BSS.IO.readMolecules(["somd1.prm7", "somd1.rst7"])
+system = BSS.IO.readMolecules(["somd1.prm7", "somd1.rst7"], reduce_box=True)
 
 # Write a stream file.
 BSS.Stream.save(system, "somd1")
@@ -186,5 +232,41 @@ somd2 somd1.bss --pert-file somd1.pert --somd1-compatibility
 (This only shows the limited options required. Others will take default values and can be set accordingly.)
 
 If you want to load an existing system from a perturbation file and use the
-new `somd2` ghost atom bonded-term modifications, then simply omit the
-`--somd1-compatibility` option.
+new `somd2` [ghost atom bonded-term modifications](https://github.com/OpenBioSim/ghostly),
+then simply omit the `--somd1-compatibility` option.
+
+## GPU oversubscription
+
+If you have an NVIDIA GPU that supports the multi-process service (MPS), you can
+oversubscibe the GPU to run multiple OpenMM contexts on the same GPU at once,
+increasing the throughput of your simulation. To do this, you will need to first
+enable MPS by running the following command:
+
+```
+nvidia-cuda-mps-control -d
+```
+
+The number of contexts that can be run in parallel is then controlled by the
+`--oversubscription-factor` option, which defaults to 1.
+
+More details on MPS, including tuning options, can be found in the following
+[techical blog](https://developer.nvidia.com/blog/maximizing-openmm-molecular-dynamics-throughput-with-nvidia-multi-process-service/).
+
+## Python API
+
+`SOMD2` can also be used as a Python API, allowing it to be embedded
+within other Python scripts.
+
+## Known issues
+
+If using the regular `Runner` class via the Python API, then you will need to
+guard calls to its `run()` method within a `if __name__ == "__main__":` block
+since it uses multiprocessing with the `spawn` start method.
+
+During a checkpoint cycle trajectory frames are stored in memory before being
+paged to disk. When running replica exchange simulations with a large number
+of replicas this can lead to exceeding the temporary file storage limit on
+some systems, causing the simulation to hang. This can be resolved by either
+reducing the frequency at which frames are stored, or checkpointing more
+frequently. (Frames are written to disk and cleared from memory at each
+checkpoint.)

@@ -6,10 +6,9 @@ channels:
 
 dependencies:
   - biosimspace
-  - ghostly
+  - git
   - filelock
-  - loch
   - loguru
   - numba
-  - nvidia-ml-py
-  - versioningit
+  - pip:
+      - git+https://github.com/openbiosim/ghostly

@@ -88,6 +88,7 @@ class Config:
         timestep="4 fs",
         temperature="300 K",
         pressure="1 atm",
+        surface_tension=None,
         barostat_frequency=25,
         integrator="langevin_middle",
         cutoff_type="pme",
@@ -102,40 +103,59 @@ class Config:
         swap_end_states=False,
         coulomb_power=0.0,
         shift_coulomb="1 A",
-        shift_delta="2.25 A",
+        shift_delta="1.5 A",
         restraints=None,
         constraint="h_bonds",
         perturbable_constraint="h_bonds_not_heavy_perturbed",
         include_constrained_energies=False,
         dynamic_constraints=True,
         ghost_modifications=True,
+        fix_perturbable_zero_sigmas=False,
         charge_difference=None,
+        coalchemical_restraint_dist=None,
         com_reset_frequency=10,
         minimise=True,
+        minimisation_constraints=False,
+        minimisation_errors=False,
         equilibration_time="0 ps",
-        equilibration_timestep="1 fs",
-        equilibration_constraints=False,
+        equilibration_timestep="2 fs",
+        equilibration_constraints=True,
         energy_frequency="1 ps",
         save_trajectories=True,
-        frame_frequency="20 ps",
+        frame_frequency="100 ps",
         save_velocities=False,
         checkpoint_frequency="100 ps",
+        num_checkpoint_workers=None,
         num_energy_neighbours=None,
-        null_energy="10000 kcal/mol",
+        null_energy="1e6 kcal/mol",
         platform="auto",
         max_threads=None,
         max_gpus=None,
+        opencl_platform_index=0,
         oversubscription_factor=1,
         replica_exchange=False,
+        perturbed_system=None,
+        gcmc=False,
+        gcmc_frequency=None,
+        gcmc_selection=None,
+        gcmc_excess_chemical_potential="-6.09 kcal/mol",
+        gcmc_standard_volume="30.543 A^3",
+        gcmc_num_waters=20,
+        gcmc_radius="4 A",
+        gcmc_bulk_sampling_probability=0.1,
+        gcmc_tolerance=0.0,
         rest2_scale=1.0,
         rest2_selection=None,
         output_directory="output",
         restart=False,
+        use_backup=False,
         write_config=True,
         overwrite=False,
         somd1_compatibility=False,
         pert_file=None,
+        save_crash_report=False,
         save_energy_components=False,
+        page_size=None,
         timeout="300 s",
     ):
         """
@@ -156,6 +176,9 @@ class Config:
         pressure: str
             Simulation pressure. (Simulations will run in the NVT ensemble unless
             a pressure is specified.)
+
+        surface_tension: str
+            Surface tension to use for NPT simulations with a membrane barostat.
 
         barostat_frequency: int
             The number of integration steps between barostat updates.
@@ -197,9 +220,9 @@ class Config:
             Factor by which to scale charges for charge scaled morph.
 
         swap_end_states: bool
-            Whether to perform the perturbation in the reverse direction.
+            Whether to swap the end states of the alchemical system.
 
-        couloumb_power : float
+        coulomb_power : float
             Power to use for the soft-core Coulomb interaction. This is used
             to soften the electrostatic interaction.
 
@@ -239,6 +262,9 @@ class Config:
             sampling of non-physical conformations. We implement the recommended
             modifcations from https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328
 
+        fix_perturbable_zero_sigmas: bool
+            Whether to prevent LJ sigma values being perturbed to zero.
+
         charge_difference: int
             The charge difference between the two end states. (Perturbed minus
             reference.) If None, then alchemical ions will automatically be
@@ -248,11 +274,26 @@ class Config:
             of whether swap-end-states is set, i.e. the states are swapped after
             the charge difference is calculated and alchemical ions are added.
 
+        coalchemical_restraint_dist: str
+            The minimum distance at which co-alchemical ions will be kept relative
+            to the centre of mass of the perturbable molecule in the system. This is
+            used to keep the co-alchemical ion in the bulk, preventing it from interacting
+            with the protein or ligand. If None, then no restraint will be applied.
+            Only functions for charge change perturbations.
+
         com_reset_frequency: int
             Frequency at which to reset the centre of mass of the system.
 
         minimise: bool
             Whether to minimise the system before simulation.
+
+        minimisation_constraints: bool
+            Whether to use constraints during minimisation. If False, then no
+            constraints will be used. If True, then the use of constraints will be
+            determined based on the value of 'equilibration_constraints'.
+
+        minimisation_errors: bool
+            Whether to raise an exception if a minimisation fails to converge.
 
         equilibration_time: str
             Time interval for equilibration. Only simulations starting from
@@ -262,11 +303,16 @@ class Config:
             Equilibration timestep. (Can be different to simulation timestep.)
 
         equilibration_constraints: bool
-            Whether to use constraints during equilibration.
+            Whether to use constraints during equilibration. If False, then no constraints
+            will be used. If True, then the values specified by 'constraint' and
+            'perturbable_constraint' will be used.
 
         energy_frequency: str
             Frequency at which to output energy data. If running using 'replica_exchange',
             then this will also be the frequency at which replica swaps are attempted.
+            When performing Grand Canonical Monte Carlo (GCMC) water insertions/deletions
+            via 'gcmc=True', this will also be the frequency at which GCMC moves are
+            attempted unless 'gcmc_frequency' is set.
 
         save_trajectories: bool
             Whether to save trajectory files
@@ -282,6 +328,14 @@ class Config:
             min(energy_frequency, frame_frequency). If zero, then no checkpointing
             will be performed.
 
+        num_checkpoint_workers: int
+            The number of parallel workers to use when checkpointing during a replica
+            exchange simulation. By default, this is set to the number of concurrent
+            GPU contexts, i.e. the number of GPUs multiplied by the oversubscription
+            factor. The option can be used to reduce the number of workers, which
+            can be useful when the system size is large, i.e. when many large
+            trajectory files could be written simultaneously.
+
         platform: str
             Platform to run simulation on.
 
@@ -293,12 +347,60 @@ class Config:
             Maximum number of GPUs to use for simulation (Default None, uses all available.)
             Does nothing if platform is set to CPU.
 
+        opencl_platform_index: int
+            The OpenCL platform index to use when multiple OpenCL implementations are
+            available on the system.
+
         oversubscription_factor: int
-            Factor by which to oversubscribe jobs on GPUs during replica exchange simulations.
+            The number of OpenMM contexts that can be run on a single GPU at the same time.
 
         replica_exchange: bool
             Whether to run replica exchange simulation. Currently this can only be used when
             GPU resources are available.
+
+        perturbed_system: str
+            The path to a stream file containing a Sire system for the equilibrated perturbed
+            end state (lambda = 1). This will be used as the starting conformation all lambda
+            windows > 0.5 when performing a replica exchange simulation.
+
+        gcmc: bool
+            Whether to perform Grand Canonical Monte Carlo (GCMC) water insertions/deletions.
+
+        gcmc_frequency: str
+            Frequency at which to attempt GCMC moves. If None, then this will be set to the
+            same as 'energy_frequency'. This must be a multiple of 'energy_frequency'.
+
+        gcmc_selection: str
+            A sire sslection string specifying the atoms that define the centre of geometry
+            of the GCMC sphere. If None, then GCMC moves will be attempted within the entire
+            simulation volume.
+
+        gcmc_excess_chemical_potential: str
+            The excess chemical potential of water in kcal/mol. The default value is calibrated
+            for the TIP3P water model. This can be calculated from the free energy of decoupling
+            a single water molecule from bulk.
+
+        gcmc_standard_volume: str
+            The standard volume of a water molecule in A^3. The default value is calibrated
+            from NPT simulation of TIP3P water.
+
+        gcmc_num_waters: int
+            The additional number of ghost water molecules to add to the system. These are
+            used as placeholders for GCMC insertion moves.
+
+        gcmc_radius: str
+            The radius of the GCMC sphere.
+
+        gcmc_bulk_sampling_probability: float
+            The probability of performing bulk GCMC moves, i.e. within the entire simulation
+            box rather than the GCMC sphere. These can be used to maintain a constant bulk
+            density, i.e. acting as a barostat. (This option has no affect when
+            'gcmc_selection=None'.)
+
+        gcmc_tolerance: float
+            The tolerance for the GCMC acceptance probability, i.e. the minimum probability
+            of acceptance for a move. This can be used to exclude low probability candidates
+            that can cause instabilities or crashes for the MD engine.
 
         rest2_scale: float, list(float)
             The scaling factor for Replica Exchange with Solute Tempering (REST) simulations.
@@ -325,6 +427,12 @@ class Config:
         restart: bool
             Whether to restart from a previous simulation using files found in 'output-directory'.
 
+        use_backup: bool
+            Whether to use backup files when restarting a simulation. If True, then
+            files from the last but one checkpoint will be used, rather than the most
+            recent checkpoint files. This can be useful if the most recent checkpoint
+            files are corrupted, or incomplete, e.g. you are recovering from a crash.
+
         write_config: bool
             Whether to write the configuration options to a YAML file in the output directory.
 
@@ -345,12 +453,19 @@ class Config:
             The path to a SOMD1 perturbation file to apply to the reference system.
             When set, this will automatically set 'somd1_compatibility' to True.
 
+        save_crash_report: bool
+            Whether to save a crash report if the simulation crashes.
+
         save_energy_components: bool
             Whether to save the energy contribution for each force when checkpointing.
             This is useful when debugging crashes.
 
+        page_size: int
+            The page size for trajectory handling in megabytes. If None, then Sire
+            will automatically set the page size.
+
         timeout: str
-            Timeout for the minimiser.
+            Timeout for the minimiser and file lock.
 
         num_energy_neighbours: int
             The number of neighbouring windows to use when computing the energy
@@ -373,6 +488,7 @@ class Config:
         self.runtime = runtime
         self.temperature = temperature
         self.pressure = pressure
+        self.surface_tension = surface_tension
         self.barostat_frequency = barostat_frequency
         self.integrator = integrator
         self.cutoff_type = cutoff_type
@@ -395,9 +511,13 @@ class Config:
         self.include_constrained_energies = include_constrained_energies
         self.dynamic_constraints = dynamic_constraints
         self.ghost_modifications = ghost_modifications
+        self.fix_perturbable_zero_sigmas = fix_perturbable_zero_sigmas
         self.charge_difference = charge_difference
+        self.coalchemical_restraint_dist = coalchemical_restraint_dist
         self.com_reset_frequency = com_reset_frequency
         self.minimise = minimise
+        self.minimisation_constraints = minimisation_constraints
+        self.minimisation_errors = minimisation_errors
         self.equilibration_time = equilibration_time
         self.equilibration_timestep = equilibration_timestep
         self.equilibration_constraints = equilibration_constraints
@@ -406,20 +526,35 @@ class Config:
         self.frame_frequency = frame_frequency
         self.save_velocities = save_velocities
         self.checkpoint_frequency = checkpoint_frequency
+        self.num_checkpoint_workers = num_checkpoint_workers
         self.platform = platform
         self.max_threads = max_threads
         self.max_gpus = max_gpus
+        self.opencl_platform_index = opencl_platform_index
         self.oversubscription_factor = oversubscription_factor
         self.replica_exchange = replica_exchange
+        self.perturbed_system = perturbed_system
+        self.gcmc = gcmc
+        self.gcmc_frequency = gcmc_frequency
+        self.gcmc_selection = gcmc_selection
+        self.gcmc_excess_chemical_potential = gcmc_excess_chemical_potential
+        self.gcmc_standard_volume = gcmc_standard_volume
+        self.gcmc_num_waters = gcmc_num_waters
+        self.gcmc_radius = gcmc_radius
+        self.gcmc_bulk_sampling_probability = gcmc_bulk_sampling_probability
+        self.gcmc_tolerance = gcmc_tolerance
         self.rest2_scale = rest2_scale
         self.rest2_selection = rest2_selection
         self.restart = restart
+        self.use_backup = use_backup
         self.somd1_compatibility = somd1_compatibility
         self.pert_file = pert_file
+        self.save_crash_report = save_crash_report
         self.save_energy_components = save_energy_components
         self.timeout = timeout
         self.num_energy_neighbours = num_energy_neighbours
         self.null_energy = null_energy
+        self.page_size = page_size
 
         self.write_config = write_config
 
@@ -511,6 +646,13 @@ class Config:
             self._charge_scale_factor
         ):
             d["lambda_schedule"] = "charge_scaled_morph"
+
+        # Use the path for the perturbed_system option, since the system
+        # isn't serializable.
+        if self.perturbed_system is not None:
+            d["perturbed_system"] = str(self._perturbed_system_file)
+            d.pop("perturbed_system_file", None)
+
         return d
 
     @property
@@ -607,6 +749,35 @@ class Config:
             raise ValueError("'barostat_frequency' must be a positive integer")
 
         self._barostat_frequency = barostat_frequency
+
+    @property
+    def surface_tension(self):
+        return self._surface_tension
+
+    @surface_tension.setter
+    def surface_tension(self, surface_tension):
+        if surface_tension is not None and not isinstance(surface_tension, str):
+            raise TypeError("'surface_tension' must be of type 'str'")
+
+        from sire.units import atm, angstrom
+
+        if surface_tension is not None:
+            try:
+                st = _sr.u(surface_tension)
+            except:
+                raise ValueError(
+                    f"Unable to parse 'surface_tension' as a Sire GeneralUnit: {surface_tension}"
+                )
+            # Make sure we can handle a value of zero.
+            if st == 0:
+                st = 0 * atm * angstrom
+            elif not st.has_same_units(atm * angstrom):
+                raise ValueError("'surface_tension' units are invalid.")
+
+            self._surface_tension = st
+
+        else:
+            self._surface_tension = surface_tension
 
     @property
     def integrator(self):
@@ -1117,6 +1288,16 @@ class Config:
         self._ghost_modifications = ghost_modifications
 
     @property
+    def fix_perturbable_zero_sigmas(self):
+        return self._fix_perturbable_zero_sigmas
+
+    @fix_perturbable_zero_sigmas.setter
+    def fix_perturbable_zero_sigmas(self, fix_perturbable_zero_sigmas):
+        if not isinstance(fix_perturbable_zero_sigmas, bool):
+            raise ValueError("'fix_perturbable_zero_sigmas' must be of type 'bool'")
+        self._fix_perturbable_zero_sigmas = fix_perturbable_zero_sigmas
+
+    @property
     def charge_difference(self):
         return self._charge_difference
 
@@ -1129,6 +1310,32 @@ class Config:
                 except:
                     raise ValueError("'charge_difference' must be an integer")
         self._charge_difference = charge_difference
+
+    @property
+    def coalchemical_restraint_dist(self):
+        return self._coalchemical_restraint_dist
+
+    @coalchemical_restraint_dist.setter
+    def coalchemical_restraint_dist(self, coalchemical_restraint_dist):
+        if coalchemical_restraint_dist is not None:
+            if not isinstance(coalchemical_restraint_dist, str):
+                raise TypeError("'coalchemical_restraint_dist' must be of type 'str'")
+
+            from sire.units import angstrom
+
+            try:
+                c = _sr.u(coalchemical_restraint_dist)
+            except:
+                raise ValueError(
+                    "Unable to parse 'coalchemical_restraint_dist' as a "
+                    f"Sire GeneralUnit: {coalchemical_restraint_dist}"
+                )
+            if not c.has_same_units(angstrom):
+                raise ValueError("'coalchemical_restraint_dist' units are invalid.")
+
+            self._coalchemical_restraint_dist = c
+        else:
+            self._coalchemical_restraint_dist = None
 
     @property
     def com_reset_frequency(self):
@@ -1156,6 +1363,26 @@ class Config:
                 "Minimisation is highly recommended for increased stability."
             )
         self._minimise = minimise
+
+    @property
+    def minimisation_constraints(self):
+        return self._minimisation_constraints
+
+    @minimisation_constraints.setter
+    def minimisation_constraints(self, minimisation_constraints):
+        if not isinstance(minimisation_constraints, bool):
+            raise ValueError("'minimisation_constraints' must be of type 'bool'")
+        self._minimisation_constraints = minimisation_constraints
+
+    @property
+    def minimisation_errors(self):
+        return self._minimisation_errors
+
+    @minimisation_errors.setter
+    def minimisation_errors(self, minimisation_errors):
+        if not isinstance(minimisation_errors, bool):
+            raise ValueError("'minimisation_errors' must be of type 'bool'")
+        self._minimisation_errors = minimisation_errors
 
     @property
     def equilibration_time(self):
@@ -1320,11 +1547,27 @@ class Config:
                 "Checkpoint frequency is low. Should be greater min(energy_frequency, frame_frequency)"
             )
         if t.value() > self._runtime.value():
-            _logger.debug(
+            _logger.warning(
                 "Checkpoint frequency < runtime, checkpointing will not occur before runtime is reached."
             )
             t = _sr.u("0ps")
         self._checkpoint_frequency = t
+
+    @property
+    def num_checkpoint_workers(self):
+        return self._num_checkpoint_workers
+
+    @num_checkpoint_workers.setter
+    def num_checkpoint_workers(self, num_checkpoint_workers):
+        if num_checkpoint_workers is not None:
+            if not isinstance(num_checkpoint_workers, int):
+                try:
+                    num_checkpoint_workers = int(num_checkpoint_workers)
+                except:
+                    raise ValueError("'num_checkpoint_workers' must be of type 'int'")
+            if num_checkpoint_workers < 1:
+                raise ValueError("'num_checkpoint_workers' must be greater than 0")
+        self._num_checkpoint_workers = num_checkpoint_workers
 
     @property
     def platform(self):
@@ -1437,6 +1680,23 @@ class Config:
                 )
 
     @property
+    def opencl_platform_index(self):
+        return self._opencl_platform_index
+
+    @opencl_platform_index.setter
+    def opencl_platform_index(self, opencl_platform_index):
+        if not isinstance(opencl_platform_index, int):
+            try:
+                opencl_platform_index = int(opencl_platform_index)
+            except:
+                raise ValueError("'opencl_platform_index' must be of type 'int'")
+        if opencl_platform_index < 0:
+            raise ValueError(
+                "'opencl_platform_index' must be greater than or equal to 0"
+            )
+        self._opencl_platform_index = opencl_platform_index
+
+    @property
     def oversubscription_factor(self):
         return self._oversubscription_factor
 
@@ -1462,6 +1722,209 @@ class Config:
         if not isinstance(replica_exchange, bool):
             raise ValueError("'replica_exchange' must be of type 'bool'")
         self._replica_exchange = replica_exchange
+
+    @property
+    def perturbed_system(self):
+        return self._perturbed_system
+
+    @perturbed_system.setter
+    def perturbed_system(self, perturbed_system):
+        if perturbed_system is not None:
+            if isinstance(perturbed_system, str):
+                import os
+
+                if not os.path.exists(perturbed_system):
+                    raise ValueError(
+                        f"'perturbed_system' stream file does not exist: {perturbed_system}"
+                    )
+
+                try:
+                    self._perturbed_system = _sr.stream.load(perturbed_system)
+                    self._perturbed_system_file = perturbed_system
+                except Exception as e:
+                    raise ValueError(
+                        f"Unable to load 'perturbed_system' stream file: {e}"
+                    )
+            else:
+                raise TypeError("'perturbed_system' must be of type 'str'")
+        else:
+            self._perturbed_system = None
+            self._perturbed_system_file = None
+
+    @property
+    def gcmc(self):
+        return self._gcmc
+
+    @gcmc.setter
+    def gcmc(self, gcmc):
+        if not isinstance(gcmc, bool):
+            raise ValueError("'gcmc' must be of type 'bool'")
+
+        # GCMC isn't supported on macOS.
+        if gcmc:
+            import platform as _platform
+
+            if _platform.system() == "Darwin":
+                raise ValueError("GCMC is not supported on macOS systems.")
+
+        self._gcmc = gcmc
+
+    @property
+    def gcmc_frequency(self):
+        return self._gcmc_frequency
+
+    @gcmc_frequency.setter
+    def gcmc_frequency(self, gcmc_frequency):
+        if gcmc_frequency is not None:
+            if not isinstance(gcmc_frequency, str):
+                raise TypeError("'gcmc_frequency' must be of type 'str'")
+
+            from sire.units import picosecond
+
+            try:
+                t = _sr.u(gcmc_frequency)
+            except:
+                raise ValueError(
+                    f"Unable to parse 'gcmc_frequency' as a Sire GeneralUnit: {gcmc_frequency}"
+                )
+
+            if t.value() != 0 and not t.has_same_units(picosecond):
+                raise ValueError("'gcmc_frequency' units are invalid.")
+
+            self._gcmc_frequency = t
+        else:
+            self._gcmc_frequency = None
+
+    @property
+    def gcmc_selection(self):
+        return self._gcmc_selection
+
+    @gcmc_selection.setter
+    def gcmc_selection(self, gcmc_selection):
+        if gcmc_selection is not None:
+            if not isinstance(gcmc_selection, str):
+                raise TypeError("'gcmc_selection' must be of type 'str'")
+        self._gcmc_selection = gcmc_selection
+
+    @property
+    def gcmc_excess_chemical_potential(self):
+        return self._gcmc_excess_chemical_potential
+
+    @gcmc_excess_chemical_potential.setter
+    def gcmc_excess_chemical_potential(self, gcmc_excess_chemical_potential):
+        if not isinstance(gcmc_excess_chemical_potential, str):
+            raise TypeError("'gcmc_excess_chemical_potential' must be of type 'str'")
+
+        from sire.units import kcal_per_mol
+
+        try:
+            gcmc_e = _sr.u(gcmc_excess_chemical_potential)
+        except:
+            raise ValueError(
+                "Unable to parse 'gcmc_excess_chemical_potential' "
+                f"as a Sire GeneralUnit: {gcmc_excess_chemical_potential}"
+            )
+
+        if not gcmc_e.has_same_units(kcal_per_mol):
+            raise ValueError("'gcmc_excess_chemical_potential' units are invalid.")
+
+        self._gcmc_excess_chemical_potential = gcmc_e
+
+    @property
+    def gcmc_standard_volume(self):
+        return self._gcmc_standard_volume
+
+    @gcmc_standard_volume.setter
+    def gcmc_standard_volume(self, gcmc_standard_volume):
+        if not isinstance(gcmc_standard_volume, str):
+            raise TypeError("'gcmc_standard_volume' must be of type 'str'")
+
+        from sire.units import angstrom3
+
+        try:
+            gcmc_v = _sr.u(gcmc_standard_volume)
+        except:
+            raise ValueError(
+                "Unable to parse 'gcmc_standard_volume' "
+                f"as a Sire GeneralUnit: {gcmc_standard_volume}"
+            )
+
+        if not gcmc_v.has_same_units(angstrom3):
+            raise ValueError("'gcmc_standard_volume' units are invalid.")
+
+        self._gcmc_standard_volume = gcmc_v
+
+    @property
+    def gcmc_num_waters(self):
+        return self._gcmc_num_waters
+
+    @gcmc_num_waters.setter
+    def gcmc_num_waters(self, gcmc_num_waters):
+        if gcmc_num_waters is not None:
+            if not isinstance(gcmc_num_waters, int):
+                try:
+                    gcmc_num_waters = int(gcmc_num_waters)
+                except:
+                    raise ValueError("'gcmc_num_waters' must be an integer")
+
+            if gcmc_num_waters < 0:
+                raise ValueError("'gcmc_num_waters' must be greater than or equal to 0")
+        self._gcmc_num_waters = gcmc_num_waters
+
+    @property
+    def gcmc_radius(self):
+        return self._gcmc_radius
+
+    @gcmc_radius.setter
+    def gcmc_radius(self, gcmc_radius):
+        if not isinstance(gcmc_radius, str):
+            raise TypeError("'gcmc_radius' must be of type 'str'")
+
+        from sire.units import angstrom
+
+        try:
+            gcmc_r = _sr.u(gcmc_radius)
+        except:
+            raise ValueError(
+                "Unable to parse 'gcmc_radius' " f"as a Sire GeneralUnit: {gcmc_radius}"
+            )
+
+        if not gcmc_r.has_same_units(angstrom):
+            raise ValueError("'gcmc_radius' units are invalid.")
+
+        self._gcmc_radius = gcmc_r
+
+    @property
+    def gcmc_bulk_sampling_probability(self):
+        return self._gcmc_bulk_sampling_probability
+
+    @gcmc_bulk_sampling_probability.setter
+    def gcmc_bulk_sampling_probability(self, gcmc_bulk_sampling_probability):
+        if not isinstance(gcmc_bulk_sampling_probability, float):
+            try:
+                gcmc_bulk_sampling_probability = float(gcmc_bulk_sampling_probability)
+            except Exception:
+                raise ValueError("'gcmc_bulk_sampling_probability' must be a float")
+        if gcmc_bulk_sampling_probability < 0.0 or gcmc_bulk_sampling_probability > 1.0:
+            raise ValueError(
+                "'gcmc_bulk_sampling_probability' must be between 0.0 and 1.0"
+            )
+        self._gcmc_bulk_sampling_probability = gcmc_bulk_sampling_probability
+
+    @property
+    def gcmc_tolerance(self):
+        return self._gcmc_tolerance
+
+    @gcmc_tolerance.setter
+    def gcmc_tolerance(self, gcmc_tolerance):
+        if not isinstance(gcmc_tolerance, float):
+            try:
+                gcmc_tolerance = float(gcmc_tolerance)
+            except Exception:
+                raise ValueError("'gcmc_tolerance' must be a float")
+        if gcmc_tolerance < 0.0:
+            raise ValueError("'gcmc_tolerance' must be greater than or equal to 0.0")
+        self._gcmc_tolerance = gcmc_tolerance
 
     @property
     def rest2_scale(self):
@@ -1510,6 +1973,16 @@ class Config:
         self._restart = restart
 
     @property
+    def use_backup(self):
+        return self._use_backup
+
+    @use_backup.setter
+    def use_backup(self, use_backup):
+        if not isinstance(use_backup, bool):
+            raise ValueError("'use_backup' must be of type 'bool'")
+        self._use_backup = use_backup
+
+    @property
     def somd1_compatibility(self):
         return self._somd1_compatibility
 
@@ -1536,6 +2009,16 @@ class Config:
         self._pert_file = pert_file
 
     @property
+    def save_crash_report(self):
+        return self._save_crash_report
+
+    @save_crash_report.setter
+    def save_crash_report(self, save_crash_report):
+        if not isinstance(save_crash_report, bool):
+            raise ValueError("'save_crash_report' must be of type 'bool'")
+        self._save_crash_report = save_crash_report
+
+    @property
     def save_energy_components(self):
         return self._save_energy_components
 
@@ -1544,6 +2027,24 @@ class Config:
         if not isinstance(save_energy_components, bool):
             raise ValueError("'save_energy_components' must be of type 'bool'")
         self._save_energy_components = save_energy_components
+
+    @property
+    def page_size(self):
+        return self._page_size
+
+    @page_size.setter
+    def page_size(self, page_size):
+        if page_size is not None:
+            if not isinstance(page_size, int):
+                try:
+                    page_size = int(page_size)
+                except:
+                    raise ValueError("'page_size' must be of type 'int'")
+
+            if page_size < 1:
+                raise ValueError("'page_size' must be greater than 0")
+
+        self._page_size = page_size
 
     @property
     def timeout(self):
@@ -1783,3 +2284,20 @@ class Config:
                     )
 
         return parser
+
+    def _reset_logger(self, logger):
+        """
+        Internal method to reset the logger.
+
+        This can be used when a parallel process is spawned to ensure that
+        the logger is correctly configured.
+        """
+
+        import sys
+
+        logger.remove()
+        logger.add(sys.stderr, level=self.log_level.upper(), enqueue=True)
+        if self.log_file is not None and self.output_directory is not None:
+            logger.add(
+                self.output_directory / self.log_file, level=self.log_level.upper()
+            )

@@ -8,7 +8,7 @@ from somd2.runner import RepexRunner
 from somd2.runner._base import RunnerBase
 from somd2.config import Config
 
-from conftest import has_cuda
+from tests.conftest import has_cuda
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")

@@ -1,12 +1,9 @@
-name: Release Main
+name: Release Devel
 
 on:
   workflow_dispatch:
-    inputs:
-      upload_packages:
-        required: true
-        description: "Upload packages to anaconda?"
-        type: boolean
+  push:
+    branches: [ devel ]
 
 jobs:
   build:
@@ -21,9 +18,11 @@ jobs:
           - { name: "linux", os: "ubuntu-latest", shell: "bash -l {0}" }
           - { name: "macos", os: "macos-latest", shell: "bash -l {0}" }
         exclude:
+          # Exclude all but the latest Python from all
+          # but Linux
           - platform:
               { name: "macos", os: "macos-latest", shell: "bash -l {0}" }
-            python-version: "3.12"  # MacOS can't run 3.12 yet...
+            python-version: "3.12"  # MacOS can't run 3.12 yet... We want 3.10 and 3.11
     environment:
       name: somd2-build
     defaults:
@@ -40,8 +39,8 @@ jobs:
           activate-environment: somd2_build
           miniforge-version: latest
 #
-      - name: Clone the main branch
-        run: git clone -b main https://github.com/openbiosim/somd2
+      - name: Clone the devel branch
+        run: git clone -b devel https://github.com/openbiosim/somd2
 #
       - name: Setup Conda
         run: conda install -y -c conda-forge boa anaconda-client packaging
@@ -53,11 +52,10 @@ jobs:
         run: mkdir ${{ github.workspace }}/build
 #
       - name: Build Conda package using conda build
-        run: conda build -c conda-forge -c openbiosim/label/main ${{ github.workspace }}/somd2/recipes/somd2
+        run: conda build -c conda-forge -c openbiosim/label/dev ${{ github.workspace }}/somd2/recipes/somd2
 #
       - name: Upload Conda package
         run: python ${{ github.workspace }}/somd2/actions/upload_package.py
         env:
           ANACONDA_TOKEN: ${{ secrets.ANACONDA_TOKEN }}
-          ANACONDA_LABEL: main
-        if: github.event.inputs.upload_packages == 'true'
+          ANACONDA_LABEL: dev
