@@ -752,6 +752,43 @@ class RunnerBase:
         else:
             self._gcmc_kwargs = None
 
+        # Limit the number of CPU threads available to Sire when running in parallel.
+        if self._is_gpu:
+            # First get the total number of threads that are available to Sire.
+            total_threads = _sr.legacy.Base.get_max_num_threads()
+
+            # Get the number of GPU devices.
+            devices = self._get_gpu_devices(
+                self._config.platform,
+                log=False,
+            )
+
+            # Work out the number of GPU workers.
+            num_gpu_workers = len(devices) * self._config.oversubscription_factor
+
+            # Adjust based on the maximum number of GPUs.
+            if self._config.max_gpus is not None:
+                num_gpu_workers = min(
+                    self._config.max_gpus * self._config.oversubscription_factor,
+                    num_gpu_workers,
+                )
+
+            # Divide the threads by the number of GPUs and oversubscribe factor.
+            sire_threads = max(1, total_threads // num_gpu_workers)
+
+            if self._config.max_sire_threads is not None:
+                if self._config.max_sire_threads > sire_threads:
+                    _logger.warning(
+                        f"Requested 'max_sire_threads' of {self._config.max_sire_threads} exceeds "
+                        f"the calculated maximum of {sire_threads}"
+                    )
+                sire_threads = self._config.max_sire_threads
+
+            _logger.info(f"Setting maximum Sire CPU threads to {sire_threads}")
+
+            # Update the maximum number of threads.
+            _sr.legacy.Base.set_max_num_threads(sire_threads)
+
     def _check_space(self):
         """
         Check if the system has a periodic space.
@@ -1423,7 +1460,7 @@ class RunnerBase:
         return True, None
 
     @staticmethod
-    def _get_gpu_devices(platform, oversubscription_factor=1):
+    def _get_gpu_devices(platform, oversubscription_factor=1, log=True):
         """
         Get list of available GPUs from CUDA_VISIBLE_DEVICES,
         OPENCL_VISIBLE_DEVICES, or HIP_VISIBLE_DEVICES.
@@ -1436,6 +1473,9 @@ class RunnerBase:
 
         oversubscription_factor: int
             The number of concurrent workers per GPU. Default is 1.
+
+        log: bool
+            Whether to log the available devices. Default is True.
 
         Returns
         --------
@@ -1459,23 +1499,30 @@ class RunnerBase:
                 raise ValueError("CUDA_VISIBLE_DEVICES not set")
             else:
                 available_devices = _os.environ.get("CUDA_VISIBLE_DEVICES").split(",")
-                _logger.info(f"CUDA_VISIBLE_DEVICES set to {available_devices}")
+                if log:
+                    _logger.info(f"CUDA_VISIBLE_DEVICES set to {available_devices}")
         elif platform == "opencl":
             if _os.environ.get("OPENCL_VISIBLE_DEVICES") is None:
                 raise ValueError("OPENCL_VISIBLE_DEVICES not set")
             else:
                 available_devices = _os.environ.get("OPENCL_VISIBLE_DEVICES").split(",")
-                _logger.info(f"OPENCL_VISIBLE_DEVICES set to {available_devices}")
+                if log:
+                    _logger.info(f"OPENCL_VISIBLE_DEVICES set to {available_devices}")
         elif platform == "hip":
             if _os.environ.get("HIP_VISIBLE_DEVICES") is None:
                 raise ValueError("HIP_VISIBLE_DEVICES not set")
             else:
                 available_devices = _os.environ.get("HIP_VISIBLE_DEVICES").split(",")
-                _logger.info(f"HIP_VISIBLE_DEVICES set to {available_devices}")
+                if log:
+                    _logger.info(f"HIP_VISIBLE_DEVICES set to {available_devices}")
 
         num_gpus = len(available_devices)
-        _logger.info(f"Number of GPUs available: {num_gpus}")
-        _logger.info(f"Number of concurrent workers per GPU: {oversubscription_factor}")
+
+        if log:
+            _logger.info(f"Number of GPUs available: {num_gpus}")
+            _logger.info(
+                f"Number of concurrent workers per GPU: {oversubscription_factor}"
+            )
 
         return available_devices
 
