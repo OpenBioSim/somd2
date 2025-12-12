@@ -111,7 +111,7 @@ class Config:
         include_constrained_energies=False,
         dynamic_constraints=True,
         ghost_modifications=True,
-        fix_perturbable_zero_sigmas=False,
+        fix_perturbable_zero_sigmas=True,
         charge_difference=None,
         coalchemical_restraint_dist=None,
         com_reset_frequency=10,
