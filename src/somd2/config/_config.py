@@ -132,6 +132,7 @@ class Config:
         platform="auto",
         max_threads=None,
         max_gpus=None,
+        max_sire_threads=None,
         opencl_platform_index=0,
         oversubscription_factor=1,
         replica_exchange=False,
@@ -348,6 +349,11 @@ class Config:
             Maximum number of GPUs to use for simulation (Default None, uses all available.)
             Does nothing if platform is set to CPU.
 
+        max_sire_threads: int
+            Maximum number of CPU threads to use within Sire (e.g. for I/O operations).
+            (Default None, divides the total available threads between the number of
+            GPUs multiplied by the oversubscription factor.)
+
         opencl_platform_index: int
             The OpenCL platform index to use when multiple OpenCL implementations are
             available on the system.
@@ -531,6 +537,7 @@ class Config:
         self.platform = platform
         self.max_threads = max_threads
         self.max_gpus = max_gpus
+        self.max_sire_threads = max_sire_threads
         self.opencl_platform_index = opencl_platform_index
         self.oversubscription_factor = oversubscription_factor
         self.replica_exchange = replica_exchange
@@ -1805,6 +1812,20 @@ class Config:
                 _logger.warning(
                     "CPU platform requested but max_gpus set - ignoring max_gpus"
                 )
+
+    @property
+    def max_sire_threads(self):
+        return self._max_sire_threads
+
+    @max_sire_threads.setter
+    def max_sire_threads(self, max_sire_threads):
+        if max_sire_threads is not None:
+            try:
+                self._max_sire_threads = int(max_sire_threads)
+            except:
+                raise ValueError("'max_sire_threads' must be of type 'int'")
+        else:
+            self._max_sire_threads = None
 
     @property
     def opencl_platform_index(self):
