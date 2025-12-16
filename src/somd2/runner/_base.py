@@ -1320,6 +1320,7 @@ class RunnerBase:
             "max_threads",
             "max_gpus",
             "restart",
+            "use_backup",
             "save_trajectories",
             "write_config",
             "log_level",
