@@ -431,6 +431,14 @@ class Runner(_RunnerBase):
             # Get the GCMC system.
             system = gcmc_sampler.system()
 
+            # Print the initial GCMC sphere position.
+            if gcmc_sampler._reference is not None:
+                positions = _sr.io.get_coords_array(system)
+                target = gcmc_sampler._get_target_position(positions)
+                _logger.info(
+                    f"Initial GCMC sphere center: [{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}] Å"
+                )
+
         else:
             gcmc_sampler = None
 
