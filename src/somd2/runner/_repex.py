@@ -948,7 +948,7 @@ class RepexRunner(_RunnerBase):
                         ]
                         with ThreadPoolExecutor(max_workers=num_workers) as executor:
                             try:
-                                for result, error in executor.map(
+                                for index, error in executor.map(
                                     self._backup_checkpoint,
                                     replicas,
                                 ):
@@ -972,7 +972,7 @@ class RepexRunner(_RunnerBase):
                         ]
                         with ThreadPoolExecutor(max_workers=num_workers) as executor:
                             try:
-                                for result, error in executor.map(
+                                for index, error in executor.map(
                                     self._checkpoint,
                                     replicas,
                                     repeat(self._lambda_values),
@@ -1533,6 +1533,15 @@ class RepexRunner(_RunnerBase):
 
         is_final_block: bool
             Whether this is the final block.
+
+        Returns
+        -------
+
+        index: int
+            The index of the replica.
+
+        exception: Exception
+            The exception if the checkpoint failed.
         """
         try:
             # Get the lambda value.
@@ -1553,9 +1562,12 @@ class RepexRunner(_RunnerBase):
 
             # Call the base class checkpoint method to save the system state.
             with self._lock:
-                super()._checkpoint(
+                index, error = super()._checkpoint(
                     system, index, block, speed, is_final_block=is_final_block
                 )
+
+                if error is not None:
+                    return index, error
 
             # Delete all trajectory frames from the Sire system within the
             # dynamics object.
@@ -1582,10 +1594,10 @@ class RepexRunner(_RunnerBase):
             if is_final_block:
                 _logger.success(f"{_lam_sym} = {lam:.5f} complete")
 
-            return True, None
+            return index, None
 
         except Exception as e:
-            return False, e
+            return index, e
 
     @staticmethod
     @_njit

@@ -778,10 +778,13 @@ class Runner(_RunnerBase):
                     # in a consistent state if read by another process.
                     with lock.acquire(timeout=self._config.timeout.to("seconds")):
                         # Backup any existing checkpoint files.
-                        self._backup_checkpoint(index)
+                        index, error = self._backup_checkpoint(index)
+
+                        if error is not None:
+                            raise error
 
                         # Write the checkpoint files.
-                        self._checkpoint(
+                        index, error = self._checkpoint(
                             system,
                             index,
                             block,
@@ -790,6 +793,9 @@ class Runner(_RunnerBase):
                             lambda_grad=lambda_grad,
                             is_final_block=is_final_block,
                         )
+
+                        if error is not None:
+                            raise error
 
                     # Delete all trajectory frames from the Sire system within the
                     # dynamics object.
@@ -965,10 +971,15 @@ class Runner(_RunnerBase):
             # in a consistent state if read by another process.
             with lock.acquire(timeout=self._config.timeout.to("seconds")):
                 # Backup any existing checkpoint files.
-                self._backup_checkpoint(index)
+                index, error = self._backup_checkpoint(index)
+
+                if error is not None:
+                    msg = f"Checkpoint backup failed for {_lam_sym} = {lambda_value:.5f}: {error}"
+                    _logger.error(msg)
+                    raise RuntimeError(msg)
 
                 # Write the checkpoint files.
-                self._checkpoint(
+                index, error = self._checkpoint(
                     system,
                     index,
                     0,
@@ -977,6 +988,11 @@ class Runner(_RunnerBase):
                     lambda_grad=lambda_grad,
                     is_final_block=True,
                 )
+
+                if error is not None:
+                    msg = f"Checkpoint failed for {_lam_sym} = {lambda_value:.5f}: {error}"
+                    _logger.error(msg)
+                    raise RuntimeError(msg)
 
             _logger.success(
                 f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"
