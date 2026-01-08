@@ -1,7 +1,7 @@
 ######################################################################
 # SOMD2: GPU accelerated alchemical free-energy engine.
 #
-# Copyright: 2023-2025
+# Copyright: 2023-2026
 #
 # Authors: The OpenBioSim Team <team@openbiosim.org>
 #
@@ -431,6 +431,14 @@ class Runner(_RunnerBase):
             # Get the GCMC system.
             system = gcmc_sampler.system()
 
+            # Log the initial position of the GCMC sphere.
+            if gcmc_sampler._reference is not None:
+                positions = _sr.io.get_coords_array(system)
+                target = gcmc_sampler._get_target_position(positions)
+                _logger.info(
+                    f"Initial GCMC sphere centre: [{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}] A"
+                )
+
         else:
             gcmc_sampler = None
 
@@ -770,10 +778,13 @@ class Runner(_RunnerBase):
                     # in a consistent state if read by another process.
                     with lock.acquire(timeout=self._config.timeout.to("seconds")):
                         # Backup any existing checkpoint files.
-                        self._backup_checkpoint(index)
+                        index, error = self._backup_checkpoint(index)
+
+                        if error is not None:
+                            raise error
 
                         # Write the checkpoint files.
-                        self._checkpoint(
+                        index, error = self._checkpoint(
                             system,
                             index,
                             block,
@@ -782,6 +793,9 @@ class Runner(_RunnerBase):
                             lambda_grad=lambda_grad,
                             is_final_block=is_final_block,
                         )
+
+                        if error is not None:
+                            raise error
 
                     # Delete all trajectory frames from the Sire system within the
                     # dynamics object.
@@ -957,10 +971,15 @@ class Runner(_RunnerBase):
             # in a consistent state if read by another process.
             with lock.acquire(timeout=self._config.timeout.to("seconds")):
                 # Backup any existing checkpoint files.
-                self._backup_checkpoint(index)
+                index, error = self._backup_checkpoint(index)
+
+                if error is not None:
+                    msg = f"Checkpoint backup failed for {_lam_sym} = {lambda_value:.5f}: {error}"
+                    _logger.error(msg)
+                    raise RuntimeError(msg)
 
                 # Write the checkpoint files.
-                self._checkpoint(
+                index, error = self._checkpoint(
                     system,
                     index,
                     0,
@@ -969,6 +988,11 @@ class Runner(_RunnerBase):
                     lambda_grad=lambda_grad,
                     is_final_block=True,
                 )
+
+                if error is not None:
+                    msg = f"Checkpoint failed for {_lam_sym} = {lambda_value:.5f}: {error}"
+                    _logger.error(msg)
+                    raise RuntimeError(msg)
 
             _logger.success(
                 f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"

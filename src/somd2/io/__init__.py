@@ -1,7 +1,7 @@
 ######################################################################
 # SOMD2: GPU accelerated alchemical free-energy engine.
 #
-# Copyright: 2023-2025
+# Copyright: 2023-2026
 #
 # Authors: The OpenBioSim Team <team@openbiosim.org>
 #
