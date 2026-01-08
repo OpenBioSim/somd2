@@ -1,7 +1,7 @@
 ######################################################################
 # SOMD2: GPU accelerated alchemical free-energy engine.
 #
-# Copyright: 2023-2025
+# Copyright: 2023-2026
 #
 # Authors: The OpenBioSim Team <team@openbiosim.org>
 #
@@ -1646,151 +1646,175 @@ class RunnerBase:
 
         is_final_block: bool
             Whether this is the final block of the simulation.
+
+        Returns
+        -------
+
+        result: bool
+            Whether the checkpoint was successful.
+
+        index: int
+            The index of the window or replica.
+
+        error: Exception
+            The exception raised during the checkpoint, if any.
         """
 
-        from somd2 import __version__, _sire_version, _sire_revisionid
+        try:
+            from somd2 import __version__, _sire_version, _sire_revisionid
 
-        # Get the lambda value.
-        lam = self._lambda_values[index]
+            # Get the lambda value.
+            lam = self._lambda_values[index]
 
-        # Get the energy trajectory.
-        df = system.energy_trajectory(to_alchemlyb=True, energy_unit="kT")
+            # Get the energy trajectory.
+            df = system.energy_trajectory(to_alchemlyb=True, energy_unit="kT")
 
-        # Set the lambda values at which energies were sampled.
-        if lambda_energy is None:
-            lambda_energy = self._lambda_values
+            # Set the lambda values at which energies were sampled.
+            if lambda_energy is None:
+                lambda_energy = self._lambda_values
 
-        # Create the metadata.
-        metadata = {
-            "attrs": df.attrs,
-            "somd2 version": __version__,
-            "sire version": f"{_sire_version}+{_sire_revisionid}",
-            "lambda": str(lam),
-            "speed": speed,
-            "temperature": str(self._config.temperature.value()),
-        }
+            # Create the metadata.
+            metadata = {
+                "attrs": df.attrs,
+                "somd2 version": __version__,
+                "sire version": f"{_sire_version}+{_sire_revisionid}",
+                "lambda": str(lam),
+                "speed": speed,
+                "temperature": str(self._config.temperature.value()),
+            }
 
-        # Add the lambda gradient if available.
-        if lambda_grad is not None:
-            metadata["lambda_grad"] = lambda_grad
+            # Add the lambda gradient if available.
+            if lambda_grad is not None:
+                metadata["lambda_grad"] = lambda_grad
 
-        if is_final_block:
-            # Save the end-state GCMC topologies for trajectory analysis and visualisation.
-            # This topology contains additional water molecules that are used for GCMC
-            # insertion moves.
-            if self._config.gcmc:
-                mols0 = _sr.morph.link_to_reference(system)
-                mols1 = _sr.morph.link_to_perturbed(system)
+            if is_final_block:
+                # Save the end-state GCMC topologies for trajectory analysis and visualisation.
+                # This topology contains additional water molecules that are used for GCMC
+                # insertion moves.
+                if self._config.gcmc:
+                    mols0 = _sr.morph.link_to_reference(system)
+                    mols1 = _sr.morph.link_to_perturbed(system)
 
-                # Save to AMBER format.
-                _sr.save(mols0, self._filenames["topology0"])
-                _sr.save(mols1, self._filenames["topology1"])
+                    # Save to AMBER format.
+                    _sr.save(mols0, self._filenames["topology0"])
+                    _sr.save(mols1, self._filenames["topology1"])
 
-                # Save to PDB format.
-                _sr.save(
-                    mols0,
-                    self._filenames["topology0"].replace(".prm7", ".pdb"),
-                )
-                _sr.save(
-                    mols1,
-                    self._filenames["topology1"].replace(".prm7", ".pdb"),
-                )
-
-            # Assemble and save the final trajectory.
-            if self._config.save_trajectories:
-                # Save the final trajectory chunk to file.
-                if self._save_frames and system.num_frames() > 0:
-                    traj_filename = (
-                        self._filenames[index]["trajectory_chunk"] + f"{block:05d}.dcd"
+                    # Save to PDB format.
+                    _sr.save(
+                        mols0,
+                        self._filenames["topology0"].replace(".prm7", ".pdb"),
                     )
                     _sr.save(
-                        system.trajectory(),
-                        traj_filename,
-                        format=["DCD"],
+                        mols1,
+                        self._filenames["topology1"].replace(".prm7", ".pdb"),
                     )
 
-                # Create the final topology file name.
-                topology0 = self._filenames["topology0"]
+                # Assemble and save the final trajectory.
+                if self._config.save_trajectories:
+                    # Save the final trajectory chunk to file.
+                    if self._save_frames and system.num_frames() > 0:
+                        traj_filename = (
+                            self._filenames[index]["trajectory_chunk"]
+                            + f"{block:05d}.dcd"
+                        )
+                        _sr.save(
+                            system.trajectory(),
+                            traj_filename,
+                            format=["DCD"],
+                        )
 
-                # Create the final trajectory file name.
-                traj_filename = self._filenames[index]["trajectory"]
+                    # Create the final topology file name.
+                    topology0 = self._filenames["topology0"]
 
-                # Glob for the trajectory chunks.
-                traj_chunks = sorted(
-                    _glob(f"{self._filenames[index]['trajectory_chunk']}*")
+                    # Create the final trajectory file name.
+                    traj_filename = self._filenames[index]["trajectory"]
+
+                    # Glob for the trajectory chunks.
+                    traj_chunks = sorted(
+                        _glob(f"{self._filenames[index]['trajectory_chunk']}*")
+                    )
+
+                    # If this is a restart, then we need to check for an existing
+                    # trajectory file with the same name. If it exists and is non-empty,
+                    # then copy it to a backup file and prepend it to the list of chunks.
+                    if self._config.restart:
+                        path = _Path(traj_filename)
+                        if path.exists() and path.stat().st_size > 0:
+                            _copyfile(traj_filename, f"{traj_filename}.prev")
+                            traj_chunks = [f"{traj_filename}.prev"] + traj_chunks
+
+                    # Make sure there are trajectory chunks to process.
+                    if len(traj_chunks) > 0:
+                        # Load the topology and chunked trajectory files.
+                        mols = _sr.load([topology0] + traj_chunks)
+
+                        # Save the final trajectory to a single file.
+                        _sr.save(mols.trajectory(), traj_filename, format=["DCD"])
+
+                        # Now remove the chunked trajectory files.
+                        for chunk in traj_chunks:
+                            _Path(chunk).unlink()
+
+                # Add config and lambda value to the system properties.
+                system.set_property(
+                    "config", self._config.as_dict(sire_compatible=True)
+                )
+                system.set_property("lambda", lam)
+
+                # Stream the final system to file.
+                _sr.stream.save(system, self._filenames[index]["checkpoint"])
+
+                # Create the final parquet file.
+                _dataframe_to_parquet(
+                    df,
+                    metadata=metadata,
+                    filename=self._filenames[index]["energy_traj"],
                 )
 
-                # If this is a restart, then we need to check for an existing
-                # trajectory file with the same name. If it exists and is non-empty,
-                # then copy it to a backup file and prepend it to the list of chunks.
-                if self._config.restart:
-                    path = _Path(traj_filename)
-                    if path.exists() and path.stat().st_size > 0:
-                        _copyfile(traj_filename, f"{traj_filename}.prev")
-                        traj_chunks = [f"{traj_filename}.prev"] + traj_chunks
-
-                # Make sure there are trajectory chunks to process.
-                if len(traj_chunks) > 0:
-                    # Load the topology and chunked trajectory files.
-                    mols = _sr.load([topology0] + traj_chunks)
-
-                    # Save the final trajectory to a single file.
-                    _sr.save(mols.trajectory(), traj_filename, format=["DCD"])
-
-                    # Now remove the chunked trajectory files.
-                    for chunk in traj_chunks:
-                        _Path(chunk).unlink()
-
-            # Add config and lambda value to the system properties.
-            system.set_property("config", self._config.as_dict(sire_compatible=True))
-            system.set_property("lambda", lam)
-
-            # Stream the final system to file.
-            _sr.stream.save(system, self._filenames[index]["checkpoint"])
-
-            # Create the final parquet file.
-            _dataframe_to_parquet(
-                df,
-                metadata=metadata,
-                filename=self._filenames[index]["energy_traj"],
-            )
-
-        else:
-            # Update the starting block if necessary.
-            if block == 0:
-                block = self._start_block
-
-            # Save the current trajectory chunk to file.
-            if self._config.save_trajectories:
-                if self._save_frames and system.num_frames() > 0:
-                    traj_filename = (
-                        self._filenames[index]["trajectory_chunk"] + f"{block:05d}.dcd"
-                    )
-                    _sr.save(
-                        system.trajectory(),
-                        traj_filename,
-                        format=["DCD"],
-                    )
-
-            # Encode the configuration and lambda value as system properties.
-            system.set_property("config", self._config.as_dict(sire_compatible=True))
-            system.set_property("lambda", lam)
-
-            # Stream the checkpoint to file.
-            _sr.stream.save(system, self._filenames[index]["checkpoint"])
-
-            # Create the parquet file name.
-            filename = self._filenames[index]["energy_traj"]
-
-            # Create the parquet file.
-            if block == self._start_block:
-                _dataframe_to_parquet(df, metadata=metadata, filename=filename)
-            # Append to the parquet file.
             else:
-                _parquet_append(
-                    filename,
-                    df.iloc[-self._energy_per_block :],
+                # Update the starting block if necessary.
+                if block == 0:
+                    block = self._start_block
+
+                # Save the current trajectory chunk to file.
+                if self._config.save_trajectories:
+                    if self._save_frames and system.num_frames() > 0:
+                        traj_filename = (
+                            self._filenames[index]["trajectory_chunk"]
+                            + f"{block:05d}.dcd"
+                        )
+                        _sr.save(
+                            system.trajectory(),
+                            traj_filename,
+                            format=["DCD"],
+                        )
+
+                # Encode the configuration and lambda value as system properties.
+                system.set_property(
+                    "config", self._config.as_dict(sire_compatible=True)
                 )
+                system.set_property("lambda", lam)
+
+                # Stream the checkpoint to file.
+                _sr.stream.save(system, self._filenames[index]["checkpoint"])
+
+                # Create the parquet file name.
+                filename = self._filenames[index]["energy_traj"]
+
+                # Create the parquet file.
+                if block == self._start_block:
+                    _dataframe_to_parquet(df, metadata=metadata, filename=filename)
+                # Append to the parquet file.
+                else:
+                    _parquet_append(
+                        filename,
+                        df.iloc[-self._energy_per_block :],
+                    )
+
+        except Exception as e:
+            return index, e
+
+        return index, None
 
     def _backup_checkpoint(self, index):
         """
@@ -1801,6 +1825,9 @@ class RunnerBase:
 
         index : int
             The index of the window or replica.
+
+        error: Exception
+            The exception raised during the backup, if any.
         """
 
         try:
@@ -1813,7 +1840,7 @@ class RunnerBase:
                 )
             traj_filename = self._filenames[index]["trajectory"]
         except Exception as e:
-            return False, e
+            return index, e
 
         try:
             # Backup the existing energy trajectory file, if it exists.
@@ -1824,9 +1851,9 @@ class RunnerBase:
                     str(self._filenames[index]["energy_traj"]) + ".bak",
                 )
         except Exception as e:
-            return False, e
+            return index, e
 
-        return True, None
+        return index, None
 
     def _save_energy_components(self, index, context):
         """
