@@ -281,6 +281,14 @@ class DynamicsCache:
                     f"Created GCMC sampler for lambda {lam:.5f} on device {device}"
                 )
 
+                # Log the initial position of the GCMC sphere.
+                if self._gcmc_samplers[i]._reference is not None:
+                    positions = _sr.io.get_coords_array(mols)
+                    target = self._gcmc_samplers[i]._get_target_position(positions)
+                    _logger.info(
+                        f"Initial GCMC sphere centre: [{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}] A"
+                    )
+
             # Create the dynamics object.
             try:
                 dynamics = mols.dynamics(**dynamics_kwargs)
@@ -344,14 +352,6 @@ class DynamicsCache:
 
             _logger.info(
                 f"Created dynamics object for lambda {lam:.5f} on device {device}"
-            )
-
-        # Print the initial GCMC sphere position.
-        if gcmc_kwargs is not None and self._gcmc_samplers[0]._reference is not None:
-            positions = _sr.io.get_coords_array(mols)
-            target = self._gcmc_samplers[0]._get_target_position(positions)
-            _logger.info(
-                f"Initial GCMC sphere center: [{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}] Å"
             )
 
     def get(self, index):
