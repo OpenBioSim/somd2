@@ -436,7 +436,8 @@ class Runner(_RunnerBase):
                 positions = _sr.io.get_coords_array(system)
                 target = gcmc_sampler._get_target_position(positions)
                 _logger.info(
-                    f"Initial GCMC sphere centre: [{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}] A"
+                    f"Initial GCMC sphere centre at {_lam_sym} = {lambda_value:.5f}: "
+                    f"[{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}] A"
                 )
 
         else:

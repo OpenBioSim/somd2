@@ -286,7 +286,8 @@ class DynamicsCache:
                     positions = _sr.io.get_coords_array(mols)
                     target = self._gcmc_samplers[i]._get_target_position(positions)
                     _logger.info(
-                        f"Initial GCMC sphere centre: [{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}] A"
+                        f"Initial GCMC sphere centre for lambda {lam:.5f} on device {device}: "
+                        f"[{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}] A"
                     )
 
             # Create the dynamics object.
