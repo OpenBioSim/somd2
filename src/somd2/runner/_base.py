@@ -535,8 +535,8 @@ class RunnerBase:
 
         # GCMC specific validation.
         if self._config.gcmc:
-            if self._config.platform != "cuda":
-                msg = "GCMC simulations require the CUDA platform."
+            if self._config.platform not in ["cuda", "opencl"]:
+                msg = "GCMC simulations require the CUDA or OpenCL platform."
                 _logger.error(msg)
                 raise ValueError(msg)
 
@@ -747,6 +747,7 @@ class RunnerBase:
                 "tolerance": self._config.gcmc_tolerance,
                 "restart": self._is_restart,
                 "overwrite": self._config.overwrite,
+                "platform": config.platform,
                 "no_logger": True,
             }
         else:
