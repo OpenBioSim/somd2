@@ -145,13 +145,13 @@ somd2 --help | grep -A2 '  --gcmc'
 ```
 
 > [!NOTE]
-> GCMC is currently only supported when using the CUDA platform and isn't
-> available on macOS, where the `pycuda` package is not available.
+> GCMC is only supported when using the CUDA or OpenCL platforms.
 
-Make sure that `nvcc` is in your `PATH`. If you require a different `nvcc` to that
-provided by conda, you can set the `PYCUDA_NVCC` environment variable to point
-to the desired `nvcc` binary. Depending on your setup, you may also need to install
-the `cuda-nvvm` package from `conda-forge`.
+When using the CUDA platform, make sure that `nvcc` is in your `PATH`. If you
+require a different `nvcc` to that provided by conda, you can set the
+`PYCUDA_NVCC` environment variable to point to the desired `nvcc` binary.
+Depending on your setup, you may also need to install the `cuda-nvvm` package
+from `conda-forge`.
 
 ## Analysis
 
