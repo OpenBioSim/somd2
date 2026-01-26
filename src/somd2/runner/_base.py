@@ -446,7 +446,7 @@ class RunnerBase:
 
         # Log the atom indices in the REST2 selection.
         if is_rest2:
-            _logger.info(f"REST2 selection contains {len(atoms)} atoms: {idxs}")
+            _logger.info(f"REST2 selection contains {len(idxs)} atoms: {idxs}")
 
         # Apply hydrogen mass repartitioning.
         if self._config.hmr:
