@@ -721,11 +721,17 @@ class RepexRunner(_RunnerBase):
                 output_directory=self._config.output_directory,
             )
         else:
+            _logger.debug("Restarting from file")
+
             # Check to see if the simulation is already complete.
             time = self._system[0].time()
             if time > self._config.runtime - self._config.timestep:
-                _logger.success(f"Simulation already complete. Exiting.")
+                _logger.success("Simulation already complete. Exiting.")
                 _sys.exit(0)
+            else:
+                _logger.info(
+                    f"Restarting at time {time}, time remaining = {self._config.runtime - time}"
+                )
 
             try:
                 with open(self._repex_state, "rb") as f:
