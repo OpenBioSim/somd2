@@ -1762,6 +1762,9 @@ class RunnerBase:
                 )
                 system.set_property("lambda", lam)
 
+                # Delete all frames from the system.
+                system.delete_all_frames()
+
                 # Stream the final system to file.
                 _sr.stream.save(system, self._filenames[index]["checkpoint"])
 
@@ -1795,6 +1798,9 @@ class RunnerBase:
                     "config", self._config.as_dict(sire_compatible=True)
                 )
                 system.set_property("lambda", lam)
+
+                # Delete all frames from the system.
+                system.delete_all_frames()
 
                 # Stream the checkpoint to file.
                 _sr.stream.save(system, self._filenames[index]["checkpoint"])
