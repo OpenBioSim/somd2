@@ -647,22 +647,25 @@ class Runner(_RunnerBase):
         else:
             num_energy_neighbours = None
 
+        # Store the current checkpoint frequency.
+        checkpoint_frequency = self._config.checkpoint_frequency
+
         # Store the checkpoint time in nanoseconds.
-        checkpoint_interval = self._config.checkpoint_frequency.to("ns")
+        checkpoint_interval = checkpoint_frequency.to("ns")
 
         # Store the start time.
         start = _timer()
 
         # Run the simulation, checkpointing in blocks.
-        if self._config.checkpoint_frequency.value() > 0.0:
+        if checkpoint_frequency.value() > 0.0:
 
             # Calculate the number of blocks and the remainder time.
-            frac = (time / self._config.checkpoint_frequency).value()
+            frac = (time / checkpoint_frequency).value()
 
             # Handle the case where the runtime is less than the checkpoint frequency.
             if frac < 1.0:
                 frac = 1.0
-                self._config.checkpoint_frequency = f"{time} ps"
+                checkpoint_frequency = _sr.u(f"{time} ps")
 
             num_blocks = int(frac)
             rem = round(frac - num_blocks, 12)
@@ -687,7 +690,7 @@ class Runner(_RunnerBase):
                         next_frame = self._config.frame_frequency
 
                         # Loop until we reach the runtime.
-                        while runtime <= self._config.checkpoint_frequency:
+                        while runtime <= checkpoint_frequency:
                             # Run the dynamics in blocks of the GCMC frequency.
                             dynamics.run(
                                 self._config.gcmc_frequency,
@@ -728,7 +731,7 @@ class Runner(_RunnerBase):
 
                     else:
                         dynamics.run(
-                            self._config.checkpoint_frequency,
+                            checkpoint_frequency,
                             energy_frequency=self._config.energy_frequency,
                             frame_frequency=self._config.frame_frequency,
                             lambda_windows=lambda_array,
