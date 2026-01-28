@@ -247,6 +247,9 @@ class DynamicsCache:
             else:
                 mols = system
 
+            # Delete an existing trajectory frames.
+            mols.delete_all_frames()
+
             # Overload the device and lambda value.
             dynamics_kwargs["device"] = device
             dynamics_kwargs["lambda_value"] = lam
@@ -667,11 +670,17 @@ class RepexRunner(_RunnerBase):
                 output_directory=self._config.output_directory,
             )
         else:
+            _logger.debug("Restarting from file")
+
             # Check to see if the simulation is already complete.
             time = self._system[0].time()
             if time > self._config.runtime - self._config.timestep:
-                _logger.success(f"Simulation already complete. Exiting.")
+                _logger.success("Simulation already complete. Exiting.")
                 _sys.exit(0)
+            else:
+                _logger.info(
+                    f"Restarting at time {time}, time remaining = {self._config.runtime - time}"
+                )
 
             try:
                 with open(self._repex_state, "rb") as f:
@@ -773,28 +782,28 @@ class RepexRunner(_RunnerBase):
         else:
             cycles = int(ceil(cycles))
 
-        if self._config.checkpoint_frequency.value() > 0.0:
+        # Store the current checkpoint frequency.
+        checkpoint_frequency = self._config.checkpoint_frequency
+
+        if checkpoint_frequency.value() > 0.0:
             # Calculate the number of blocks and the remainder time.
-            frac = (self._config.runtime / self._config.checkpoint_frequency).value()
+            frac = (self._config.runtime / checkpoint_frequency).value()
 
             # Handle the case where the runtime is less than the checkpoint frequency.
             if frac < 1.0:
                 frac = 1.0
-                self._config.checkpoint_frequency = str(self._config.runtime)
+                checkpoint_frequency = self._config.runtime
 
             num_blocks = int(frac)
             rem = round(frac - num_blocks, 12)
 
             # Work out the number of repex cycles per block.
-            frac = (
-                self._config.checkpoint_frequency.value()
-                / self._config.energy_frequency.value()
-            )
+            frac = (checkpoint_frequency / self._config.energy_frequency).value()
 
             # Handle the case where the checkpoint frequency is less than the energy frequency.
             if frac < 1.0:
                 frac = 1.0
-                self._config.checkpoint_frequency = str(self._config.energy_frequency)
+                checkpoint_frequency = self._config.energy_frequency
 
             # Store the number of repex cycles per block.
             cycles_per_checkpoint = int(frac)
@@ -981,7 +990,7 @@ class RepexRunner(_RunnerBase):
                                     repeat(num_blocks + int(rem > 0)),
                                     repeat(i == cycles - 1),
                                 ):
-                                    if not result:
+                                    if error:
                                         _logger.error(
                                             f"Checkpoint failed for {_lam_sym} = "
                                             f"{self._lambda_values[index]:.5f}: {error}"
