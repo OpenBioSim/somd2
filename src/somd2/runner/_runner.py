@@ -666,6 +666,7 @@ class Runner(_RunnerBase):
             if frac < 1.0:
                 frac = 1.0
                 checkpoint_frequency = _sr.u(f"{time} ps")
+                checkpoint_interval = checkpoint_frequency.to("ns")
 
             num_blocks = int(frac)
             rem = round(frac - num_blocks, 12)
