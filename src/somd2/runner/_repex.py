@@ -1041,7 +1041,7 @@ class RepexRunner(_RunnerBase):
                                     repeat(num_blocks + int(rem > 0)),
                                     repeat(i == cycles - 1),
                                 ):
-                                    if not result:
+                                    if error:
                                         _logger.error(
                                             f"Checkpoint failed for {_lam_sym} = "
                                             f"{self._lambda_values[index]:.5f}: {error}"
