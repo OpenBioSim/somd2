@@ -247,6 +247,9 @@ class DynamicsCache:
             else:
                 mols = system
 
+            # Delete an existing trajectory frames.
+            mols.delete_all_frames()
+
             # Overload the device and lambda value.
             dynamics_kwargs["device"] = device
             dynamics_kwargs["lambda_value"] = lam

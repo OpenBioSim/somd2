@@ -292,6 +292,9 @@ class Runner(_RunnerBase):
         else:
             system = self._system.clone()
 
+        # Delete an existing trajectory frames.
+        system.delete_all_frames()
+
         # GPU platform.
         if self._is_gpu:
             # Get a GPU from the pool.
