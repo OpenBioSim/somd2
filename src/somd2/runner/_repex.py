@@ -350,6 +350,11 @@ class DynamicsCache:
                 est_total = (
                     info["before"] + first_cost + marginal_cost * (num_contexts - 1)
                 )
+                _logger.info(
+                    f"Memory per replica on device {device}: "
+                    f"first = {first_cost / (1024**2):.0f} MiB, "
+                    f"marginal = {marginal_cost / (1024**2):.0f} MiB"
+                )
             else:
                 est_total = None
 
