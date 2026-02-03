@@ -587,18 +587,10 @@ class DynamicsCache:
 
                 pynvml.nvmlInit()
 
-                # Find matching device by name
-                device_count = pynvml.nvmlDeviceGetCount()
-                for i in range(device_count):
-                    handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-                    name = pynvml.nvmlDeviceGetName(handle)
-
-                    if name in device.name or device.name in name:
-                        memory = pynvml.nvmlDeviceGetMemoryInfo(handle)
-                        pynvml.nvmlShutdown()
-                        return (memory.used, memory.free, memory.total)
-
+                handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
+                memory = pynvml.nvmlDeviceGetMemoryInfo(handle)
                 pynvml.nvmlShutdown()
+                return (memory.used, memory.free, memory.total)
             except Exception as e:
                 msg = f"Could not get NVIDIA GPU memory info for device {device_index}: {e}"
                 _logger.error(msg)
