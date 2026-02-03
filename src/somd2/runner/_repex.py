@@ -218,15 +218,14 @@ class DynamicsCache:
         # Per-device memory tracking for estimation.
         device_mem = {}
 
-        # Determine whether there is a remainder in the number of replicas.
+        # Work out how many replicas are assigned to each device.
+        # Replicas are assigned round-robin, so the first (num_replicas % num_gpus)
+        # devices get one extra replica.
+        base = floor(num_replicas / num_gpus)
         remainder = num_replicas % num_gpus
-
-        # Store the number of contexts for each device. The last device will
-        # have remainder contexts, while all others have
-        contexts_per_device = num_replicas * [floor(num_replicas / num_gpus)]
-
-        # Set the last device to have the remainder contexts.
-        contexts_per_device[-1] = remainder
+        contexts_per_device = [
+            base + (1 if i < remainder else 0) for i in range(num_gpus)
+        ]
 
         # Create the dynamics objects in serial.
         for i, (lam, scale) in enumerate(zip(lambdas, rest2_scale_factors)):
