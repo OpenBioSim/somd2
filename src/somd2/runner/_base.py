@@ -272,7 +272,7 @@ class RunnerBase:
             except Exception as e1:
                 try:
                     self._system, self._modifications = modify(
-                        self_system, optimise_angles=False
+                        self._system, optimise_angles=False
                     )
                 except Exception as e2:
                     msg = f"Unable to apply modifications to ghost atom bonded terms: {e1}; {e2}"
