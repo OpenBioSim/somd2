@@ -37,3 +37,9 @@ from ._version import __version__
 # Store the sire version.
 from sire import __version__ as _sire_version
 from sire import __revisionid__ as _sire_revisionid
+
+# Store the ghostly version.
+from ghostly import __version__ as _ghostly_version
+
+# Store the loch version.
+from loch import __version__ as _loch_version
