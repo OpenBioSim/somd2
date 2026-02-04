@@ -117,10 +117,20 @@ class RunnerBase:
             self._perturbed_box = None
 
         # Log the versions of somd2 and sire.
-        from somd2 import __version__, _sire_version, _sire_revisionid
+        from somd2 import (
+            __version__,
+            _sire_version,
+            _sire_revisionid,
+            _ghostly_version,
+            _loch_version,
+        )
 
         _logger.info(f"somd2 version: {__version__}")
         _logger.info(f"sire version: {_sire_version}+{_sire_revisionid}")
+        if self._config.ghost_modifications:
+            _logger.info(f"ghostly version: {_ghostly_version}")
+        if self._config.gcmc:
+            _logger.info(f"loch version: {_loch_version}")
 
         # Flag whether frames are being saved.
         if (
