@@ -310,6 +310,21 @@ class DynamicsCache:
             ):
                 from openmm.unit import angstrom
 
+                # Get the positions from the context.
+                positions = (
+                    dynamics.context()
+                    .getState(getPositions=True)
+                    .getPositions(asNumpy=True)
+                )
+
+                # The positions array also contains the ghost water atoms that
+                # were added during the GCMC setup. We need to make sure that
+                # we copy these over to the perturbed positions array.
+                diff = len(positions) - len(perturbed_positions)
+                perturbed_positions = _np.concatenate(
+                    [perturbed_positions, positions[-diff:]]
+                )
+
                 dynamics.context().setPeriodicBoxVectors(*perturbed_box * angstrom)
                 dynamics.context().setPositions(perturbed_positions * angstrom)
 
