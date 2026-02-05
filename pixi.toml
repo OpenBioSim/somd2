@@ -1,0 +1,25 @@
+[workspace]
+name = "somd2"
+channels = ["conda-forge", "openbiosim/label/dev"]
+# No Windows - depends on loch which requires pycuda/pyopencl
+platforms = ["linux-64", "osx-arm64"]
+
+[dependencies]
+python = ">=3.10"
+biosimspace = "*"
+ghostly = "*"
+loch = "*"
+loguru = "*"
+numba = "*"
+
+[target.linux-64.dependencies]
+nvidia-ml-py = "*"
+
+[feature.test.dependencies]
+pytest = "*"
+black = "*"
+
+[environments]
+default = []
+test = ["test"]
+dev = ["test"]
