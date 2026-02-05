@@ -315,7 +315,7 @@ class DynamicsCache:
                     dynamics.context()
                     .getState(getPositions=True)
                     .getPositions(asNumpy=True)
-                )
+                ) / angstrom
 
                 # The positions array also contains the ghost water atoms that
                 # were added during the GCMC setup. We need to make sure that
