@@ -37,3 +37,6 @@ output.yaml
 
 # Conda recipe (it is auto-generated)
 recipes/somd2/meta.yaml
+
+# Auto-generated version file
+src/somd2/_version.py
