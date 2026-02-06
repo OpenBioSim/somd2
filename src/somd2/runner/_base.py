@@ -528,7 +528,17 @@ class RunnerBase:
             self._is_restart = False
             self._cleanup()
 
-        # Save config whenever 'configure' is called to keep it up to date.
+        if self._config.replica_exchange and self._config.perturbed_system is not None:
+            # Check whether the perturbed system was loaded from file. If not
+            # we need to save to the output directory and update the config to
+            # point to the new file.
+            if self._config._perturbed_system_file is None:
+                filename = _Path(self._config.output_directory) / "perturbed_system.s3"
+                _sr.stream.save(perturbed_system, perturbed_system_file)
+                self._config._perturbed_system_file = str(filename)
+                _logger.info(f"Saving perturbed system to {perturbed_system_file}")
+
+        # Write YAML configuration file to the output directory.
         if self._config.write_config:
             _dict_to_yaml(
                 self._config.as_dict(),
