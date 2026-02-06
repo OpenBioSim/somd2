@@ -655,7 +655,10 @@ class Config:
 
         # Use the path for the perturbed_system option, since the system
         # isn't serializable.
-        if self.perturbed_system is not None:
+        if (
+            self.perturbed_system is not None
+            and self._perturbed_system_file is not None
+        ):
             d["perturbed_system"] = str(self._perturbed_system_file)
             d.pop("perturbed_system_file", None)
 
