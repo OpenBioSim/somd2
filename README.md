@@ -57,7 +57,7 @@ You may also need to install other packages from source, e.g.
 [Loch](https://github.com/OpenBioSim/loch):
 
 ```
-pip install -e /path/to/biosimspace/python
+pip install -e /path/to/biosimspace
 pip install -e /path/to/ghostly
 pip install -e /path/to/loch
 ```
