@@ -40,7 +40,8 @@ jobs:
           fetch-depth: 0
       #
       - name: Compute version info
-        run: python ${{ github.workspace }}/actions/update_recipe.py
+        shell: bash
+        run: python "${{ github.workspace }}/actions/update_recipe.py"
       #
       - name: Create sdist
         run: pip install build && python -m build --sdist && mv dist/*.tar.gz somd2-source.tar.gz
@@ -61,11 +62,13 @@ jobs:
         run: rattler-build build --recipe "${{ github.workspace }}/recipes/somd2" -c conda-forge -c openbiosim/label/main --variant-config "${{ github.workspace }}/python_variant.yaml"
       #
       - name: Install anaconda-client
+        shell: bash
         run: python -m pip install anaconda-client
         if: github.event.inputs.upload_packages == 'true'
       #
       - name: Upload package
-        run: python ${{ github.workspace }}/actions/upload_package.py
+        shell: bash
+        run: python "${{ github.workspace }}/actions/upload_package.py"
         env:
           ANACONDA_TOKEN: ${{ secrets.ANACONDA_TOKEN }}
           ANACONDA_LABEL: main
