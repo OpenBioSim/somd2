@@ -24,7 +24,6 @@ requirements:
     - loch
     - loguru
     - numba
-    - numpy <2.3  # Remove when nglview >=4.1 is released
     - python
     - if: linux
       then:
