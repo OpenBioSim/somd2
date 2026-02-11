@@ -76,6 +76,24 @@ You should now have a `somd2` executable in your path. To test, run:
 somd2 --help
 ```
 
+## Development
+
+Pre-commit hooks are used to ensure consistent code formatting and linting.
+To set up pre-commit in your development environment:
+
+```
+pixi shell -e dev
+pre-commit install
+```
+
+This will run [ruff](https://docs.astral.sh/ruff/) formatting and linting
+checks automatically on each commit. To run the checks manually against all
+files:
+
+```
+pre-commit run --all-files
+```
+
 ## Usage
 
 In order to run an alchemical free-energy simulation you will need to

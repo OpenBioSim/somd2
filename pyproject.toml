@@ -35,3 +35,10 @@ distance-dirty = "{base_version}+{distance}.{vcs}{rev}.dirty"
 
 [tool.versioningit.write]
 file = "src/somd2/_version.py"
+
+[tool.ruff.lint]
+ignore = ["E402"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["F841"]
+
