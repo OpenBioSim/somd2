@@ -1459,7 +1459,6 @@ class Config:
     @platform.setter
     def platform(self, platform):
         import os as _os
-        import sys as _sys
 
         if not isinstance(platform, str):
             raise TypeError("'platform' must be of type 'str'")

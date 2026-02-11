@@ -402,8 +402,8 @@ class RunnerBase:
                 if len(self._config.rest2_scale) != len(self._lambda_energy):
                     msg = f"Length of 'rest2_scale' must match the number of {_lam_sym} values."
                     if is_missing:
-                        msg += f"If you have omitted some 'lambda_values` from `lambda_energy`, please "
-                        f"add them to `lambda_energy`, along with the corresponding `rest2_scale` values."
+                        msg += "If you have omitted some 'lambda_values` from `lambda_energy`, please "
+                        "add them to `lambda_energy`, along with the corresponding `rest2_scale` values."
                     _logger.error(msg)
                     raise ValueError(msg)
                 # Make sure the end states are close to 1.0.
@@ -429,7 +429,6 @@ class RunnerBase:
 
         # Make sure the REST2 selection is valid.
         if self._config.rest2_selection is not None:
-
             try:
                 atoms = _sr.mol.selection_to_atoms(
                     self._system, self._config.rest2_selection

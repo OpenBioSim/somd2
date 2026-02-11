@@ -1,9 +1,7 @@
 from pathlib import Path
 
 import tempfile
-import pytest
 
-import sire as sr
 
 from somd2.runner import Runner
 from somd2.config import Config

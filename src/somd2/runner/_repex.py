@@ -461,7 +461,6 @@ class DynamicsCache:
         index: int
             The index of the replica.
         """
-        from openmm.unit import angstrom
 
         # Get the current OpenMM state.
         state = (
@@ -1039,8 +1038,7 @@ class RepexRunner(_RunnerBase):
                     for j in range(num_checkpoint_batches):
                         # Get the indices of the replicas in this batch.
                         replicas = replica_list[
-                            j
-                            * num_checkpoint_workers : (j + 1)
+                            j * num_checkpoint_workers : (j + 1)
                             * num_checkpoint_workers
                         ]
                         with ThreadPoolExecutor(max_workers=num_workers) as executor:
@@ -1063,8 +1061,7 @@ class RepexRunner(_RunnerBase):
                     for j in range(num_checkpoint_batches):
                         # Get the indices of the replicas in this batch.
                         replicas = replica_list[
-                            j
-                            * num_checkpoint_workers : (j + 1)
+                            j * num_checkpoint_workers : (j + 1)
                             * num_checkpoint_workers
                         ]
                         with ThreadPoolExecutor(max_workers=num_workers) as executor:

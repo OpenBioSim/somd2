@@ -548,7 +548,7 @@ def make_compatible(system, fix_perturbable_zero_sigmas=False):
             for idx0 in impropers0_idx.keys():
                 if idx1.equivalent(idx0):
                     # Don't store duplicates.
-                    if not idx0 in impropers_shared_idx.keys():
+                    if idx0 not in impropers_shared_idx.keys():
                         impropers_shared_idx[idx1] = (
                             impropers0_idx[idx0],
                             impropers1_idx[idx1],
@@ -659,7 +659,6 @@ def reconstruct_system(system):
 
     # Loop over all perturbable molecules.
     for mol in pert_mols:
-
         # Delete any AmberParams properties.
         try:
             cursor = mol.cursor()
