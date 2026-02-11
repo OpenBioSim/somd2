@@ -21,6 +21,7 @@ black = "*"
 
 [feature.lint.dependencies]
 pre-commit = "*"
+rattler-build = "*"
 ruff = "*"
 
 [environments]
