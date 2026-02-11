@@ -44,15 +44,10 @@ tests:
           - pytest -vvv --color=yes --import-mode=importlib ./tests
     files:
       source:
-        - src/somd2/
         - tests/
     requirements:
       run:
         - pytest
-        - if: linux and x86_64
-          then:
-            - black ==25
-            - pytest-black
 
 about:
   homepage: https://github.com/openbiosim/somd2
