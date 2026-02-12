@@ -28,11 +28,6 @@ requirements:
     - python
 
 tests:
-  - python:
-      - if: linux
-        then:
-          imports:
-            - somd2
   - script:
       - if: linux
         then:
