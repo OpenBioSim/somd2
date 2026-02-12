@@ -28,16 +28,19 @@ requirements:
     - python
 
 tests:
-  - script:
-      - if: linux
-        then:
-          - pytest -vvv --color=yes --import-mode=importlib ./tests
-    files:
-      source:
-        - tests/
-    requirements:
-      run:
-        - pytest
+  - if: linux
+    then:
+      - python:
+          imports:
+            - somd2
+      - script:
+          - PYTHONPATH=. pytest -vvv --color=yes --import-mode=importlib ./tests
+        files:
+          source:
+            - tests/
+        requirements:
+          run:
+            - pytest
 
 about:
   homepage: https://github.com/openbiosim/somd2
