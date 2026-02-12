@@ -30,9 +30,13 @@ requirements:
 tests:
   - python:
       imports:
-        - somd2
+        - if: linux
+          then:
+            - somd2
   - script:
-      - pytest -vvv --color=yes --import-mode=importlib ./tests
+      - if: linux
+        then:
+          - pytest -vvv --color=yes --import-mode=importlib ./tests
     files:
       source:
         - tests/
