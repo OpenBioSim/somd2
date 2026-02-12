@@ -652,6 +652,14 @@ class Config:
             self._charge_scale_factor
         ):
             d["lambda_schedule"] = "charge_scaled_morph"
+        else:
+            d["lambda_schedule"] = self._serialise_object(self.lambda_schedule)
+
+        # Serialise restraints.
+        if self.restraints is not None:
+            d["restraints"] = [
+                self._serialise_object(restraint) for restraint in self.restraints
+            ]
 
         # Use the path for the perturbed_system option, since the system
         # isn't serializable.
@@ -984,14 +992,21 @@ class Config:
             if isinstance(lambda_schedule, str):
                 # Strip whitespace and convert to lower case.
                 lambda_schedule = lambda_schedule.strip().lower()
-                if lambda_schedule not in self._choices["lambda_schedule"]:
-                    raise ValueError(
-                        f"Lambda schedule not recognised. Valid lambda schedules are: {self._choices['lambda_schedule']}"
-                    )
                 if lambda_schedule == "standard_morph":
                     self._lambda_schedule = _LambdaSchedule.standard_morph()
                 elif lambda_schedule == "charge_scaled_morph":
                     self._lambda_schedule = _LambdaSchedule.charge_scaled_morph(0.2)
+                else:
+                    try:
+                        self._lambda_schedule = self._deserialise_object(
+                            lambda_schedule
+                        )
+                    except Exception:
+                        raise ValueError(
+                            "Unable to deserialise 'lambda_schedule'. Ensure that this is a "
+                            "hex string representation of a valid LambdaSchedule object, or "
+                            f"one of the following strings: {', '.join(self._choices['lambda_schedule'])}"
+                        )
             else:
                 self._lambda_schedule = lambda_schedule
         else:
@@ -1094,11 +1109,26 @@ class Config:
                 restraints = [restraints]
 
             # Check that all restraints are of the correct type.
+            deserialised_restraints = []
             for restraint in restraints:
-                if not isinstance(restraint, _sr.mm._MM.Restraints):
+                if isinstance(restraint, _sr.mm._MM.Restraints):
+                    continue
+                elif isinstance(restraint, str):
+                    try:
+                        restraint = self._deserialise_object(restraint)
+                    except Exception:
+                        raise ValueError(
+                            "Unable to deserialise restraint. Ensure that this "
+                            "is a hex string representation of a valid sire.mm._MM.Restraints object."
+                        )
+                    deserialised_restraints.append(restraint)
+                else:
                     raise ValueError(
                         "'restraints' must be a sire.mm._MM.Restraints object, or a list of these objects."
                     )
+
+            if len(deserialised_restraints) > 0:
+                restraints = deserialised_restraints
 
         self._restraints = restraints
 
@@ -2081,6 +2111,63 @@ class Config:
         if not isinstance(overwrite, bool):
             raise ValueError("'overwrite' must be of type 'bool'")
         self._overwrite = overwrite
+
+    @staticmethod
+    def _serialise_object(obj):
+        """
+        Internal method to serialise a Sire object to a hex string representation
+        for storage in the YAML config file.
+
+        Parameters
+        ----------
+
+        obj: object
+            The Sire object to serialise.
+
+        Returns
+        --------
+
+        hex:
+            The hex string representation of the Sire object.
+        """
+
+        from sire.stream import save
+        from sire.legacy.Qt import QByteArray
+
+        try:
+            hex = QByteArray(save(obj)).to_hex().data()
+        except Exception as e:
+            raise ValueError(f"Unable to serialise object: {e}")
+
+        return hex
+
+    @staticmethod
+    def _deserialise_object(hex):
+        """
+        Internal method to deserialise a Sire object from a hex string representation.
+
+        Parameters
+        ----------
+
+        hex: str
+            The hex string representation of the Sire object.
+
+        Returns
+        -------
+
+        obj:
+            The deserialised Sire object.
+        """
+        from sire.stream import load
+        from sire.legacy.Qt import QByteArray
+
+        try:
+            hex_byte_arrary = QByteArray.from_raw_data(hex, len(hex))
+            obj = load(QByteArray.from_hex(hex_byte_arrary))
+        except Exception as e:
+            raise ValueError(f"Unable to deserialise object: {e}")
+
+        return obj
 
     @classmethod
     def _create_parser(cls):

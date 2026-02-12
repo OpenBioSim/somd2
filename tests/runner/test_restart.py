@@ -228,3 +228,50 @@ def test_restart(mols, request):
         # Load the new checkpoint file and make sure the restart fails
         with pytest.raises(ValueError):
             runner_badconfig = Runner(mols, Config(**config_new))
+
+
+def test_restart_custom_schedule(ethane_methanol):
+    """
+    Test that a restart works when using a non-standard lambda schedule.
+    """
+    mols = ethane_methanol.clone()
+    schedule = sr.cas.LambdaSchedule.standard_decouple()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "12fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "lambda_schedule": schedule,
+            "platform": "CPU",
+            "max_threads": 1,
+            "num_lambda": 2,
+        }
+
+        # Instantiate a runner using the config defined above.
+        runner = Runner(mols, Config(**config))
+
+        del runner
+
+        config_new = {
+            "runtime": "24fs",
+            "restart": True,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "lambda_schedule": schedule,
+            "platform": "CPU",
+            "max_threads": 1,
+            "num_lambda": 2,
+            "overwrite": True,
+            "log_level": "DEBUG",
+        }
+
+        runner2 = Runner(mols, Config(**config_new))
+
+        # Run the simulation.
+        runner2.run()

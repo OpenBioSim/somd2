@@ -155,7 +155,7 @@ class Runner(_RunnerBase):
         Returns
         -------
 
-        devices : [(str, int)]
+        devices: [(str, int)]
             List of available device numbers with oversubscription factor.
         """
         devices = []
