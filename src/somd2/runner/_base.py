@@ -532,10 +532,12 @@ class RunnerBase:
             # we need to save to the output directory and update the config to
             # point to the new file.
             if self._config._perturbed_system_file is None:
-                filename = _Path(self._config.output_directory) / "perturbed_system.s3"
-                _sr.stream.save(perturbed_system, perturbed_system_file)
-                self._config._perturbed_system_file = str(filename)
-                _logger.info(f"Saving perturbed system to {perturbed_system_file}")
+                filename = str(
+                    _Path(self._config.output_directory) / "perturbed_system.s3"
+                )
+                _sr.stream.save(self._config.perturbed_system, filename)
+                self._config._perturbed_system_file = filename
+                _logger.info(f"Saving perturbed system to {filename}")
 
         # Write YAML configuration file to the output directory.
         if self._config.write_config:
