@@ -1376,13 +1376,13 @@ class RunnerBase:
                         continue
                     else:
                         try:
-                            v1 = _Config._deserialise_object(v1)
+                            v1 = _Config._from_hex(v1)
                         except Exception as e:
                             raise ValueError(
                                 f"Unable to deserialise lambda schedule from config1: {str(e)}"
                             )
                         try:
-                            v2 = _Config._deserialise_object(v2)
+                            v2 = _Config._from_hex(v2)
                         except Exception as e:
                             raise ValueError(
                                 f"Unable to deserialise lambda schedule from config2: {str(e)}"
@@ -1401,13 +1401,13 @@ class RunnerBase:
                     if v1 and v2:
                         for r1, r2 in zip(v1, v2):
                             try:
-                                r1 = _Config._deserialise_object(r1)
+                                r1 = _Config._from_hex(r1)
                             except Exception as e:
                                 raise ValueError(
                                     f"Unable to deserialise restraint from config1: {str(e)}"
                                 )
                             try:
-                                r2 = _Config._deserialise_object(r2)
+                                r2 = _Config._from_hex(r2)
                             except Exception as e:
                                 raise ValueError(
                                     f"Unable to deserialise restraint from config2: {str(e)}"

@@ -653,13 +653,11 @@ class Config:
         ):
             d["lambda_schedule"] = "charge_scaled_morph"
         else:
-            d["lambda_schedule"] = self._serialise_object(self.lambda_schedule)
+            d["lambda_schedule"] = self._to_hex(self.lambda_schedule)
 
         # Serialise restraints.
         if self.restraints is not None:
-            d["restraints"] = [
-                self._serialise_object(restraint) for restraint in self.restraints
-            ]
+            d["restraints"] = [self._to_hex(restraint) for restraint in self.restraints]
 
         # Use the path for the perturbed_system option, since the system
         # isn't serializable.
@@ -998,9 +996,7 @@ class Config:
                     self._lambda_schedule = _LambdaSchedule.charge_scaled_morph(0.2)
                 else:
                     try:
-                        self._lambda_schedule = self._deserialise_object(
-                            lambda_schedule
-                        )
+                        self._lambda_schedule = self._from_hex(lambda_schedule)
                     except Exception:
                         raise ValueError(
                             "Unable to deserialise 'lambda_schedule'. Ensure that this is a "
@@ -1115,7 +1111,7 @@ class Config:
                     continue
                 elif isinstance(restraint, str):
                     try:
-                        restraint = self._deserialise_object(restraint)
+                        restraint = self._from_hex(restraint)
                     except Exception:
                         raise ValueError(
                             "Unable to deserialise restraint. Ensure that this "
@@ -2113,7 +2109,7 @@ class Config:
         self._overwrite = overwrite
 
     @staticmethod
-    def _serialise_object(obj):
+    def _to_hex(obj):
         """
         Internal method to serialise a Sire object to a hex string representation
         for storage in the YAML config file.
@@ -2142,7 +2138,7 @@ class Config:
         return hex
 
     @staticmethod
-    def _deserialise_object(hex):
+    def _from_hex(hex):
         """
         Internal method to deserialise a Sire object from a hex string representation.
 
