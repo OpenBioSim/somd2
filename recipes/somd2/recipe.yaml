@@ -29,9 +29,9 @@ requirements:
 
 tests:
   - python:
-      imports:
-        - if: linux
-          then:
+      - if: linux
+        then:
+          imports:
             - somd2
   - script:
       - if: linux
