@@ -11,8 +11,6 @@ ghostly = "*"
 loch = "*"
 loguru = "*"
 numba = "*"
-
-[target.linux-64.dependencies]
 nvidia-ml-py = "*"
 
 [feature.test.dependencies]
