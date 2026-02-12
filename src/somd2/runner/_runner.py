@@ -155,7 +155,7 @@ class Runner(_RunnerBase):
         Returns
         -------
 
-        devices : [(str, int)]
+        devices: [(str, int)]
             List of available device numbers with oversubscription factor.
         """
         devices = []
@@ -658,7 +658,6 @@ class Runner(_RunnerBase):
 
         # Run the simulation, checkpointing in blocks.
         if checkpoint_frequency.value() > 0.0:
-
             # Calculate the number of blocks and the remainder time.
             frac = (time / checkpoint_frequency).value()
 

@@ -402,8 +402,8 @@ class RunnerBase:
                 if len(self._config.rest2_scale) != len(self._lambda_energy):
                     msg = f"Length of 'rest2_scale' must match the number of {_lam_sym} values."
                     if is_missing:
-                        msg += f"If you have omitted some 'lambda_values` from `lambda_energy`, please "
-                        f"add them to `lambda_energy`, along with the corresponding `rest2_scale` values."
+                        msg += "If you have omitted some 'lambda_values` from `lambda_energy`, please "
+                        "add them to `lambda_energy`, along with the corresponding `rest2_scale` values."
                     _logger.error(msg)
                     raise ValueError(msg)
                 # Make sure the end states are close to 1.0.
@@ -429,7 +429,6 @@ class RunnerBase:
 
         # Make sure the REST2 selection is valid.
         if self._config.rest2_selection is not None:
-
             try:
                 atoms = _sr.mol.selection_to_atoms(
                     self._system, self._config.rest2_selection
@@ -528,7 +527,19 @@ class RunnerBase:
             self._is_restart = False
             self._cleanup()
 
-        # Save config whenever 'configure' is called to keep it up to date.
+        if self._config.replica_exchange and self._config.perturbed_system is not None:
+            # Check whether the perturbed system was loaded from file. If not
+            # we need to save to the output directory and update the config to
+            # point to the new file.
+            if self._config._perturbed_system_file is None:
+                filename = str(
+                    _Path(self._config.output_directory) / "perturbed_system.s3"
+                )
+                _sr.stream.save(self._config.perturbed_system, filename)
+                self._config._perturbed_system_file = filename
+                _logger.info(f"Saving perturbed system to {filename}")
+
+        # Write YAML configuration file to the output directory.
         if self._config.write_config:
             _dict_to_yaml(
                 self._config.as_dict(),
@@ -1345,6 +1356,70 @@ class RunnerBase:
                 v1 = config1[key]
                 v2 = config2[key]
 
+                # None config options stored as a Sire property are converted
+                # to False, so None and Fasle are equivalent for the purposes of
+                # comparison.
+                if v1 is None and not v2:
+                    continue
+                if v2 is None and not v1:
+                    continue
+
+                # Early exit equivalence check.
+                if v1 == v2:
+                    continue
+
+                # Custom lambda schedules are stored as a hexademical string of
+                # serialised object. We need to deserialise them before comparison.
+                if key == "lambda_schedule":
+                    # Standard schedules are stored as strings, so we can compare these directly.
+                    if v1 == v2:
+                        continue
+                    else:
+                        try:
+                            v1 = _Config._deserialise_object(v1)
+                        except Exception as e:
+                            raise ValueError(
+                                f"Unable to deserialise lambda schedule from config1: {str(e)}"
+                            )
+                        try:
+                            v2 = _Config._deserialise_object(v2)
+                        except Exception as e:
+                            raise ValueError(
+                                f"Unable to deserialise lambda schedule from config2: {str(e)}"
+                            )
+                        if v1 != v2:
+                            raise ValueError(
+                                f"{key} has changed since the last run. This is not "
+                                "allowed when using the restart option."
+                            )
+                        else:
+                            continue
+
+                # Restraints are stored as a list of hexadecimal strings of serialised objects.
+                # We need to deserialise them before comparison.
+                elif key == "restraints":
+                    if v1 and v2:
+                        for r1, r2 in zip(v1, v2):
+                            try:
+                                r1 = _Config._deserialise_object(r1)
+                            except Exception as e:
+                                raise ValueError(
+                                    f"Unable to deserialise restraint from config1: {str(e)}"
+                                )
+                            try:
+                                r2 = _Config._deserialise_object(r2)
+                            except Exception as e:
+                                raise ValueError(
+                                    f"Unable to deserialise restraint from config2: {str(e)}"
+                                )
+                            if r1 != r2:
+                                raise ValueError(
+                                    f"{key} has changed since the last run. This is not "
+                                    "allowed when using the restart option."
+                                )
+                            else:
+                                continue
+
                 # Convert GeneralUnits to strings for comparison.
                 if isinstance(v1, _GeneralUnit):
                     v1 = str(v1)
@@ -1354,14 +1429,14 @@ class RunnerBase:
                 # Convert Sire containers to lists for comparison.
                 try:
                     v1 = v1.to_list()
-                except:
+                except Exception:
                     pass
                 try:
                     v2 = v2.to_list()
-                except:
+                except Exception:
                     pass
 
-                if (v1 == None and v2 == False) or (v2 == None and v1 == False):
+                if (v1 is None and v2 == False) or (v2 is None and v1 == False):
                     continue
                 # The GCMC frequency will be automaticall set if None.
                 elif key == "gcmc_frequency" and v1 is None:

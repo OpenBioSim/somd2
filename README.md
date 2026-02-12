@@ -9,25 +9,9 @@ simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and [Ope
 
 ## Installation
 
-First create a conda environment using the provided environment file:
+### Conda package
 
-```
-conda env create -f environment.yaml
-```
-
-(We recommend using [Miniforge](https://github.com/conda-forge/miniforge).)
-
-> [!NOTE]
-> On macOS, you will need to use the `environment_macos.yaml` file instead.
-
-Now install `somd2` into the environment:
-
-```
-conda activate somd2
-pip install --editable .
-```
-
-Alternatively, to install into an existing conda environment:
+Install `somd2` directly from the `openbiosim` channel:
 
 ```
 conda install -c conda-forge -c openbiosim somd2
@@ -39,10 +23,75 @@ Or, for the development version:
 conda install -c conda-forge -c openbiosim/label/dev somd2
 ```
 
+### Installing from source (standalone)
+
+To install from source using [pixi](https://pixi.sh), which will
+automatically create an environment with all required dependencies
+(including pre-built [Sire](https://github.com/OpenBioSim/sire),
+[BioSimSpace](https://github.com/OpenBioSim/biosimspace),
+[Ghostly](https://github.com/OpenBioSim/ghostly), and
+[Loch](https://github.com/OpenBioSim/loch)):
+
+```
+git clone https://github.com/openbiosim/somd2
+cd somd2
+pixi install
+pixi shell
+pip install -e .
+```
+
+### Installing from source (full OpenBioSim development)
+
+If you are developing across the full OpenBioSim stack, first install
+[Sire](https://github.com/OpenBioSim/sire) from source by following the
+instructions [here](https://github.com/OpenBioSim/sire#installation), then
+activate its pixi environment:
+
+```
+pixi shell --manifest-path /path/to/sire/pixi.toml -e dev
+```
+
+You may also need to install other packages from source, e.g.
+[BioSimSpace](https://github.com/OpenBioSim/biosimspace),
+[Ghostly](https://github.com/OpenBioSim/ghostly), and
+[Loch](https://github.com/OpenBioSim/loch):
+
+```
+pip install -e /path/to/biosimspace
+pip install -e /path/to/ghostly
+pip install -e /path/to/loch
+```
+
+Then install `somd2` into the environment:
+
+```
+pip install -e .
+```
+
+### Testing
+
 You should now have a `somd2` executable in your path. To test, run:
 
 ```
 somd2 --help
+```
+
+## Development
+
+Pre-commit hooks are used to ensure consistent code formatting and linting.
+To set up pre-commit in your development environment:
+
+```
+pixi shell -e dev
+pre-commit install
+```
+
+This will run [ruff](https://docs.astral.sh/ruff/) formatting and linting
+checks automatically on each commit. To run the checks manually against all
+files:
+
+```
+pre-commit run --all-files
 ```
 
 ## Usage

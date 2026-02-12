@@ -1,0 +1,55 @@
+context:
+  name: somd2
+
+package:
+  name: ${{ name }}
+  version: ${{ env.get('GIT_DESCRIBE_TAG', default='PR') }}
+
+source:
+  path: ../../somd2-source.tar.gz
+
+build:
+  number: ${{ env.get('GIT_DESCRIBE_NUMBER', default='0') }}
+  script: python -m pip install . --no-deps --ignore-installed -vv
+
+requirements:
+  host:
+    - pip
+    - python
+    - setuptools
+    - versioningit
+  run:
+    - biosimspace
+    - ghostly
+    - loch
+    - loguru
+    - numba
+    - nvidia-ml-py
+    - python
+
+tests:
+  - if: linux
+    then:
+      - python:
+          imports:
+            - somd2
+      - script:
+          - PYTHONPATH=. pytest -vvv --color=yes --import-mode=importlib ./tests
+        files:
+          source:
+            - tests/
+        requirements:
+          run:
+            - pytest
+
+about:
+  homepage: https://github.com/openbiosim/somd2
+  license: GPL-3.0-or-later
+  license_file: LICENSE
+  summary: "GPU accelerated free-energy perturbation simulation engine."
+  repository: https://github.com/openbiosim/somd2
+  documentation: https://github.com/openbiosim/somd2
+
+extra:
+  recipe-maintainers:
+    - lohedges

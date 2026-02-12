@@ -1,50 +1,58 @@
-import sys
+"""Compute git version info for rattler-build.
+
+This script computes GIT_DESCRIBE_TAG and GIT_DESCRIBE_NUMBER from the
+git history and outputs them in GitHub Actions format for setting
+environment variables.
+
+It also writes a _version.py file so that versioningit has a fallback
+when .git is not available (e.g., when rattler-build excludes it).
+"""
+
 import os
 import subprocess
+import sys
 
-# Get the name of the script.
 script = os.path.abspath(sys.argv[0])
-
-# we want to import the 'get_requirements' package from this directory
-sys.path.insert(0, os.path.dirname(script))
-
-# go up one directories to get the source directory
-# (this script is in BioSimSpace/actions/)
 srcdir = os.path.dirname(os.path.dirname(script))
-
-condadir = os.path.join(srcdir, "recipes", "somd2")
-
-print(f"conda recipe in {condadir}")
-
-# Store the name of the recipe and template YAML files.
-recipe = os.path.join(condadir, "meta.yaml")
-template = os.path.join(condadir, "template.yaml")
-
 gitdir = os.path.join(srcdir, ".git")
 
 
 def run_cmd(cmd):
-    p = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE)
-    return str(p.stdout.read().decode("utf-8")).lstrip().rstrip()
+    p = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, _ = p.communicate()
+    return stdout.decode("utf-8").strip()
 
 
-# Get the remote.
-remote = run_cmd(
-    f"git --git-dir={gitdir} --work-tree={srcdir} config --get remote.origin.url"
-)
-print(remote)
+# Get the full git describe output (e.g., "2024.1.0-5-gabcdef" or "2024.1.0")
+describe = run_cmd(f"git --git-dir={gitdir} --work-tree={srcdir} describe --tags")
 
-# Get the branch.
-branch = run_cmd(
-    f"git --git-dir={gitdir} --work-tree={srcdir} rev-parse --abbrev-ref HEAD"
-)
-print(branch)
+if "-" in describe:
+    # Format: tag-number-hash (e.g., "2024.1.0-5-gabcdef")
+    parts = describe.rsplit("-", 2)
+    tag = parts[0]
+    number = parts[1]
+    rev = parts[2]  # e.g., "gabcdef"
+    version = f"{tag}+{number}.{rev}"
+else:
+    # Exactly on a tag
+    tag = describe
+    number = "0"
+    version = tag
 
-lines = open(template, "r").readlines()
+print(f"GIT_DESCRIBE_TAG={tag}")
+print(f"GIT_DESCRIBE_NUMBER={number}")
+print(f"Version={version}")
 
-with open(recipe, "w") as FILE:
-    for line in lines:
-        line = line.replace("SOMD2_REMOTE", remote)
-        line = line.replace("SOMD2_BRANCH", branch)
+# Write to GITHUB_ENV if running in GitHub Actions
+github_env = os.environ.get("GITHUB_ENV")
+if github_env:
+    with open(github_env, "a") as f:
+        f.write(f"GIT_DESCRIBE_TAG={tag}\n")
+        f.write(f"GIT_DESCRIBE_NUMBER={number}\n")
+    print("Exported to GITHUB_ENV")
 
-        FILE.write(line)
+# Write _version.py for versioningit fallback
+version_file = os.path.join(srcdir, "src", "somd2", "_version.py")
+with open(version_file, "w") as f:
+    f.write(f'__version__ = "{version}"\n')
+print(f"Wrote {version_file}")

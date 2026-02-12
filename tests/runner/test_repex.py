@@ -17,7 +17,6 @@ def test_repex_output(ethane_methanol):
     Validate that repex specific simulation output is generated.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
-
         config = {
             "runtime": "12fs",
             "restart": False,
@@ -92,7 +91,6 @@ def test_rest2_scale(ethane_methanol, rest2_scale, is_valid):
     """Validate the REST2 scale factor handling."""
 
     with tempfile.TemporaryDirectory() as tmpdir:
-
         config = {
             "runtime": "12fs",
             "restart": False,
@@ -130,7 +128,6 @@ def test_rest2_selection(ethane_methanol, rest2_selection, is_valid):
     """Validate the REST2 selection handling."""
 
     with tempfile.TemporaryDirectory() as tmpdir:
-
         config = {
             "runtime": "12fs",
             "restart": False,
