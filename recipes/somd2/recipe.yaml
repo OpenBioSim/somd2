@@ -24,24 +24,15 @@ requirements:
     - loch
     - loguru
     - numba
+    - nvidia-ml-py
     - python
-    - if: linux
-      then:
-        - nvidia-ml-py
 
 tests:
   - python:
       imports:
-        - if: linux
-          then:
-            - somd2
+        - somd2
   - script:
-      - if: linux and x86_64
-        then:
-          - pytest -vvv --color=yes --black src/somd2
-      - if: linux
-        then:
-          - pytest -vvv --color=yes --import-mode=importlib ./tests
+      - pytest -vvv --color=yes --import-mode=importlib ./tests
     files:
       source:
         - tests/
