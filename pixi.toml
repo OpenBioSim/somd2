@@ -15,7 +15,6 @@ nvidia-ml-py = "*"
 
 [feature.test.dependencies]
 pytest = "*"
-black = "*"
 
 [feature.lint.dependencies]
 pre-commit = "*"
