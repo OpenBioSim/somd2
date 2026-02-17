@@ -1338,6 +1338,8 @@ class RunnerBase:
             "energy_frequency",
             "frame_frequency",
             "save_velocities",
+            "perturbed_system",
+            "perturbed_system_file",
             "platform",
             "max_threads",
             "max_gpus",
