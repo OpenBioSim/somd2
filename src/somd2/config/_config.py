@@ -2158,6 +2158,11 @@ class Config:
         from sire.legacy.Qt import QByteArray
 
         try:
+            # Convert StringProperty to string.
+            try:
+                hex = hex.value()
+            except Exception:
+                pass
             hex_byte_arrary = QByteArray.from_raw_data(hex, len(hex))
             obj = load(QByteArray.from_hex(hex_byte_arrary))
         except Exception as e:
