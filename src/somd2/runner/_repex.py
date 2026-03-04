@@ -1283,11 +1283,8 @@ class RepexRunner(_RunnerBase):
                     gcmc_sampler.write_ghost_residues()
 
             # Get the energy at each lambda value.
-            energies = (
-                dynamics._d.energy_trajectory()
-                .to_pandas(to_alchemlyb=True, energy_unit="kcal/mol")
-                .iloc[-1, :]
-                .to_numpy()
+            energies = _np.array(
+                [e.value() for e in list(dynamics.current_energies().values())[2:]]
             )
 
         except Exception as e:
