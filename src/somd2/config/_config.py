@@ -1813,7 +1813,7 @@ class Config:
             gcmc_r = _sr.u(gcmc_radius)
         except:
             raise ValueError(
-                "Unable to parse 'gcmc_radius' " f"as a Sire GeneralUnit: {gcmc_radius}"
+                f"Unable to parse 'gcmc_radius' as a Sire GeneralUnit: {gcmc_radius}"
             )
 
         if not gcmc_r.has_same_units(angstrom):

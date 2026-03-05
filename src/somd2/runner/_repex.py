@@ -993,7 +993,7 @@ class RepexRunner(_RunnerBase):
 
         # Perform the replica exchange simulation.
         for i in range(cycles):
-            _logger.info(f"Running dynamics for cycle {i+1} of {cycles}")
+            _logger.info(f"Running dynamics for cycle {i + 1} of {cycles}")
 
             # Log the states. This is the replica index for the state (positions
             # and velocities) used to seed each replica for the current cycle.
@@ -1678,7 +1678,7 @@ class RepexRunner(_RunnerBase):
             dynamics._d._sire_mols.delete_all_frames()
 
             _logger.info(
-                f"Finished block {block+1} of {self._start_block + num_blocks} "
+                f"Finished block {block + 1} of {self._start_block + num_blocks} "
                 f"for {_lam_sym} = {lam:.5f}"
             )
 

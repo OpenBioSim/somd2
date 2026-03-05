@@ -1985,8 +1985,8 @@ class RunnerBase:
             state = new_context.getState(getEnergy=True, groups={i})
             name = f.getName()
             name_len = len(name)
-            header += f"{f.getName():>{name_len+2}}"
-            record += f"{state.getPotentialEnergy().value_in_unit(openmm.unit.kilocalories_per_mole):>{name_len+2}.2f}"
+            header += f"{f.getName():>{name_len + 2}}"
+            record += f"{state.getPotentialEnergy().value_in_unit(openmm.unit.kilocalories_per_mole):>{name_len + 2}.2f}"
 
         # Write to file.
         if self._nrg_sample == 0:
