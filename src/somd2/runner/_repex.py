@@ -1008,13 +1008,13 @@ class RepexRunner(_RunnerBase):
             results = []
 
             # Whether to checkpoint.
-            is_checkpoint = i > 0 and i % cycles_per_checkpoint == 0
+            is_checkpoint = (i + 1) % cycles_per_checkpoint == 0
 
             # Whether to perform a GCMC move before the dynamics block.
             is_gcmc = i % cycles_per_gcmc == 0
 
             # Whether a frame is saved at the end of the cycle.
-            write_gcmc_ghosts = i > 0 and i % cycles_per_frame == 0
+            write_gcmc_ghosts = (i + 1) % cycles_per_frame == 0
 
             # Run a dynamics block for each replica, making sure only each GPU is only
             # oversubscribed by a factor of self._config.oversubscription_factor.
