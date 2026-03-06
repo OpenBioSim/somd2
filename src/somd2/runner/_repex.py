@@ -1011,7 +1011,7 @@ class RepexRunner(_RunnerBase):
             is_checkpoint = (i + 1) % cycles_per_checkpoint == 0
 
             # Whether to perform a GCMC move before the dynamics block.
-            is_gcmc = i % cycles_per_gcmc == 0
+            is_gcmc = (i + 1) % cycles_per_gcmc == 0
 
             # Whether a frame is saved at the end of the cycle.
             write_gcmc_ghosts = (i + 1) % cycles_per_frame == 0
@@ -1248,6 +1248,14 @@ class RepexRunner(_RunnerBase):
                 # Remove the PyCUDA context from the stack.
                 gcmc_sampler.pop()
 
+                # A frame was saved at the end of the last cycle, so write
+                # the current ghost water residue indices to file. This is
+                # done here, immediately after the GCMC move, since the
+                # sampler state is only updated during GCMC moves and waters
+                # may have moved in/out of the GCMC sphere during dynamics.
+                if write_gcmc_ghosts:
+                    gcmc_sampler.write_ghost_residues()
+
             # Run the dynamics.
             dynamics.run(
                 self._config.energy_frequency,
@@ -1277,10 +1285,6 @@ class RepexRunner(_RunnerBase):
             # Save the GCMC state.
             if gcmc_sampler is not None:
                 self._dynamics_cache.save_gcmc_state(index)
-                # The frame frequency was hit, so write the indices of the
-                # current ghost water residues to file.
-                if write_gcmc_ghosts:
-                    gcmc_sampler.write_ghost_residues()
 
             # Get the energy at each lambda value.
             energies = (
