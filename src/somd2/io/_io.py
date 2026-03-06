@@ -74,7 +74,7 @@ def dataframe_to_parquet(df, metadata, filepath=None, filename=None):
     table = table.replace_schema_metadata(combined_meta)
     if filename is None:
         if "lambda" in metadata and "temperature" in metadata:
-            filename = f"Lam_{metadata['lambda'].replace('.','')[:5]}_T_{metadata['temperature']}.parquet"
+            filename = f"Lam_{metadata['lambda'].replace('.', '')[:5]}_T_{metadata['temperature']}.parquet"
         else:
             filename = "output.parquet"
     if not filename.endswith(".parquet"):

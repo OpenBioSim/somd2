@@ -71,11 +71,12 @@ pip install -e .
 > [!Note]
 > Pixi does not run conda post-link scripts, so the `ocl-icd-system`
 > symlink needed for OpenCL won't be created automatically. After
-> creating the environment, run the following once to fix this:
+> creating the environment (or after a pixi update), run the following
+> to fix this:
 >
 > ```bash
 > pixi shell
-> ln -s /etc/OpenCL/vendors "${CONDA_PREFIX}/etc/OpenCL/vendors/ocl-icd-system"
+> ln -sfn /etc/OpenCL/vendors "${CONDA_PREFIX}/etc/OpenCL/vendors/ocl-icd-system"
 > ```
 
 ### Testing

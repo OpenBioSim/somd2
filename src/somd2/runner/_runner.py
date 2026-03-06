@@ -748,7 +748,7 @@ class Runner(_RunnerBase):
                     except:
                         pass
                     raise RuntimeError(
-                        f"Dynamics block {block+1} for {_lam_sym} = {lambda_value:.5f} failed: {e}"
+                        f"Dynamics block {block + 1} for {_lam_sym} = {lambda_value:.5f} failed: {e}"
                     )
 
                 # Checkpoint.
@@ -809,7 +809,7 @@ class Runner(_RunnerBase):
                     dynamics._d._sire_mols.delete_all_frames()
 
                     _logger.info(
-                        f"Finished block {block+1} of {self._start_block + num_blocks} "
+                        f"Finished block {block + 1} of {self._start_block + num_blocks} "
                         f"for {_lam_sym} = {lambda_value:.5f}"
                     )
 
@@ -884,7 +884,7 @@ class Runner(_RunnerBase):
                     dynamics._d._sire_mols.delete_all_frames()
 
                     _logger.info(
-                        f"Finished block {block+1} of {self._start_block + num_blocks} "
+                        f"Finished block {block + 1} of {self._start_block + num_blocks} "
                         f"for {_lam_sym} = {lambda_value:.5f}"
                     )
 

@@ -764,6 +764,7 @@ class RunnerBase:
                 "coulomb_power": self._config.coulomb_power,
                 "shift_coulomb": str(self._config.shift_coulomb),
                 "shift_delta": str(self._config.shift_delta),
+                "rest2_selection": self._config.rest2_selection,
                 "swap_end_states": self._config.swap_end_states,
                 "tolerance": self._config.gcmc_tolerance,
                 "restart": self._is_restart,
@@ -1985,8 +1986,8 @@ class RunnerBase:
             state = new_context.getState(getEnergy=True, groups={i})
             name = f.getName()
             name_len = len(name)
-            header += f"{f.getName():>{name_len+2}}"
-            record += f"{state.getPotentialEnergy().value_in_unit(openmm.unit.kilocalories_per_mole):>{name_len+2}.2f}"
+            header += f"{f.getName():>{name_len + 2}}"
+            record += f"{state.getPotentialEnergy().value_in_unit(openmm.unit.kilocalories_per_mole):>{name_len + 2}.2f}"
 
         # Write to file.
         if self._nrg_sample == 0:
