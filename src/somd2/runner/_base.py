@@ -764,6 +764,7 @@ class RunnerBase:
                 "coulomb_power": self._config.coulomb_power,
                 "shift_coulomb": str(self._config.shift_coulomb),
                 "shift_delta": str(self._config.shift_delta),
+                "rest2_selection": self._config.rest2_selection,
                 "swap_end_states": self._config.swap_end_states,
                 "tolerance": self._config.gcmc_tolerance,
                 "restart": self._is_restart,
