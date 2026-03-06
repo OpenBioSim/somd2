@@ -904,12 +904,12 @@ class RepexRunner(_RunnerBase):
                 frac = 1.0
                 checkpoint_frequency = self._config.energy_frequency
 
-            # Store the number of repex cycles per block.
-            cycles_per_checkpoint = int(frac)
+            # Store the number of repex cycles per block (may be fractional).
+            cycles_per_checkpoint = frac
 
         # Otherwise, we don't checkpoint.
         else:
-            cycles_per_checkpoint = cycles
+            cycles_per_checkpoint = float(cycles)
             num_blocks = 1
             rem = 0
 
@@ -991,6 +991,10 @@ class RepexRunner(_RunnerBase):
         else:
             cycles_per_gcmc = cycles + 1
 
+        # Initialise the threshold for the next checkpoint cycle. This is a float
+        # to handle non-integer ratios between the checkpoint and energy frequencies.
+        next_checkpoint = cycles_per_checkpoint
+
         # Perform the replica exchange simulation.
         for i in range(cycles):
             _logger.info(f"Running dynamics for cycle {i + 1} of {cycles}")
@@ -1007,14 +1011,15 @@ class RepexRunner(_RunnerBase):
             # Clear the results list.
             results = []
 
-            # Whether to checkpoint.
-            is_checkpoint = i > 0 and i % cycles_per_checkpoint == 0
+            # Whether to checkpoint. Use a float threshold to correctly handle
+            # non-integer ratios between the checkpoint and energy frequencies.
+            is_checkpoint = (i + 1) >= next_checkpoint - 1e-10
 
             # Whether to perform a GCMC move before the dynamics block.
-            is_gcmc = i % cycles_per_gcmc == 0
+            is_gcmc = (i + 1) % cycles_per_gcmc == 0
 
             # Whether a frame is saved at the end of the cycle.
-            write_gcmc_ghosts = i > 0 and i % cycles_per_frame == 0
+            write_gcmc_ghosts = (i + 1) % cycles_per_frame == 0
 
             # Run a dynamics block for each replica, making sure only each GPU is only
             # oversubscribed by a factor of self._config.oversubscription_factor.
@@ -1118,6 +1123,9 @@ class RepexRunner(_RunnerBase):
                 if is_checkpoint:
                     # Update the block number.
                     block += 1
+
+                    # Advance the checkpoint threshold.
+                    next_checkpoint += cycles_per_checkpoint
 
                     # Guard the repex state and transition matrix saving with a file lock.
                     lock = _FileLock(self._lock_file)
@@ -1248,6 +1256,14 @@ class RepexRunner(_RunnerBase):
                 # Remove the PyCUDA context from the stack.
                 gcmc_sampler.pop()
 
+                # A frame was saved at the end of the last cycle, so write
+                # the current ghost water residue indices to file. This is
+                # done here, immediately after the GCMC move, since the
+                # sampler state is only updated during GCMC moves and waters
+                # may have moved in/out of the GCMC sphere during dynamics.
+                if write_gcmc_ghosts:
+                    gcmc_sampler.write_ghost_residues()
+
             # Run the dynamics.
             dynamics.run(
                 self._config.energy_frequency,
@@ -1277,10 +1293,6 @@ class RepexRunner(_RunnerBase):
             # Save the GCMC state.
             if gcmc_sampler is not None:
                 self._dynamics_cache.save_gcmc_state(index)
-                # The frame frequency was hit, so write the indices of the
-                # current ghost water residues to file.
-                if write_gcmc_ghosts:
-                    gcmc_sampler.write_ghost_residues()
 
             # Get the energy at each lambda value.
             energies = dynamics._current_energy_array()
