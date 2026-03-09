@@ -718,59 +718,56 @@ class RunnerBase:
         self._initial_constraint = self._config.constraint
         self._initial_perturbable_constraint = self._config.perturbable_constraint
 
+        # Common kwargs shared by both dynamics and GCMC sampling.
+        self._common_kwargs = {
+            "coulomb_power": self._config.coulomb_power,
+            "cutoff": self._config.cutoff,
+            "cutoff_type": self._config.cutoff_type,
+            "platform": self._config.platform,
+            "rest2_selection": self._config.rest2_selection,
+            "shift_coulomb": self._config.shift_coulomb,
+            "shift_delta": self._config.shift_delta,
+            "swap_end_states": self._config.swap_end_states,
+            "temperature": self._config.temperature,
+        }
+
         # Create the default dynamics kwargs dictionary. These can be overloaded
         # as needed.
         self._dynamics_kwargs = {
-            "integrator": config.integrator,
-            "temperature": config.temperature,
-            "pressure": config.pressure if self._has_water else None,
-            "surface_tension": config.surface_tension,
-            "barostat_frequency": config.barostat_frequency,
-            "timestep": config.timestep,
-            "restraints": config.restraints,
-            "cutoff_type": config.cutoff_type,
-            "cutoff": config.cutoff,
-            "schedule": config.lambda_schedule,
-            "platform": config.platform,
-            "constraint": config.constraint,
-            "perturbable_constraint": config.perturbable_constraint,
-            "include_constrained_energies": config.include_constrained_energies,
-            "dynamic_constraints": config.dynamic_constraints,
-            "swap_end_states": config.swap_end_states,
-            "com_reset_frequency": config.com_reset_frequency,
+            **self._common_kwargs,
+            "barostat_frequency": self._config.barostat_frequency,
+            "com_reset_frequency": self._config.com_reset_frequency,
+            "constraint": self._config.constraint,
+            "dynamic_constraints": self._config.dynamic_constraints,
+            "include_constrained_energies": self._config.include_constrained_energies,
+            "integrator": self._config.integrator,
+            "map": self._config._extra_args,
+            "perturbable_constraint": self._config.perturbable_constraint,
+            "pressure": self._config.pressure if self._has_water else None,
+            "restraints": self._config.restraints,
+            "schedule": self._config.lambda_schedule,
+            "surface_tension": self._config.surface_tension,
+            "timestep": self._config.timestep,
             "vacuum": not self._has_space,
-            "coulomb_power": config.coulomb_power,
-            "shift_coulomb": config.shift_coulomb,
-            "shift_delta": config.shift_delta,
-            "rest2_selection": config.rest2_selection,
-            "map": config._extra_args,
         }
 
         # Create the GCMC specific kwargs dictionary.
         if self._config.gcmc:
             self._gcmc_kwargs = {
-                "reference": self._config.gcmc_selection,
+                **self._common_kwargs,
+                "bulk_sampling_probability": self._config.gcmc_bulk_sampling_probability,
                 "excess_chemical_potential": str(
                     self._config.gcmc_excess_chemical_potential
                 ),
-                "standard_volume": str(self._config.gcmc_standard_volume),
-                "radius": str(self._config.gcmc_radius),
-                "num_ghost_waters": self._config.gcmc_num_waters,
-                "bulk_sampling_probability": self._config.gcmc_bulk_sampling_probability,
-                "cutoff_type": self._config.cutoff_type,
-                "cutoff": str(self._config.cutoff),
-                "temperature": str(self._config.temperature),
                 "lambda_schedule": self._config.lambda_schedule,
-                "coulomb_power": self._config.coulomb_power,
-                "shift_coulomb": str(self._config.shift_coulomb),
-                "shift_delta": str(self._config.shift_delta),
-                "rest2_selection": self._config.rest2_selection,
-                "swap_end_states": self._config.swap_end_states,
-                "tolerance": self._config.gcmc_tolerance,
-                "restart": self._is_restart,
-                "overwrite": self._config.overwrite,
-                "platform": config.platform,
                 "no_logger": True,
+                "num_ghost_waters": self._config.gcmc_num_waters,
+                "overwrite": self._config.overwrite,
+                "radius": str(self._config.gcmc_radius),
+                "reference": self._config.gcmc_selection,
+                "restart": self._is_restart,
+                "standard_volume": str(self._config.gcmc_standard_volume),
+                "tolerance": self._config.gcmc_tolerance,
             }
         else:
             self._gcmc_kwargs = None
