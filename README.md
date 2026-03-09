@@ -1,3 +1,9 @@
+<p align="center">
+    <picture align="center">
+        <img alt="SOMD" src="./.img/somd2.png" width="50%"/>
+    </picture>
+</p>
+
 # SOMD2
 
 [![GitHub Actions](https://github.com/openbiosim/somd2/actions/workflows/devel.yaml/badge.svg)](https://github.com/openbiosim/somd2/actions/workflows/devel.yaml)
