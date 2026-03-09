@@ -731,8 +731,7 @@ class RunnerBase:
             "temperature": self._config.temperature,
         }
 
-        # Create the default dynamics kwargs dictionary. These can be overloaded
-        # as needed.
+        # Create the default dynamics kwargs dictionary.
         self._dynamics_kwargs = {
             **self._common_kwargs,
             "barostat_frequency": self._config.barostat_frequency,
