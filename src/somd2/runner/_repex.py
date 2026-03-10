@@ -1265,9 +1265,6 @@ class RepexRunner(_RunnerBase):
                 ),
             )
 
-            # Set the state.
-            self._dynamics_cache.save_openmm_state(index)
-
             # Perform a GCMC move and write ghost water residue indices after
             # dynamics so that the ghost state is temporally consistent with
             # the saved frame.
@@ -1288,6 +1285,9 @@ class RepexRunner(_RunnerBase):
 
                 # Save the GCMC state.
                 self._dynamics_cache.save_gcmc_state(index)
+
+            # Save the OpenMM state after any GCMC move so the context is consistent.
+            self._dynamics_cache.save_openmm_state(index)
 
             # Get the energy at each lambda value.
             energies = dynamics._current_energy_array()
