@@ -1242,28 +1242,6 @@ class RepexRunner(_RunnerBase):
             # Draw new velocities from the Maxwell-Boltzmann distribution.
             dynamics.randomise_velocities()
 
-            # Perform a GCMC move. For repex this needs to be done before the
-            # dynamics block so that the final energies, which are used in the
-            # repex acceptance criteria, are correct.
-            if is_gcmc and gcmc_sampler is not None:
-                # Push the PyCUDA context on top of the stack.
-                gcmc_sampler.push()
-
-                # Perform the GCMC move.
-                _logger.info(f"Performing GCMC move at {_lam_sym} = {lam:.5f}")
-                gcmc_sampler.move(dynamics.context())
-
-                # Remove the PyCUDA context from the stack.
-                gcmc_sampler.pop()
-
-                # A frame was saved at the end of the last cycle, so write
-                # the current ghost water residue indices to file. This is
-                # done here, immediately after the GCMC move, since the
-                # sampler state is only updated during GCMC moves and waters
-                # may have moved in/out of the GCMC sphere during dynamics.
-                if write_gcmc_ghosts:
-                    gcmc_sampler.write_ghost_residues()
-
             # Run the dynamics.
             dynamics.run(
                 self._config.energy_frequency,
@@ -1287,12 +1265,29 @@ class RepexRunner(_RunnerBase):
                 ),
             )
 
-            # Set the state.
-            self._dynamics_cache.save_openmm_state(index)
-
-            # Save the GCMC state.
             if gcmc_sampler is not None:
+                # Write ghost residues before the GCMC move so the ghost state
+                # is consistent with the saved frame (which is also captured
+                # before the GCMC move).
+                if write_gcmc_ghosts:
+                    gcmc_sampler.write_ghost_residues()
+
+                if is_gcmc:
+                    # Push the PyCUDA context on top of the stack.
+                    gcmc_sampler.push()
+
+                    # Perform the GCMC move.
+                    _logger.info(f"Performing GCMC move at {_lam_sym} = {lam:.5f}")
+                    gcmc_sampler.move(dynamics.context())
+
+                    # Remove the PyCUDA context from the stack.
+                    gcmc_sampler.pop()
+
+                # Save the GCMC state.
                 self._dynamics_cache.save_gcmc_state(index)
+
+            # Save the OpenMM state after any GCMC move so the context is consistent.
+            self._dynamics_cache.save_openmm_state(index)
 
             # Get the energy at each lambda value.
             energies = dynamics._current_energy_array()
