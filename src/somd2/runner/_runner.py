@@ -690,7 +690,7 @@ class Runner(_RunnerBase):
                         next_frame = self._config.frame_frequency
 
                         # Loop until we reach the runtime.
-                        while runtime <= checkpoint_frequency:
+                        while runtime < checkpoint_frequency:
                             # Run the dynamics in blocks of the GCMC frequency.
                             dynamics.run(
                                 self._config.gcmc_frequency,
