@@ -714,20 +714,21 @@ class Runner(_RunnerBase):
                                 ),
                             )
 
+                            # Update the runtime.
+                            runtime += self._config.energy_frequency
+
+                            # If a frame is saved, write the ghost residue indices
+                            # before the GCMC move so the ghost state is consistent
+                            # with the saved frame.
+                            if save_frames and runtime >= next_frame:
+                                gcmc_sampler.write_ghost_residues()
+                                next_frame += self._config.frame_frequency
+
                             # Perform a GCMC move.
                             _logger.info(
                                 f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
                             )
                             gcmc_sampler.move(dynamics.context())
-
-                            # Update the runtime.
-                            runtime += self._config.energy_frequency
-
-                            # If a frame is saved, then we need to save current indices
-                            # of the ghost water residues.
-                            if save_frames and runtime >= next_frame:
-                                gcmc_sampler.write_ghost_residues()
-                                next_frame += self._config.frame_frequency
 
                     else:
                         dynamics.run(

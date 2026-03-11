@@ -1265,10 +1265,13 @@ class RepexRunner(_RunnerBase):
                 ),
             )
 
-            # Perform a GCMC move and write ghost water residue indices after
-            # dynamics so that the ghost state is temporally consistent with
-            # the saved frame.
             if gcmc_sampler is not None:
+                # Write ghost residues before the GCMC move so the ghost state
+                # is consistent with the saved frame (which is also captured
+                # before the GCMC move).
+                if write_gcmc_ghosts:
+                    gcmc_sampler.write_ghost_residues()
+
                 if is_gcmc:
                     # Push the PyCUDA context on top of the stack.
                     gcmc_sampler.push()
@@ -1279,9 +1282,6 @@ class RepexRunner(_RunnerBase):
 
                     # Remove the PyCUDA context from the stack.
                     gcmc_sampler.pop()
-
-                if write_gcmc_ghosts:
-                    gcmc_sampler.write_ghost_residues()
 
                 # Save the GCMC state.
                 self._dynamics_cache.save_gcmc_state(index)
