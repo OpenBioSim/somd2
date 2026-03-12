@@ -1,7 +1,6 @@
 [workspace]
 name = "somd2"
 channels = ["conda-forge", "openbiosim/label/dev"]
-# No Windows - depends on loch which requires pycuda/pyopencl
 platforms = ["linux-64", "osx-arm64"]
 
 [dependencies]
