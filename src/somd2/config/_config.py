@@ -134,6 +134,7 @@ class Config:
         opencl_platform_index=0,
         oversubscription_factor=1,
         replica_exchange=False,
+        randomise_velocities=False,
         perturbed_system=None,
         gcmc=False,
         gcmc_frequency=None,
@@ -363,6 +364,9 @@ class Config:
             Whether to run replica exchange simulation. Currently this can only be used when
             GPU resources are available.
 
+        randomise_velocities: bool
+            Whether to randomise velocities at the start of each replica exchange cycle.
+
         perturbed_system: str
             The path to a stream file containing a Sire system for the equilibrated perturbed
             end state (lambda = 1). This will be used as the starting conformation all lambda
@@ -539,6 +543,7 @@ class Config:
         self.opencl_platform_index = opencl_platform_index
         self.oversubscription_factor = oversubscription_factor
         self.replica_exchange = replica_exchange
+        self.randomise_velocities = randomise_velocities
         self.perturbed_system = perturbed_system
         self.gcmc = gcmc
         self.gcmc_frequency = gcmc_frequency
@@ -1644,6 +1649,16 @@ class Config:
         if not isinstance(replica_exchange, bool):
             raise ValueError("'replica_exchange' must be of type 'bool'")
         self._replica_exchange = replica_exchange
+
+    @property
+    def randomise_velocities(self):
+        return self._randomise_velocities
+
+    @randomise_velocities.setter
+    def randomise_velocities(self, randomise_velocities):
+        if not isinstance(randomise_velocities, bool):
+            raise ValueError("'randomise_velocities' must be of type 'bool'")
+        self._randomise_velocities = randomise_velocities
 
     @property
     def perturbed_system(self):
