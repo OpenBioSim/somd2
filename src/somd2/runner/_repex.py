@@ -1240,7 +1240,8 @@ class RepexRunner(_RunnerBase):
             _logger.info(f"Running dynamics at {_lam_sym} = {lam:.5f}")
 
             # Draw new velocities from the Maxwell-Boltzmann distribution.
-            dynamics.randomise_velocities()
+            if self._config.randomise_velocities:
+                dynamics.randomise_velocities()
 
             # Run the dynamics.
             dynamics.run(
