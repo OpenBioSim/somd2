@@ -1102,49 +1102,48 @@ class RepexRunner(_RunnerBase):
                                 _logger.error("Checkpoint cancelled. Exiting.")
                                 _sys.exit(1)
 
-            if i < cycles:
-                # Assemble and energy matrix from the results.
-                _logger.info("Assembling energy matrix")
-                energy_matrix = self._assemble_results(results)
+            # Assemble an energy matrix from the results.
+            _logger.info("Assembling energy matrix")
+            energy_matrix = self._assemble_results(results)
 
-                # Mix the replicas.
-                _logger.info("Mixing replicas")
-                self._dynamics_cache.set_states(
-                    self._mix_replicas(
-                        self._config.num_lambda,
-                        energy_matrix,
-                        self._dynamics_cache.get_proposed(),
-                        self._dynamics_cache.get_accepted(),
-                    )
+            # Mix the replicas.
+            _logger.info("Mixing replicas")
+            self._dynamics_cache.set_states(
+                self._mix_replicas(
+                    self._config.num_lambda,
+                    energy_matrix,
+                    self._dynamics_cache.get_proposed(),
+                    self._dynamics_cache.get_accepted(),
                 )
-                self._dynamics_cache.mix_states()
+            )
+            self._dynamics_cache.mix_states()
 
-                # This is a checkpoint cycle.
-                if is_checkpoint:
-                    # Update the block number.
-                    block += 1
+            # This is a checkpoint cycle.
+            if is_checkpoint:
+                # Update the block number.
+                block += 1
 
-                    # Advance the checkpoint threshold.
-                    next_checkpoint += cycles_per_checkpoint
+                # Advance the checkpoint threshold.
+                next_checkpoint += cycles_per_checkpoint
 
-                    # Guard the repex state and transition matrix saving with a file lock.
-                    lock = _FileLock(self._lock_file)
-                    with lock.acquire(timeout=self._config.timeout.to("seconds")):
-                        # Save the transition matrix.
-                        _logger.info("Saving replica exchange transition matrix")
-                        self._save_transition_matrix()
+                # Guard the repex state and transition matrix saving with a file lock.
+                lock = _FileLock(self._lock_file)
+                with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                    # Save the transition matrix.
+                    _logger.info("Saving replica exchange transition matrix")
+                    self._save_transition_matrix()
 
-                        # Backup the dynamics cache pickle file, if it exists.
-                        if self._repex_state.exists():
-                            _copyfile(
-                                self._repex_state,
-                                self._repex_state.with_suffix(".pkl.bak"),
-                            )
+                    # Backup the dynamics cache pickle file, if it exists.
+                    if self._repex_state.exists():
+                        _copyfile(
+                            self._repex_state,
+                            self._repex_state.with_suffix(".pkl.bak"),
+                        )
 
-                        # Pickle the dynamics cache.
-                        _logger.info("Saving replica exchange state")
-                        with open(self._repex_state, "wb") as f:
-                            _pickle.dump(self._dynamics_cache, f)
+                    # Pickle the dynamics cache.
+                    _logger.info("Saving replica exchange state")
+                    with open(self._repex_state, "wb") as f:
+                        _pickle.dump(self._dynamics_cache, f)
 
         # Record the end time for the production block.
         prod_end = time()
