@@ -812,15 +812,17 @@ class RepexRunner(_RunnerBase):
             for i in range(len(self._lambda_values)):
                 dynamics, gcmc_sampler = self._dynamics_cache.get(i)
 
-                # Reset the OpenMM state.
-                dynamics.context().setState(self._dynamics_cache._openmm_states[i])
+                # Reset the OpenMM state, applying the last replica exchange
+                # mixing so the correct post-mix state is restored.
+                state = self._dynamics_cache._states[i]
+                dynamics.context().setState(self._dynamics_cache._openmm_states[state])
 
                 # Reset the GCMC water state.
                 if gcmc_sampler is not None:
                     gcmc_sampler.push()
                     gcmc_sampler._set_water_state(
                         dynamics.context(),
-                        states=self._dynamics_cache._gcmc_states[i],
+                        states=self._dynamics_cache._gcmc_states[state],
                         force=True,
                     )
                     gcmc_sampler.pop()
