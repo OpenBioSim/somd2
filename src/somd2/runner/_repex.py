@@ -532,12 +532,14 @@ class DynamicsCache:
 
                     # Update the water state in the GCMCSampler.
                     self._gcmc_samplers[i].push()
-                    self._gcmc_samplers[i]._set_water_state(
-                        self._dynamics[i].context(),
-                        indices=water_idxs,
-                        states=self._gcmc_states[state][water_idxs],
-                    )
-                    self._gcmc_samplers[i].pop()
+                    try:
+                        self._gcmc_samplers[i]._set_water_state(
+                            self._dynamics[i].context(),
+                            indices=water_idxs,
+                            states=self._gcmc_states[state][water_idxs],
+                        )
+                    finally:
+                        self._gcmc_samplers[i].pop()
 
             # Update the swap matrix.
             old_state = self._old_states[i]
@@ -820,12 +822,14 @@ class RepexRunner(_RunnerBase):
                 # Reset the GCMC water state.
                 if gcmc_sampler is not None:
                     gcmc_sampler.push()
-                    gcmc_sampler._set_water_state(
-                        dynamics.context(),
-                        states=self._dynamics_cache._gcmc_states[state],
-                        force=True,
-                    )
-                    gcmc_sampler.pop()
+                    try:
+                        gcmc_sampler._set_water_state(
+                            dynamics.context(),
+                            states=self._dynamics_cache._gcmc_states[state],
+                            force=True,
+                        )
+                    finally:
+                        gcmc_sampler.pop()
 
         # Conversion factor for reduced potential.
         kT = (_sr.units.k_boltz * self._config.temperature).to(_sr.units.kcal_per_mol)
@@ -1277,13 +1281,13 @@ class RepexRunner(_RunnerBase):
                 if is_gcmc:
                     # Push the PyCUDA context on top of the stack.
                     gcmc_sampler.push()
-
-                    # Perform the GCMC move.
-                    _logger.info(f"Performing GCMC move at {_lam_sym} = {lam:.5f}")
-                    gcmc_sampler.move(dynamics.context())
-
-                    # Remove the PyCUDA context from the stack.
-                    gcmc_sampler.pop()
+                    try:
+                        # Perform the GCMC move.
+                        _logger.info(f"Performing GCMC move at {_lam_sym} = {lam:.5f}")
+                        gcmc_sampler.move(dynamics.context())
+                    finally:
+                        # Remove the PyCUDA context from the stack.
+                        gcmc_sampler.pop()
 
                 # Save the GCMC state.
                 self._dynamics_cache.save_gcmc_state(index)
@@ -1340,15 +1344,15 @@ class RepexRunner(_RunnerBase):
             if gcmc_sampler is not None:
                 # Push the PyCUDA context on top of the stack.
                 gcmc_sampler.push()
-
-                _logger.info(
-                    f"Pre-equilibrating with GCMC moves at {_lam_sym} = {self._lambda_values[index]:.5f}"
-                )
-                for i in range(100):
-                    gcmc_sampler.move(dynamics.context())
-
-                # Remove the PyCUDA context from the stack.
-                gcmc_sampler.pop()
+                try:
+                    _logger.info(
+                        f"Pre-equilibrating with GCMC moves at {_lam_sym} = {self._lambda_values[index]:.5f}"
+                    )
+                    for i in range(100):
+                        gcmc_sampler.move(dynamics.context())
+                finally:
+                    # Remove the PyCUDA context from the stack.
+                    gcmc_sampler.pop()
 
             # Minimise.
             dynamics.minimise(timeout=self._config.timeout)
@@ -1433,15 +1437,15 @@ class RepexRunner(_RunnerBase):
             if gcmc_sampler is not None:
                 # Push the PyCUDA context on top of the stack.
                 gcmc_sampler.push()
-
-                _logger.info(
-                    f"Equilibrating with GCMC moves at {_lam_sym} = {self._lambda_values[index]:.5f}"
-                )
-                for i in range(100):
-                    gcmc_sampler.move(dynamics.context())
-
-                # Remove the PyCUDA context from the stack.
-                gcmc_sampler.pop()
+                try:
+                    _logger.info(
+                        f"Equilibrating with GCMC moves at {_lam_sym} = {self._lambda_values[index]:.5f}"
+                    )
+                    for i in range(100):
+                        gcmc_sampler.move(dynamics.context())
+                finally:
+                    # Remove the PyCUDA context from the stack.
+                    gcmc_sampler.pop()
 
                 # Store the current water state.
                 water_state = gcmc_sampler.water_state()
@@ -1693,14 +1697,14 @@ class RepexRunner(_RunnerBase):
             if gcmc_sampler is not None:
                 # Push the PyCUDA context on top of the stack.
                 gcmc_sampler.push()
-
-                _logger.info(
-                    f"Current number of waters in GCMC volume at {_lam_sym} = {lam:.5f} "
-                    f"is {gcmc_sampler.num_waters()}"
-                )
-
-                # Remove the PyCUDA context from the stack.
-                gcmc_sampler.pop()
+                try:
+                    _logger.info(
+                        f"Current number of waters in GCMC volume at {_lam_sym} = {lam:.5f} "
+                        f"is {gcmc_sampler.num_waters()}"
+                    )
+                finally:
+                    # Remove the PyCUDA context from the stack.
+                    gcmc_sampler.pop()
 
             if is_final_block:
                 _logger.success(f"{_lam_sym} = {lam:.5f} complete")
@@ -1823,12 +1827,12 @@ class RepexRunner(_RunnerBase):
 
         # Push the PyCUDA context on top of the stack.
         gcmc_sampler.push()
-
-        # Set the water state.
-        gcmc_sampler._set_water_state(dynamics.context(), force=True)
-
-        # Remove the PyCUDA context from the stack.
-        gcmc_sampler.pop()
+        try:
+            # Set the water state.
+            gcmc_sampler._set_water_state(dynamics.context(), force=True)
+        finally:
+            # Remove the PyCUDA context from the stack.
+            gcmc_sampler.pop()
 
         # Re-bind the GCMC sampler to the dynamics object.
         gcmc_sampler.bind_dynamics(dynamics)
