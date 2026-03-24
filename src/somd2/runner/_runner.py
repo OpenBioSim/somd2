@@ -521,8 +521,12 @@ class Runner(_RunnerBase):
                         f"Equilibrating with GCMC moves at {_lam_sym} = {lambda_value:.5f}"
                     )
 
-                    for i in range(100):
-                        gcmc_sampler.move(dynamics.context())
+                    gcmc_sampler.push()
+                    try:
+                        for i in range(100):
+                            gcmc_sampler.move(dynamics.context())
+                    finally:
+                        gcmc_sampler.pop()
 
                 # Run without saving energies or frames.
                 dynamics.run(
@@ -610,20 +614,24 @@ class Runner(_RunnerBase):
             if self._is_restart:
                 from openmm.unit import angstrom
 
-                # First set all waters to non-ghosts.
-                gcmc_sampler._set_water_state(
-                    dynamics.context(),
-                    states=_np.ones(len(gcmc_sampler._water_indices)),
-                    force=True,
-                )
+                gcmc_sampler.push()
+                try:
+                    # First set all waters to non-ghosts.
+                    gcmc_sampler._set_water_state(
+                        dynamics.context(),
+                        states=_np.ones(len(gcmc_sampler._water_indices)),
+                        force=True,
+                    )
 
-                # Now set the ghost waters.
-                gcmc_sampler._set_water_state(
-                    dynamics.context(),
-                    self._restart_ghost_waters[index],
-                    states=_np.zeros(len(gcmc_sampler._water_indices)),
-                    force=True,
-                )
+                    # Now set the ghost waters.
+                    gcmc_sampler._set_water_state(
+                        dynamics.context(),
+                        self._restart_ghost_waters[index],
+                        states=_np.zeros(len(gcmc_sampler._water_indices)),
+                        force=True,
+                    )
+                finally:
+                    gcmc_sampler.pop()
 
                 # Finally, reset the context positions to match the restart system.
                 dynamics.context().setPositions(
@@ -634,10 +642,14 @@ class Runner(_RunnerBase):
             # the water state in the new context to match the equilibrated system.
             elif is_equilibrated:
                 # Reset the water state.
-                gcmc_sampler._set_water_state(
-                    dynamics.context(),
-                    force=True,
-                )
+                gcmc_sampler.push()
+                try:
+                    gcmc_sampler._set_water_state(
+                        dynamics.context(),
+                        force=True,
+                    )
+                finally:
+                    gcmc_sampler.pop()
 
         # Set the number of neighbours used for the energy calculation.
         # If not None, then we add one to account for the extra windows
@@ -728,7 +740,11 @@ class Runner(_RunnerBase):
                             _logger.info(
                                 f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
                             )
-                            gcmc_sampler.move(dynamics.context())
+                            gcmc_sampler.push()
+                            try:
+                                gcmc_sampler.move(dynamics.context())
+                            finally:
+                                gcmc_sampler.pop()
 
                     else:
                         dynamics.run(
@@ -816,10 +832,14 @@ class Runner(_RunnerBase):
 
                     # Log the number of waters within the GCMC sampling volume.
                     if gcmc_sampler is not None:
-                        _logger.info(
-                            f"Current number of waters in GCMC volume at {_lam_sym} = {lambda_value:.5f} "
-                            f"is {gcmc_sampler.num_waters()}"
-                        )
+                        gcmc_sampler.push()
+                        try:
+                            _logger.info(
+                                f"Current number of waters in GCMC volume at {_lam_sym} = {lambda_value:.5f} "
+                                f"is {gcmc_sampler.num_waters()}"
+                            )
+                        finally:
+                            gcmc_sampler.pop()
 
                     if is_final_block:
                         _logger.success(
@@ -928,7 +948,11 @@ class Runner(_RunnerBase):
                         _logger.info(
                             f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
                         )
-                        gcmc_sampler.move(dynamics.context())
+                        gcmc_sampler.push()
+                        try:
+                            gcmc_sampler.move(dynamics.context())
+                        finally:
+                            gcmc_sampler.pop()
 
                         # Update the runtime.
                         runtime += self._config.energy_frequency
