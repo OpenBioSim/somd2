@@ -1763,14 +1763,14 @@ class RunnerBase:
                 "attrs": df.attrs,
                 "somd2 version": __version__,
                 "sire version": f"{_sire_version}+{_sire_revisionid}",
-                "lambda": str(lam),
+                "lambda": f"{lam:.5f}",
                 "speed": speed,
                 "temperature": str(self._config.temperature.value()),
             }
 
             # Add the lambda gradient if available.
             if lambda_grad is not None:
-                metadata["lambda_grad"] = lambda_grad
+                metadata["lambda_grad"] = [f"{v:.5f}" for v in lambda_grad]
 
             if is_final_block:
                 # Save the end-state GCMC topologies for trajectory analysis and visualisation.
