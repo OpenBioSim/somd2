@@ -40,11 +40,20 @@ class Runner(_RunnerBase):
     Standard simulation runner class. (Uncoupled simulations.)
     """
 
-    from multiprocessing import Manager
+    _manager = None
 
-    _manager = Manager()
-    _lock = _manager.Lock()
-    _queue = _manager.Queue()
+    @classmethod
+    def _init_manager(cls):
+        """
+        Initialise the shared-memory Manager the first time a Runner is
+        constructed in the parent process. Deferred from class definition time
+        so that importing this module does not fork a manager process before
+        OpenMM threads have been started.
+        """
+        if cls._manager is None:
+            from multiprocessing import Manager
+
+            cls._manager = Manager()
 
     def __init__(self, system, config):
         """
@@ -72,6 +81,16 @@ class Runner(_RunnerBase):
 
         # Call the base class constructor.
         super().__init__(system, config)
+
+        # Initialise the shared-memory manager lazily so that importing this
+        # module does not fork a manager process before OpenMM threads exist.
+        Runner._init_manager()
+
+        # Create Lock and Queue as instance attributes so that they are
+        # pickled as manager proxies and shared correctly across all spawned
+        # worker processes, preventing race conditions on the GPU pool.
+        self._lock = Runner._manager.Lock()
+        self._queue = Runner._manager.Queue()
 
         # Store the array of lambda values for energy sampling.
         if self._config.lambda_energy is not None:
