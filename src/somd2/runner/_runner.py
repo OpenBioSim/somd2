@@ -722,6 +722,29 @@ class Runner(_RunnerBase):
 
                         # Loop until we reach the runtime.
                         while runtime < checkpoint_frequency:
+                            # Perform a GCMC move before dynamics so the ghost
+                            # state is consistent with the energies computed
+                            # during dynamics.
+                            _logger.info(
+                                f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
+                            )
+                            gcmc_sampler.push()
+                            try:
+                                gcmc_sampler.move(dynamics.context())
+                            finally:
+                                gcmc_sampler.pop()
+
+                            # Write ghost residues immediately after the GCMC
+                            # move if a frame will be saved in the upcoming
+                            # dynamics block.
+                            if (
+                                save_frames
+                                and runtime + self._config.energy_frequency
+                                >= next_frame
+                            ):
+                                gcmc_sampler.write_ghost_residues()
+                                next_frame += self._config.frame_frequency
+
                             # Run the dynamics in blocks of the GCMC frequency.
                             dynamics.run(
                                 self._config.gcmc_frequency,
@@ -747,23 +770,6 @@ class Runner(_RunnerBase):
 
                             # Update the runtime.
                             runtime += self._config.energy_frequency
-
-                            # If a frame is saved, write the ghost residue indices
-                            # before the GCMC move so the ghost state is consistent
-                            # with the saved frame.
-                            if save_frames and runtime >= next_frame:
-                                gcmc_sampler.write_ghost_residues()
-                                next_frame += self._config.frame_frequency
-
-                            # Perform a GCMC move.
-                            _logger.info(
-                                f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
-                            )
-                            gcmc_sampler.push()
-                            try:
-                                gcmc_sampler.move(dynamics.context())
-                            finally:
-                                gcmc_sampler.pop()
 
                     else:
                         dynamics.run(
@@ -948,7 +954,29 @@ class Runner(_RunnerBase):
                     next_frame = self._config.frame_frequency
 
                     # Loop until we reach the runtime.
-                    while runtime <= time:
+                    while runtime < time:
+                        # Perform a GCMC move before dynamics so the ghost
+                        # state is consistent with the energies computed
+                        # during dynamics.
+                        _logger.info(
+                            f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
+                        )
+                        gcmc_sampler.push()
+                        try:
+                            gcmc_sampler.move(dynamics.context())
+                        finally:
+                            gcmc_sampler.pop()
+
+                        # Write ghost residues immediately after the GCMC
+                        # move if a frame will be saved in the upcoming
+                        # dynamics block.
+                        if (
+                            save_frames
+                            and runtime + self._config.energy_frequency >= next_frame
+                        ):
+                            gcmc_sampler.write_ghost_residues()
+                            next_frame += self._config.frame_frequency
+
                         # Run the dynamics in blocks of the GCMC frequency.
                         dynamics.run(
                             self._config.gcmc_frequency,
@@ -963,24 +991,8 @@ class Runner(_RunnerBase):
                             save_crash_report=self._config.save_crash_report,
                         )
 
-                        # Perform a GCMC move.
-                        _logger.info(
-                            f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
-                        )
-                        gcmc_sampler.push()
-                        try:
-                            gcmc_sampler.move(dynamics.context())
-                        finally:
-                            gcmc_sampler.pop()
-
                         # Update the runtime.
                         runtime += self._config.energy_frequency
-
-                        # If a frame is saved, then we need to save current indices
-                        # of the ghost water residues.
-                        if save_frames and runtime >= next_frame:
-                            gcmc_sampler.write_ghost_residues()
-                            next_frame += self._config.frame_frequency
                 else:
                     dynamics.run(
                         time,
