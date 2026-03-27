@@ -206,6 +206,10 @@ class RunnerBase:
             self._config.fix_perturbable_zero_sigmas
         )
 
+        # If specified, use the Taylor soft-core form.
+        if self._config.softcore_form == "taylor":
+            self._config._extra_args["use_taylor_softening"] = True
+
         # We're running in SOMD1 compatibility mode.
         if self._config.somd1_compatibility:
             from .._utils._somd1 import make_compatible
