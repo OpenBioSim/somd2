@@ -72,6 +72,7 @@ class Config:
             "reverse_ring_break_morph",
         ],
         "log_level": [level.lower() for level in _logger._core.levels],
+        "softcore_form": ["zacharias", "taylor"],
     }
 
     # A dictionary of nargs for the various options.
@@ -149,6 +150,7 @@ class Config:
         gcmc_tolerance=0.0,
         rest2_scale=1.0,
         rest2_selection=None,
+        softcore_form="zacharias",
         output_directory="output",
         restart=False,
         use_backup=False,
@@ -432,6 +434,10 @@ class Config:
             those atoms will be considered as part of the REST2 region. This allows REST2 to
             be applied to protein mutations.
 
+        softcore_form: str
+            The soft-core potential form to use for alchemical interactions. This can be
+            either "zacharias" or "taylor". The default is "zacharias".
+
         output_directory: str
             Path to a directory to store output files.
 
@@ -560,6 +566,7 @@ class Config:
         self.rest2_selection = rest2_selection
         self.restart = restart
         self.use_backup = use_backup
+        self.softcore_form = softcore_form
         self.somd1_compatibility = somd1_compatibility
         self.pert_file = pert_file
         self.save_crash_report = save_crash_report
@@ -2180,6 +2187,22 @@ class Config:
         if not isinstance(restart, bool):
             raise ValueError("'restart' must be of type 'bool'")
         self._restart = restart
+
+    @property
+    def softcore_form(self):
+        return self._softcore_form
+
+    @softcore_form.setter
+    def softcore_form(self, softcore_form):
+        if not isinstance(softcore_form, str):
+            raise TypeError("'softcore_form' must be of type 'str'")
+        softcore_form = softcore_form.lower().replace(" ", "")
+        if softcore_form not in self._choices["softcore_form"]:
+            raise ValueError(
+                f"'softcore_form' not recognised. Valid forms are: {', '.join(self._choices['softcore_form'])}"
+            )
+        else:
+            self._softcore_form = softcore_form
 
     @property
     def use_backup(self):
