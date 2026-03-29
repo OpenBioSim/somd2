@@ -151,6 +151,7 @@ class Config:
         rest2_scale=1.0,
         rest2_selection=None,
         softcore_form="zacharias",
+        taylor_power=1,
         output_directory="output",
         restart=False,
         use_backup=False,
@@ -438,6 +439,11 @@ class Config:
             The soft-core potential form to use for alchemical interactions. This can be
             either "zacharias" or "taylor". The default is "zacharias".
 
+        taylor_power: int
+            The power to use for the alpha term in the Taylor soft-core LJ expression,
+            i.e. sig6 = sigma^6 / (alpha^m * sigma^6 + r^6). Must be between 0 and 4.
+            The default is 1. Only used when softcore_form is "taylor".
+
         output_directory: str
             Path to a directory to store output files.
 
@@ -567,6 +573,7 @@ class Config:
         self.restart = restart
         self.use_backup = use_backup
         self.softcore_form = softcore_form
+        self.taylor_power = taylor_power
         self.somd1_compatibility = somd1_compatibility
         self.pert_file = pert_file
         self.save_crash_report = save_crash_report
@@ -2203,6 +2210,21 @@ class Config:
             )
         else:
             self._softcore_form = softcore_form
+
+    @property
+    def taylor_power(self):
+        return self._taylor_power
+
+    @taylor_power.setter
+    def taylor_power(self, taylor_power):
+        if not isinstance(taylor_power, int):
+            try:
+                taylor_power = int(taylor_power)
+            except Exception:
+                raise ValueError("'taylor_power' must be of type 'int'")
+        if not 0 <= taylor_power <= 4:
+            raise ValueError("'taylor_power' must be between 0 and 4")
+        self._taylor_power = taylor_power
 
     @property
     def use_backup(self):

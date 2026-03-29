@@ -209,6 +209,7 @@ class RunnerBase:
         # If specified, use the Taylor soft-core form.
         if self._config.softcore_form == "taylor":
             self._config._extra_args["use_taylor_softening"] = True
+            self._config._extra_args["taylor_power"] = self._config.taylor_power
 
         # We're running in SOMD1 compatibility mode.
         if self._config.somd1_compatibility:
@@ -769,6 +770,8 @@ class RunnerBase:
                 "radius": str(self._config.gcmc_radius),
                 "reference": self._config.gcmc_selection,
                 "restart": self._is_restart,
+                "softcore_form": self._config.softcore_form,
+                "taylor_power": self._config.taylor_power,
                 "standard_volume": str(self._config.gcmc_standard_volume),
                 "tolerance": self._config.gcmc_tolerance,
             }
