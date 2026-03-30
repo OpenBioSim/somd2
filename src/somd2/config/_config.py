@@ -1156,6 +1156,7 @@ class Config:
                         lever="torsion_phase",
                         equation=self._lambda_schedule.final(),
                     )
+                    self._lambda_schedule_name = "ring_break_morph"
                 elif lambda_schedule == "reverse_ring_break_morph":
                     self._lambda_schedule = _LambdaSchedule.standard_morph()
                     self._lambda_schedule.set_equation(
@@ -1292,7 +1293,7 @@ class Config:
                         lever="torsion_phase",
                         equation=self._lambda_schedule.final(),
                     )
-
+                    self._lambda_schedule_name = "reverse_ring_break_morph"
                 else:
                     try:
                         self._lambda_schedule = self._from_hex(lambda_schedule)
