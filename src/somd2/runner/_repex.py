@@ -378,9 +378,13 @@ class DynamicsCache:
 
                 # If this exceeds the total memory, raise an error.
                 if est_total > total_mem:
+                    baseline = info["before"]
+                    replica_cost = first_cost + marginal_cost * (num_contexts - 1)
                     msg = (
                         f"Not enough memory on device {device} for all assigned replicas. "
-                        f"Estimated memory usage: {est_total / (1024**3):.2f} GB, "
+                        f"Baseline usage before simulation: {baseline / (1024**3):.2f} GB "
+                        f"Estimated replica memory: {replica_cost / (1024**3):.2f} GB, "
+                        f"Total estimated: {est_total / (1024**3):.2f} GB, "
                         f"Available memory: {total_mem / (1024**3):.2f} GB."
                     )
                     _logger.error(msg)
