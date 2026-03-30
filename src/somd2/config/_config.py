@@ -1030,7 +1030,7 @@ class Config:
                     )
                     self._lambda_schedule.set_equation(
                         stage="restraints_off",
-                        lever="restraint",
+                        lever="morse_soft",
                         equation=1 - self._lambda_schedule.lam(),
                     )
                     self._lambda_schedule.set_equation(
@@ -1077,7 +1077,12 @@ class Config:
                     )
                     self._lambda_schedule.set_equation(
                         stage="potential_swap",
-                        lever="restraint",
+                        lever="morse_hard",
+                        equation=1 - self._lambda_schedule.lam(),
+                    )
+                    self._lambda_schedule.set_equation(
+                        stage="potential_swap",
+                        lever="morse_soft",
                         equation=0 + self._lambda_schedule.lam(),
                     )
                     self._lambda_schedule.set_equation(
@@ -1116,9 +1121,11 @@ class Config:
                     )
 
                     self._lambda_schedule.set_equation(
-                        stage="morph", lever="restraint", equation=0
+                        stage="morph", lever="morse_hard", equation=0
                     )
-
+                    self._lambda_schedule.set_equation(
+                        stage="morph", lever="morse_soft", equation=0
+                    )
                     self._lambda_schedule.set_equation(
                         stage="morph",
                         lever="bond_k",
@@ -1153,9 +1160,11 @@ class Config:
                 elif lambda_schedule == "reverse_ring_break_morph":
                     self._lambda_schedule = _LambdaSchedule.standard_morph()
                     self._lambda_schedule.set_equation(
-                        stage="morph", lever="restraint", equation=0
+                        stage="morph", lever="morse_hard", equation=0
                     )
-
+                    self._lambda_schedule.set_equation(
+                        stage="morph", lever="morse_soft", equation=0
+                    )
                     self._lambda_schedule.set_equation(
                         stage="morph",
                         lever="bond_k",
@@ -1192,8 +1201,11 @@ class Config:
                     )
                     self._lambda_schedule.set_equation(
                         stage="bonded_perturb",
-                        lever="restraint",
+                        lever="morse_soft",
                         equation=0 + self._lambda_schedule.lam(),
+                    )
+                    self._lambda_schedule.set_equation(
+                        stage="bonded_perturb", lever="morse_hard", equation=0
                     )
                     self._lambda_schedule.set_equation(
                         stage="bonded_perturb",
@@ -1239,7 +1251,12 @@ class Config:
                     )
                     self._lambda_schedule.set_equation(
                         stage="potential_swap",
-                        lever="restraint",
+                        lever="morse_hard",
+                        equation=0 + self._lambda_schedule.lam(),
+                    )
+                    self._lambda_schedule.set_equation(
+                        stage="potential_swap",
+                        lever="morse_soft",
                         equation=1 - self._lambda_schedule.lam(),
                     )
                     self._lambda_schedule.set_equation(
