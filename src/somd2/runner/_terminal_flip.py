@@ -30,7 +30,7 @@ import numpy as _np
 import sire.legacy.Mol as _Mol
 
 from somd2 import _logger
-from somd2._utils import _delta_sym
+from somd2._utils import _delta_sym, _degree_sym
 
 
 def _auto_flip_angle(mol, anchor_idx, pivot_idx, ring_neighbor_idxs):
@@ -258,14 +258,14 @@ def detect_terminal_groups(system, flip_angle=None):
                     if group_angle is None:
                         _logger.warning(
                             f"Terminal group at pivot atom {j} has no recognised "
-                            f"rotational symmetry (raw angle = {raw:.1f}°). "
+                            f"rotational symmetry (raw angle = {raw:.1f}{_degree_sym}). "
                             "Skipping group."
                         )
                         continue
 
                     _logger.debug(
                         f"Terminal group at pivot atom {j}: auto-detected flip "
-                        f"angle = {group_angle}° (raw = {raw:.1f}°)."
+                        f"angle = {group_angle}{_degree_sym} (raw = {raw:.1f}{_degree_sym})."
                     )
 
                 # Map molecule-local indices to absolute system indices.
