@@ -1034,6 +1034,9 @@ class Config:
                         equation=1 - self._lambda_schedule.lam(),
                     )
                     self._lambda_schedule.set_equation(
+                        stage="restraints_off", lever="morse_hard", equation=0
+                    )
+                    self._lambda_schedule.set_equation(
                         stage="restraints_off",
                         lever="bond_k",
                         equation=self._lambda_schedule.final(),
