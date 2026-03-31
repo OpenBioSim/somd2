@@ -372,7 +372,8 @@ class Config:
             GPU resources are available.
 
         randomise_velocities: bool
-            Whether to randomise velocities at the start of each replica exchange cycle.
+            Whether to randomise velocities at the start of each replica exchange cycle
+            or following a terminal flip Monte Carlo move.
 
         perturbed_system: str
             The path to a stream file containing a Sire system for the equilibrated perturbed

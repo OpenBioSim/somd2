@@ -769,7 +769,11 @@ class Runner(_RunnerBase):
                                     f"Performing terminal flip move at "
                                     f"{_lam_sym} = {lambda_value:.5f}"
                                 )
-                                terminal_flip_sampler.move(dynamics.context())
+                                if (
+                                    terminal_flip_sampler.move(dynamics.context())
+                                    and self._config.randomise_velocities
+                                ):
+                                    dynamics.randomise_velocities()
 
                             # Write ghost residues immediately after the GCMC
                             # move if a frame will be saved in the upcoming
@@ -826,7 +830,11 @@ class Runner(_RunnerBase):
                                 f"Performing terminal flip move at "
                                 f"{_lam_sym} = {lambda_value:.5f}"
                             )
-                            terminal_flip_sampler.move(dynamics.context())
+                            if (
+                                terminal_flip_sampler.move(dynamics.context())
+                                and self._config.randomise_velocities
+                            ):
+                                dynamics.randomise_velocities()
 
                         dynamics.run(
                             checkpoint_frequency,
@@ -973,7 +981,11 @@ class Runner(_RunnerBase):
                             f"Performing terminal flip move at "
                             f"{_lam_sym} = {lambda_value:.5f}"
                         )
-                        terminal_flip_sampler.move(dynamics.context())
+                        if (
+                            terminal_flip_sampler.move(dynamics.context())
+                            and self._config.randomise_velocities
+                        ):
+                            dynamics.randomise_velocities()
 
                     dynamics.run(
                         rem,
@@ -1072,7 +1084,11 @@ class Runner(_RunnerBase):
                                 f"Performing terminal flip move at "
                                 f"{_lam_sym} = {lambda_value:.5f}"
                             )
-                            terminal_flip_sampler.move(dynamics.context())
+                            if (
+                                terminal_flip_sampler.move(dynamics.context())
+                                and self._config.randomise_velocities
+                            ):
+                                dynamics.randomise_velocities()
 
                         # Write ghost residues immediately after the GCMC
                         # move if a frame will be saved in the upcoming
@@ -1114,7 +1130,11 @@ class Runner(_RunnerBase):
                             f"Performing terminal flip move at "
                             f"{_lam_sym} = {lambda_value:.5f}"
                         )
-                        terminal_flip_sampler.move(dynamics.context())
+                        if (
+                            terminal_flip_sampler.move(dynamics.context())
+                            and self._config.randomise_velocities
+                        ):
+                            dynamics.randomise_velocities()
 
                     dynamics.run(
                         time,

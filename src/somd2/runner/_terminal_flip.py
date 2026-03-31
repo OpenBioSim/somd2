@@ -429,11 +429,18 @@ class TerminalFlipSampler:
 
         context : openmm.Context
             The active OpenMM context.
+
+        Returns
+        -------
+
+        bool
+            True if the move was accepted, False otherwise. Returns False
+            immediately if there are no terminal groups.
         """
         from openmm import unit as _omm_unit
 
         if not self._terminal_groups:
-            return
+            return False
 
         self._num_attempted += 1
 
@@ -468,6 +475,7 @@ class TerminalFlipSampler:
                 f"{_delta_sym} = {e_new - e_old:.2f} kJ/mol, "
                 f"acc = {min(1.0, _np.exp(-delta_e)):.3f})"
             )
+            return True
         else:
             context.setPositions(old_positions * _omm_unit.nanometer)
             _logger.debug(
@@ -475,6 +483,7 @@ class TerminalFlipSampler:
                 f"{_delta_sym} = {e_new - e_old:.2f} kJ/mol, "
                 f"acc = {_np.exp(-delta_e):.3f})"
             )
+            return False
 
     @property
     def num_attempted(self):
