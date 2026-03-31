@@ -23,8 +23,10 @@ import platform as _platform
 
 if _platform.system() == "Windows":
     _lam_sym = "lambda"
+    _delta_sym = "delta"
 else:
     _lam_sym = "λ"
+    _delta_sym = "ΔE"
 
 del _platform
 

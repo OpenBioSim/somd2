@@ -139,6 +139,8 @@ class Config:
         replica_exchange=False,
         randomise_velocities=False,
         perturbed_system=None,
+        terminal_flip_frequency=None,
+        terminal_flip_angle=None,
         gcmc=False,
         gcmc_frequency=None,
         gcmc_selection=None,
@@ -377,6 +379,17 @@ class Config:
             end state (lambda = 1). This will be used as the starting conformation all lambda
             windows > 0.5 when performing a replica exchange simulation.
 
+        terminal_flip_frequency: str
+            Frequency at which to attempt terminal ring flip Monte Carlo moves. If None
+            (the default), no terminal flip moves will be performed. When set, terminal
+            ring groups in perturbable molecules are detected automatically using Sire's
+            native connectivity. This must be a multiple of 'energy_frequency'.
+
+        terminal_flip_angle: str
+            Override the flip angle used for all terminal ring groups, e.g.
+            ``"180 degrees"``. If None (the default), the angle is determined
+            automatically for each group from its geometry.
+
         gcmc: bool
             Whether to perform Grand Canonical Monte Carlo (GCMC) water insertions/deletions.
 
@@ -559,6 +572,8 @@ class Config:
         self.replica_exchange = replica_exchange
         self.randomise_velocities = randomise_velocities
         self.perturbed_system = perturbed_system
+        self.terminal_flip_frequency = terminal_flip_frequency
+        self.terminal_flip_angle = terminal_flip_angle
         self.gcmc = gcmc
         self.gcmc_frequency = gcmc_frequency
         self.gcmc_selection = gcmc_selection
@@ -1993,6 +2008,60 @@ class Config:
         else:
             self._perturbed_system = None
             self._perturbed_system_file = None
+
+    @property
+    def terminal_flip_frequency(self):
+        return self._terminal_flip_frequency
+
+    @terminal_flip_frequency.setter
+    def terminal_flip_frequency(self, terminal_flip_frequency):
+        if terminal_flip_frequency is not None:
+            if not isinstance(terminal_flip_frequency, str):
+                raise TypeError("'terminal_flip_frequency' must be of type 'str'")
+
+            from sire.units import picosecond
+
+            try:
+                t = _sr.u(terminal_flip_frequency)
+            except Exception:
+                raise ValueError(
+                    f"Unable to parse 'terminal_flip_frequency' as a Sire GeneralUnit: "
+                    f"{terminal_flip_frequency}"
+                )
+
+            if t.value() != 0 and not t.has_same_units(picosecond):
+                raise ValueError("'terminal_flip_frequency' units are invalid.")
+
+            self._terminal_flip_frequency = t
+        else:
+            self._terminal_flip_frequency = None
+
+    @property
+    def terminal_flip_angle(self):
+        return self._terminal_flip_angle
+
+    @terminal_flip_angle.setter
+    def terminal_flip_angle(self, terminal_flip_angle):
+        if terminal_flip_angle is not None:
+            if not isinstance(terminal_flip_angle, str):
+                raise TypeError("'terminal_flip_angle' must be of type 'str'")
+
+            from sire.units import degrees
+
+            try:
+                a = _sr.u(terminal_flip_angle)
+            except Exception:
+                raise ValueError(
+                    f"Unable to parse 'terminal_flip_angle' as a Sire GeneralUnit: "
+                    f"{terminal_flip_angle}"
+                )
+
+            if not a.has_same_units(degrees):
+                raise ValueError("'terminal_flip_angle' units are invalid.")
+
+            self._terminal_flip_angle = a
+        else:
+            self._terminal_flip_angle = None
 
     @property
     def gcmc(self):

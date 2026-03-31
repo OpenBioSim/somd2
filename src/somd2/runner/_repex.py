@@ -854,6 +854,21 @@ class RepexRunner(_RunnerBase):
         else:
             self._start_block = 0
 
+        # Create the terminal flip sampler (if terminal groups were detected).
+        if self._terminal_groups:
+            from ._terminal_flip import TerminalFlipSampler
+
+            self._terminal_flip_sampler = TerminalFlipSampler(
+                self._terminal_groups,
+                float(self._config.temperature.value()),
+            )
+            _logger.info(
+                f"Terminal flip sampler ready for replica exchange "
+                f"({len(self._terminal_groups)} group(s))"
+            )
+        else:
+            self._terminal_flip_sampler = None
+
         from threading import Lock
 
         # Create a lock to guard the dynamics cache.
@@ -1001,6 +1016,23 @@ class RepexRunner(_RunnerBase):
         else:
             cycles_per_gcmc = cycles + 1
 
+        # Work out the number of cycles per terminal flip move.
+        if (
+            self._config.terminal_flip_frequency is not None
+            and self._terminal_flip_sampler is not None
+        ):
+            cycles_per_flip = max(
+                1,
+                round(
+                    (
+                        self._config.terminal_flip_frequency
+                        / self._config.energy_frequency
+                    ).value()
+                ),
+            )
+        else:
+            cycles_per_flip = cycles + 1
+
         # Initialise the threshold for the next checkpoint cycle. This is a float
         # to handle non-integer ratios between the checkpoint and energy frequencies.
         next_checkpoint = cycles_per_checkpoint
@@ -1028,6 +1060,9 @@ class RepexRunner(_RunnerBase):
             # Whether to perform a GCMC move before the dynamics block.
             is_gcmc = (i + 1) % cycles_per_gcmc == 0
 
+            # Whether to perform a terminal flip move before the dynamics block.
+            is_terminal_flip = (i + 1) % cycles_per_flip == 0
+
             # Whether a frame is saved at the end of the cycle.
             write_gcmc_ghosts = (i + 1) % cycles_per_frame == 0
 
@@ -1043,6 +1078,7 @@ class RepexRunner(_RunnerBase):
                             repeat(self._lambda_values),
                             repeat(is_gcmc),
                             repeat(write_gcmc_ghosts),
+                            repeat(is_terminal_flip),
                         ):
                             if not result:
                                 _logger.error(
@@ -1128,6 +1164,15 @@ class RepexRunner(_RunnerBase):
             )
             self._dynamics_cache.mix_states()
 
+            # Log terminal flip acceptance rate at each cycle.
+            if self._terminal_flip_sampler is not None:
+                _logger.info(
+                    f"Terminal flip acceptance rate: "
+                    f"{self._terminal_flip_sampler.acceptance_rate:.3f} "
+                    f"({self._terminal_flip_sampler.num_accepted}/"
+                    f"{self._terminal_flip_sampler.num_attempted})"
+                )
+
             # This is a checkpoint cycle.
             if is_checkpoint:
                 # Update the block number.
@@ -1202,6 +1247,7 @@ class RepexRunner(_RunnerBase):
         lambdas,
         is_gcmc=False,
         write_gcmc_ghosts=False,
+        is_terminal_flip=False,
     ):
         """
         Run a dynamics block for a given replica.
@@ -1224,6 +1270,10 @@ class RepexRunner(_RunnerBase):
         write_gcmc_ghosts: bool
             Whether to write the indices of GCMC ghost residues to
             file.
+
+        is_terminal_flip: bool
+            Whether a terminal flip MC move should be performed before the
+            dynamics block.
 
         Returns
         -------
@@ -1261,6 +1311,11 @@ class RepexRunner(_RunnerBase):
                 # ghost state and frame (saved during dynamics) are consistent.
                 if write_gcmc_ghosts:
                     gcmc_sampler.write_ghost_residues()
+
+            # Perform a terminal flip move before dynamics if requested.
+            if self._terminal_flip_sampler is not None and is_terminal_flip:
+                _logger.info(f"Performing terminal flip move at {_lam_sym} = {lam:.5f}")
+                self._terminal_flip_sampler.move(dynamics.context())
 
             _logger.info(f"Running dynamics at {_lam_sym} = {lam:.5f}")
 
@@ -1701,9 +1756,16 @@ class RepexRunner(_RunnerBase):
                 # Push the PyCUDA context on top of the stack.
                 gcmc_sampler.push()
                 try:
+                    n_moves = gcmc_sampler._num_moves
+                    acc_str = (
+                        f", acceptance rate = {gcmc_sampler.move_acceptance_probability():.3f}"
+                        f" (ins = {gcmc_sampler.num_insertions()}, del = {gcmc_sampler.num_deletions()})"
+                        if n_moves > 0
+                        else ""
+                    )
                     _logger.info(
                         f"Current number of waters in GCMC volume at {_lam_sym} = {lam:.5f} "
-                        f"is {gcmc_sampler.num_waters()}"
+                        f"is {gcmc_sampler.num_waters()}{acc_str}"
                     )
                 finally:
                     # Remove the PyCUDA context from the stack.
