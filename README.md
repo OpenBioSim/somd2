@@ -242,12 +242,6 @@ geometry. To override this for all groups:
 somd2 perturbable_system.bss --terminal-flip-frequency "1 ps" --terminal-flip-angle "180 degrees"
 ```
 
-To see all terminal flip related options, run:
-
-```
-somd2 --help | grep -A2 '  --terminal-flip'
-```
-
 ## Analysis
 
 Simulation output will be written to the directory specified using the
