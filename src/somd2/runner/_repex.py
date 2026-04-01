@@ -1315,11 +1315,7 @@ class RepexRunner(_RunnerBase):
             # Perform a terminal flip move before dynamics if requested.
             if self._terminal_flip_sampler is not None and is_terminal_flip:
                 _logger.info(f"Performing terminal flip move at {_lam_sym} = {lam:.5f}")
-                if (
-                    self._terminal_flip_sampler.move(dynamics.context())
-                    and self._config.randomise_velocities
-                ):
-                    dynamics.randomise_velocities()
+                self._terminal_flip_sampler.move(dynamics.context())
 
             _logger.info(f"Running dynamics at {_lam_sym} = {lam:.5f}")
 
