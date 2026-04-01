@@ -854,19 +854,22 @@ class RepexRunner(_RunnerBase):
         else:
             self._start_block = 0
 
-        # Create the terminal flip sampler (if terminal groups were detected).
+        # Create a terminal flip sampler per replica (if terminal groups were detected).
         if self._terminal_groups:
             from ._samplers import TerminalFlipSampler
 
-            self._terminal_flip_sampler = TerminalFlipSampler(
-                self._terminal_groups,
-                float(self._config.temperature.value()),
-            )
+            self._terminal_flip_samplers = [
+                TerminalFlipSampler(
+                    self._terminal_groups,
+                    float(self._config.temperature.value()),
+                )
+                for _ in self._lambda_values
+            ]
             _logger.info(
-                f"Terminal flip sampler ready ({len(self._terminal_groups)} group(s))"
+                f"Terminal flip samplers ready ({len(self._terminal_groups)} group(s))"
             )
         else:
-            self._terminal_flip_sampler = None
+            self._terminal_flip_samplers = None
 
         from threading import Lock
 
@@ -1018,7 +1021,7 @@ class RepexRunner(_RunnerBase):
         # Work out the number of cycles per terminal flip move.
         if (
             self._config.terminal_flip_frequency is not None
-            and self._terminal_flip_sampler is not None
+            and self._terminal_flip_samplers is not None
         ):
             cycles_per_flip = max(
                 1,
@@ -1163,15 +1166,6 @@ class RepexRunner(_RunnerBase):
             )
             self._dynamics_cache.mix_states()
 
-            # Log terminal flip acceptance rate at each cycle.
-            if self._terminal_flip_sampler is not None:
-                _logger.info(
-                    f"Terminal flip acceptance rate: "
-                    f"{self._terminal_flip_sampler.acceptance_rate:.3f} "
-                    f"({self._terminal_flip_sampler.num_accepted}/"
-                    f"{self._terminal_flip_sampler.num_attempted})"
-                )
-
             # This is a checkpoint cycle.
             if is_checkpoint:
                 # Update the block number.
@@ -1312,9 +1306,9 @@ class RepexRunner(_RunnerBase):
                     gcmc_sampler.write_ghost_residues()
 
             # Perform a terminal flip move before dynamics if requested.
-            if self._terminal_flip_sampler is not None and is_terminal_flip:
+            if self._terminal_flip_samplers is not None and is_terminal_flip:
                 _logger.info(f"Performing terminal flip move at {_lam_sym} = {lam:.5f}")
-                self._terminal_flip_sampler.move(dynamics.context())
+                self._terminal_flip_samplers[index].move(dynamics.context())
 
             _logger.info(f"Running dynamics at {_lam_sym} = {lam:.5f}")
 
@@ -1769,6 +1763,15 @@ class RepexRunner(_RunnerBase):
                 finally:
                     # Remove the PyCUDA context from the stack.
                     gcmc_sampler.pop()
+
+            # Log terminal flip acceptance rate for this replica.
+            if self._terminal_flip_samplers is not None:
+                sampler = self._terminal_flip_samplers[index]
+                _logger.info(
+                    f"Terminal flip acceptance rate at {_lam_sym} = {lam:.5f}: "
+                    f"{sampler.acceptance_rate:.3f} "
+                    f"({sampler.num_accepted}/{sampler.num_attempted})"
+                )
 
             if is_final_block:
                 _logger.success(f"{_lam_sym} = {lam:.5f} complete")
