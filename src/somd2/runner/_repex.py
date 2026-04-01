@@ -863,8 +863,7 @@ class RepexRunner(_RunnerBase):
                 float(self._config.temperature.value()),
             )
             _logger.info(
-                f"Terminal flip sampler ready for replica exchange "
-                f"({len(self._terminal_groups)} group(s))"
+                f"Terminal flip sampler ready ({len(self._terminal_groups)} group(s))"
             )
         else:
             self._terminal_flip_sampler = None
