@@ -539,3 +539,19 @@ class TerminalFlipSampler:
         if self._num_attempted == 0:
             return 0.0
         return self._num_accepted / self._num_attempted
+
+    def reset(self, num_attempted=0, num_accepted=0):
+        """
+        Reset the move counters.
+
+        Parameters
+        ----------
+
+        num_attempted : int
+            Value to restore ``num_attempted`` to. Defaults to 0.
+
+        num_accepted : int
+            Value to restore ``num_accepted`` to. Defaults to 0.
+        """
+        self._num_attempted = num_attempted
+        self._num_accepted = num_accepted

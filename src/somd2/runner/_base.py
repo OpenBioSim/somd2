@@ -1197,6 +1197,7 @@ class RunnerBase:
             output_directory / f"energy_components_{lam}.txt"
         )
         filenames["gcmc_ghosts"] = str(output_directory / f"gcmc_ghosts_{lam}.txt")
+        filenames["sampler_stats"] = str(output_directory / f"sampler_stats_{lam}.pkl")
         if restart:
             filenames["config"] = str(
                 output_directory / increment_filename("config", "yaml")

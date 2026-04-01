@@ -106,6 +106,8 @@ class DynamicsCache:
         self._openmm_states = [None] * len(lambdas)
         self._gcmc_samplers = [None] * len(lambdas)
         self._gcmc_states = [None] * len(lambdas)
+        self._gcmc_stats = [None] * len(lambdas)
+        self._terminal_flip_stats = [[0, 0]] * len(lambdas)
         self._num_proposed = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
         self._num_accepted = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
         self._num_swaps = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
@@ -130,6 +132,14 @@ class DynamicsCache:
         for key, value in state.items():
             setattr(self, key, value)
 
+        # Provide defaults for attributes added after the initial release,
+        # so that old checkpoint files can still be loaded.
+        n = len(self._lambdas)
+        if not hasattr(self, "_gcmc_stats"):
+            self._gcmc_stats = [None] * n
+        if not hasattr(self, "_terminal_flip_stats"):
+            self._terminal_flip_stats = [[0, 0]] * n
+
     def __getstate__(self):
         """
         Get the state of the object.
@@ -145,6 +155,8 @@ class DynamicsCache:
             # Don't pickle the GCMC samplers since they need to be recreated.
             "_gcmc_samplers": len(self._gcmc_samplers) * [None],
             "_gcmc_states": self._gcmc_states,
+            "_gcmc_stats": self._gcmc_stats,
+            "_terminal_flip_stats": self._terminal_flip_stats,
             "_num_proposed": self._num_proposed,
             "_num_accepted": self._num_accepted,
             "_num_swaps": self._num_swaps,
@@ -823,7 +835,7 @@ class RepexRunner(_RunnerBase):
                 state = self._dynamics_cache._states[i]
                 dynamics.context().setState(self._dynamics_cache._openmm_states[state])
 
-                # Reset the GCMC water state.
+                # Reset the GCMC water state and restore statistics.
                 if gcmc_sampler is not None:
                     gcmc_sampler.push()
                     try:
@@ -834,6 +846,13 @@ class RepexRunner(_RunnerBase):
                         )
                     finally:
                         gcmc_sampler.pop()
+                    if self._dynamics_cache._gcmc_stats[i] is not None:
+                        gcmc_sampler.restore_stats(self._dynamics_cache._gcmc_stats[i])
+
+                # Restore terminal flip sampler statistics.
+                if self._terminal_flip_samplers is not None:
+                    attempted, accepted = self._dynamics_cache._terminal_flip_stats[i]
+                    self._terminal_flip_samplers[i].reset(attempted, accepted)
 
         # Conversion factor for reduced potential.
         kT = (_sr.units.k_boltz * self._config.temperature).to(_sr.units.kcal_per_mol)
@@ -1190,6 +1209,7 @@ class RepexRunner(_RunnerBase):
 
                     # Pickle the dynamics cache.
                     _logger.info("Saving replica exchange state")
+                    self._save_sampler_stats()
                     with open(self._repex_state, "wb") as f:
                         _pickle.dump(self._dynamics_cache, f)
 
@@ -1211,6 +1231,11 @@ class RepexRunner(_RunnerBase):
 
             # Pickle final state of the dynamics cache.
             _logger.info("Saving final replica exchange state")
+            if self._terminal_flip_samplers is not None:
+                self._dynamics_cache._terminal_flip_stats = [
+                    [s.num_attempted, s.num_accepted]
+                    for s in self._terminal_flip_samplers
+                ]
             with open(self._repex_state, "wb") as f:
                 _pickle.dump(self._dynamics_cache, f)
 
@@ -1841,6 +1866,21 @@ class RepexRunner(_RunnerBase):
                 accepted[state_j, state_i] += 1
 
         return states
+
+    def _save_sampler_stats(self):
+        """
+        Save GCMC and terminal flip sampler statistics to the dynamics cache
+        prior to pickling.
+        """
+        for i in range(len(self._lambda_values)):
+            _, gcmc_sampler = self._dynamics_cache.get(i)
+            if gcmc_sampler is not None:
+                self._dynamics_cache._gcmc_stats[i] = gcmc_sampler.get_stats()
+
+        if self._terminal_flip_samplers is not None:
+            self._dynamics_cache._terminal_flip_stats = [
+                [s.num_attempted, s.num_accepted] for s in self._terminal_flip_samplers
+            ]
 
     def _save_transition_matrix(self):
         """

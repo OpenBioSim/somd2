@@ -695,6 +695,16 @@ class Runner(_RunnerBase):
                 finally:
                     gcmc_sampler.pop()
 
+        # Restore sampler statistics from a previous run.
+        if self._is_restart:
+            stats = self._load_sampler_stats(index)
+            if stats is not None:
+                if gcmc_sampler is not None and "gcmc" in stats:
+                    gcmc_sampler.restore_stats(stats["gcmc"])
+                if terminal_flip_sampler is not None and "terminal_flip" in stats:
+                    attempted, accepted = stats["terminal_flip"]
+                    terminal_flip_sampler.reset(attempted, accepted)
+
         # Set the number of neighbours used for the energy calculation.
         # If not None, then we add one to account for the extra windows
         # used for finite-difference gradient analysis.
@@ -923,6 +933,11 @@ class Runner(_RunnerBase):
 
                         if error is not None:
                             raise error
+
+                        # Save sampler statistics alongside the checkpoint.
+                        self._save_sampler_stats(
+                            index, gcmc_sampler, terminal_flip_sampler
+                        )
 
                     # Delete all trajectory frames from the Sire system within the
                     # dynamics object.
@@ -1213,11 +1228,72 @@ class Runner(_RunnerBase):
                     _logger.error(msg)
                     raise RuntimeError(msg)
 
+                # Save sampler statistics alongside the final checkpoint.
+                self._save_sampler_stats(index, gcmc_sampler, terminal_flip_sampler)
+
             _logger.success(
                 f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"
             )
 
         return time
+
+    def _save_sampler_stats(self, index, gcmc_sampler, terminal_flip_sampler):
+        """
+        Save GCMC and terminal flip sampler statistics to a pickle file.
+
+        Parameters
+        ----------
+
+        index : int
+            The index of the lambda value.
+
+        gcmc_sampler : GCMCSampler or None
+            The GCMC sampler for this replica.
+
+        terminal_flip_sampler : TerminalFlipSampler or None
+            The terminal flip sampler for this replica.
+        """
+        import pickle as _pickle
+
+        stats = {}
+        if gcmc_sampler is not None:
+            stats["gcmc"] = gcmc_sampler.get_stats()
+        if terminal_flip_sampler is not None:
+            stats["terminal_flip"] = [
+                terminal_flip_sampler.num_attempted,
+                terminal_flip_sampler.num_accepted,
+            ]
+        with open(self._filenames[index]["sampler_stats"], "wb") as f:
+            _pickle.dump(stats, f)
+
+    def _load_sampler_stats(self, index):
+        """
+        Load sampler statistics from a pickle file.
+
+        Parameters
+        ----------
+
+        index : int
+            The index of the lambda value.
+
+        Returns
+        -------
+
+        dict or None
+            The sampler statistics, or None if the file does not exist.
+        """
+        import pickle as _pickle
+        from pathlib import Path as _Path
+
+        path = _Path(self._filenames[index]["sampler_stats"])
+        if not path.exists():
+            return None
+        try:
+            with open(path, "rb") as f:
+                return _pickle.load(f)
+        except Exception as e:
+            _logger.warning(f"Could not load sampler stats for index {index}: {e}")
+            return None
 
     def _minimisation(
         self,
