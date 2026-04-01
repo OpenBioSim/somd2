@@ -125,7 +125,7 @@ def _round_to_symmetry_angle(raw_angle, tolerance=10.0):
     return symmetry_angles[min_idx]
 
 
-def detect_terminal_groups(system, flip_angle=None):
+def detect_terminal_groups(system, flip_angle=None, max_mobile_atoms=None):
     """
     Detect terminal ring groups in perturbable molecules using Sire's native
     connectivity.
@@ -150,6 +150,11 @@ def detect_terminal_groups(system, flip_angle=None):
         nearest crystallographic symmetry angle (360°/n for n = 2..12). If
         a float is given it overrides the geometric measurement for all
         groups.
+
+    max_mobile_atoms : int or None
+        Maximum number of mobile atoms allowed in a terminal ring group.
+        Groups with more mobile atoms than this threshold are skipped.
+        Defaults to None (no limit).
 
     Returns
     -------
@@ -236,6 +241,14 @@ def detect_terminal_groups(system, flip_angle=None):
                 mobile = _bfs_mobile(connectivity, i, j, num_atoms)
 
                 if not mobile:
+                    continue
+
+                # Skip groups with too many mobile atoms.
+                if max_mobile_atoms is not None and len(mobile) > max_mobile_atoms:
+                    _logger.warning(
+                        f"Terminal group at pivot atom {j} has {len(mobile)} mobile "
+                        f"atoms (max_mobile_atoms={max_mobile_atoms}). Skipping group."
+                    )
                     continue
 
                 # Determine the flip angle for this group.

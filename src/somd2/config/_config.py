@@ -141,6 +141,7 @@ class Config:
         perturbed_system=None,
         terminal_flip_frequency=None,
         terminal_flip_angle=None,
+        terminal_flip_max_mobile_atoms=None,
         gcmc=False,
         gcmc_frequency=None,
         gcmc_selection=None,
@@ -391,6 +392,11 @@ class Config:
             ``"180 degrees"``. If None (the default), the angle is determined
             automatically for each group from its geometry.
 
+        terminal_flip_max_mobile_atoms: int or None
+            Maximum number of mobile atoms allowed in a terminal ring group.
+            Groups with more mobile atoms than this threshold are skipped during
+            detection. Defaults to None (no limit).
+
         gcmc: bool
             Whether to perform Grand Canonical Monte Carlo (GCMC) water insertions/deletions.
 
@@ -575,6 +581,7 @@ class Config:
         self.perturbed_system = perturbed_system
         self.terminal_flip_frequency = terminal_flip_frequency
         self.terminal_flip_angle = terminal_flip_angle
+        self.terminal_flip_max_mobile_atoms = terminal_flip_max_mobile_atoms
         self.gcmc = gcmc
         self.gcmc_frequency = gcmc_frequency
         self.gcmc_selection = gcmc_selection
@@ -2063,6 +2070,26 @@ class Config:
             self._terminal_flip_angle = a
         else:
             self._terminal_flip_angle = None
+
+    @property
+    def terminal_flip_max_mobile_atoms(self):
+        return self._terminal_flip_max_mobile_atoms
+
+    @terminal_flip_max_mobile_atoms.setter
+    def terminal_flip_max_mobile_atoms(self, terminal_flip_max_mobile_atoms):
+        if terminal_flip_max_mobile_atoms is not None:
+            if not isinstance(terminal_flip_max_mobile_atoms, int):
+                try:
+                    terminal_flip_max_mobile_atoms = int(terminal_flip_max_mobile_atoms)
+                except:
+                    raise ValueError(
+                        "'terminal_flip_max_mobile_atoms' must be of type 'int'"
+                    )
+            if terminal_flip_max_mobile_atoms < 1:
+                raise ValueError(
+                    "'terminal_flip_max_mobile_atoms' must be greater than 0"
+                )
+        self._terminal_flip_max_mobile_atoms = terminal_flip_max_mobile_atoms
 
     @property
     def gcmc(self):

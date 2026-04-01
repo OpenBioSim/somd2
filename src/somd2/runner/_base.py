@@ -692,7 +692,11 @@ class RunnerBase:
                 if self._config.terminal_flip_angle is not None
                 else None
             )
-            self._terminal_groups = detect_terminal_groups(mols, flip_angle=flip_angle)
+            self._terminal_groups = detect_terminal_groups(
+                mols,
+                flip_angle=flip_angle,
+                max_mobile_atoms=self._config.terminal_flip_max_mobile_atoms,
+            )
 
             if not self._terminal_groups:
                 _logger.warning(
