@@ -202,6 +202,7 @@ def detect_terminal_groups(system, flip_angle=None):
 
         num_atoms = mol.num_atoms()
         seen_bonds = set()
+        rdmol = None  # lazily initialised if geometric detection fails
 
         for i in range(num_atoms):
             atom_i_idx = _Mol.AtomIdx(i)
@@ -263,12 +264,39 @@ def detect_terminal_groups(system, flip_angle=None):
                     group_angle = _round_to_symmetry_angle(raw)
 
                     if group_angle is None:
-                        _logger.warning(
-                            f"Terminal group at pivot atom {j} has no recognised "
-                            f"rotational symmetry (raw angle = {raw:.1f}{_degree_sym}). "
-                            "Skipping group."
-                        )
-                        continue
+                        # Geometric detection failed; fall back to hybridization.
+                        try:
+                            if rdmol is None:
+                                from sire.convert import to_rdkit as _to_rdkit
+                                from rdkit.Chem import HybridizationType as _HybType
+
+                                rdmol = _to_rdkit(mol)
+                            hyb = rdmol.GetAtomWithIdx(j).GetHybridization()
+                            if hyb == _HybType.SP2:
+                                group_angle = 180.0
+                            elif hyb == _HybType.SP3:
+                                group_angle = 120.0
+                            else:
+                                _logger.warning(
+                                    f"Terminal group at pivot atom {j}: geometric "
+                                    f"detection gave unrecognised angle "
+                                    f"({raw:.1f}{_degree_sym}) and hybridization "
+                                    f"({hyb}) has no defined flip angle. Skipping."
+                                )
+                                continue
+                            _logger.warning(
+                                f"Terminal group at pivot atom {j}: geometric "
+                                f"detection gave unrecognised angle "
+                                f"({raw:.1f}{_degree_sym}), using hybridization-based "
+                                f"angle {group_angle}{_degree_sym} (pivot is {hyb.name})."
+                            )
+                        except Exception as e:
+                            _logger.warning(
+                                f"Terminal group at pivot atom {j} has no recognised "
+                                f"rotational symmetry (raw angle = {raw:.1f}{_degree_sym}) "
+                                f"and hybridization fallback failed: {e}. Skipping."
+                            )
+                            continue
 
                     _logger.debug(
                         f"Terminal group at pivot atom {j}: auto-detected flip "
