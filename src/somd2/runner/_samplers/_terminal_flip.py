@@ -173,7 +173,11 @@ def detect_terminal_groups(system, flip_angle=None):
     # All atoms in the system, used to obtain absolute (OpenMM) atom indices.
     all_atoms = system.atoms()
 
+    import sire.morph as _morph
+
     for mol in pert_mols:
+        mol = _morph.link_to_reference(mol)
+
         try:
             connectivity = mol.property("connectivity")
         except Exception:
