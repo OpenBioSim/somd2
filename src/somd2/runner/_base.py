@@ -680,7 +680,7 @@ class RunnerBase:
                 raise ValueError(msg)
 
             # Auto-detect terminal ring groups using Sire connectivity.
-            from ._terminal_flip import detect_terminal_groups
+            from ._samplers import detect_terminal_groups
 
             if isinstance(self._system, list):
                 mols = self._system[0]

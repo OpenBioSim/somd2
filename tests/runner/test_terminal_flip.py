@@ -22,7 +22,7 @@ import numpy as np
 
 from somd2.config import Config
 from somd2.runner import Runner
-from somd2.runner._terminal_flip import TerminalFlipSampler, detect_terminal_groups
+from somd2.runner._samplers import TerminalFlipSampler, detect_terminal_groups
 
 # ---------------------------------------------------------------------------
 # detect_terminal_groups

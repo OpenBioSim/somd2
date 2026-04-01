@@ -467,7 +467,7 @@ class Runner(_RunnerBase):
 
         # Create the terminal flip sampler (if terminal groups were detected).
         if self._terminal_groups:
-            from ._terminal_flip import TerminalFlipSampler
+            from ._samplers import TerminalFlipSampler
 
             terminal_flip_sampler = TerminalFlipSampler(
                 self._terminal_groups,
