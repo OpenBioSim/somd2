@@ -22,6 +22,9 @@
 # Adapted from the terminal ring flip MC implemenation in GrandFEP:
 # https://github.com/deGrootLab/GrandFEP
 # (Released under the MIT License.)
+#
+# Original method: Wang et al., ChemRxiv, 2025.
+# https://doi.org/10.26434/chemrxiv-2025-2zkx5
 
 __all__ = ["TerminalFlipSampler", "detect_terminal_groups"]
 
