@@ -455,9 +455,12 @@ class TerminalFlipSampler:
         )
         e_old = state.getPotentialEnergy().value_in_unit(_omm_unit.kilojoule_per_mole)
 
-        # Random sign gives a symmetric proposal (detailed balance).
-        signed_angle = float(_np.random.choice([-1, 1])) * angle
-        self._rotate(context, group_idx, signed_angle)
+        # Pick uniformly from the n-1 non-current states, where n = 360 / angle.
+        # For 180° (n=2) this is equivalent to a random sign; for higher
+        # symmetry orders it correctly samples any non-current state in one move.
+        n = round(360.0 / angle)
+        step = int(_np.random.randint(1, n))
+        self._rotate(context, group_idx, step * angle)
 
         # Evaluate the energy of the proposed configuration.
         e_new = (
