@@ -19,14 +19,19 @@
 # along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
-import platform as _platform
+import sys as _sys
 
-if _platform.system() == "Windows":
-    _lam_sym = "lambda"
-else:
+try:
+    "λΔ°".encode(_sys.stdout.encoding or "utf-8")
     _lam_sym = "λ"
+    _delta_sym = "ΔE"
+    _degree_sym = "°"
+except (UnicodeEncodeError, LookupError):
+    _lam_sym = "lambda"
+    _delta_sym = "delta"
+    _degree_sym = "deg"
 
-del _platform
+del _sys
 
 
 def _has_ghost(mol, idxs, is_lambda1=False):

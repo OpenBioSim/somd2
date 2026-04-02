@@ -219,6 +219,29 @@ require a different `nvcc` to that provided by conda, you can set the
 Depending on your setup, you may also need to install the `cuda-nvvm` package
 from `conda-forge`.
 
+## Terminal ring flip Monte Carlo
+
+SOMD2 supports terminal ring flip Monte Carlo (MC) moves to improve sampling
+of terminal aromatic rings in perturbable ligands, as described in
+[this paper](https://chemrxiv.org/doi/full/10.26434/chemrxiv-2025-2zkx5).
+Each move attempts a discrete rotation of a terminal ring around the bond
+connecting it to the rest of the molecule, accepted or rejected via the
+Metropolis criterion. Terminal ring groups are detected automatically from
+the molecular connectivity of perturbable molecules.
+
+To enable terminal flip MC, set the frequency at which moves are attempted:
+
+```
+somd2 perturbable_system.bss --terminal-flip-frequency "1 ps"
+```
+
+The flip angle for each group is determined automatically from the ring
+geometry. To override this for all groups:
+
+```
+somd2 perturbable_system.bss --terminal-flip-frequency "1 ps" --terminal-flip-angle "180 degrees"
+```
+
 ## Analysis
 
 Simulation output will be written to the directory specified using the

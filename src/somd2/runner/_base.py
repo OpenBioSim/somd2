@@ -664,6 +664,59 @@ class RunnerBase:
             # Store the excess chemcical potential value.
             self._mu_ex = self._config.gcmc_excess_chemical_potential.value()
 
+        # Terminal flip specific validation and setup.
+        if self._config.terminal_flip_frequency is not None:
+            from math import isclose
+
+            # Make sure the terminal flip frequency is a multiple of the
+            # energy frequency.
+            ratio = (
+                self._config.terminal_flip_frequency / self._config.energy_frequency
+            ).value()
+
+            if not isclose(ratio, round(ratio), abs_tol=1e-4):
+                msg = "'terminal_flip_frequency' must be a multiple of 'energy_frequency'."
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            # Auto-detect terminal ring groups using Sire connectivity.
+            from ._samplers import detect_terminal_groups
+
+            if isinstance(self._system, list):
+                mols = self._system[0]
+            else:
+                mols = self._system
+
+            flip_angle = (
+                self._config.terminal_flip_angle.to("degrees").value()
+                if self._config.terminal_flip_angle is not None
+                else None
+            )
+            self._terminal_groups = detect_terminal_groups(
+                mols,
+                flip_angle=flip_angle,
+                max_mobile_atoms=self._config.terminal_flip_max_mobile_atoms,
+            )
+
+            if not self._terminal_groups:
+                _logger.warning(
+                    "No terminal ring groups detected. Terminal flip moves will not "
+                    "be performed."
+                )
+            else:
+                _logger.info(
+                    f"Detected {len(self._terminal_groups)} terminal ring group(s) "
+                    f"for terminal flip MC."
+                )
+                for i, (angle, indices) in enumerate(self._terminal_groups):
+                    _logger.info(
+                        f"  Group {i}: flip angle = {angle}°, "
+                        f"anchor = {indices[0]}, pivot = {indices[1]}, "
+                        f"{len(indices) - 2} mobile atom(s)"
+                    )
+        else:
+            self._terminal_groups = []
+
         # Store the initial system time.
         if isinstance(self._system, list):
             self._initial_time = []
@@ -1148,6 +1201,7 @@ class RunnerBase:
             output_directory / f"energy_components_{lam}.txt"
         )
         filenames["gcmc_ghosts"] = str(output_directory / f"gcmc_ghosts_{lam}.txt")
+        filenames["sampler_stats"] = str(output_directory / f"sampler_stats_{lam}.pkl")
         if restart:
             filenames["config"] = str(
                 output_directory / increment_filename("config", "yaml")

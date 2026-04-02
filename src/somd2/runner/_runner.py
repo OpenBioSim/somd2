@@ -465,6 +465,31 @@ class Runner(_RunnerBase):
         else:
             gcmc_sampler = None
 
+        # Create the terminal flip sampler (if terminal groups were detected).
+        if self._terminal_groups:
+            from ._samplers import TerminalFlipSampler
+
+            terminal_flip_sampler = TerminalFlipSampler(
+                self._terminal_groups,
+                float(self._config.temperature.value()),
+            )
+            flip_every = max(
+                1,
+                round(
+                    (
+                        self._config.terminal_flip_frequency
+                        / self._config.energy_frequency
+                    ).value()
+                ),
+            )
+            _logger.info(
+                f"Terminal flip sampler ready at {_lam_sym} = {lambda_value:.5f} "
+                f"(every {flip_every} energy block(s))"
+            )
+        else:
+            terminal_flip_sampler = None
+            flip_every = None
+
         # Minimisation.
         if self._config.minimise:
             constraint = self._config.constraint
@@ -670,6 +695,16 @@ class Runner(_RunnerBase):
                 finally:
                     gcmc_sampler.pop()
 
+        # Restore sampler statistics from a previous run.
+        if self._is_restart:
+            stats = self._load_sampler_stats(index)
+            if stats is not None:
+                if gcmc_sampler is not None and "gcmc" in stats:
+                    gcmc_sampler.restore_stats(stats["gcmc"])
+                if terminal_flip_sampler is not None and "terminal_flip" in stats:
+                    attempted, accepted = stats["terminal_flip"]
+                    terminal_flip_sampler.reset(attempted, accepted)
+
         # Set the number of neighbours used for the energy calculation.
         # If not None, then we add one to account for the extra windows
         # used for finite-difference gradient analysis.
@@ -719,6 +754,7 @@ class Runner(_RunnerBase):
                         runtime = _sr.u("0ps")
                         save_frames = self._config.frame_frequency > 0
                         next_frame = self._config.frame_frequency
+                        flip_counter = 0
 
                         # Loop until we reach the runtime.
                         while runtime < checkpoint_frequency:
@@ -733,6 +769,21 @@ class Runner(_RunnerBase):
                                 gcmc_sampler.move(dynamics.context())
                             finally:
                                 gcmc_sampler.pop()
+
+                            # Perform a terminal flip move at the specified frequency.
+                            if (
+                                terminal_flip_sampler is not None
+                                and flip_counter % flip_every == 0
+                            ):
+                                _logger.info(
+                                    f"Performing terminal flip move at "
+                                    f"{_lam_sym} = {lambda_value:.5f}"
+                                )
+                                if (
+                                    terminal_flip_sampler.move(dynamics.context())
+                                    and self._config.randomise_velocities
+                                ):
+                                    dynamics.randomise_velocities()
 
                             # Write ghost residues immediately after the GCMC
                             # move if a frame will be saved in the upcoming
@@ -768,8 +819,45 @@ class Runner(_RunnerBase):
                                 ),
                             )
 
-                            # Update the runtime.
+                            # Update the runtime and flip counter.
                             runtime += self._config.energy_frequency
+                            flip_counter += 1
+
+                    elif terminal_flip_sampler is not None:
+                        # Terminal flip without GCMC: perform flip moves at the
+                        # specified frequency then run the full dynamics block.
+                        n_flips = max(
+                            1,
+                            round(
+                                (
+                                    checkpoint_frequency
+                                    / self._config.terminal_flip_frequency
+                                ).value()
+                            ),
+                        )
+                        for _ in range(n_flips):
+                            _logger.info(
+                                f"Performing terminal flip move at "
+                                f"{_lam_sym} = {lambda_value:.5f}"
+                            )
+                            if (
+                                terminal_flip_sampler.move(dynamics.context())
+                                and self._config.randomise_velocities
+                            ):
+                                dynamics.randomise_velocities()
+
+                        dynamics.run(
+                            checkpoint_frequency,
+                            energy_frequency=self._config.energy_frequency,
+                            frame_frequency=self._config.frame_frequency,
+                            lambda_windows=lambda_array,
+                            rest2_scale_factors=rest2_scale_factors,
+                            save_velocities=self._config.save_velocities,
+                            auto_fix_minimise=True,
+                            num_energy_neighbours=num_energy_neighbours,
+                            null_energy=self._config.null_energy,
+                            save_crash_report=self._config.save_crash_report,
+                        )
 
                     else:
                         dynamics.run(
@@ -846,6 +934,11 @@ class Runner(_RunnerBase):
                         if error is not None:
                             raise error
 
+                        # Save sampler statistics alongside the checkpoint.
+                        self._save_sampler_stats(
+                            index, gcmc_sampler, terminal_flip_sampler
+                        )
+
                     # Delete all trajectory frames from the Sire system within the
                     # dynamics object.
                     dynamics._d._sire_mols.delete_all_frames()
@@ -859,12 +952,29 @@ class Runner(_RunnerBase):
                     if gcmc_sampler is not None:
                         gcmc_sampler.push()
                         try:
+                            n_moves = gcmc_sampler._num_moves
+                            acc_str = (
+                                f", acceptance rate = {gcmc_sampler.move_acceptance_probability():.3f}"
+                                f" (ins = {gcmc_sampler.num_insertions()}, del = {gcmc_sampler.num_deletions()})"
+                                if n_moves > 0
+                                else ""
+                            )
                             _logger.info(
                                 f"Current number of waters in GCMC volume at {_lam_sym} = {lambda_value:.5f} "
-                                f"is {gcmc_sampler.num_waters()}"
+                                f"is {gcmc_sampler.num_waters()}{acc_str}"
                             )
                         finally:
                             gcmc_sampler.pop()
+
+                    # Log terminal flip acceptance rate.
+                    if terminal_flip_sampler is not None:
+                        _logger.info(
+                            f"Terminal flip acceptance rate at "
+                            f"{_lam_sym} = {lambda_value:.5f}: "
+                            f"{terminal_flip_sampler.acceptance_rate:.3f} "
+                            f"({terminal_flip_sampler.num_accepted}/"
+                            f"{terminal_flip_sampler.num_attempted})"
+                        )
 
                     if is_final_block:
                         _logger.success(
@@ -880,6 +990,18 @@ class Runner(_RunnerBase):
                 block += 1
                 block_start = _timer()
                 try:
+                    # Perform one terminal flip at the start of the remainder block.
+                    if terminal_flip_sampler is not None:
+                        _logger.info(
+                            f"Performing terminal flip move at "
+                            f"{_lam_sym} = {lambda_value:.5f}"
+                        )
+                        if (
+                            terminal_flip_sampler.move(dynamics.context())
+                            and self._config.randomise_velocities
+                        ):
+                            dynamics.randomise_velocities()
+
                     dynamics.run(
                         rem,
                         energy_frequency=self._config.energy_frequency,
@@ -952,6 +1074,7 @@ class Runner(_RunnerBase):
                     runtime = _sr.u("0ps")
                     save_frames = self._config.frame_frequency > 0
                     next_frame = self._config.frame_frequency
+                    flip_counter = 0
 
                     # Loop until we reach the runtime.
                     while runtime < time:
@@ -966,6 +1089,21 @@ class Runner(_RunnerBase):
                             gcmc_sampler.move(dynamics.context())
                         finally:
                             gcmc_sampler.pop()
+
+                        # Perform a terminal flip move at the specified frequency.
+                        if (
+                            terminal_flip_sampler is not None
+                            and flip_counter % flip_every == 0
+                        ):
+                            _logger.info(
+                                f"Performing terminal flip move at "
+                                f"{_lam_sym} = {lambda_value:.5f}"
+                            )
+                            if (
+                                terminal_flip_sampler.move(dynamics.context())
+                                and self._config.randomise_velocities
+                            ):
+                                dynamics.randomise_velocities()
 
                         # Write ghost residues immediately after the GCMC
                         # move if a frame will be saved in the upcoming
@@ -991,8 +1129,41 @@ class Runner(_RunnerBase):
                             save_crash_report=self._config.save_crash_report,
                         )
 
-                        # Update the runtime.
+                        # Update the runtime and flip counter.
                         runtime += self._config.energy_frequency
+                        flip_counter += 1
+
+                elif terminal_flip_sampler is not None:
+                    # Terminal flip without GCMC: perform flip moves at the
+                    # start then run the full dynamics block.
+                    n_flips = max(
+                        1,
+                        round((time / self._config.terminal_flip_frequency).value()),
+                    )
+                    for _ in range(n_flips):
+                        _logger.info(
+                            f"Performing terminal flip move at "
+                            f"{_lam_sym} = {lambda_value:.5f}"
+                        )
+                        if (
+                            terminal_flip_sampler.move(dynamics.context())
+                            and self._config.randomise_velocities
+                        ):
+                            dynamics.randomise_velocities()
+
+                    dynamics.run(
+                        time,
+                        energy_frequency=self._config.energy_frequency,
+                        frame_frequency=self._config.frame_frequency,
+                        lambda_windows=lambda_array,
+                        rest2_scale_factors=rest2_scale_factors,
+                        save_velocities=self._config.save_velocities,
+                        auto_fix_minimise=True,
+                        num_energy_neighbours=num_energy_neighbours,
+                        null_energy=self._config.null_energy,
+                        save_crash_report=self._config.save_crash_report,
+                    )
+
                 else:
                     dynamics.run(
                         time,
@@ -1057,11 +1228,72 @@ class Runner(_RunnerBase):
                     _logger.error(msg)
                     raise RuntimeError(msg)
 
+                # Save sampler statistics alongside the final checkpoint.
+                self._save_sampler_stats(index, gcmc_sampler, terminal_flip_sampler)
+
             _logger.success(
                 f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"
             )
 
         return time
+
+    def _save_sampler_stats(self, index, gcmc_sampler, terminal_flip_sampler):
+        """
+        Save GCMC and terminal flip sampler statistics to a pickle file.
+
+        Parameters
+        ----------
+
+        index : int
+            The index of the lambda value.
+
+        gcmc_sampler : GCMCSampler or None
+            The GCMC sampler for this replica.
+
+        terminal_flip_sampler : TerminalFlipSampler or None
+            The terminal flip sampler for this replica.
+        """
+        import pickle as _pickle
+
+        stats = {}
+        if gcmc_sampler is not None:
+            stats["gcmc"] = gcmc_sampler.get_stats()
+        if terminal_flip_sampler is not None:
+            stats["terminal_flip"] = [
+                terminal_flip_sampler.num_attempted,
+                terminal_flip_sampler.num_accepted,
+            ]
+        with open(self._filenames[index]["sampler_stats"], "wb") as f:
+            _pickle.dump(stats, f)
+
+    def _load_sampler_stats(self, index):
+        """
+        Load sampler statistics from a pickle file.
+
+        Parameters
+        ----------
+
+        index : int
+            The index of the lambda value.
+
+        Returns
+        -------
+
+        dict or None
+            The sampler statistics, or None if the file does not exist.
+        """
+        import pickle as _pickle
+        from pathlib import Path as _Path
+
+        path = _Path(self._filenames[index]["sampler_stats"])
+        if not path.exists():
+            return None
+        try:
+            with open(path, "rb") as f:
+                return _pickle.load(f)
+        except Exception as e:
+            _logger.warning(f"Could not load sampler stats for index {index}: {e}")
+            return None
 
     def _minimisation(
         self,
