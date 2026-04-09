@@ -245,7 +245,7 @@ somd2 perturbable_system.bss --terminal-flip-frequency "1 ps" --terminal-flip-an
 ## Copying output files during a simulation
 
 When `SOMD2` writes checkpoint files it acquires an exclusive
-[file lock](https://filelock.readthedocs.io) on `somd2.lock` inside the output
+[file lock](https://py-filelock.readthedocs.io) on `somd2.lock` inside the output
 directory. This guarantees that checkpoint files are always in a consistent
 state on disk.
 
