@@ -688,6 +688,11 @@ class Config:
             if value is None and sire_compatible:
                 d[attr_l] = False
 
+        # Don't include lambda_schedule_name or perturbed_system_file in the dictionary,
+        # since these are just helper attributes.
+        d.pop("_lambda_schedule_name", None)
+        d.pop("_perturbed_system_file", None)
+
         # Handle the lambda schedule separately so that we can use simplified
         # keyword options.
 
@@ -716,7 +721,6 @@ class Config:
             and self._perturbed_system_file is not None
         ):
             d["perturbed_system"] = str(self._perturbed_system_file)
-            d.pop("perturbed_system_file", None)
 
         return d
 
