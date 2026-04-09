@@ -1397,7 +1397,6 @@ class RunnerBase:
             "frame_frequency",
             "save_velocities",
             "perturbed_system",
-            "perturbed_system_file",
             "platform",
             "max_threads",
             "max_gpus",
@@ -1434,51 +1433,61 @@ class RunnerBase:
                     # Standard schedules are stored as strings, so we can compare these directly.
                     if v1 == v2:
                         continue
-                    else:
-                        try:
-                            v1 = _Config._from_hex(v1)
-                        except Exception as e:
-                            raise ValueError(
-                                f"Unable to deserialise lambda schedule from config1: {str(e)}"
-                            )
-                        try:
-                            v2 = _Config._from_hex(v2)
-                        except Exception as e:
-                            raise ValueError(
-                                f"Unable to deserialise lambda schedule from config2: {str(e)}"
-                            )
-                        if v1 != v2:
-                            raise ValueError(
-                                f"{key} has changed since the last run. This is not "
-                                "allowed when using the restart option."
-                            )
-                        else:
-                            continue
+                    try:
+                        v1 = _Config._from_hex(v1)
+                    except Exception as e:
+                        raise ValueError(
+                            f"Unable to deserialise lambda schedule from config1: {str(e)}"
+                        )
+                    try:
+                        v2 = _Config._from_hex(v2)
+                    except Exception as e:
+                        raise ValueError(
+                            f"Unable to deserialise lambda schedule from config2: {str(e)}"
+                        )
+                    if v1 != v2:
+                        raise ValueError(
+                            f"{key} has changed since the last run. This is not "
+                            "allowed when using the restart option."
+                        )
+                    continue
 
                 # Restraints are stored as a list of hexadecimal strings of serialised objects.
                 # We need to deserialise them before comparison.
                 elif key == "restraints":
                     if v1 and v2:
-                        for r1, r2 in zip(v1, v2):
-                            try:
-                                r1 = _Config._from_hex(r1)
-                            except Exception as e:
-                                raise ValueError(
-                                    f"Unable to deserialise restraint from config1: {str(e)}"
-                                )
-                            try:
-                                r2 = _Config._from_hex(r2)
-                            except Exception as e:
-                                raise ValueError(
-                                    f"Unable to deserialise restraint from config2: {str(e)}"
-                                )
-                            if r1 != r2:
+                        if len(v1) != len(v2):
+                            raise ValueError(
+                                f"Number of restraints has changed since the last run "
+                                f"({len(v1)} vs {len(v2)}). This is not allowed when "
+                                "using the restart option."
+                            )
+                        # Deserialise all restraints from both configs.
+                        try:
+                            deserialized_v1 = [_Config._from_hex(r) for r in v1]
+                        except Exception as e:
+                            raise ValueError(
+                                f"Unable to deserialise restraint from config1: {str(e)}"
+                            )
+                        try:
+                            deserialized_v2 = [_Config._from_hex(r) for r in v2]
+                        except Exception as e:
+                            raise ValueError(
+                                f"Unable to deserialise restraint from config2: {str(e)}"
+                            )
+                        # Match each restraint in v1 against v2, regardless of order.
+                        unmatched = list(deserialized_v2)
+                        for r1 in deserialized_v1:
+                            for i, r2 in enumerate(unmatched):
+                                if r1 == r2:
+                                    unmatched.pop(i)
+                                    break
+                            else:
                                 raise ValueError(
                                     f"{key} has changed since the last run. This is not "
                                     "allowed when using the restart option."
                                 )
-                            else:
-                                continue
+                    continue
 
                 # Convert GeneralUnits to strings for comparison.
                 if isinstance(v1, _GeneralUnit):
