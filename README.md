@@ -242,6 +242,38 @@ geometry. To override this for all groups:
 somd2 perturbable_system.bss --terminal-flip-frequency "1 ps" --terminal-flip-angle "180 degrees"
 ```
 
+## Copying output files during a simulation
+
+When `SOMD2` writes checkpoint files it acquires an exclusive
+[file lock](https://filelock.readthedocs.io) on `somd2.lock` inside the output
+directory. This guarantees that checkpoint files are always in a consistent
+state on disk.
+
+If you want to copy the output directory while a simulation is running (for
+example, to create a backup or to inspect intermediate results), acquire the
+same lock first so that you do not copy files mid-write. On Linux/macOS this
+can be done with the `flock` command:
+
+```bash
+flock /path/to/output/somd2.lock cp -r /path/to/output /destination
+```
+
+Or from Python using the [filelock](https://pypi.org/project/filelock/) package
+(which `somd2` already depends on):
+
+```python
+from filelock import FileLock
+
+with FileLock("/path/to/output/somd2.lock"):
+    # copy files here
+    ...
+```
+
+> [!NOTE]
+> The `--timeout` option (default: `300 s`) controls how long `SOMD2` will
+> wait to re-acquire the lock after your copy completes. If you hold the lock
+> for longer than this, the simulation will raise a `Timeout` error.
+
 ## Analysis
 
 Simulation output will be written to the directory specified using the
