@@ -52,8 +52,7 @@ class DynamicsCache:
         dynamics_kwargs,
         gcmc_kwargs=None,
         output_directory=None,
-        perturbed_positions=None,
-        perturbed_box=None,
+        perturbed_system=None,
     ):
         """
         Constructor.
@@ -82,13 +81,9 @@ class DynamicsCache:
         output_directory: pathlib.Path
             The directory for simulation output.
 
-        perturbed_positions: numpy.ndarray
-            The positions for the perturbed state. If None, then the perturbed state
-            is not used.
-
-        perturbed_box: numpy.ndarray
-            The box vectors for the perturbed state. If None, then the perturbed state
-            is not used.
+        perturbed_system: :class: `System <sire.system.System>`
+            The perturbed end-state system used to seed starting coordinates for
+            lambda > 0.5 replicas. If None, the perturbed state is not used.
         """
 
         # Warn if the number of replicas is not a multiple of the number of GPUs.
@@ -121,8 +116,7 @@ class DynamicsCache:
             dynamics_kwargs,
             gcmc_kwargs=gcmc_kwargs,
             output_directory=output_directory,
-            perturbed_positions=perturbed_positions,
-            perturbed_box=perturbed_box,
+            perturbed_system=perturbed_system,
         )
 
     def __setstate__(self, state):
@@ -173,8 +167,7 @@ class DynamicsCache:
         dynamics_kwargs,
         gcmc_kwargs=None,
         output_directory=None,
-        perturbed_positions=None,
-        perturbed_box=None,
+        perturbed_system=None,
     ):
         """
         Create the dynamics objects.
@@ -203,13 +196,9 @@ class DynamicsCache:
         output_directory: pathlib.Path
             The directory for simulation output.
 
-        perturbed_positions: numpy.ndarray
-            The positions for the perturbed state. If None, then the perturbed state
-            is not used.
-
-        perturbed_box: numpy.ndarray
-            The box vectors for the perturbed state. If None, then the perturbed state
-            is not used.
+        perturbed_system: :class: `System <sire.system.System>`
+            The perturbed end-state system used to seed starting coordinates for
+            lambda > 0.5 replicas. If None, the perturbed state is not used.
         """
 
         from math import floor
@@ -256,7 +245,10 @@ class DynamicsCache:
             # This is a restart, get the system for this replica.
             if isinstance(system, list):
                 mols = system[i]
-            # This is a new simulation.
+            # This is a new simulation. For lambda > 0.5, use the perturbed
+            # system to seed the starting coordinates and periodic space.
+            elif perturbed_system is not None and lam > 0.5:
+                mols = perturbed_system
             else:
                 mols = system
 
@@ -313,33 +305,6 @@ class DynamicsCache:
                 msg = f"Could not create dynamics object for lambda {lam:.5f} on device {device}: {e}"
                 _logger.error(msg)
                 raise RuntimeError(msg) from e
-
-            # Update the box vectors and positions if the perturbed state is used.
-            if (
-                perturbed_positions is not None
-                and perturbed_box is not None
-                and lam > 0.5
-            ):
-                from openmm.unit import angstrom
-
-                # Get the positions from the context.
-                positions = (
-                    dynamics.context()
-                    .getState(getPositions=True)
-                    .getPositions(asNumpy=True)
-                ) / angstrom
-
-                # The positions array also contains the ghost water atoms that
-                # were added during the GCMC setup. We need to make sure that
-                # we copy these over to the perturbed positions array.
-                diff = len(positions) - len(perturbed_positions)
-                if diff != 0:
-                    perturbed_positions = _np.concatenate(
-                        [perturbed_positions, positions[-diff:]]
-                    )
-
-                dynamics.context().setPeriodicBoxVectors(*perturbed_box * angstrom)
-                dynamics.context().setPositions(perturbed_positions * angstrom)
 
             # Bind the GCMC sampler to the dynamics object. This allows the
             # dynamics object to reset the water state in its internal OpenMM
@@ -782,8 +747,7 @@ class RepexRunner(_RunnerBase):
                 self._num_gpus,
                 dynamics_kwargs,
                 gcmc_kwargs=self._gcmc_kwargs,
-                perturbed_positions=self._perturbed_positions,
-                perturbed_box=self._perturbed_box,
+                perturbed_system=self._perturbed_system,
                 output_directory=self._config.output_directory,
             )
         else:
