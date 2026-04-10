@@ -94,28 +94,6 @@ class RunnerBase:
                 _logger.error(msg)
                 raise ValueError(msg)
 
-            # Make sure the coordinates property is linked.
-            perturbed_system = _sr.morph.link_to_perturbed(
-                self._config.perturbed_system
-            )
-
-            # Store the positions.
-            self._perturbed_positions = _sr.io.get_coords_array(perturbed_system)
-
-            # Store the box vectors.
-            cell = self._config.perturbed_system.space().box_matrix()
-            c0 = cell.column0()
-            c1 = cell.column1()
-            c2 = cell.column2()
-            self._perturbed_box = (
-                (c0.x().value(), c0.y().value(), c0.z().value()),
-                (c1.x().value(), c1.y().value(), c1.z().value()),
-                (c2.x().value(), c2.y().value(), c2.z().value()),
-            )
-        else:
-            self._perturbed_positions = None
-            self._perturbed_box = None
-
         # Log the versions of somd2 and sire.
         from somd2 import (
             __version__,
@@ -522,6 +500,27 @@ class RunnerBase:
 
         # Store the current system as a reference.
         self._reference_system = self._system.clone()
+
+        # Create a clone of the fully-prepared reference system with the
+        # perturbed end-state coordinates and periodic space. This is done
+        # after all system preparation so that the clone inherits the same
+        # topology and properties. It is used to seed starting coordinates
+        # for lambda > 0.5 replicas.
+        if self._config.replica_exchange and self._config.perturbed_system is not None:
+            from sire.legacy.IO import setCoordinates as _setCoordinates
+
+            pert_coords = _sr.io.get_coords_array(
+                _sr.morph.link_to_perturbed(self._config.perturbed_system)
+            )
+            self._perturbed_system = _sr.system.System(
+                _setCoordinates(self._system._system, pert_coords.tolist())
+            )
+            self._perturbed_system.set_space(self._config.perturbed_system.space())
+
+            # Link properties to the lambda = 0 end state.
+            self._perturbed_system = _sr.morph.link_to_reference(self._perturbed_system)
+        else:
+            self._perturbed_system = None
 
         # Check for a valid restart.
         if self._config.restart:
