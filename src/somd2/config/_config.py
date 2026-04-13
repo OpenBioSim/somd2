@@ -164,7 +164,7 @@ class Config:
         pert_file=None,
         auto_fix_minimise=True,
         save_crash_report=False,
-        save_energy_components=False,
+        save_energy_components=True,
         page_size=None,
         timeout="300 s",
     ):
@@ -506,7 +506,6 @@ class Config:
 
         save_energy_components: bool
             Whether to save the energy contribution for each force when checkpointing.
-            This is useful when debugging crashes.
 
         page_size: int
             The page size for trajectory handling in megabytes. If None, then Sire

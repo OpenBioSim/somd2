@@ -1397,11 +1397,6 @@ class RepexRunner(_RunnerBase):
             energies = dynamics._current_energy_array()
 
         except Exception as e:
-            try:
-                # Save the energy components for debugging purposes.
-                self._save_energy_components(index, dynamics.context())
-            except:
-                pass
             return False, index, e
 
         # Return the index and the energies.
@@ -1647,11 +1642,6 @@ class RepexRunner(_RunnerBase):
             )
 
         except Exception as e:
-            try:
-                # Save the energy components for debugging purposes.
-                self._save_energy_components(index, dynamics.context())
-            except:
-                pass
             return False, index, e
 
         return True, index, None
@@ -1766,6 +1756,12 @@ class RepexRunner(_RunnerBase):
 
             # Commit the current system.
             system = dynamics.commit()
+
+            # Save the energy contribution for each force.
+            if self._config.save_energy_components:
+                self._save_energy_components(
+                    index, dynamics.context(), system.time().to("ns")
+                )
 
             # If performing GCMC, then we need to flag the ghost waters.
             if gcmc_sampler is not None:
