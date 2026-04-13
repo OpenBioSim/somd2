@@ -162,6 +162,7 @@ class Config:
         overwrite=False,
         somd1_compatibility=False,
         pert_file=None,
+        auto_fix_minimise=True,
         save_crash_report=False,
         save_energy_components=False,
         page_size=None,
@@ -496,6 +497,10 @@ class Config:
             The path to a SOMD1 perturbation file to apply to the reference system.
             When set, this will automatically set 'somd1_compatibility' to True.
 
+        auto_fix_minimise: bool
+            Whether to attempt to automatically recover from simulation instabilities
+            by minimising and restarting. Defaults to True.
+
         save_crash_report: bool
             Whether to save a crash report if the simulation crashes.
 
@@ -599,6 +604,7 @@ class Config:
         self.taylor_power = taylor_power
         self.somd1_compatibility = somd1_compatibility
         self.pert_file = pert_file
+        self.auto_fix_minimise = auto_fix_minimise
         self.save_crash_report = save_crash_report
         self.save_energy_components = save_energy_components
         self.timeout = timeout
@@ -2382,6 +2388,16 @@ class Config:
             raise ValueError(f"Perturbation file does not exist: {pert_file}")
 
         self._pert_file = pert_file
+
+    @property
+    def auto_fix_minimise(self):
+        return self._auto_fix_minimise
+
+    @auto_fix_minimise.setter
+    def auto_fix_minimise(self, auto_fix_minimise):
+        if not isinstance(auto_fix_minimise, bool):
+            raise ValueError("'auto_fix_minimise' must be of type 'bool'")
+        self._auto_fix_minimise = auto_fix_minimise
 
     @property
     def save_crash_report(self):

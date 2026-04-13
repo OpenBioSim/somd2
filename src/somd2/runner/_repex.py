@@ -1332,7 +1332,7 @@ class RepexRunner(_RunnerBase):
                 lambda_windows=lambdas,
                 rest2_scale_factors=self._rest2_scale_factors,
                 save_velocities=self._config.save_velocities,
-                auto_fix_minimise=True,
+                auto_fix_minimise=self._config.auto_fix_minimise,
                 num_energy_neighbours=self._config.num_energy_neighbours,
                 null_energy=self._config.null_energy,
                 save_crash_report=self._config.save_crash_report,
@@ -1563,7 +1563,7 @@ class RepexRunner(_RunnerBase):
                 energy_frequency=0,
                 frame_frequency=0,
                 save_velocities=False,
-                auto_fix_minimise=True,
+                auto_fix_minimise=self._config.auto_fix_minimise,
                 save_crash_report=self._config.save_crash_report,
             )
 
