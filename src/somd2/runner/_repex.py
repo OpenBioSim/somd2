@@ -1583,6 +1583,7 @@ class RepexRunner(_RunnerBase):
                     dynamics_kwargs["device"] = device
                     dynamics_kwargs["lambda_value"] = self._lambda_values[index]
                     dynamics_kwargs["rest2_scale"] = self._rest2_scale_factors[index]
+                    dynamics_kwargs["timestep"] = self._config._equilibration_timestep
                     dynamics_kwargs["constraint"] = constraint
                     dynamics_kwargs["perturbable_constraint"] = perturbable_constraint
 
