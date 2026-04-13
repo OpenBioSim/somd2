@@ -979,6 +979,39 @@ class RepexRunner(_RunnerBase):
                         _logger.error("Equilibration cancelled. Exiting.")
                         _sys.exit(1)
 
+        # Write a checkpoint immediately after equilibration so that a restart
+        # after an early production crash doesn't need to re-equilibrate.
+        if self._is_equilibration and not self._is_restart:
+            lock = _FileLock(self._lock_file)
+            with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                for j in range(num_checkpoint_batches):
+                    replicas = replica_list[
+                        j * num_checkpoint_workers : (j + 1) * num_checkpoint_workers
+                    ]
+                    with ThreadPoolExecutor(
+                        max_workers=num_checkpoint_workers
+                    ) as executor:
+                        try:
+                            for index, error in executor.map(
+                                self._checkpoint,
+                                replicas,
+                                repeat(self._lambda_values),
+                                repeat(-1),
+                                repeat(cycles),
+                            ):
+                                if error is not None:
+                                    msg = (
+                                        f"Post-equilibration checkpoint failed for {_lam_sym} = "
+                                        f"{self._lambda_values[index]:.5f}:\n{error}"
+                                    )
+                                    _logger.error(msg)
+                                    raise error
+                        except KeyboardInterrupt:
+                            _logger.error(
+                                "Post-equilibration checkpoint cancelled. Exiting."
+                            )
+                            _sys.exit(1)
+
         # Current block number.
         block = self._start_block
 
@@ -1753,10 +1786,15 @@ class RepexRunner(_RunnerBase):
             # dynamics object.
             dynamics._d._sire_mols.delete_all_frames()
 
-            _logger.info(
-                f"Finished block {block + 1} of {self._start_block + num_blocks} "
-                f"for {_lam_sym} = {lam:.5f}"
-            )
+            if block == -1:
+                _logger.info(
+                    f"Writing post-equilibration checkpoint for {_lam_sym} = {lam:.5f}"
+                )
+            else:
+                _logger.info(
+                    f"Finished block {block + 1} of {self._start_block + num_blocks} "
+                    f"for {_lam_sym} = {lam:.5f}"
+                )
 
             # Log the number of waters within the GCMC sampling volume.
             if gcmc_sampler is not None:

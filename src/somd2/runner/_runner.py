@@ -719,6 +719,31 @@ class Runner(_RunnerBase):
         # Store the checkpoint time in nanoseconds.
         checkpoint_interval = checkpoint_frequency.to("ns")
 
+        # Write a checkpoint immediately after equilibration so that a restart
+        # after an early production crash doesn't need to re-equilibrate.
+        if is_equilibrated:
+            lock = _FileLock(self._lock_file)
+            with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                _, error = self._checkpoint(
+                    system,
+                    index,
+                    block=-1,
+                    speed=0.0,
+                    lambda_energy=lambda_energy,
+                    lambda_grad=lambda_grad,
+                )
+                if error is not None:
+                    msg = (
+                        f"Post-equilibration checkpoint failed for {_lam_sym} = "
+                        f"{lambda_value:.5f}:\n{error}"
+                    )
+                    _logger.error(msg)
+                    raise error
+                _logger.info(
+                    f"Writing post-equilibration checkpoint "
+                    f"for {_lam_sym} = {lambda_value:.5f}"
+                )
+
         # Store the start time.
         start = _timer()
 

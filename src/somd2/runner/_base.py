@@ -1820,26 +1820,33 @@ class RunnerBase:
             # Get the lambda value.
             lam = self._lambda_values[index]
 
+            # -1 is the sentinel for a post-equilibration checkpoint. No
+            # energies are collected during equilibration, so skip all
+            # parquet-related work in this case.
+            is_post_equilibration = block == -1
+
             # Get the energy trajectory.
-            df = system.energy_trajectory(to_alchemlyb=True, energy_unit="kT")
+            if not is_post_equilibration:
+                df = system.energy_trajectory(to_alchemlyb=True, energy_unit="kT")
 
             # Set the lambda values at which energies were sampled.
             if lambda_energy is None:
                 lambda_energy = self._lambda_values
 
             # Create the metadata.
-            metadata = {
-                "attrs": df.attrs,
-                "somd2 version": __version__,
-                "sire version": f"{_sire_version}+{_sire_revisionid}",
-                "lambda": f"{lam:.5f}",
-                "speed": speed,
-                "temperature": str(self._config.temperature.value()),
-            }
+            if not is_post_equilibration:
+                metadata = {
+                    "attrs": df.attrs,
+                    "somd2 version": __version__,
+                    "sire version": f"{_sire_version}+{_sire_revisionid}",
+                    "lambda": f"{lam:.5f}",
+                    "speed": speed,
+                    "temperature": str(self._config.temperature.value()),
+                }
 
-            # Add the lambda gradient if available.
-            if lambda_grad is not None:
-                metadata["lambda_grad"] = [f"{v:.5f}" for v in lambda_grad]
+                # Add the lambda gradient if available.
+                if lambda_grad is not None:
+                    metadata["lambda_grad"] = [f"{v:.5f}" for v in lambda_grad]
 
             if is_final_block:
                 # Save the end-state GCMC topologies for trajectory analysis and visualisation.
@@ -1930,7 +1937,7 @@ class RunnerBase:
 
             else:
                 # Update the starting block if necessary.
-                if block == 0:
+                if block <= 0:
                     block = self._start_block
 
                 # Save the current trajectory chunk to file.
@@ -1958,18 +1965,20 @@ class RunnerBase:
                 # Stream the checkpoint to file.
                 _sr.stream.save(system, self._filenames[index]["checkpoint"])
 
-                # Create the parquet file name.
-                filename = self._filenames[index]["energy_traj"]
+                # Skip parquet creation for post-equilibration checkpoints.
+                if not is_post_equilibration:
+                    # Create the parquet file name.
+                    filename = self._filenames[index]["energy_traj"]
 
-                # Create the parquet file.
-                if block == self._start_block:
-                    _dataframe_to_parquet(df, metadata=metadata, filename=filename)
-                # Append to the parquet file.
-                else:
-                    _parquet_append(
-                        filename,
-                        df.iloc[-self._energy_per_block :],
-                    )
+                    # Create the parquet file.
+                    if block == self._start_block:
+                        _dataframe_to_parquet(df, metadata=metadata, filename=filename)
+                    # Append to the parquet file.
+                    else:
+                        _parquet_append(
+                            filename,
+                            df.iloc[-self._energy_per_block :],
+                        )
 
         except Exception as e:
             return index, e
