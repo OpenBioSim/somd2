@@ -526,10 +526,6 @@ class DynamicsCache:
             old_state = self._old_states[i]
             self._num_swaps[old_state, state] += 1
 
-        # Snapshot the pre-run state for crash recovery.
-        for i, state in enumerate(self._states):
-            self._dynamics[i]._d._pre_run_state = self._openmm_states[state]
-
         # Store the current states.
         self._old_states = self._states.copy()
 
@@ -1153,6 +1149,13 @@ class RepexRunner(_RunnerBase):
             )
             self._dynamics_cache.mix_states()
 
+            # Snapshot the pre-run state for crash recovery.
+            if self._config.auto_fix_minimise:
+                for i, state in enumerate(self._dynamics_cache.get_states()):
+                    self._dynamics_cache._dynamics[
+                        i
+                    ]._d._pre_run_state = self._dynamics_cache._openmm_states[state]
+
             # This is a checkpoint cycle.
             if is_checkpoint:
                 # Update the block number.
@@ -1283,8 +1286,10 @@ class RepexRunner(_RunnerBase):
             dynamics, gcmc_sampler = self._dynamics_cache.get(index)
 
             # Track whether any MC move changed the context positions so we
-            # can update _pre_run_state once at the end.
+            # can update _pre_run_state once at the end. Only needed when
+            # crash recovery is enabled.
             needs_pre_run_snapshot = False
+            auto_fix_minimise = self._config.auto_fix_minimise
 
             # Perform the GCMC move before dynamics so that the energies
             # computed during dynamics are consistent with the state used
@@ -1297,7 +1302,8 @@ class RepexRunner(_RunnerBase):
                 finally:
                     gcmc_sampler.pop()
 
-                needs_pre_run_snapshot = True
+                if auto_fix_minimise:
+                    needs_pre_run_snapshot = True
 
                 # Write ghost residues immediately after the GCMC move so the
                 # ghost state and frame (saved during dynamics) are consistent.
@@ -1308,11 +1314,11 @@ class RepexRunner(_RunnerBase):
             if self._terminal_flip_samplers is not None and is_terminal_flip:
                 _logger.info(f"Performing terminal flip move at {_lam_sym} = {lam:.5f}")
                 if self._terminal_flip_samplers[index].move(dynamics.context()):
-                    needs_pre_run_snapshot = True
+                    if auto_fix_minimise:
+                        needs_pre_run_snapshot = True
 
             # Snapshot the context state for crash recovery if any MC move
-            # changed positions. This overwrites the snapshot set in
-            # mix_states() so _rebuild_and_minimise() has a consistent state.
+            # changed positions.
             if needs_pre_run_snapshot:
                 dynamics._d._pre_run_state = dynamics.context().getState(
                     getPositions=True, getVelocities=True

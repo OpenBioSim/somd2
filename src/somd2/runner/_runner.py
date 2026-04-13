@@ -771,7 +771,7 @@ class Runner(_RunnerBase):
                                 gcmc_sampler.pop()
 
                             # GCMC always changes positions.
-                            needs_pre_run_snapshot = True
+                            needs_pre_run_snapshot = self._config.auto_fix_minimise
 
                             # Perform a terminal flip move at the specified frequency.
                             if (
@@ -786,7 +786,8 @@ class Runner(_RunnerBase):
                                     dynamics.context()
                                 )
                                 if flip_accepted:
-                                    needs_pre_run_snapshot = True
+                                    if self._config.auto_fix_minimise:
+                                        needs_pre_run_snapshot = True
                                     if self._config.randomise_velocities:
                                         dynamics.randomise_velocities()
 
