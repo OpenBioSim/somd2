@@ -578,7 +578,7 @@ class Runner(_RunnerBase):
                     energy_frequency=0,
                     frame_frequency=0,
                     save_velocities=False,
-                    auto_fix_minimise=True,
+                    auto_fix_minimise=self._config.auto_fix_minimise,
                     save_crash_report=self._config.save_crash_report,
                 )
 
@@ -719,6 +719,31 @@ class Runner(_RunnerBase):
         # Store the checkpoint time in nanoseconds.
         checkpoint_interval = checkpoint_frequency.to("ns")
 
+        # Write a checkpoint immediately after equilibration so that a restart
+        # after an early production crash doesn't need to re-equilibrate.
+        if is_equilibrated:
+            lock = _FileLock(self._lock_file)
+            with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                _, error = self._checkpoint(
+                    system,
+                    index,
+                    block=-1,
+                    speed=0.0,
+                    lambda_energy=lambda_energy,
+                    lambda_grad=lambda_grad,
+                )
+                if error is not None:
+                    msg = (
+                        f"Post-equilibration checkpoint failed for {_lam_sym} = "
+                        f"{lambda_value:.5f}:\n{error}"
+                    )
+                    _logger.error(msg)
+                    raise error
+                _logger.info(
+                    f"Writing post-equilibration checkpoint "
+                    f"for {_lam_sym} = {lambda_value:.5f}"
+                )
+
         # Store the start time.
         start = _timer()
 
@@ -770,6 +795,9 @@ class Runner(_RunnerBase):
                             finally:
                                 gcmc_sampler.pop()
 
+                            # GCMC always changes positions.
+                            needs_pre_run_snapshot = self._config.auto_fix_minimise
+
                             # Perform a terminal flip move at the specified frequency.
                             if (
                                 terminal_flip_sampler is not None
@@ -779,11 +807,24 @@ class Runner(_RunnerBase):
                                     f"Performing terminal flip move at "
                                     f"{_lam_sym} = {lambda_value:.5f}"
                                 )
-                                if (
-                                    terminal_flip_sampler.move(dynamics.context())
-                                    and self._config.randomise_velocities
-                                ):
-                                    dynamics.randomise_velocities()
+                                flip_accepted = terminal_flip_sampler.move(
+                                    dynamics.context()
+                                )
+                                if flip_accepted:
+                                    if self._config.auto_fix_minimise:
+                                        needs_pre_run_snapshot = True
+                                    if self._config.randomise_velocities:
+                                        dynamics.randomise_velocities()
+
+                            # Snapshot the context state once for crash recovery
+                            # if any MC move changed positions.
+                            if needs_pre_run_snapshot:
+                                dynamics._d._pre_run_state = (
+                                    dynamics.context().getState(
+                                        getPositions=True, getVelocities=True
+                                    )
+                                )
+                                needs_pre_run_snapshot = False
 
                             # Write ghost residues immediately after the GCMC
                             # move if a frame will be saved in the upcoming
@@ -804,7 +845,7 @@ class Runner(_RunnerBase):
                                 lambda_windows=lambda_array,
                                 rest2_scale_factors=rest2_scale_factors,
                                 save_velocities=self._config.save_velocities,
-                                auto_fix_minimise=True,
+                                auto_fix_minimise=self._config.auto_fix_minimise,
                                 num_energy_neighbours=num_energy_neighbours,
                                 null_energy=self._config.null_energy,
                                 save_crash_report=self._config.save_crash_report,
@@ -853,7 +894,7 @@ class Runner(_RunnerBase):
                             lambda_windows=lambda_array,
                             rest2_scale_factors=rest2_scale_factors,
                             save_velocities=self._config.save_velocities,
-                            auto_fix_minimise=True,
+                            auto_fix_minimise=self._config.auto_fix_minimise,
                             num_energy_neighbours=num_energy_neighbours,
                             null_energy=self._config.null_energy,
                             save_crash_report=self._config.save_crash_report,
@@ -867,7 +908,7 @@ class Runner(_RunnerBase):
                             lambda_windows=lambda_array,
                             rest2_scale_factors=rest2_scale_factors,
                             save_velocities=self._config.save_velocities,
-                            auto_fix_minimise=True,
+                            auto_fix_minimise=self._config.auto_fix_minimise,
                             num_energy_neighbours=num_energy_neighbours,
                             null_energy=self._config.null_energy,
                             save_crash_report=self._config.save_crash_report,
@@ -1009,7 +1050,7 @@ class Runner(_RunnerBase):
                         lambda_windows=lambda_array,
                         rest2_scale_factors=rest2_scale_factors,
                         save_velocities=self._config.save_velocities,
-                        auto_fix_minimise=True,
+                        auto_fix_minimise=self._config.auto_fix_minimise,
                         num_energy_neighbours=num_energy_neighbours,
                         null_energy=self._config.null_energy,
                         save_crash_report=self._config.save_crash_report,
@@ -1090,6 +1131,9 @@ class Runner(_RunnerBase):
                         finally:
                             gcmc_sampler.pop()
 
+                        # GCMC always changes positions.
+                        needs_pre_run_snapshot = True
+
                         # Perform a terminal flip move at the specified frequency.
                         if (
                             terminal_flip_sampler is not None
@@ -1099,11 +1143,21 @@ class Runner(_RunnerBase):
                                 f"Performing terminal flip move at "
                                 f"{_lam_sym} = {lambda_value:.5f}"
                             )
-                            if (
-                                terminal_flip_sampler.move(dynamics.context())
-                                and self._config.randomise_velocities
-                            ):
-                                dynamics.randomise_velocities()
+                            flip_accepted = terminal_flip_sampler.move(
+                                dynamics.context()
+                            )
+                            if flip_accepted:
+                                needs_pre_run_snapshot = True
+                                if self._config.randomise_velocities:
+                                    dynamics.randomise_velocities()
+
+                        # Snapshot the context state once for crash recovery
+                        # if any MC move changed positions.
+                        if needs_pre_run_snapshot:
+                            dynamics._d._pre_run_state = dynamics.context().getState(
+                                getPositions=True, getVelocities=True
+                            )
+                            needs_pre_run_snapshot = False
 
                         # Write ghost residues immediately after the GCMC
                         # move if a frame will be saved in the upcoming
@@ -1123,7 +1177,7 @@ class Runner(_RunnerBase):
                             lambda_windows=lambda_array,
                             rest2_scale_factors=rest2_scale_factors,
                             save_velocities=self._config.save_velocities,
-                            auto_fix_minimise=True,
+                            auto_fix_minimise=self._config.auto_fix_minimise,
                             num_energy_neighbours=num_energy_neighbours,
                             null_energy=self._config.null_energy,
                             save_crash_report=self._config.save_crash_report,
@@ -1158,7 +1212,7 @@ class Runner(_RunnerBase):
                         lambda_windows=lambda_array,
                         rest2_scale_factors=rest2_scale_factors,
                         save_velocities=self._config.save_velocities,
-                        auto_fix_minimise=True,
+                        auto_fix_minimise=self._config.auto_fix_minimise,
                         num_energy_neighbours=num_energy_neighbours,
                         null_energy=self._config.null_energy,
                         save_crash_report=self._config.save_crash_report,
@@ -1172,7 +1226,7 @@ class Runner(_RunnerBase):
                         lambda_windows=lambda_array,
                         rest2_scale_factors=rest2_scale_factors,
                         save_velocities=self._config.save_velocities,
-                        auto_fix_minimise=True,
+                        auto_fix_minimise=self._config.auto_fix_minimise,
                         num_energy_neighbours=num_energy_neighbours,
                         null_energy=self._config.null_energy,
                         save_crash_report=self._config.save_crash_report,

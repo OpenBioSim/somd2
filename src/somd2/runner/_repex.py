@@ -979,6 +979,39 @@ class RepexRunner(_RunnerBase):
                         _logger.error("Equilibration cancelled. Exiting.")
                         _sys.exit(1)
 
+        # Write a checkpoint immediately after equilibration so that a restart
+        # after an early production crash doesn't need to re-equilibrate.
+        if self._is_equilibration and not self._is_restart:
+            lock = _FileLock(self._lock_file)
+            with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                for j in range(num_checkpoint_batches):
+                    replicas = replica_list[
+                        j * num_checkpoint_workers : (j + 1) * num_checkpoint_workers
+                    ]
+                    with ThreadPoolExecutor(
+                        max_workers=num_checkpoint_workers
+                    ) as executor:
+                        try:
+                            for index, error in executor.map(
+                                self._checkpoint,
+                                replicas,
+                                repeat(self._lambda_values),
+                                repeat(-1),
+                                repeat(cycles),
+                            ):
+                                if error is not None:
+                                    msg = (
+                                        f"Post-equilibration checkpoint failed for {_lam_sym} = "
+                                        f"{self._lambda_values[index]:.5f}:\n{error}"
+                                    )
+                                    _logger.error(msg)
+                                    raise error
+                        except KeyboardInterrupt:
+                            _logger.error(
+                                "Post-equilibration checkpoint cancelled. Exiting."
+                            )
+                            _sys.exit(1)
+
         # Current block number.
         block = self._start_block
 
@@ -1149,6 +1182,13 @@ class RepexRunner(_RunnerBase):
             )
             self._dynamics_cache.mix_states()
 
+            # Snapshot the pre-run state for crash recovery.
+            if self._config.auto_fix_minimise:
+                for i, state in enumerate(self._dynamics_cache.get_states()):
+                    self._dynamics_cache._dynamics[
+                        i
+                    ]._d._pre_run_state = self._dynamics_cache._openmm_states[state]
+
             # This is a checkpoint cycle.
             if is_checkpoint:
                 # Update the block number.
@@ -1278,6 +1318,12 @@ class RepexRunner(_RunnerBase):
             # Get the dynamics object (and GCMC sampler).
             dynamics, gcmc_sampler = self._dynamics_cache.get(index)
 
+            # Track whether any MC move changed the context positions so we
+            # can update _pre_run_state once at the end. Only needed when
+            # crash recovery is enabled.
+            needs_pre_run_snapshot = False
+            auto_fix_minimise = self._config.auto_fix_minimise
+
             # Perform the GCMC move before dynamics so that the energies
             # computed during dynamics are consistent with the state used
             # for replica exchange mixing.
@@ -1289,6 +1335,9 @@ class RepexRunner(_RunnerBase):
                 finally:
                     gcmc_sampler.pop()
 
+                if auto_fix_minimise:
+                    needs_pre_run_snapshot = True
+
                 # Write ghost residues immediately after the GCMC move so the
                 # ghost state and frame (saved during dynamics) are consistent.
                 if write_gcmc_ghosts:
@@ -1297,7 +1346,16 @@ class RepexRunner(_RunnerBase):
             # Perform a terminal flip move before dynamics if requested.
             if self._terminal_flip_samplers is not None and is_terminal_flip:
                 _logger.info(f"Performing terminal flip move at {_lam_sym} = {lam:.5f}")
-                self._terminal_flip_samplers[index].move(dynamics.context())
+                if self._terminal_flip_samplers[index].move(dynamics.context()):
+                    if auto_fix_minimise:
+                        needs_pre_run_snapshot = True
+
+            # Snapshot the context state for crash recovery if any MC move
+            # changed positions.
+            if needs_pre_run_snapshot:
+                dynamics._d._pre_run_state = dynamics.context().getState(
+                    getPositions=True, getVelocities=True
+                )
 
             _logger.info(f"Running dynamics at {_lam_sym} = {lam:.5f}")
 
@@ -1313,7 +1371,7 @@ class RepexRunner(_RunnerBase):
                 lambda_windows=lambdas,
                 rest2_scale_factors=self._rest2_scale_factors,
                 save_velocities=self._config.save_velocities,
-                auto_fix_minimise=True,
+                auto_fix_minimise=self._config.auto_fix_minimise,
                 num_energy_neighbours=self._config.num_energy_neighbours,
                 null_energy=self._config.null_energy,
                 save_crash_report=self._config.save_crash_report,
@@ -1544,7 +1602,7 @@ class RepexRunner(_RunnerBase):
                 energy_frequency=0,
                 frame_frequency=0,
                 save_velocities=False,
-                auto_fix_minimise=True,
+                auto_fix_minimise=self._config.auto_fix_minimise,
                 save_crash_report=self._config.save_crash_report,
             )
 
@@ -1728,10 +1786,15 @@ class RepexRunner(_RunnerBase):
             # dynamics object.
             dynamics._d._sire_mols.delete_all_frames()
 
-            _logger.info(
-                f"Finished block {block + 1} of {self._start_block + num_blocks} "
-                f"for {_lam_sym} = {lam:.5f}"
-            )
+            if block == -1:
+                _logger.info(
+                    f"Writing post-equilibration checkpoint for {_lam_sym} = {lam:.5f}"
+                )
+            else:
+                _logger.info(
+                    f"Finished block {block + 1} of {self._start_block + num_blocks} "
+                    f"for {_lam_sym} = {lam:.5f}"
+                )
 
             # Log the number of waters within the GCMC sampling volume.
             if gcmc_sampler is not None:
