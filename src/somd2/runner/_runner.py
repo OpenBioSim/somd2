@@ -770,6 +770,9 @@ class Runner(_RunnerBase):
                             finally:
                                 gcmc_sampler.pop()
 
+                            # GCMC always changes positions.
+                            needs_pre_run_snapshot = True
+
                             # Perform a terminal flip move at the specified frequency.
                             if (
                                 terminal_flip_sampler is not None
@@ -779,11 +782,23 @@ class Runner(_RunnerBase):
                                     f"Performing terminal flip move at "
                                     f"{_lam_sym} = {lambda_value:.5f}"
                                 )
-                                if (
-                                    terminal_flip_sampler.move(dynamics.context())
-                                    and self._config.randomise_velocities
-                                ):
-                                    dynamics.randomise_velocities()
+                                flip_accepted = terminal_flip_sampler.move(
+                                    dynamics.context()
+                                )
+                                if flip_accepted:
+                                    needs_pre_run_snapshot = True
+                                    if self._config.randomise_velocities:
+                                        dynamics.randomise_velocities()
+
+                            # Snapshot the context state once for crash recovery
+                            # if any MC move changed positions.
+                            if needs_pre_run_snapshot:
+                                dynamics._d._pre_run_state = (
+                                    dynamics.context().getState(
+                                        getPositions=True, getVelocities=True
+                                    )
+                                )
+                                needs_pre_run_snapshot = False
 
                             # Write ghost residues immediately after the GCMC
                             # move if a frame will be saved in the upcoming
@@ -1090,6 +1105,9 @@ class Runner(_RunnerBase):
                         finally:
                             gcmc_sampler.pop()
 
+                        # GCMC always changes positions.
+                        needs_pre_run_snapshot = True
+
                         # Perform a terminal flip move at the specified frequency.
                         if (
                             terminal_flip_sampler is not None
@@ -1099,11 +1117,21 @@ class Runner(_RunnerBase):
                                 f"Performing terminal flip move at "
                                 f"{_lam_sym} = {lambda_value:.5f}"
                             )
-                            if (
-                                terminal_flip_sampler.move(dynamics.context())
-                                and self._config.randomise_velocities
-                            ):
-                                dynamics.randomise_velocities()
+                            flip_accepted = terminal_flip_sampler.move(
+                                dynamics.context()
+                            )
+                            if flip_accepted:
+                                needs_pre_run_snapshot = True
+                                if self._config.randomise_velocities:
+                                    dynamics.randomise_velocities()
+
+                        # Snapshot the context state once for crash recovery
+                        # if any MC move changed positions.
+                        if needs_pre_run_snapshot:
+                            dynamics._d._pre_run_state = dynamics.context().getState(
+                                getPositions=True, getVelocities=True
+                            )
+                            needs_pre_run_snapshot = False
 
                         # Write ghost residues immediately after the GCMC
                         # move if a frame will be saved in the upcoming
