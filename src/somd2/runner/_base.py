@@ -555,9 +555,6 @@ class RunnerBase:
             self._config.checkpoint_frequency / self._config.energy_frequency
         )
 
-        # Zero the energy sample.
-        self._nrg_sample = 0
-
         # GCMC specific validation.
         if self._config.gcmc:
             if self._config.platform not in ["cuda", "opencl"]:
@@ -1197,10 +1194,11 @@ class RunnerBase:
         filenames["trajectory"] = str(output_directory / f"traj_{lam}.dcd")
         filenames["trajectory_chunk"] = str(output_directory / f"traj_{lam}_")
         filenames["energy_components"] = str(
-            output_directory / f"energy_components_{lam}.txt"
+            output_directory / f"energy_components_{lam}.csv"
         )
         filenames["gcmc_ghosts"] = str(output_directory / f"gcmc_ghosts_{lam}.txt")
         filenames["sampler_stats"] = str(output_directory / f"sampler_stats_{lam}.pkl")
+        filenames["xml"] = str(output_directory / f"system_{lam}.xml")
         if restart:
             filenames["config"] = str(
                 output_directory / increment_filename("config", "yaml")
@@ -2024,9 +2022,10 @@ class RunnerBase:
 
         return index, None
 
-    def _save_energy_components(self, index, context):
+    def _save_energy_components(self, index, context, time_ns):
         """
-        Internal function to save the energy components for each force group to file.
+        Internal function to save the energy components for each force group to a
+        CSV file.
 
         Parameters
         ----------
@@ -2036,44 +2035,38 @@ class RunnerBase:
 
         context : openmm.Context
             The current OpenMM context.
+
+        time_ns : float
+            The current simulation time in nanoseconds.
         """
 
-        from copy import deepcopy
+        import csv as _csv
         import openmm
 
-        # Get the current context and system.
-        system = deepcopy(context.getSystem())
+        filepath = self._filenames[index]["energy_components"]
+        file_exists = _Path(filepath).exists()
 
-        # Add each force to a unique group.
-        for i, f in enumerate(system.getForces()):
-            f.setForceGroup(i)
+        # Use the named force groups already assigned by sire_to_openmm_system,
+        # sorted alphabetically for a consistent column order across runs.
+        energies = {}
+        for name, grp in sorted(context._force_group_map.items()):
+            state = context.getState(getEnergy=True, groups=(1 << grp))
+            energies[name] = state.getPotentialEnergy().value_in_unit(
+                openmm.unit.kilocalories_per_mole
+            )
 
-        # Create a new context.
-        new_context = openmm.Context(system, deepcopy(context.getIntegrator()))
-        new_context.setPositions(context.getState(getPositions=True).getPositions())
+        columns = ["time"] + list(energies.keys())
+        row = {"time": round(time_ns, 6)} | {
+            name: round(nrg, 4) for name, nrg in energies.items()
+        }
 
-        header = f"{'# Sample':>10}"
-        record = f"{self._nrg_sample:>10}"
-
-        # Process the records.
-        for i, f in enumerate(system.getForces()):
-            state = new_context.getState(getEnergy=True, groups={i})
-            name = f.getName()
-            name_len = len(name)
-            header += f"{f.getName():>{name_len + 2}}"
-            record += f"{state.getPotentialEnergy().value_in_unit(openmm.unit.kilocalories_per_mole):>{name_len + 2}.2f}"
-
-        # Write to file.
-        if self._nrg_sample == 0:
-            with open(self._filenames[index]["energy_components"], "w") as f:
-                f.write(header + "\n")
-                f.write(record + "\n")
-        else:
-            with open(self._filenames[index]["energy_components"], "a") as f:
-                f.write(record + "\n")
-
-        # Increment the sample number.
-        self._nrg_sample += 1
+        with open(filepath, "a", newline="") as f:
+            writer = _csv.DictWriter(f, fieldnames=columns)
+            if not file_exists:
+                # Write a comment line with units before the header.
+                f.write("# time: ns, energy: kcal/mol\n")
+                writer.writeheader()
+            writer.writerow(row)
 
     def _restore_backup_files(self):
         """

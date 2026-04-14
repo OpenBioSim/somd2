@@ -592,10 +592,6 @@ class Runner(_RunnerBase):
                     system.set_time(_sr.u("0ps"))
 
             except Exception as e:
-                try:
-                    self._save_energy_components(index, dynamics.context())
-                except:
-                    pass
                 raise RuntimeError(f"Equilibration failed: {e}")
 
         # Work out the lambda values for finite-difference gradient analysis.
@@ -644,6 +640,11 @@ class Runner(_RunnerBase):
 
         # Create the dynamics object.
         dynamics = system.dynamics(**dynamics_kwargs)
+
+        # Write the OpenMM XML file to the output directory.
+        if self._config.save_xml and not is_restart:
+            _logger.info(f"Writing OpenMM XML for {_lam_sym} = {lambda_value:.5f}")
+            dynamics.to_xml(self._filenames[index]["xml"])
 
         # Reset the GCMC sampler. This resets the sampling statistics and clears
         # the associated OpenMM forces.
@@ -914,22 +915,20 @@ class Runner(_RunnerBase):
                             save_crash_report=self._config.save_crash_report,
                         )
                 except Exception as e:
-                    try:
-                        self._save_energy_components(index, dynamics.context())
-                    except:
-                        pass
                     raise RuntimeError(
                         f"Dynamics block {block + 1} for {_lam_sym} = {lambda_value:.5f} failed: {e}"
                     )
 
                 # Checkpoint.
                 try:
-                    # Save the energy contribution for each force.
-                    if self._config.save_energy_components:
-                        self._save_energy_components(index, dynamics.context())
-
                     # Commit the current system.
                     system = dynamics.commit()
+
+                    # Save the energy contribution for each force.
+                    if self._config.save_energy_components:
+                        self._save_energy_components(
+                            index, dynamics.context(), system.time().to("ns")
+                        )
 
                     # If performing GCMC, then we need to flag the ghost waters.
                     if gcmc_sampler is not None:
@@ -1056,12 +1055,14 @@ class Runner(_RunnerBase):
                         save_crash_report=self._config.save_crash_report,
                     )
 
-                    # Save the energy contribution for each force.
-                    if self._config.save_energy_components:
-                        self._save_energy_components(index, dynamics.context())
-
                     # Commit the current system.
                     system = dynamics.commit()
+
+                    # Save the energy contribution for each force.
+                    if self._config.save_energy_components:
+                        self._save_energy_components(
+                            index, dynamics.context(), system.time().to("ns")
+                        )
 
                     # Record the end time.
                     block_end = _timer()
@@ -1101,10 +1102,6 @@ class Runner(_RunnerBase):
                         f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"
                     )
                 except Exception as e:
-                    try:
-                        self._save_energy_components(index, dynamics.context())
-                    except:
-                        pass
                     raise RuntimeError(
                         f"Final dynamics block for {lam_sym} = {lambda_value:.5f} failed: {e}"
                     )
@@ -1232,10 +1229,6 @@ class Runner(_RunnerBase):
                         save_crash_report=self._config.save_crash_report,
                     )
             except Exception as e:
-                try:
-                    self._save_energy_components(index, dynamics.context())
-                except:
-                    pass
                 raise RuntimeError(
                     f"Dynamics for {_lam_sym} = {lambda_value:.5f} failed: {e}"
                 )

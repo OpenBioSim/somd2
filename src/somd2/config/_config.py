@@ -164,7 +164,8 @@ class Config:
         pert_file=None,
         auto_fix_minimise=True,
         save_crash_report=False,
-        save_energy_components=False,
+        save_energy_components=True,
+        save_xml=False,
         page_size=None,
         timeout="300 s",
     ):
@@ -506,7 +507,11 @@ class Config:
 
         save_energy_components: bool
             Whether to save the energy contribution for each force when checkpointing.
-            This is useful when debugging crashes.
+
+        save_xml: bool
+            Whether to write an XML file for the OpenMM system to the output
+            directory on startup. This can be useful for debugging or for
+            use with other tools that can read OpenMM XML files.
 
         page_size: int
             The page size for trajectory handling in megabytes. If None, then Sire
@@ -607,6 +612,7 @@ class Config:
         self.auto_fix_minimise = auto_fix_minimise
         self.save_crash_report = save_crash_report
         self.save_energy_components = save_energy_components
+        self.save_xml = save_xml
         self.timeout = timeout
         self.num_energy_neighbours = num_energy_neighbours
         self.null_energy = null_energy
@@ -2418,6 +2424,16 @@ class Config:
         if not isinstance(save_energy_components, bool):
             raise ValueError("'save_energy_components' must be of type 'bool'")
         self._save_energy_components = save_energy_components
+
+    @property
+    def save_xml(self):
+        return self._save_xml
+
+    @save_xml.setter
+    def save_xml(self, save_xml):
+        if not isinstance(save_xml, bool):
+            raise ValueError("'save_xml' must be of type 'bool'")
+        self._save_xml = save_xml
 
     @property
     def page_size(self):
