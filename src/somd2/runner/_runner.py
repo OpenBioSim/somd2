@@ -641,6 +641,11 @@ class Runner(_RunnerBase):
         # Create the dynamics object.
         dynamics = system.dynamics(**dynamics_kwargs)
 
+        # Write the OpenMM XML file to the output directory.
+        if self._config.save_xml and not is_restart:
+            _logger.info(f"Writing OpenMM XML for {_lam_sym} = {lambda_value:.5f}")
+            dynamics.to_xml(self._filenames[index]["xml"])
+
         # Reset the GCMC sampler. This resets the sampling statistics and clears
         # the associated OpenMM forces.
         if gcmc_sampler is not None:

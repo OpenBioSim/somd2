@@ -53,6 +53,7 @@ class DynamicsCache:
         gcmc_kwargs=None,
         output_directory=None,
         perturbed_system=None,
+        xml_filenames=None,
     ):
         """
         Constructor.
@@ -84,6 +85,10 @@ class DynamicsCache:
         perturbed_system: :class: `System <sire.system.System>`
             The perturbed end-state system used to seed starting coordinates for
             lambda > 0.5 replicas. If None, the perturbed state is not used.
+
+        xml_filenames: list of str
+            A list of file paths for the OpenMM XML output, one per replica.
+            If None, XML files are not written.
         """
 
         # Warn if the number of replicas is not a multiple of the number of GPUs.
@@ -117,6 +122,7 @@ class DynamicsCache:
             gcmc_kwargs=gcmc_kwargs,
             output_directory=output_directory,
             perturbed_system=perturbed_system,
+            xml_filenames=xml_filenames,
         )
 
     def __setstate__(self, state):
@@ -168,6 +174,7 @@ class DynamicsCache:
         gcmc_kwargs=None,
         output_directory=None,
         perturbed_system=None,
+        xml_filenames=None,
     ):
         """
         Create the dynamics objects.
@@ -199,6 +206,10 @@ class DynamicsCache:
         perturbed_system: :class: `System <sire.system.System>`
             The perturbed end-state system used to seed starting coordinates for
             lambda > 0.5 replicas. If None, the perturbed state is not used.
+
+        xml_filenames: list of str
+            A list of file paths for the OpenMM XML output, one per replica.
+            If None, XML files are not written.
         """
 
         from math import floor
@@ -314,6 +325,13 @@ class DynamicsCache:
 
             # Append the dynamics object.
             self._dynamics.append(dynamics)
+
+            # Write the OpenMM XML file to the output directory.
+            if xml_filenames is not None:
+                _logger.info(
+                    f"Writing OpenMM XML for lambda {lam:.5f} on device {device}"
+                )
+                dynamics.to_xml(xml_filenames[i])
 
             # Track memory footprint for this device.
             info = device_mem[device]
@@ -740,6 +758,11 @@ class RepexRunner(_RunnerBase):
 
         # Create the dynamics cache.
         if not self._is_restart:
+            xml_filenames = (
+                [self._filenames[i]["xml"] for i in range(len(self._lambda_values))]
+                if self._config.save_xml
+                else None
+            )
             self._dynamics_cache = DynamicsCache(
                 self._system,
                 self._lambda_values,
@@ -749,6 +772,7 @@ class RepexRunner(_RunnerBase):
                 gcmc_kwargs=self._gcmc_kwargs,
                 perturbed_system=self._perturbed_system,
                 output_directory=self._config.output_directory,
+                xml_filenames=xml_filenames,
             )
         else:
             _logger.debug("Restarting from file")
