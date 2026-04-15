@@ -473,22 +473,12 @@ class Runner(_RunnerBase):
                 self._terminal_groups,
                 float(self._config.temperature.value()),
             )
-            flip_every = max(
-                1,
-                round(
-                    (
-                        self._config.terminal_flip_frequency
-                        / self._config.energy_frequency
-                    ).value()
-                ),
-            )
             _logger.info(
                 f"Terminal flip sampler ready at {_lam_sym} = {lambda_value:.5f} "
-                f"(every {flip_every} energy block(s))"
+                f"(every {self._config.terminal_flip_frequency})"
             )
         else:
             terminal_flip_sampler = None
-            flip_every = None
 
         # Minimisation.
         if self._config.minimise:
@@ -772,37 +762,87 @@ class Runner(_RunnerBase):
 
                 # Run the dynamics.
                 try:
-                    # GCMC specific handling. Note that the frame and checkpoint
-                    # frequencies are multiples of the energy frequency so we can
-                    # run in energy frequency blocks with no remainder.
-                    if self._config.gcmc:
-                        # Initialise the run time and time at which the next frame is saved.
+                    # Run in sub-blocks when any MC sampler is active or energy
+                    # components are being saved; otherwise run the full block.
+                    needs_subblock = (
+                        gcmc_sampler is not None
+                        or terminal_flip_sampler is not None
+                        or self._config.save_energy_components
+                    )
+                    if needs_subblock:
                         runtime = _sr.u("0ps")
-                        save_frames = self._config.frame_frequency > 0
-                        next_frame = self._config.frame_frequency
+                        ec_elapsed = _sr.u("0ps")
                         flip_counter = 0
-
-                        # Loop until we reach the runtime.
-                        while runtime < checkpoint_frequency:
-                            # Perform a GCMC move before dynamics so the ghost
-                            # state is consistent with the energies computed
-                            # during dynamics.
-                            _logger.info(
-                                f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
+                        save_frames = (
+                            gcmc_sampler is not None
+                            and self._config.frame_frequency > 0
+                        )
+                        next_frame = (
+                            self._config.frame_frequency if save_frames else None
+                        )
+                        # Sub-block size: shortest active MC frequency, or
+                        # energy_frequency when only saving energy components.
+                        if (
+                            gcmc_sampler is not None
+                            and terminal_flip_sampler is not None
+                        ):
+                            block_size = min(
+                                self._config.gcmc_frequency,
+                                self._config.terminal_flip_frequency,
                             )
-                            gcmc_sampler.push()
-                            try:
-                                gcmc_sampler.move(dynamics.context())
-                            finally:
-                                gcmc_sampler.pop()
+                        elif gcmc_sampler is not None:
+                            block_size = self._config.gcmc_frequency
+                        elif terminal_flip_sampler is not None:
+                            block_size = self._config.terminal_flip_frequency
+                        else:
+                            block_size = self._config.energy_frequency
+                        # How often to attempt each MC move (in sub-block units).
+                        gcmc_every = (
+                            max(
+                                1,
+                                round(
+                                    (self._config.gcmc_frequency / block_size).value()
+                                ),
+                            )
+                            if gcmc_sampler is not None
+                            else None
+                        )
+                        mc_flip_every = (
+                            max(
+                                1,
+                                round(
+                                    (
+                                        self._config.terminal_flip_frequency
+                                        / block_size
+                                    ).value()
+                                ),
+                            )
+                            if terminal_flip_sampler is not None
+                            else None
+                        )
 
-                            # GCMC always changes positions.
-                            needs_pre_run_snapshot = self._config.auto_fix_minimise
+                        while runtime < checkpoint_frequency:
+                            needs_pre_run_snapshot = False
 
-                            # Perform a terminal flip move at the specified frequency.
+                            # GCMC move.
+                            if (
+                                gcmc_sampler is not None
+                                and flip_counter % gcmc_every == 0
+                            ):
+                                _logger.info(
+                                    f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
+                                )
+                                gcmc_sampler.push()
+                                try:
+                                    gcmc_sampler.move(dynamics.context())
+                                finally:
+                                    gcmc_sampler.pop()
+                                needs_pre_run_snapshot = self._config.auto_fix_minimise
+
+                            # Terminal flip move.
                             if (
                                 terminal_flip_sampler is not None
-                                and flip_counter % flip_every == 0
+                                and flip_counter % mc_flip_every == 0
                             ):
                                 _logger.info(
                                     f"Performing terminal flip move at "
@@ -817,30 +857,24 @@ class Runner(_RunnerBase):
                                     if self._config.randomise_velocities:
                                         dynamics.randomise_velocities()
 
-                            # Snapshot the context state once for crash recovery
-                            # if any MC move changed positions.
+                            # Snapshot the context state for crash recovery if
+                            # any MC move changed positions.
                             if needs_pre_run_snapshot:
                                 dynamics._d._pre_run_state = (
                                     dynamics.context().getState(
                                         getPositions=True, getVelocities=True
                                     )
                                 )
-                                needs_pre_run_snapshot = False
 
-                            # Write ghost residues immediately after the GCMC
-                            # move if a frame will be saved in the upcoming
-                            # dynamics block.
-                            if (
-                                save_frames
-                                and runtime + self._config.energy_frequency
-                                >= next_frame
-                            ):
+                            # Write ghost residues immediately before the dynamics
+                            # block if a frame will be saved within it.
+                            if save_frames and runtime + block_size >= next_frame:
                                 gcmc_sampler.write_ghost_residues()
                                 next_frame += self._config.frame_frequency
 
-                            # Run the dynamics in blocks of the GCMC frequency.
+                            # Run the dynamics block.
                             dynamics.run(
-                                self._config.gcmc_frequency,
+                                block_size,
                                 energy_frequency=self._config.energy_frequency,
                                 frame_frequency=self._config.frame_frequency,
                                 lambda_windows=lambda_array,
@@ -850,7 +884,6 @@ class Runner(_RunnerBase):
                                 num_energy_neighbours=num_energy_neighbours,
                                 null_energy=self._config.null_energy,
                                 save_crash_report=self._config.save_crash_report,
-                                # GCMC specific options.
                                 excess_chemical_potential=(
                                     self._mu_ex if gcmc_sampler is not None else None
                                 ),
@@ -861,45 +894,19 @@ class Runner(_RunnerBase):
                                 ),
                             )
 
-                            # Update the runtime and flip counter.
-                            runtime += self._config.energy_frequency
+                            runtime += block_size
+                            ec_elapsed += block_size
                             flip_counter += 1
 
-                    elif terminal_flip_sampler is not None:
-                        # Terminal flip without GCMC: perform flip moves at the
-                        # specified frequency then run the full dynamics block.
-                        n_flips = max(
-                            1,
-                            round(
-                                (
-                                    checkpoint_frequency
-                                    / self._config.terminal_flip_frequency
-                                ).value()
-                            ),
-                        )
-                        for _ in range(n_flips):
-                            _logger.info(
-                                f"Performing terminal flip move at "
-                                f"{_lam_sym} = {lambda_value:.5f}"
-                            )
-                            if (
-                                terminal_flip_sampler.move(dynamics.context())
-                                and self._config.randomise_velocities
-                            ):
-                                dynamics.randomise_velocities()
-
-                        dynamics.run(
-                            checkpoint_frequency,
-                            energy_frequency=self._config.energy_frequency,
-                            frame_frequency=self._config.frame_frequency,
-                            lambda_windows=lambda_array,
-                            rest2_scale_factors=rest2_scale_factors,
-                            save_velocities=self._config.save_velocities,
-                            auto_fix_minimise=self._config.auto_fix_minimise,
-                            num_energy_neighbours=num_energy_neighbours,
-                            null_energy=self._config.null_energy,
-                            save_crash_report=self._config.save_crash_report,
-                        )
+                            # Save energy components.
+                            if self._config.save_energy_components:
+                                self._save_energy_components(
+                                    index,
+                                    dynamics.context(),
+                                    (block * checkpoint_frequency + ec_elapsed).to(
+                                        "ns"
+                                    ),
+                                )
 
                     else:
                         dynamics.run(
@@ -923,12 +930,6 @@ class Runner(_RunnerBase):
                 try:
                     # Commit the current system.
                     system = dynamics.commit()
-
-                    # Save the energy contribution for each force.
-                    if self._config.save_energy_components:
-                        self._save_energy_components(
-                            index, dynamics.context(), system.time().to("ns")
-                        )
 
                     # If performing GCMC, then we need to flag the ghost waters.
                     if gcmc_sampler is not None:
@@ -1103,38 +1104,79 @@ class Runner(_RunnerBase):
                     )
                 except Exception as e:
                     raise RuntimeError(
-                        f"Final dynamics block for {lam_sym} = {lambda_value:.5f} failed: {e}"
+                        f"Final dynamics block for {_lam_sym} = {lambda_value:.5f} failed: {e}"
                     )
         else:
             try:
-                if gcmc_sampler is not None:
-                    # Initialise the run time and time at which the next frame is saved.
+                # Run in sub-blocks when any MC sampler is active or energy
+                # components are being saved; otherwise run a single block.
+                needs_subblock = (
+                    gcmc_sampler is not None
+                    or terminal_flip_sampler is not None
+                    or self._config.save_energy_components
+                )
+                if needs_subblock:
                     runtime = _sr.u("0ps")
-                    save_frames = self._config.frame_frequency > 0
-                    next_frame = self._config.frame_frequency
+                    ec_elapsed = _sr.u("0ps")
                     flip_counter = 0
-
-                    # Loop until we reach the runtime.
-                    while runtime < time:
-                        # Perform a GCMC move before dynamics so the ghost
-                        # state is consistent with the energies computed
-                        # during dynamics.
-                        _logger.info(
-                            f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
+                    save_frames = (
+                        gcmc_sampler is not None and self._config.frame_frequency > 0
+                    )
+                    next_frame = self._config.frame_frequency if save_frames else None
+                    # Sub-block size: shortest active MC frequency, or
+                    # energy_frequency when only saving energy components.
+                    if gcmc_sampler is not None and terminal_flip_sampler is not None:
+                        block_size = min(
+                            self._config.gcmc_frequency,
+                            self._config.terminal_flip_frequency,
                         )
-                        gcmc_sampler.push()
-                        try:
-                            gcmc_sampler.move(dynamics.context())
-                        finally:
-                            gcmc_sampler.pop()
+                    elif gcmc_sampler is not None:
+                        block_size = self._config.gcmc_frequency
+                    elif terminal_flip_sampler is not None:
+                        block_size = self._config.terminal_flip_frequency
+                    else:
+                        block_size = self._config.energy_frequency
+                    # How often to attempt each MC move (in sub-block units).
+                    gcmc_every = (
+                        max(
+                            1, round((self._config.gcmc_frequency / block_size).value())
+                        )
+                        if gcmc_sampler is not None
+                        else None
+                    )
+                    mc_flip_every = (
+                        max(
+                            1,
+                            round(
+                                (
+                                    self._config.terminal_flip_frequency / block_size
+                                ).value()
+                            ),
+                        )
+                        if terminal_flip_sampler is not None
+                        else None
+                    )
+                    time_base = self._config.runtime - time
 
-                        # GCMC always changes positions.
-                        needs_pre_run_snapshot = True
+                    while runtime < time:
+                        needs_pre_run_snapshot = False
 
-                        # Perform a terminal flip move at the specified frequency.
+                        # GCMC move.
+                        if gcmc_sampler is not None and flip_counter % gcmc_every == 0:
+                            _logger.info(
+                                f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
+                            )
+                            gcmc_sampler.push()
+                            try:
+                                gcmc_sampler.move(dynamics.context())
+                            finally:
+                                gcmc_sampler.pop()
+                            needs_pre_run_snapshot = self._config.auto_fix_minimise
+
+                        # Terminal flip move.
                         if (
                             terminal_flip_sampler is not None
-                            and flip_counter % flip_every == 0
+                            and flip_counter % mc_flip_every == 0
                         ):
                             _logger.info(
                                 f"Performing terminal flip move at "
@@ -1144,31 +1186,27 @@ class Runner(_RunnerBase):
                                 dynamics.context()
                             )
                             if flip_accepted:
-                                needs_pre_run_snapshot = True
+                                if self._config.auto_fix_minimise:
+                                    needs_pre_run_snapshot = True
                                 if self._config.randomise_velocities:
                                     dynamics.randomise_velocities()
 
-                        # Snapshot the context state once for crash recovery
-                        # if any MC move changed positions.
+                        # Snapshot the context state for crash recovery if
+                        # any MC move changed positions.
                         if needs_pre_run_snapshot:
                             dynamics._d._pre_run_state = dynamics.context().getState(
                                 getPositions=True, getVelocities=True
                             )
-                            needs_pre_run_snapshot = False
 
-                        # Write ghost residues immediately after the GCMC
-                        # move if a frame will be saved in the upcoming
-                        # dynamics block.
-                        if (
-                            save_frames
-                            and runtime + self._config.energy_frequency >= next_frame
-                        ):
+                        # Write ghost residues immediately before the dynamics
+                        # block if a frame will be saved within it.
+                        if save_frames and runtime + block_size >= next_frame:
                             gcmc_sampler.write_ghost_residues()
                             next_frame += self._config.frame_frequency
 
-                        # Run the dynamics in blocks of the GCMC frequency.
+                        # Run the dynamics block.
                         dynamics.run(
-                            self._config.gcmc_frequency,
+                            block_size,
                             energy_frequency=self._config.energy_frequency,
                             frame_frequency=self._config.frame_frequency,
                             lambda_windows=lambda_array,
@@ -1178,42 +1216,27 @@ class Runner(_RunnerBase):
                             num_energy_neighbours=num_energy_neighbours,
                             null_energy=self._config.null_energy,
                             save_crash_report=self._config.save_crash_report,
+                            excess_chemical_potential=(
+                                self._mu_ex if gcmc_sampler is not None else None
+                            ),
+                            num_waters=(
+                                _np.sum(gcmc_sampler.water_state())
+                                if gcmc_sampler is not None
+                                else None
+                            ),
                         )
 
-                        # Update the runtime and flip counter.
-                        runtime += self._config.energy_frequency
+                        runtime += block_size
+                        ec_elapsed += block_size
                         flip_counter += 1
 
-                elif terminal_flip_sampler is not None:
-                    # Terminal flip without GCMC: perform flip moves at the
-                    # start then run the full dynamics block.
-                    n_flips = max(
-                        1,
-                        round((time / self._config.terminal_flip_frequency).value()),
-                    )
-                    for _ in range(n_flips):
-                        _logger.info(
-                            f"Performing terminal flip move at "
-                            f"{_lam_sym} = {lambda_value:.5f}"
-                        )
-                        if (
-                            terminal_flip_sampler.move(dynamics.context())
-                            and self._config.randomise_velocities
-                        ):
-                            dynamics.randomise_velocities()
-
-                    dynamics.run(
-                        time,
-                        energy_frequency=self._config.energy_frequency,
-                        frame_frequency=self._config.frame_frequency,
-                        lambda_windows=lambda_array,
-                        rest2_scale_factors=rest2_scale_factors,
-                        save_velocities=self._config.save_velocities,
-                        auto_fix_minimise=self._config.auto_fix_minimise,
-                        num_energy_neighbours=num_energy_neighbours,
-                        null_energy=self._config.null_energy,
-                        save_crash_report=self._config.save_crash_report,
-                    )
+                        # Save energy components.
+                        if self._config.save_energy_components:
+                            self._save_energy_components(
+                                index,
+                                dynamics.context(),
+                                (time_base + ec_elapsed).to("ns"),
+                            )
 
                 else:
                     dynamics.run(

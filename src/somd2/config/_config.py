@@ -506,7 +506,11 @@ class Config:
             Whether to save a crash report if the simulation crashes.
 
         save_energy_components: bool
-            Whether to save the energy contribution for each force when checkpointing.
+            Whether to save per-force-group energy contributions to a Parquet file
+            in the output directory. Energies are recorded at every 'energy_frequency'
+            interval. When not running replica exchange, the interval is instead the
+            shortest active MC frequency when running with GCMC or terminal flip moves.
+            Intended for debugging purposes.
 
         save_xml: bool
             Whether to write an XML file for the OpenMM system to the output
