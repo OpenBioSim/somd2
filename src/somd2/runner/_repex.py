@@ -1108,6 +1108,16 @@ class RepexRunner(_RunnerBase):
             # Whether a frame is saved at the end of the cycle.
             write_gcmc_ghosts = (i + 1) % cycles_per_frame == 0
 
+            # Current simulation time in ns for energy components saving.
+            time_ns = (
+                (
+                    self._start_block * checkpoint_frequency
+                    + (i + 1) * self._config.energy_frequency
+                ).to("ns")
+                if self._config.save_energy_components
+                else None
+            )
+
             # Run a dynamics block for each replica, making sure only each GPU is only
             # oversubscribed by a factor of self._config.oversubscription_factor.
             for j in range(num_batches):
@@ -1121,6 +1131,7 @@ class RepexRunner(_RunnerBase):
                             repeat(is_gcmc),
                             repeat(write_gcmc_ghosts),
                             repeat(is_terminal_flip),
+                            repeat(time_ns),
                         ):
                             if not result:
                                 _logger.error(
@@ -1294,6 +1305,7 @@ class RepexRunner(_RunnerBase):
         is_gcmc=False,
         write_gcmc_ghosts=False,
         is_terminal_flip=False,
+        time_ns=None,
     ):
         """
         Run a dynamics block for a given replica.
@@ -1320,6 +1332,10 @@ class RepexRunner(_RunnerBase):
         is_terminal_flip: bool
             Whether a terminal flip MC move should be performed before the
             dynamics block.
+
+        time_ns: float or None
+            The current simulation time in nanoseconds, used when saving energy
+            components. If None, energy components are not saved.
 
         Returns
         -------
@@ -1416,6 +1432,10 @@ class RepexRunner(_RunnerBase):
 
             # Save the OpenMM state.
             self._dynamics_cache.save_openmm_state(index)
+
+            # Save the energy contribution for each force.
+            if self._config.save_energy_components and time_ns is not None:
+                self._save_energy_components(index, dynamics.context(), time_ns)
 
             # Get the energy at each lambda value.
             energies = dynamics._current_energy_array()
@@ -1780,12 +1800,6 @@ class RepexRunner(_RunnerBase):
 
             # Commit the current system.
             system = dynamics.commit()
-
-            # Save the energy contribution for each force.
-            if self._config.save_energy_components:
-                self._save_energy_components(
-                    index, dynamics.context(), system.time().to("ns")
-                )
 
             # If performing GCMC, then we need to flag the ghost waters.
             if gcmc_sampler is not None:

@@ -498,6 +498,10 @@ class RunnerBase:
         # Check the output directories and create names of output files.
         self._filenames = self._prepare_output()
 
+        # Per-window cache of the last saved energy-components time (ns),
+        # used to skip duplicate rows on restart.
+        self._last_ec_time = {}
+
         # Store the current system as a reference.
         self._reference_system = self._system.clone()
 
@@ -1194,7 +1198,7 @@ class RunnerBase:
         filenames["trajectory"] = str(output_directory / f"traj_{lam}.dcd")
         filenames["trajectory_chunk"] = str(output_directory / f"traj_{lam}_")
         filenames["energy_components"] = str(
-            output_directory / f"energy_components_{lam}.csv"
+            output_directory / f"energy_components_{lam}.parquet"
         )
         filenames["gcmc_ghosts"] = str(output_directory / f"gcmc_ghosts_{lam}.txt")
         filenames["sampler_stats"] = str(output_directory / f"sampler_stats_{lam}.pkl")
@@ -2020,12 +2024,23 @@ class RunnerBase:
         except Exception as e:
             return index, e
 
+        try:
+            # Backup the existing energy components file, if it exists.
+            path = _Path(self._filenames[index]["energy_components"])
+            if path.exists() and path.stat().st_size > 0:
+                _copyfile(
+                    self._filenames[index]["energy_components"],
+                    str(self._filenames[index]["energy_components"]) + ".bak",
+                )
+        except Exception as e:
+            return index, e
+
         return index, None
 
     def _save_energy_components(self, index, context, time_ns):
         """
         Internal function to save the energy components for each force group to a
-        CSV file.
+        Parquet file.
 
         Parameters
         ----------
@@ -2040,11 +2055,28 @@ class RunnerBase:
             The current simulation time in nanoseconds.
         """
 
-        import csv as _csv
+        import json as _json
         import openmm
+        import pandas as _pd
+        import pyarrow as _pa
+        import pyarrow.parquet as _pq_local
 
         filepath = self._filenames[index]["energy_components"]
-        file_exists = _Path(filepath).exists()
+
+        # Lazy-initialise the last saved time for restart deduplication.
+        # On the first call for this window, read the existing file (if any)
+        # to find the maximum time already written.
+        if index not in self._last_ec_time:
+            path = _Path(filepath)
+            if path.exists() and path.stat().st_size > 0:
+                existing = _pq_local.read_table(filepath).to_pandas()
+                self._last_ec_time[index] = float(existing["time"].max())
+            else:
+                self._last_ec_time[index] = -1.0
+
+        # Skip rows that have already been written (restart deduplication).
+        if time_ns <= self._last_ec_time[index]:
+            return
 
         # Use the named force groups already assigned by sire_to_openmm_system,
         # sorted alphabetically for a consistent column order across runs.
@@ -2055,18 +2087,25 @@ class RunnerBase:
                 openmm.unit.kilocalories_per_mole
             )
 
-        columns = ["time"] + list(energies.keys())
-        row = {"time": round(time_ns, 6)} | {
-            name: round(nrg, 4) for name, nrg in energies.items()
-        }
+        row = {"time": round(time_ns, 6)} | energies
+        df = _pd.DataFrame([row])
 
-        with open(filepath, "a", newline="") as f:
-            writer = _csv.DictWriter(f, fieldnames=columns)
-            if not file_exists:
-                # Write a comment line with units before the header.
-                f.write("# time: ns, energy: kcal/mol\n")
-                writer.writeheader()
-            writer.writerow(row)
+        path = _Path(filepath)
+        if path.exists() and path.stat().st_size > 0:
+            _parquet_append(filepath, df)
+        else:
+            # First write: embed units as schema metadata under the "somd2" key,
+            # consistent with how the energy trajectory parquet files are written.
+            table = _pa.Table.from_pandas(df)
+            meta = _json.dumps(
+                {"time_units": "ns", "energy_units": "kcal/mol"}
+            ).encode()
+            table = table.replace_schema_metadata(
+                {b"somd2": meta, **table.schema.metadata}
+            )
+            _pq_local.write_table(table, filepath)
+
+        self._last_ec_time[index] = time_ns
 
     def _restore_backup_files(self):
         """

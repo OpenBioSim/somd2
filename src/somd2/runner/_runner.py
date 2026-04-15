@@ -781,6 +781,9 @@ class Runner(_RunnerBase):
                         save_frames = self._config.frame_frequency > 0
                         next_frame = self._config.frame_frequency
                         flip_counter = 0
+                        # Track elapsed simulation time separately for energy components,
+                        # since dynamics blocks increment by gcmc_frequency not energy_frequency.
+                        ec_elapsed = _sr.u("0ps")
 
                         # Loop until we reach the runtime.
                         while runtime < checkpoint_frequency:
@@ -863,6 +866,56 @@ class Runner(_RunnerBase):
 
                             # Update the runtime and flip counter.
                             runtime += self._config.energy_frequency
+                            ec_elapsed += self._config.gcmc_frequency
+                            flip_counter += 1
+
+                            # Save the energy contribution for each force.
+                            if self._config.save_energy_components:
+                                self._save_energy_components(
+                                    index,
+                                    dynamics.context(),
+                                    (block * checkpoint_frequency + ec_elapsed).to(
+                                        "ns"
+                                    ),
+                                )
+
+                    elif self._config.save_energy_components:
+                        # Sub-block loop to save energy components at energy_frequency
+                        # intervals, with optional terminal flip moves.
+                        runtime = _sr.u("0ps")
+                        flip_counter = 0
+                        while runtime < checkpoint_frequency:
+                            if (
+                                terminal_flip_sampler is not None
+                                and flip_counter % flip_every == 0
+                            ):
+                                _logger.info(
+                                    f"Performing terminal flip move at "
+                                    f"{_lam_sym} = {lambda_value:.5f}"
+                                )
+                                if (
+                                    terminal_flip_sampler.move(dynamics.context())
+                                    and self._config.randomise_velocities
+                                ):
+                                    dynamics.randomise_velocities()
+                            dynamics.run(
+                                self._config.energy_frequency,
+                                energy_frequency=self._config.energy_frequency,
+                                frame_frequency=self._config.frame_frequency,
+                                lambda_windows=lambda_array,
+                                rest2_scale_factors=rest2_scale_factors,
+                                save_velocities=self._config.save_velocities,
+                                auto_fix_minimise=self._config.auto_fix_minimise,
+                                num_energy_neighbours=num_energy_neighbours,
+                                null_energy=self._config.null_energy,
+                                save_crash_report=self._config.save_crash_report,
+                            )
+                            runtime += self._config.energy_frequency
+                            self._save_energy_components(
+                                index,
+                                dynamics.context(),
+                                (block * checkpoint_frequency + runtime).to("ns"),
+                            )
                             flip_counter += 1
 
                     elif terminal_flip_sampler is not None:
@@ -923,12 +976,6 @@ class Runner(_RunnerBase):
                 try:
                     # Commit the current system.
                     system = dynamics.commit()
-
-                    # Save the energy contribution for each force.
-                    if self._config.save_energy_components:
-                        self._save_energy_components(
-                            index, dynamics.context(), system.time().to("ns")
-                        )
 
                     # If performing GCMC, then we need to flag the ghost waters.
                     if gcmc_sampler is not None:
@@ -1103,7 +1150,7 @@ class Runner(_RunnerBase):
                     )
                 except Exception as e:
                     raise RuntimeError(
-                        f"Final dynamics block for {lam_sym} = {lambda_value:.5f} failed: {e}"
+                        f"Final dynamics block for {_lam_sym} = {lambda_value:.5f} failed: {e}"
                     )
         else:
             try:
@@ -1113,6 +1160,9 @@ class Runner(_RunnerBase):
                     save_frames = self._config.frame_frequency > 0
                     next_frame = self._config.frame_frequency
                     flip_counter = 0
+                    # Track elapsed simulation time separately for energy components,
+                    # since dynamics blocks increment by gcmc_frequency not energy_frequency.
+                    ec_elapsed = _sr.u("0ps")
 
                     # Loop until we reach the runtime.
                     while runtime < time:
@@ -1182,6 +1232,56 @@ class Runner(_RunnerBase):
 
                         # Update the runtime and flip counter.
                         runtime += self._config.energy_frequency
+                        ec_elapsed += self._config.gcmc_frequency
+                        flip_counter += 1
+
+                        # Save the energy contribution for each force.
+                        if self._config.save_energy_components:
+                            self._save_energy_components(
+                                index,
+                                dynamics.context(),
+                                (self._config.runtime - time + ec_elapsed).to("ns"),
+                            )
+
+                elif self._config.save_energy_components:
+                    # Sub-block loop to save energy components at energy_frequency
+                    # intervals, with optional terminal flip moves.
+                    runtime = _sr.u("0ps")
+                    flip_counter = 0
+                    # Elapsed time before this run (0 for fresh, restart time for restart).
+                    time_base = self._config.runtime - time
+                    while runtime < time:
+                        if (
+                            terminal_flip_sampler is not None
+                            and flip_counter % flip_every == 0
+                        ):
+                            _logger.info(
+                                f"Performing terminal flip move at "
+                                f"{_lam_sym} = {lambda_value:.5f}"
+                            )
+                            if (
+                                terminal_flip_sampler.move(dynamics.context())
+                                and self._config.randomise_velocities
+                            ):
+                                dynamics.randomise_velocities()
+                        dynamics.run(
+                            self._config.energy_frequency,
+                            energy_frequency=self._config.energy_frequency,
+                            frame_frequency=self._config.frame_frequency,
+                            lambda_windows=lambda_array,
+                            rest2_scale_factors=rest2_scale_factors,
+                            save_velocities=self._config.save_velocities,
+                            auto_fix_minimise=self._config.auto_fix_minimise,
+                            num_energy_neighbours=num_energy_neighbours,
+                            null_energy=self._config.null_energy,
+                            save_crash_report=self._config.save_crash_report,
+                        )
+                        runtime += self._config.energy_frequency
+                        self._save_energy_components(
+                            index,
+                            dynamics.context(),
+                            (time_base + runtime).to("ns"),
+                        )
                         flip_counter += 1
 
                 elif terminal_flip_sampler is not None:
