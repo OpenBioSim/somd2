@@ -245,8 +245,8 @@ somd2 perturbable_system.bss --terminal-flip-frequency "1 ps" --terminal-flip-an
 ## Debugging with energy components
 
 To help diagnose simulation instabilities, `SOMD2` can record the potential
-energy contribution from each OpenMM force group at every `energy-frequency`
-interval. This is enabled with the `--save-energy-components` flag:
+energy contribution from each OpenMM force group. This is enabled with the
+`--save-energy-components` flag:
 
 ```
 somd2 perturbable_system.bss --save-energy-components
@@ -255,6 +255,14 @@ somd2 perturbable_system.bss --save-energy-components
 One Parquet file per λ window is written to the output directory, named
 `energy_components_<lambda>.parquet`. Times are in nanoseconds and energies in
 kcal/mol; both are stored as schema metadata in the file.
+
+The recording interval depends on the runner and active samplers:
+
+- **Replica exchange**: always `energy-frequency`
+- **Standard runner, no MC**: `energy-frequency`
+- **Standard runner, with MC**: the shortest active MC frequency, i.e.
+  `gcmc-frequency`, `terminal-flip-frequency`, or the smaller of the two
+  when both are active
 
 > [!NOTE]
 > Energy components are written more frequently than checkpoint files and are
