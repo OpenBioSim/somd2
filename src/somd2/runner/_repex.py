@@ -837,11 +837,6 @@ class RepexRunner(_RunnerBase):
                     if self._dynamics_cache._gcmc_stats[i] is not None:
                         gcmc_sampler.restore_stats(self._dynamics_cache._gcmc_stats[i])
 
-                # Restore terminal flip sampler statistics.
-                if self._terminal_flip_samplers is not None:
-                    attempted, accepted = self._dynamics_cache._terminal_flip_stats[i]
-                    self._terminal_flip_samplers[i].reset(attempted, accepted)
-
         # Conversion factor for reduced potential.
         kT = (_sr.units.k_boltz * self._config.temperature).to(_sr.units.kcal_per_mol)
         self._beta = 1.0 / kT
@@ -877,6 +872,13 @@ class RepexRunner(_RunnerBase):
             )
         else:
             self._terminal_flip_samplers = None
+
+        # Restore terminal flip sampler statistics from checkpoint (deferred
+        # until here so that _terminal_flip_samplers is always initialised first).
+        if self._is_restart and self._terminal_flip_samplers is not None:
+            for i in range(len(self._lambda_values)):
+                attempted, accepted = self._dynamics_cache._terminal_flip_stats[i]
+                self._terminal_flip_samplers[i].reset(attempted, accepted)
 
         from threading import Lock
 
