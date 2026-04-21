@@ -3,6 +3,7 @@ from collections import defaultdict
 
 import sire as sr
 
+from somd2._utils import _lam_sym
 from somd2.runner import Runner
 
 
@@ -44,12 +45,12 @@ def test_hmr_pertfile(pert_fwd_mols, pert_rev_mols):
 
     # Ligand A: forward lambda=0 must match reverse lambda=1
     assert fwd_masses["lam0"] == rev_masses["lam1"], (
-        "Ligand A masses differ between forward λ=0 and reverse λ=1 after HMR"
+        f"Ligand A masses differ between forward {_lam_sym}=0 and reverse {_lam_sym}=1 after HMR"
     )
 
     # Ligand B: forward lambda=1 must match reverse lambda=0
     assert fwd_masses["lam1"] == rev_masses["lam0"], (
-        "Ligand B masses differ between forward λ=1 and reverse λ=0 after HMR"
+        f"Ligand B masses differ between forward {_lam_sym}=1 and reverse {_lam_sym}=0 after HMR"
     )
 
 
