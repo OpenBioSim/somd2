@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import pytest
 import sire as sr
@@ -59,3 +60,29 @@ def ethane_methanol_ions():
     mols = sr.load(sr.expand(sr.tutorial_url, "merged_molecule_ions.s3"))
     mols = sr.morph.link_to_reference(mols)
     return mols
+
+
+@pytest.fixture(scope="session")
+def pert_fwd_mols():
+    """
+    Load the forward perturbation system from AMBER files hosted on the sire
+    test server and apply the local forward pert file.
+    """
+    from somd2._utils._somd1 import apply_pert
+
+    mols = sr.load_test_files("somd1_forward.prm7", "somd1_forward.rst7")
+    pert_file = str(Path(__file__).parent / "runner" / "inputs" / "forward.pert")
+    return apply_pert(mols, pert_file)
+
+
+@pytest.fixture(scope="session")
+def pert_rev_mols():
+    """
+    Load the reverse perturbation system from AMBER files hosted on the sire
+    test server and apply the local backward pert file.
+    """
+    from somd2._utils._somd1 import apply_pert
+
+    mols = sr.load_test_files("somd1_backward.prm7", "somd1_backward.rst7")
+    pert_file = str(Path(__file__).parent / "runner" / "inputs" / "backward.pert")
+    return apply_pert(mols, pert_file)
