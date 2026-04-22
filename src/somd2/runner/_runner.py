@@ -639,6 +639,12 @@ class Runner(_RunnerBase):
         # Reset the GCMC sampler. This resets the sampling statistics and clears
         # the associated OpenMM forces.
         if gcmc_sampler is not None:
+            # Ensure the water count is up to date before resetting. If the
+            # last move was a bulk sampling move, _is_bulk is True and
+            # num_waters() needs the stored context to recompute _N. Calling
+            # it here, while the context is still available, clears _is_bulk
+            # so that reset() can safely null the context.
+            gcmc_sampler.num_waters()
             gcmc_sampler.reset()
 
             # Bind the GCMC sampler to the dynamics object.
