@@ -706,8 +706,8 @@ class Config:
 
         # Don't include lambda_schedule_name or perturbed_system_file in the dictionary,
         # since these are just helper attributes.
-        d.pop("_lambda_schedule_name", None)
-        d.pop("_perturbed_system_file", None)
+        d.pop("lambda_schedule_name", None)
+        d.pop("perturbed_system_file", None)
 
         # Handle the lambda schedule separately so that we can use simplified
         # keyword options.
