@@ -628,13 +628,6 @@ class Runner(_RunnerBase):
             }
         )
 
-        # Resolve the water count while the old context is still alive. If the
-        # last equilibration move was a bulk sampling move, _is_bulk is True
-        # and num_waters() needs the stored context to recompute _N. Creating
-        # a new dynamics object below destroys that context.
-        if gcmc_sampler is not None:
-            gcmc_sampler.num_waters()
-
         # Create the dynamics object.
         dynamics = system.dynamics(**dynamics_kwargs)
 
@@ -690,6 +683,7 @@ class Runner(_RunnerBase):
                         dynamics.context(),
                         force=True,
                     )
+                    gcmc_sampler.num_waters(context=dynamics.context())
                 finally:
                     gcmc_sampler.pop()
 

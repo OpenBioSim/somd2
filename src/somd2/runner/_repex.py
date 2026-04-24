@@ -1481,7 +1481,6 @@ class RepexRunner(_RunnerBase):
             dynamics, gcmc_sampler = self._dynamics_cache.get(index)
 
             if gcmc_sampler is not None:
-                # Push the PyCUDA context on top of the stack.
                 gcmc_sampler.push()
                 try:
                     _logger.info(
@@ -1490,7 +1489,6 @@ class RepexRunner(_RunnerBase):
                     for i in range(100):
                         gcmc_sampler.move(dynamics.context())
                 finally:
-                    # Remove the PyCUDA context from the stack.
                     gcmc_sampler.pop()
 
             # Minimise.
@@ -1509,10 +1507,6 @@ class RepexRunner(_RunnerBase):
                 if constraints_changed:
                     # Commit the current system.
                     system = dynamics.commit()
-
-                    # Resolve the water count while the context is still alive.
-                    if gcmc_sampler is not None:
-                        gcmc_sampler.num_waters()
 
                     # Delete the dynamics object.
                     self._dynamics_cache.delete(index)
@@ -1578,7 +1572,6 @@ class RepexRunner(_RunnerBase):
             dynamics, gcmc_sampler = self._dynamics_cache.get(index)
 
             if gcmc_sampler is not None:
-                # Push the PyCUDA context on top of the stack.
                 gcmc_sampler.push()
                 try:
                     _logger.info(
@@ -1587,7 +1580,6 @@ class RepexRunner(_RunnerBase):
                     for i in range(100):
                         gcmc_sampler.move(dynamics.context())
                 finally:
-                    # Remove the PyCUDA context from the stack.
                     gcmc_sampler.pop()
 
                 # Store the current water state.
@@ -1614,10 +1606,6 @@ class RepexRunner(_RunnerBase):
 
                     # Commit the current system.
                     system = dynamics.commit()
-
-                    # Resolve the water count while the context is still alive.
-                    if gcmc_sampler is not None:
-                        gcmc_sampler.num_waters()
 
                     # Delete the current dynamics object.
                     self._dynamics_cache.delete(index)
@@ -1665,10 +1653,6 @@ class RepexRunner(_RunnerBase):
             else:
                 system.set_time(_sr.u("0ps"))
 
-            # Resolve the water count while the context is still alive.
-            if gcmc_sampler is not None:
-                gcmc_sampler.num_waters()
-
             # Delete the dynamics object.
             self._dynamics_cache.delete(index)
 
@@ -1691,6 +1675,14 @@ class RepexRunner(_RunnerBase):
             # not match the current GCMC water state.
             if gcmc_sampler is not None:
                 self._reset_gcmc_sampler(gcmc_sampler, dynamics)
+
+                # Compute the current number of waters in the GCMC sampling
+                # volume after equilibration.
+                gcmc_sampler.push()
+                try:
+                    gcmc_sampler.num_waters(context=dynamics.context())
+                finally:
+                    gcmc_sampler.pop()
 
             # Set the new dynamics object.
             self._dynamics_cache.set(index, dynamics)
@@ -1847,7 +1839,6 @@ class RepexRunner(_RunnerBase):
 
             # Log the number of waters within the GCMC sampling volume.
             if gcmc_sampler is not None:
-                # Push the PyCUDA context on top of the stack.
                 gcmc_sampler.push()
                 try:
                     n_moves = gcmc_sampler._num_moves
@@ -1862,7 +1853,6 @@ class RepexRunner(_RunnerBase):
                         f"is {gcmc_sampler.num_waters()}{acc_str}"
                     )
                 finally:
-                    # Remove the PyCUDA context from the stack.
                     gcmc_sampler.pop()
 
             # Log terminal flip acceptance rate for this replica.
@@ -2008,13 +1998,11 @@ class RepexRunner(_RunnerBase):
         # clears the associated OpenMM forces.
         gcmc_sampler.reset()
 
-        # Push the PyCUDA context on top of the stack.
         gcmc_sampler.push()
         try:
             # Set the water state.
             gcmc_sampler._set_water_state(dynamics.context(), force=True)
         finally:
-            # Remove the PyCUDA context from the stack.
             gcmc_sampler.pop()
 
         # Re-bind the GCMC sampler to the dynamics object.
