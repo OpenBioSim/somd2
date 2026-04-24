@@ -388,13 +388,6 @@ If you want to load an existing system from a perturbation file and use the
 new `somd2` [ghost atom bonded-term modifications](https://github.com/OpenBioSim/ghostly),
 then simply omit the `--somd1-compatibility` option.
 
-> [!NOTE]
-> Using a ``pertfile`` as input is only supported when end states have the same
-> connectivity, i.e. it can't be used for ring-breaking perturbations, or
-> when non-bonded scale factors differ between the end states. For these cases,
-> you will need to generate a new perturbation stream file using `prepareFEP.py`
-> with the `--somd2` option as described above.
-
 ## GPU oversubscription
 
 If you have an NVIDIA GPU that supports the multi-process service (MPS), you can

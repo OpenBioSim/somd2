@@ -147,6 +147,14 @@ class RunnerBase:
                 _logger.error(msg)
                 raise IOError(msg)
 
+            # Reconstruct end-state connectivity and intrascale matrices from
+            # the bonded terms. The lambda=0 reference topology is used as the
+            # starting point and the pertfile does not express changes in
+            # connectivity or intrascale directly.
+            from .._utils._somd1 import reconstruct_intrascale
+
+            self._system = reconstruct_intrascale(self._system)
+
             # If we're not using SOMD1 compatibility, then reconstruct the original
             # perturbable system. We only need to do this if applying modifications
             # to ghost atom bonded terms.

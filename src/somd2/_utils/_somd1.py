@@ -19,7 +19,12 @@
 # along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
-__all__ = ["apply_pert", "make_compatible", "reconstruct_system"]
+__all__ = [
+    "apply_pert",
+    "make_compatible",
+    "reconstruct_intrascale",
+    "reconstruct_system",
+]
 
 from sire.system import System as _System
 from sire.legacy.System import System as _LegacySystem
@@ -608,6 +613,90 @@ def make_compatible(system, fix_perturbable_zero_sigmas=False):
         system.update(edit_mol.commit())
 
     # Return the updated system.
+    return system
+
+
+def reconstruct_intrascale(system):
+    """
+    Reconstruct end-state connectivity and intrascale matrices for perturbable
+    molecules from their bonded terms. This is required when a perturbation
+    file is used with AMBER topology/coordinate input, since the pertfile
+    assumes unchanged connectivity, which does not hold for ring-breaking or
+    ring-size-changing perturbations.
+
+    Parameters
+    ----------
+
+    system : sire.system.System, sire.legacy.System.System
+        The system containing the perturbable molecules.
+
+    Returns
+    -------
+
+    system : sire.system.System
+        The updated system with corrected connectivity0, connectivity1,
+        intrascale0, and intrascale1 properties on each perturbable molecule.
+    """
+
+    import sire.legacy.CAS as _SireCAS
+
+    if not isinstance(system, (_System, _LegacySystem)):
+        raise TypeError(
+            "'system' must of type 'sire.system.System' or 'sire.legacy.System.System'"
+        )
+
+    if isinstance(system, _LegacySystem):
+        system = _System(system)
+
+    system = system.clone()
+
+    try:
+        pert_mols = system.molecules("property is_perturbable")
+    except KeyError:
+        raise KeyError("No perturbable molecules in the system")
+
+    r = _SireCAS.Symbol("r")
+
+    for mol in pert_mols:
+        info = mol.info()
+
+        # Build connectivity from bond0 potentials, skipping zero-k bonds.
+        conn0 = _SireMol.Connectivity(info).edit()
+        for bond in mol.property("bond0").potentials():
+            if _SireMM.AmberBond(bond.function(), r).k() != 0.0:
+                conn0.connect(bond.atom0(), bond.atom1())
+        conn0 = conn0.commit()
+
+        # Build connectivity from bond1 potentials, skipping zero-k bonds.
+        conn1 = _SireMol.Connectivity(info).edit()
+        for bond in mol.property("bond1").potentials():
+            if _SireMM.AmberBond(bond.function(), r).k() != 0.0:
+                conn1.connect(bond.atom0(), bond.atom1())
+        conn1 = conn1.commit()
+
+        # Get the 1-4 scale factors from the lambda=0 forcefield.
+        ff = mol.property("forcefield0")
+        sf14 = _SireMM.CLJScaleFactor(
+            ff.electrostatic14_scale_factor(), ff.vdw14_scale_factor()
+        )
+
+        # Build intrascale matrices from the per-state connectivity.
+        intra0 = _SireMM.CLJNBPairs(conn0, sf14)
+        intra1 = _SireMM.CLJNBPairs(conn1, sf14)
+
+        edit_mol = mol.edit()
+
+        if conn0 == conn1:
+            edit_mol = edit_mol.set_property("connectivity", conn0).molecule()
+        else:
+            edit_mol = edit_mol.set_property("connectivity0", conn0).molecule()
+            edit_mol = edit_mol.set_property("connectivity1", conn1).molecule()
+
+        edit_mol = edit_mol.set_property("intrascale0", intra0).molecule()
+        edit_mol = edit_mol.set_property("intrascale1", intra1).molecule()
+
+        system.update(edit_mol.commit())
+
     return system
 
 
