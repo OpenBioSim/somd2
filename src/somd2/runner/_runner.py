@@ -546,6 +546,13 @@ class Runner(_RunnerBase):
                 # Create the dynamics object.
                 dynamics = system.dynamics(**dynamics_kwargs)
 
+                # Write the OpenMM XML file to the output directory.
+                if self._config.save_xml and not is_restart:
+                    _logger.info(
+                        f"Writing OpenMM XML for {_lam_sym} = {lambda_value:.5f}"
+                    )
+                    dynamics.to_xml(self._filenames[index]["xml"])
+
                 # Equilibrate with GCMC moves.
                 if gcmc_sampler is not None:
                     # Bind the GCMC sampler to the dynamics object.
@@ -631,8 +638,9 @@ class Runner(_RunnerBase):
         # Create the dynamics object.
         dynamics = system.dynamics(**dynamics_kwargs)
 
-        # Write the OpenMM XML file to the output directory.
-        if self._config.save_xml and not is_restart:
+        # Write the OpenMM XML file to the output directory (only if not already
+        # written during equilibration).
+        if self._config.save_xml and not is_restart and not is_equilibrated:
             _logger.info(f"Writing OpenMM XML for {_lam_sym} = {lambda_value:.5f}")
             dynamics.to_xml(self._filenames[index]["xml"])
 
