@@ -71,7 +71,7 @@ def pert_fwd_mols():
     from somd2._utils._somd1 import apply_pert
 
     mols = sr.load_test_files("somd1_forward.prm7", "somd1_forward.rst7")
-    pert_file = str(Path(__file__).parent / "runner" / "inputs" / "forward.pert")
+    pert_file = str(Path(__file__).parent / "inputs" / "forward.pert")
     return apply_pert(mols, pert_file)
 
 
@@ -84,5 +84,5 @@ def pert_rev_mols():
     from somd2._utils._somd1 import apply_pert
 
     mols = sr.load_test_files("somd1_backward.prm7", "somd1_backward.rst7")
-    pert_file = str(Path(__file__).parent / "runner" / "inputs" / "backward.pert")
+    pert_file = str(Path(__file__).parent / "inputs" / "backward.pert")
     return apply_pert(mols, pert_file)
