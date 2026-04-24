@@ -697,7 +697,9 @@ def reconstruct_intrascale(system):
 
         system.update(edit_mol.commit())
 
-    return system
+    from sire import morph as _morph
+
+    return _morph.link_to_reference(system)
 
 
 def reconstruct_system(system):
