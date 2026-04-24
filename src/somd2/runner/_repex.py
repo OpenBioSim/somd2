@@ -1657,6 +1657,10 @@ class RepexRunner(_RunnerBase):
             else:
                 system.set_time(_sr.u("0ps"))
 
+            # Resolve the water count while the context is still alive.
+            if gcmc_sampler is not None:
+                gcmc_sampler.num_waters()
+
             # Delete the dynamics object.
             self._dynamics_cache.delete(index)
 
@@ -1992,13 +1996,6 @@ class RepexRunner(_RunnerBase):
         dynamics: sire.mol.Dynamics
             The dynamics object associated with the GCMC sampler.
         """
-        # Ensure the water count is up to date before resetting. If the last
-        # move was a bulk sampling move, _is_bulk is True and num_waters()
-        # needs the stored context to recompute _N. Calling it here, while
-        # the context is still available, clears _is_bulk so that reset()
-        # can safely null the context.
-        gcmc_sampler.num_waters()
-
         # Reset the GCMC sampler. This resets the sampling statistics and
         # clears the associated OpenMM forces.
         gcmc_sampler.reset()

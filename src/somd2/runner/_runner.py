@@ -628,6 +628,13 @@ class Runner(_RunnerBase):
             }
         )
 
+        # Resolve the water count while the old context is still alive. If the
+        # last equilibration move was a bulk sampling move, _is_bulk is True
+        # and num_waters() needs the stored context to recompute _N. Creating
+        # a new dynamics object below destroys that context.
+        if gcmc_sampler is not None:
+            gcmc_sampler.num_waters()
+
         # Create the dynamics object.
         dynamics = system.dynamics(**dynamics_kwargs)
 
@@ -639,12 +646,6 @@ class Runner(_RunnerBase):
         # Reset the GCMC sampler. This resets the sampling statistics and clears
         # the associated OpenMM forces.
         if gcmc_sampler is not None:
-            # Ensure the water count is up to date before resetting. If the
-            # last move was a bulk sampling move, _is_bulk is True and
-            # num_waters() needs the stored context to recompute _N. Calling
-            # it here, while the context is still available, clears _is_bulk
-            # so that reset() can safely null the context.
-            gcmc_sampler.num_waters()
             gcmc_sampler.reset()
 
             # Bind the GCMC sampler to the dynamics object.
