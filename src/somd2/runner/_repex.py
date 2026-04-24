@@ -1510,6 +1510,10 @@ class RepexRunner(_RunnerBase):
                     # Commit the current system.
                     system = dynamics.commit()
 
+                    # Resolve the water count while the context is still alive.
+                    if gcmc_sampler is not None:
+                        gcmc_sampler.num_waters()
+
                     # Delete the dynamics object.
                     self._dynamics_cache.delete(index)
 
@@ -1610,6 +1614,10 @@ class RepexRunner(_RunnerBase):
 
                     # Commit the current system.
                     system = dynamics.commit()
+
+                    # Resolve the water count while the context is still alive.
+                    if gcmc_sampler is not None:
+                        gcmc_sampler.num_waters()
 
                     # Delete the current dynamics object.
                     self._dynamics_cache.delete(index)
