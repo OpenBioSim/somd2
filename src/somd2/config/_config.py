@@ -151,6 +151,7 @@ class Config:
         gcmc_radius="4 A",
         gcmc_bulk_sampling_probability=0.1,
         gcmc_tolerance=0.0,
+        use_dispersion_correction=False,
         rest2_scale=1.0,
         rest2_selection=None,
         softcore_form="zacharias",
@@ -438,6 +439,12 @@ class Config:
             of acceptance for a move. This can be used to exclude low probability candidates
             that can cause instabilities or crashes for the MD engine.
 
+        use_dispersion_correction: bool
+            Whether to use the long-range dispersion correction for LJ interactions.
+            When True, the correction is evaluated analytically via a CustomVolumeForce
+            and cached per lambda state, avoiding expensive recomputation on every
+            lambda change. Default False.
+
         rest2_scale: float, list(float)
             The scaling factor for Replica Exchange with Solute Tempering (REST) simulations.
             This is the factor by which the temperature of the solute is scaled with respect to
@@ -605,6 +612,7 @@ class Config:
         self.gcmc_radius = gcmc_radius
         self.gcmc_bulk_sampling_probability = gcmc_bulk_sampling_probability
         self.gcmc_tolerance = gcmc_tolerance
+        self.use_dispersion_correction = use_dispersion_correction
         self.rest2_scale = rest2_scale
         self.rest2_selection = rest2_selection
         self.restart = restart
@@ -2285,6 +2293,16 @@ class Config:
         if gcmc_tolerance < 0.0:
             raise ValueError("'gcmc_tolerance' must be greater than or equal to 0.0")
         self._gcmc_tolerance = gcmc_tolerance
+
+    @property
+    def use_dispersion_correction(self):
+        return self._use_dispersion_correction
+
+    @use_dispersion_correction.setter
+    def use_dispersion_correction(self, use_dispersion_correction):
+        if not isinstance(use_dispersion_correction, bool):
+            raise TypeError("'use_dispersion_correction' must be of type 'bool'")
+        self._use_dispersion_correction = use_dispersion_correction
 
     @property
     def rest2_scale(self):

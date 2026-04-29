@@ -192,6 +192,16 @@ class RunnerBase:
             self._config.fix_perturbable_zero_sigmas
         )
 
+        # Long-range dispersion correction.
+        self._config._extra_args["use_dispersion_correction"] = (
+            self._config.use_dispersion_correction
+        )
+
+        # GCMC LRC map options.
+        if self._config.gcmc and self._config.use_dispersion_correction:
+            self._config._extra_args["use_gcmc_lrc"] = True
+            self._config._extra_args["num_gcmc_waters"] = self._config.gcmc_num_waters
+
         # If specified, use the Taylor soft-core form.
         if self._config.softcore_form == "taylor":
             self._config._extra_args["use_taylor_softening"] = True
