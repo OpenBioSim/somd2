@@ -301,6 +301,13 @@ class RunnerBase:
         except:
             self._has_water = False
 
+        # Warn if dispersion correction is requested but can't be applied.
+        if self._config.use_dispersion_correction and not self._has_space:
+            _logger.warning(
+                "'use_dispersion_correction=True' has no effect: the system "
+                "has no periodic space. The option will be ignored."
+            )
+
         # Check the end state constraints.
         self._check_end_state_constraints()
 
