@@ -202,10 +202,19 @@ class RunnerBase:
             self._config._extra_args["use_gcmc_lrc"] = True
             self._config._extra_args["num_gcmc_waters"] = self._config.gcmc_num_waters
 
-        # If specified, use the Taylor soft-core form.
+        # Set the soft-core form.
         if self._config.softcore_form == "taylor":
             self._config._extra_args["use_taylor_softening"] = True
             self._config._extra_args["taylor_power"] = self._config.taylor_power
+        elif self._config.softcore_form == "beutler":
+            schedule_name = self._config._lambda_schedule_name
+            if schedule_name not in (None, "annihilate", "decouple"):
+                raise ValueError(
+                    "The Beutler soft-core form is only supported with the 'annihilate' "
+                    "or 'decouple' lambda schedules, or a custom schedule."
+                )
+            self._config._extra_args["use_beutler_softening"] = True
+            self._config._extra_args["beutler_alpha"] = self._config.beutler_alpha
 
         # We're running in SOMD1 compatibility mode.
         if self._config.somd1_compatibility:
@@ -803,7 +812,6 @@ class RunnerBase:
 
         # Common kwargs shared by both dynamics and GCMC sampling.
         self._common_kwargs = {
-            "coulomb_power": self._config.coulomb_power,
             "cutoff": self._config.cutoff,
             "cutoff_type": self._config.cutoff_type,
             "platform": self._config.platform,
