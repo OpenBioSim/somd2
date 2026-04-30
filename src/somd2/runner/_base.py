@@ -178,6 +178,40 @@ class RunnerBase:
         # Link properties to the lambda = 0 end state.
         self._system = _sr.morph.link_to_reference(self._system)
 
+        # Whether this is a ring-breaking schedule.
+        if (
+            self._config._lambda_schedule_name is not None
+            and "ring_breaking" in self._config._lambda_schedule_name
+        ):
+            self._is_ring_breaking = True
+        else:
+            self._is_ring_breaking = False
+
+        # Check to see if the end-state connectivities are the same.
+        if not self._is_ring_breaking:
+            for mol in self._system["property is_perturbable"].molecules():
+                has_end_state_connectivity = False
+                try:
+                    # The molecule will have two connectivity properties if
+                    # the merge detected a change in connectivity.
+                    c0 = mol.property("connectivity0")
+                    c1 = mol.property("connectivity1")
+                    has_end_state_connectivity = True
+                except:
+                    # No connectivity change detected.
+                    has_end_state_connectivity = False
+                    pass
+
+                # Check the connectivities regardless.
+                if has_end_state_connectivity:
+                    if c0 != c1:
+                        msg = (
+                            "End-state connectivities are different. If this is a ring-breaking "
+                            "perturbation, please set 'lambda_schedule_name' to 'ring_breaking'."
+                        )
+                        _logger.warning(msg)
+                        break
+
         # Set the default configuration options.
 
         # Restrict the atomic properties used to define light atoms when
