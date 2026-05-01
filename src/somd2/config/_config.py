@@ -1093,14 +1093,10 @@ class Config:
                     self._lambda_schedule = _reverse_ring_break_morph()
                     self._lambda_schedule_name = "reverse_ring_break_morph"
                 elif lambda_schedule == "annihilate":
-                    from .._utils._schedules import annihilate as _annihilate
-
-                    self._lambda_schedule = _annihilate()
+                    self._lambda_schedule = None
                     self._lambda_schedule_name = "annihilate"
                 elif lambda_schedule == "decouple":
-                    from .._utils._schedules import decouple as _decouple
-
-                    self._lambda_schedule = _decouple()
+                    self._lambda_schedule = None
                     self._lambda_schedule_name = "decouple"
                 else:
                     try:

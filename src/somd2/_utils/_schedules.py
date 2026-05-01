@@ -27,15 +27,22 @@ __all__ = [
 ]
 
 
-def annihilate():
+def annihilate(fix_epsilon=True):
     """
-    Build the ABFE lambda schedule using decharge → annihilate with constant epsilon.
+    Build the ABFE lambda schedule using decharge → annihilate.
 
     Annihilation removes ALL non-bonded interactions (including intramolecular LJ
-    between non-bonded pairs), matching the GROMACS ABFE protocol. Epsilon is held
-    constant at its real-atom value throughout the annihilate stage so that the
-    (1-alpha) prefactor for the Buetler soft-core provides the sole LJ decay pathway,
-    giving true single (1-lambda) scaling consistent with GROMACS Beutler.
+    between non-bonded pairs).
+
+    Parameters
+    ----------
+    fix_epsilon : bool, optional
+        If True (default), epsilon is held constant at its real-atom value
+        throughout the annihilate stage so that the (1-alpha) prefactor of the
+        Beutler soft-core provides the sole LJ decay pathway.  The ghost-LRC
+        force is then explicitly scaled to zero over the stage to compensate.
+        If False, epsilon is scaled normally from initial to final and the LRC
+        follows naturally.
 
     Returns
     -------
@@ -66,18 +73,33 @@ def annihilate():
     )
     s.set_equation(stage="annihilate", lever="charge", equation=s.final())
     s.set_equation(stage="annihilate", force="restraint", equation=s.final())
-    s.set_equation(stage="annihilate", lever="epsilon", equation=s.initial())
+
+    if fix_epsilon:
+        s.set_equation(stage="annihilate", lever="epsilon", equation=s.initial())
+        s.set_equation(
+            stage="annihilate",
+            force="ghost-lrc",
+            lever="lrc_scale",
+            equation=1 - s.lam(),
+        )
 
     return s
 
 
-def decouple():
+def decouple(fix_epsilon=True):
     """
-    Build the ABFE lambda schedule using decharge → decouple with constant epsilon.
+    Build the ABFE lambda schedule using decharge → decouple.
 
     Decoupling removes only INTERMOLECULAR non-bonded interactions; intramolecular
-    terms are preserved via kappa=0 on ghost/ghost and ghost-14 forces. Epsilon is
-    held constant throughout the decouple stage (see annihilate for rationale).
+    terms are preserved via kappa=0 on ghost/ghost and ghost-14 forces.
+
+    Parameters
+    ----------
+    fix_epsilon : bool, optional
+        If True (default), epsilon is held constant at its real-atom value
+        throughout the decouple stage (see annihilate for rationale).  The
+        ghost-LRC force is then explicitly scaled to zero over the stage.
+        If False, epsilon is scaled normally and the LRC follows naturally.
 
     Returns
     -------
@@ -96,7 +118,15 @@ def decouple():
     s.set_equation(stage="decouple", lever="kappa", force="ghost/ghost", equation=0)
     s.set_equation(stage="decouple", lever="kappa", force="ghost-14", equation=0)
     s.set_equation(stage="decouple", lever="charge", equation=s.final())
-    s.set_equation(stage="decouple", lever="epsilon", equation=s.initial())
+
+    if fix_epsilon:
+        s.set_equation(stage="decouple", lever="epsilon", equation=s.initial())
+        s.set_equation(
+            stage="decouple",
+            force="ghost-lrc",
+            lever="lrc_scale",
+            equation=1 - s.lam(),
+        )
 
     s.prepend_stage("decharge", s.initial())
     s.set_equation(
