@@ -181,7 +181,7 @@ class RunnerBase:
         # Whether this is a ring-breaking schedule.
         if (
             self._config._lambda_schedule_name is not None
-            and "ring_breaking" in self._config._lambda_schedule_name
+            and "ring_break" in self._config._lambda_schedule_name
         ):
             self._is_ring_breaking = True
         else:
