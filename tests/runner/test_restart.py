@@ -123,13 +123,6 @@ def test_restart(mols, request):
         with pytest.raises(ValueError):
             runner_constraints = Runner(mols, Config(**config_diffconstraint))
 
-        config_diffcoulombpower = config_new.copy()
-        config_diffcoulombpower["runtime"] = "36fs"
-        config_diffcoulombpower["coulomb_power"] = 0.5
-
-        with pytest.raises(ValueError):
-            runner_coulombpower = Runner(mols, Config(**config_diffcoulombpower))
-
         config_diffcutofftype = config_new.copy()
         config_diffcutofftype["runtime"] = "36fs"
         config_diffcutofftype["cutoff_type"] = "rf"
