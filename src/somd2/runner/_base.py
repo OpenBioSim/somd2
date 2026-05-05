@@ -212,6 +212,23 @@ class RunnerBase:
                         _logger.warning(msg)
                         break
 
+        # Check for a periodic space.
+        self._has_space = self._check_space()
+
+        # Check for water.
+        try:
+            # The search will fail if there are no water molecules.
+            water = self._system["water"].molecules()
+            self._has_water = True
+        except:
+            self._has_water = False
+
+        # Warn if dispersion correction is requested but can't be applied.
+        if self._config.use_dispersion_correction and not self._has_water:
+            msg = "Cannot use dispersion correction for vacuum simulations. Disabling!"
+            _logger.warning(msg)
+            self._config.use_dispersion_correction = False
+
         # Set the default configuration options.
 
         # Restrict the atomic properties used to define light atoms when
@@ -341,24 +358,6 @@ class RunnerBase:
                     msg = f"Unable to apply modifications to ghost atom bonded terms: {e1}; {e2}"
                     _logger.error(msg)
                     raise RuntimeError(msg)
-
-        # Check for a periodic space.
-        self._has_space = self._check_space()
-
-        # Check for water.
-        try:
-            # The search will fail if there are no water molecules.
-            water = self._system["water"].molecules()
-            self._has_water = True
-        except:
-            self._has_water = False
-
-        # Warn if dispersion correction is requested but can't be applied.
-        if self._config.use_dispersion_correction and not self._has_space:
-            _logger.warning(
-                "'use_dispersion_correction=True' has no effect: the system "
-                "has no periodic space. The option will be ignored."
-            )
 
         # Check the end state constraints.
         self._check_end_state_constraints()
