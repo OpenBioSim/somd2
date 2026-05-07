@@ -178,6 +178,57 @@ class RunnerBase:
         # Link properties to the lambda = 0 end state.
         self._system = _sr.morph.link_to_reference(self._system)
 
+        # Whether this is a ring-breaking schedule.
+        if (
+            self._config._lambda_schedule_name is not None
+            and "ring_break" in self._config._lambda_schedule_name
+        ):
+            self._is_ring_breaking = True
+        else:
+            self._is_ring_breaking = False
+
+        # Check to see if the end-state connectivities are the same.
+        if not self._is_ring_breaking:
+            for mol in self._system["property is_perturbable"].molecules():
+                has_end_state_connectivity = False
+                try:
+                    # The molecule will have two connectivity properties if
+                    # the merge detected a change in connectivity.
+                    c0 = mol.property("connectivity0")
+                    c1 = mol.property("connectivity1")
+                    has_end_state_connectivity = True
+                except:
+                    # No connectivity change detected.
+                    has_end_state_connectivity = False
+                    pass
+
+                # Check the connectivities regardless.
+                if has_end_state_connectivity:
+                    if c0 != c1:
+                        msg = (
+                            "End-state connectivities are different. If this is a ring-breaking "
+                            "perturbation, please set 'lambda_schedule_name' to 'ring_breaking'."
+                        )
+                        _logger.warning(msg)
+                        break
+
+        # Check for a periodic space.
+        self._has_space = self._check_space()
+
+        # Check for water.
+        try:
+            # The search will fail if there are no water molecules.
+            water = self._system["water"].molecules()
+            self._has_water = True
+        except:
+            self._has_water = False
+
+        # Warn if dispersion correction is requested but can't be applied.
+        if self._config.use_dispersion_correction and not self._has_water:
+            msg = "Cannot use dispersion correction for vacuum simulations. Disabling!"
+            _logger.warning(msg)
+            self._config.use_dispersion_correction = False
+
         # Set the default configuration options.
 
         # Restrict the atomic properties used to define light atoms when
@@ -192,10 +243,40 @@ class RunnerBase:
             self._config.fix_perturbable_zero_sigmas
         )
 
-        # If specified, use the Taylor soft-core form.
+        # Long-range dispersion correction.
+        self._config._extra_args["use_dispersion_correction"] = (
+            self._config.use_dispersion_correction
+        )
+
+        # GCMC LRC map options.
+        if self._config.gcmc and self._config.use_dispersion_correction:
+            self._config._extra_args["use_gcmc_lrc"] = True
+            self._config._extra_args["num_gcmc_waters"] = self._config.gcmc_num_waters
+
+        # Set the soft-core form.
         if self._config.softcore_form == "taylor":
             self._config._extra_args["use_taylor_softening"] = True
             self._config._extra_args["taylor_power"] = self._config.taylor_power
+        elif self._config.softcore_form == "beutler":
+            schedule_name = self._config._lambda_schedule_name
+            if schedule_name not in (None, "annihilate", "decouple"):
+                raise ValueError(
+                    "The Beutler soft-core form is only supported with the 'annihilate' "
+                    "or 'decouple' lambda schedules, or a custom schedule."
+                )
+            self._config._extra_args["use_beutler_softening"] = True
+            self._config._extra_args["beutler_alpha"] = self._config.beutler_alpha
+
+        # Build deferred schedules now that the softcore form is known.
+        fix_epsilon = self._config.softcore_form == "beutler"
+        if self._config._lambda_schedule_name == "annihilate":
+            from .._utils._schedules import annihilate as _annihilate
+
+            self._config._lambda_schedule = _annihilate(fix_epsilon=fix_epsilon)
+        elif self._config._lambda_schedule_name == "decouple":
+            from .._utils._schedules import decouple as _decouple
+
+            self._config._lambda_schedule = _decouple(fix_epsilon=fix_epsilon)
 
         # We're running in SOMD1 compatibility mode.
         if self._config.somd1_compatibility:
@@ -272,24 +353,11 @@ class RunnerBase:
             # Angle optimisation can sometimes fail.
             except Exception as e1:
                 try:
-                    self._system, self._modifications = modify(
-                        self._system, optimise_angles=False
-                    )
+                    self._system, self._modifications = modify(self._system)
                 except Exception as e2:
                     msg = f"Unable to apply modifications to ghost atom bonded terms: {e1}; {e2}"
                     _logger.error(msg)
                     raise RuntimeError(msg)
-
-        # Check for a periodic space.
-        self._has_space = self._check_space()
-
-        # Check for water.
-        try:
-            # The search will fail if there are no water molecules.
-            water = self._system["water"].molecules()
-            self._has_water = True
-        except:
-            self._has_water = False
 
         # Check the end state constraints.
         self._check_end_state_constraints()
@@ -786,7 +854,6 @@ class RunnerBase:
 
         # Common kwargs shared by both dynamics and GCMC sampling.
         self._common_kwargs = {
-            "coulomb_power": self._config.coulomb_power,
             "cutoff": self._config.cutoff,
             "cutoff_type": self._config.cutoff_type,
             "platform": self._config.platform,
@@ -838,6 +905,14 @@ class RunnerBase:
             }
         else:
             self._gcmc_kwargs = None
+
+        # Reverse the lambda schedule when swapping end states so that the
+        # schedule progresses from the perturbed end state to the reference.
+        # (The GCMC schedule is reversed inside loch itself.)
+        if self._config.swap_end_states:
+            self._dynamics_kwargs["schedule"] = self._dynamics_kwargs[
+                "schedule"
+            ].reverse()
 
         # Limit the number of CPU threads available to Sire when running in parallel.
         if self._is_gpu:
