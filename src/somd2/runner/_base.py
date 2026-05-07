@@ -908,14 +908,11 @@ class RunnerBase:
 
         # Reverse the lambda schedule when swapping end states so that the
         # schedule progresses from the perturbed end state to the reference.
+        # (The GCMC schedule is reversed inside loch itself.)
         if self._config.swap_end_states:
             self._dynamics_kwargs["schedule"] = self._dynamics_kwargs[
                 "schedule"
             ].reverse()
-            if self._gcmc_kwargs is not None:
-                self._gcmc_kwargs["lambda_schedule"] = self._gcmc_kwargs[
-                    "lambda_schedule"
-                ].reverse()
 
         # Limit the number of CPU threads available to Sire when running in parallel.
         if self._is_gpu:
