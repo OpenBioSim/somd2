@@ -906,6 +906,17 @@ class RunnerBase:
         else:
             self._gcmc_kwargs = None
 
+        # Reverse the lambda schedule when swapping end states so that the
+        # schedule progresses from the perturbed end state to the reference.
+        if self._config.swap_end_states:
+            self._dynamics_kwargs["schedule"] = self._dynamics_kwargs[
+                "schedule"
+            ].reverse()
+            if self._gcmc_kwargs is not None:
+                self._gcmc_kwargs["lambda_schedule"] = self._gcmc_kwargs[
+                    "lambda_schedule"
+                ].reverse()
+
         # Limit the number of CPU threads available to Sire when running in parallel.
         if self._is_gpu:
             # First get the total number of threads that are available to Sire.
