@@ -216,6 +216,22 @@ def ring_break_morph():
     s.set_equation(stage="morph", lever="torsion_k", equation=s.final())
     s.set_equation(stage="morph", lever="torsion_phase", equation=s.final())
 
+    # Ring-breaking bonds: softcore interaction grows from zero as the ring
+    # opens during the morph stage (alpha: 1→0, kappa: 0→1).
+    # Ring-making bonds: softcore interaction shrinks to zero as the ring
+    # closes during the morph stage (alpha: 0→1, kappa: 1→0).
+    # potential_swap and restraints_off stages use default (s.initial()):
+    #   ring-break alpha=1.0/kappa=0.0 (no interaction, ring still bonded)
+    #   ring-make  alpha=0.0/kappa=1.0 (full interaction, ring not yet formed)
+    s.set_equation(
+        stage="morph", force="ring-break", lever="alpha", equation=1 - s.lam()
+    )
+    s.set_equation(stage="morph", force="ring-break", lever="kappa", equation=s.lam())
+    s.set_equation(stage="morph", force="ring-make", lever="alpha", equation=s.lam())
+    s.set_equation(
+        stage="morph", force="ring-make", lever="kappa", equation=1 - s.lam()
+    )
+
     return s
 
 
@@ -287,5 +303,30 @@ def reverse_ring_break_morph():
     s.set_equation(stage="potential_swap", lever="angle_size", equation=s.final())
     s.set_equation(stage="potential_swap", lever="torsion_k", equation=s.final())
     s.set_equation(stage="potential_swap", lever="torsion_phase", equation=s.final())
+
+    # morph stage (first): nonbonded-only changes; ring bonds still intact/absent.
+    #   ring-break: alpha=1.0/kappa=0.0 throughout (no interaction, ring bonded at λ=0)
+    #   ring-make:  alpha=0.0/kappa=1.0 throughout (full interaction, ring absent at λ=0)
+    # bonded_perturb stage (second): ring bonds established/dissolved via Morse.
+    #   ring-make softcore turns off as ring forms (alpha: 0→1, kappa: 1→0)
+    #   ring-break softcore turns on as ring opens (alpha: 1→0, kappa: 0→1)
+    # potential_swap stage (last): Morse→harmonic swap; ring fully transitioned.
+    #   defaults (s.final()) give ring-break alpha=0/kappa=1, ring-make alpha=1/kappa=0.
+    s.set_equation(stage="morph", force="ring-break", lever="alpha", equation=1)
+    s.set_equation(stage="morph", force="ring-break", lever="kappa", equation=0)
+    s.set_equation(stage="morph", force="ring-make", lever="alpha", equation=0)
+    s.set_equation(stage="morph", force="ring-make", lever="kappa", equation=1)
+    s.set_equation(
+        stage="bonded_perturb", force="ring-break", lever="alpha", equation=1 - s.lam()
+    )
+    s.set_equation(
+        stage="bonded_perturb", force="ring-break", lever="kappa", equation=s.lam()
+    )
+    s.set_equation(
+        stage="bonded_perturb", force="ring-make", lever="alpha", equation=s.lam()
+    )
+    s.set_equation(
+        stage="bonded_perturb", force="ring-make", lever="kappa", equation=1 - s.lam()
+    )
 
     return s
