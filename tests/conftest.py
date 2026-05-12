@@ -86,3 +86,15 @@ def pert_rev_mols():
     mols = sr.load_test_files("somd1_backward.prm7", "somd1_backward.rst7")
     pert_file = str(Path(__file__).parent / "inputs" / "backward.pert")
     return apply_pert(mols, pert_file)
+
+
+@pytest.fixture(scope="session")
+def syk_ring_break_mols():
+    """
+    Load the SYK 5035→5033 ring-breaking perturbation system.
+
+    Reference state (λ=0): SYK-5035 with an intact ring containing a
+    breaking bond. Perturbed state (λ=1): SYK-5033, the open-chain analogue.
+    """
+    mols = sr.load_test_files("syk_5035_5033.s3")
+    return sr.morph.link_to_reference(mols)
