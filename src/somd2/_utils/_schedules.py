@@ -151,7 +151,7 @@ def ring_break_morph():
     """
     Build a lambda schedule for ring-breaking perturbations.
 
-    Three stages: potential_swap → restraints_off → morph.
+    Four stages: potential_swap → restraints_off → ring_open → morph.
 
     Returns
     -------
@@ -162,8 +162,36 @@ def ring_break_morph():
     from sire.cas import LambdaSchedule as _LambdaSchedule
 
     s = _LambdaSchedule.standard_morph()
+    s.set_stage_weight("morph", 2)
 
-    s.prepend_stage("restraints_off", s.initial())
+    # ring_open: Morse is already off; ring-break nonbonded interaction ramps
+    # on (alpha: 1→0, kappa: 0→1) while non-bonded terms stay at initial and
+    # bonded terms remain at final. The softcore interaction gently pushes the
+    # atoms into the open-chain geometry before the full nonbonded morph begins,
+    # improving HREX overlap at the ring-break boundary.
+    s.prepend_stage("ring_open", s.initial(), weight=1)
+    s.set_equation(stage="ring_open", lever="morse_hard", equation=0)
+    s.set_equation(stage="ring_open", lever="morse_soft", equation=0)
+    s.set_equation(stage="ring_open", lever="bond_k", equation=s.final())
+    s.set_equation(stage="ring_open", lever="bond_length", equation=s.final())
+    s.set_equation(stage="ring_open", lever="angle_k", equation=s.final())
+    s.set_equation(stage="ring_open", lever="angle_size", equation=s.final())
+    s.set_equation(stage="ring_open", lever="torsion_k", equation=s.final())
+    s.set_equation(stage="ring_open", lever="torsion_phase", equation=s.final())
+    s.set_equation(
+        stage="ring_open", force="ring-break", lever="alpha", equation=1 - s.lam()
+    )
+    s.set_equation(
+        stage="ring_open", force="ring-break", lever="kappa", equation=s.lam()
+    )
+    s.set_equation(
+        stage="ring_open", force="ring-make", lever="alpha", equation=s.lam()
+    )
+    s.set_equation(
+        stage="ring_open", force="ring-make", lever="kappa", equation=1 - s.lam()
+    )
+
+    s.prepend_stage("restraints_off", s.initial(), weight=1)
     s.set_equation(stage="restraints_off", lever="morse_soft", equation=1 - s.lam())
     s.set_equation(stage="restraints_off", lever="morse_hard", equation=0)
     s.set_equation(stage="restraints_off", lever="bond_k", equation=s.final())
@@ -189,7 +217,7 @@ def ring_break_morph():
         equation=(1 - s.lam()) * s.initial() + s.lam() * s.final(),
     )
 
-    s.prepend_stage("potential_swap", s.initial())
+    s.prepend_stage("potential_swap", s.initial(), weight=2)
     s.set_equation(stage="potential_swap", lever="morse_hard", equation=1 - s.lam())
     s.set_equation(stage="potential_swap", lever="morse_soft", equation=0 + s.lam())
     s.set_equation(
@@ -207,6 +235,8 @@ def ring_break_morph():
     s.set_equation(stage="potential_swap", lever="torsion_k", equation=s.initial())
     s.set_equation(stage="potential_swap", lever="torsion_phase", equation=s.initial())
 
+    # morph: standard nonbonded morphing. Ring-break is fixed at fully open
+    # (kappa=1, alpha=0) since geometry has already relaxed in ring_open.
     s.set_equation(stage="morph", lever="morse_hard", equation=0)
     s.set_equation(stage="morph", lever="morse_soft", equation=0)
     s.set_equation(stage="morph", lever="bond_k", equation=s.final())
@@ -215,6 +245,10 @@ def ring_break_morph():
     s.set_equation(stage="morph", lever="angle_size", equation=s.final())
     s.set_equation(stage="morph", lever="torsion_k", equation=s.final())
     s.set_equation(stage="morph", lever="torsion_phase", equation=s.final())
+    s.set_equation(stage="morph", force="ring-break", lever="alpha", equation=0)
+    s.set_equation(stage="morph", force="ring-break", lever="kappa", equation=1)
+    s.set_equation(stage="morph", force="ring-make", lever="alpha", equation=1)
+    s.set_equation(stage="morph", force="ring-make", lever="kappa", equation=0)
 
     return s
 
@@ -223,7 +257,7 @@ def reverse_ring_break_morph():
     """
     Build a lambda schedule for reverse ring-breaking perturbations.
 
-    Three stages: morph → bonded_perturb → potential_swap.
+    Four stages: morph → ring_close → bonded_perturb → potential_swap.
 
     Returns
     -------
@@ -234,7 +268,10 @@ def reverse_ring_break_morph():
     from sire.cas import LambdaSchedule as _LambdaSchedule
 
     s = _LambdaSchedule.standard_morph()
+    s.set_stage_weight("morph", 2)
 
+    # morph: standard nonbonded morphing. Ring-break fixed at fully open
+    # (kappa=1, alpha=0); ring-make fixed at full interaction (kappa=1, alpha=0).
     s.set_equation(stage="morph", lever="morse_hard", equation=0)
     s.set_equation(stage="morph", lever="morse_soft", equation=0)
     s.set_equation(stage="morph", lever="bond_k", equation=s.initial())
@@ -243,8 +280,36 @@ def reverse_ring_break_morph():
     s.set_equation(stage="morph", lever="angle_size", equation=s.initial())
     s.set_equation(stage="morph", lever="torsion_k", equation=s.initial())
     s.set_equation(stage="morph", lever="torsion_phase", equation=s.initial())
+    s.set_equation(stage="morph", force="ring-break", lever="alpha", equation=1)
+    s.set_equation(stage="morph", force="ring-break", lever="kappa", equation=0)
+    s.set_equation(stage="morph", force="ring-make", lever="alpha", equation=0)
+    s.set_equation(stage="morph", force="ring-make", lever="kappa", equation=1)
 
-    s.append_stage("bonded_perturb", s.final())
+    # ring_close: non-bonded terms fixed at final; ring-make interaction ramps
+    # off (alpha: 0→1, kappa: 1→0) to allow atoms to relax into ring geometry
+    # before Morse is applied. Symmetric counterpart to ring_open.
+    s.append_stage("ring_close", s.final(), weight=1)
+    s.set_equation(stage="ring_close", lever="morse_hard", equation=0)
+    s.set_equation(stage="ring_close", lever="morse_soft", equation=0)
+    s.set_equation(stage="ring_close", lever="bond_k", equation=s.initial())
+    s.set_equation(stage="ring_close", lever="bond_length", equation=s.initial())
+    s.set_equation(stage="ring_close", lever="angle_k", equation=s.initial())
+    s.set_equation(stage="ring_close", lever="angle_size", equation=s.initial())
+    s.set_equation(stage="ring_close", lever="torsion_k", equation=s.initial())
+    s.set_equation(stage="ring_close", lever="torsion_phase", equation=s.initial())
+    s.set_equation(stage="ring_close", force="ring-break", lever="alpha", equation=1)
+    s.set_equation(stage="ring_close", force="ring-break", lever="kappa", equation=0)
+    s.set_equation(
+        stage="ring_close", force="ring-make", lever="alpha", equation=s.lam()
+    )
+    s.set_equation(
+        stage="ring_close", force="ring-make", lever="kappa", equation=1 - s.lam()
+    )
+
+    # bonded_perturb: Morse soft ramps on; ring-make already off from ring_close.
+    # Ring-break softcore turns on as any ring-break bond opens (alpha: 1→0,
+    # kappa: 0→1); ring-make stays off (kappa=0, alpha=1).
+    s.append_stage("bonded_perturb", s.final(), weight=1)
     s.set_equation(stage="bonded_perturb", lever="morse_soft", equation=0 + s.lam())
     s.set_equation(stage="bonded_perturb", lever="morse_hard", equation=0)
     s.set_equation(stage="bonded_perturb", lever="bond_k", equation=s.initial())
@@ -269,8 +334,16 @@ def reverse_ring_break_morph():
         lever="torsion_phase",
         equation=(1 - s.lam()) * s.initial() + s.lam() * s.final(),
     )
+    s.set_equation(
+        stage="bonded_perturb", force="ring-break", lever="alpha", equation=1 - s.lam()
+    )
+    s.set_equation(
+        stage="bonded_perturb", force="ring-break", lever="kappa", equation=s.lam()
+    )
+    s.set_equation(stage="bonded_perturb", force="ring-make", lever="alpha", equation=1)
+    s.set_equation(stage="bonded_perturb", force="ring-make", lever="kappa", equation=0)
 
-    s.append_stage("potential_swap", s.final())
+    s.append_stage("potential_swap", s.final(), weight=2)
     s.set_equation(stage="potential_swap", lever="morse_hard", equation=0 + s.lam())
     s.set_equation(stage="potential_swap", lever="morse_soft", equation=1 - s.lam())
     s.set_equation(
