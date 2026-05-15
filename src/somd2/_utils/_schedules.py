@@ -264,6 +264,35 @@ def ring_break_morph():
     s.set_equation(stage="morph", force="ring-make", lever="alpha", equation=0)
     s.set_equation(stage="morph", force="ring-make", lever="kappa", equation=1)
 
+    # coul_kappa decouples Coulomb onset from LJ onset: zero throughout the
+    # bonded stages so the CLJ exception carries no charge while atoms are at
+    # covalent distances, then ramps 0→1 during morph only (where the LJ
+    # softcore has already separated the atoms).  ring-make mirrors ring-break
+    # so that .reverse() gives the correct reversed schedule (coul_kappa ramps
+    # 1→0 through the reversed morph stage for the ring-making direction).
+    s.set_equation(
+        stage="potential_swap", force="ring-break", lever="coul_kappa", equation=0
+    )
+    s.set_equation(
+        stage="restraints_off", force="ring-break", lever="coul_kappa", equation=0
+    )
+    s.set_equation(
+        stage="ring_open", force="ring-break", lever="coul_kappa", equation=0
+    )
+    s.set_equation(
+        stage="morph", force="ring-break", lever="coul_kappa", equation=s.lam()
+    )
+    s.set_equation(
+        stage="potential_swap", force="ring-make", lever="coul_kappa", equation=0
+    )
+    s.set_equation(
+        stage="restraints_off", force="ring-make", lever="coul_kappa", equation=0
+    )
+    s.set_equation(stage="ring_open", force="ring-make", lever="coul_kappa", equation=0)
+    s.set_equation(
+        stage="morph", force="ring-make", lever="coul_kappa", equation=s.lam()
+    )
+
     return s
 
 

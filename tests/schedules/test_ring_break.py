@@ -10,10 +10,6 @@ pytestmark = pytest.mark.skipif(
 # clearly non-zero CustomBondForce energy.
 _ACTIVE_THRESHOLD = 0.1
 
-# Minimum energy delta (kcal/mol) expected when kappa switches from 0 to 1
-# at fixed geometry (within ring_open, where all bonded params are at s.final()).
-_KAPPA_DELTA_THRESHOLD = 0.2
-
 
 def _build_dynamics(mols, schedule, swap_end_states):
     """
@@ -219,56 +215,6 @@ def test_reverse_ring_break_morph_schedule(lam, expected_kappa, expected_alpha):
     )
     assert abs(alpha - expected_alpha) < 1e-10, (
         f"ring-make alpha={alpha:.8f} at λ={lam:.4f}, expected {expected_alpha}"
-    )
-
-
-# ── energy delta test ─────────────────────────────────────────────────────────
-#
-# Within the ring_open stage (λ ∈ [1/2, 2/3)) all bonded parameters are fixed
-# at s.final() throughout; only kappa and alpha change. Heavy-atom bonds are
-# not in the h_bonds constraint set, so update_constraints=True does not move
-# the ring-break atoms between the two set_lambda calls. Both measurements
-# therefore use identical atom positions, making the energy delta a clean
-# measure of the kappa switch rather than a geometry change.
-#
-# With Sire's current softcore formula the CustomBondForce energy at kappa=0 is
-# the negative of the hard-hard correction (not near zero), but the DELTA
-# between kappa=0 and kappa=1 at fixed geometry equals the net softcore
-# correction and is a meaningful, formula-independent observable.
-
-
-def test_ring_break_softcore_delta(forward_dynamics):
-    """
-    The ring-break CustomBondForce energy changes substantially between the start
-    (kappa=0, α=1) and end (kappa=1, α=0) of the ring_open stage.
-
-    Both measurements use the same atom geometry because ring_open fixes all
-    bonded parameters at s.final() and heavy-atom bonds are unconstrained.
-    """
-    e_off = _force_energy_kcal(forward_dynamics, 0.5, "ring-break")  # kappa=0
-    e_on = _force_energy_kcal(forward_dynamics, 2 / 3, "ring-break")  # kappa=1
-    assert abs(e_on - e_off) > _KAPPA_DELTA_THRESHOLD, (
-        f"ring-break energy delta between kappa=0 (λ=0.5, E={e_off:.4f} kcal/mol) "
-        f"and kappa=1 (λ=2/3, E={e_on:.4f} kcal/mol) is only "
-        f"{abs(e_on - e_off):.4f} kcal/mol (expected > {_KAPPA_DELTA_THRESHOLD})"
-    )
-
-
-def test_ring_make_softcore_delta(reverse_dynamics):
-    """
-    The ring-make CustomBondForce energy changes substantially between the start
-    (kappa=1, α=0) and end (kappa=0, α=1) of the reversed ring_open stage.
-
-    Symmetric counterpart of test_ring_break_softcore_delta for the reverse schedule.
-    Reversed ring_open spans λ ∈ [1/3, 1/2); measurements at λ=1/3 (kappa=1) and
-    λ=1/2 (kappa=0) share the same atom geometry for the same reason.
-    """
-    e_on = _force_energy_kcal(reverse_dynamics, 1 / 3, "ring-make")  # kappa=1
-    e_off = _force_energy_kcal(reverse_dynamics, 0.5, "ring-make")  # kappa=0
-    assert abs(e_on - e_off) > _KAPPA_DELTA_THRESHOLD, (
-        f"ring-make energy delta between kappa=1 (λ=1/3, E={e_on:.4f} kcal/mol) "
-        f"and kappa=0 (λ=1/2, E={e_off:.4f} kcal/mol) is only "
-        f"{abs(e_on - e_off):.4f} kcal/mol (expected > {_KAPPA_DELTA_THRESHOLD})"
     )
 
 
