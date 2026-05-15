@@ -175,6 +175,41 @@ _REV_KAPPA_ALPHA = [
     (1.00, 0.0, 1.0),
 ]
 
+# ring_break_morph coul_kappa points (initial=0, final=1):
+#   λ=0.00–2/3  all pre-morph stages   coul_kappa=0
+#   λ=2/3       morph start            coul_kappa=0  (within-stage lam=0)
+#   λ=0.85      morph mid              coul_kappa=0.55  ((0.85-2/3)*3)
+#   λ=1.00      morph end              coul_kappa=1.0
+_FWD_COUL_KAPPA = [
+    (0.00, 0.0),
+    (0.15, 0.0),
+    (1 / 3, 0.0),
+    (0.45, 0.0),
+    (0.50, 0.0),
+    (0.55, 0.0),
+    (0.60, 0.0),
+    (2 / 3, 0.0),
+    (0.85, 0.55),
+    (1.00, 1.0),
+]
+
+# reverse_ring_break_morph ring-make coul_kappa points (initial=1, final=0):
+#   λ=0.00      morph start (reversed)  coul_kappa=1.0
+#   λ=0.15      morph mid               coul_kappa=0.55  (1 - 0.15*3)
+#   λ=1/3       morph end / ring_open   coul_kappa=0.0
+#   λ=0.45–1.0  ring_open/restraints_off/potential_swap  coul_kappa=0
+_REV_COUL_KAPPA = [
+    (0.00, 1.0),
+    (0.15, 0.55),
+    (1 / 3, 0.0),
+    (0.45, 0.0),
+    (0.50, 0.0),
+    (0.60, 0.0),
+    (2 / 3, 0.0),
+    (0.85, 0.0),
+    (1.00, 0.0),
+]
+
 
 @pytest.mark.parametrize("lam,expected_kappa,expected_alpha", _FWD_KAPPA_ALPHA)
 def test_ring_break_morph_schedule(lam, expected_kappa, expected_alpha):
@@ -215,6 +250,42 @@ def test_reverse_ring_break_morph_schedule(lam, expected_kappa, expected_alpha):
     )
     assert abs(alpha - expected_alpha) < 1e-10, (
         f"ring-make alpha={alpha:.8f} at λ={lam:.4f}, expected {expected_alpha}"
+    )
+
+
+@pytest.mark.parametrize("lam,expected_coul_kappa", _FWD_COUL_KAPPA)
+def test_ring_break_morph_coul_kappa(lam, expected_coul_kappa):
+    """
+    ring_break_morph() pins coul_kappa=0 through all pre-morph stages and ramps
+    it 0→1 during morph only, so Coulomb only activates once atoms are separated.
+
+    Uses lambdalever's initial/final values (coul_kappa: 0→1).
+    """
+    from somd2._utils._schedules import ring_break_morph
+
+    s = ring_break_morph()
+    coul_kappa = s.morph("ring-break", "coul_kappa", 0.0, 1.0, lam)
+    assert abs(coul_kappa - expected_coul_kappa) < 1e-10, (
+        f"ring-break coul_kappa={coul_kappa:.8f} at λ={lam:.4f}, "
+        f"expected {expected_coul_kappa}"
+    )
+
+
+@pytest.mark.parametrize("lam,expected_coul_kappa", _REV_COUL_KAPPA)
+def test_reverse_ring_break_morph_coul_kappa(lam, expected_coul_kappa):
+    """
+    reverse_ring_break_morph() ramps ring-make coul_kappa 1→0 through the
+    reversed morph stage and pins it to 0 in all subsequent stages.
+
+    Uses lambdalever's initial/final values (coul_kappa: 1→0).
+    """
+    from somd2._utils._schedules import reverse_ring_break_morph
+
+    s = reverse_ring_break_morph()
+    coul_kappa = s.morph("ring-make", "coul_kappa", 1.0, 0.0, lam)
+    assert abs(coul_kappa - expected_coul_kappa) < 1e-10, (
+        f"ring-make coul_kappa={coul_kappa:.8f} at λ={lam:.4f}, "
+        f"expected {expected_coul_kappa}"
     )
 
 
@@ -315,8 +386,10 @@ def test_schedule_symmetry():
         for force, lever, init, fin in [
             ("ring-break", "kappa", 0.0, 1.0),
             ("ring-break", "alpha", 1.0, 0.0),
+            ("ring-break", "coul_kappa", 0.0, 1.0),
             ("ring-make", "kappa", 1.0, 0.0),
             ("ring-make", "alpha", 0.0, 1.0),
+            ("ring-make", "coul_kappa", 1.0, 0.0),
         ]:
             v_rev = rev.morph(force, lever, init, fin, lam)
             v_rev2 = rev_via_reverse.morph(force, lever, init, fin, lam)
