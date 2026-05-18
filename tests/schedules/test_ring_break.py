@@ -43,6 +43,7 @@ def _build_dynamics(mols, schedule, swap_end_states):
         perturbable_constraint="h_bonds_not_heavy_perturbed",
         cutoff="10A",
         cutoff_type="rf",
+        schedule=schedule,
         dynamic_constraints=True,
         include_constrained_energies=False,
         swap_end_states=swap_end_states,
@@ -53,7 +54,6 @@ def _build_dynamics(mols, schedule, swap_end_states):
             "check_for_h_by_element": False,
             "check_for_h_by_ambertype": False,
             "fix_perturbable_zero_sigmas": True,
-            "lambda_schedule": schedule,
             "restraints": [hard_restraints, soft_restraints],
         },
     )
@@ -397,3 +397,58 @@ def test_schedule_symmetry():
                 f"Mismatch for {force}/{lever} at λ={lam:.2f}: "
                 f"reverse_ring_break_morph={v_rev}, ring_break_morph().reverse()={v_rev2}"
             )
+
+
+def test_force_contribution(forward_dynamics, syk_ring_break_mols):
+    """
+    Verify the softcore CustomBondForce contribution at each end state.
+
+    At λ=0 the softcore is fully off (α=1, LJ=0; coul_kappa=0, Coulomb=0) so
+    the total energy should match a system without the force to within numerical
+    precision. At λ=1 the exclusion has morphed away, so without the force the
+    ring-break pair sees a large LJ repulsion at bonded distance; with the force
+    the softcore smooths this repulsion, giving a substantially lower energy.
+    """
+
+    from somd2._utils._schedules import ring_break_morph
+
+    # Delete the ring_breaking_bonds property from the perturbable molecule
+    # so that the soft-core ring-breaking force isn't created.
+    mols = syk_ring_break_mols.clone()
+    mol = mols["perturbable"].molecules()[0]
+    cursor = mol.cursor()
+    del [cursor["ring_breaking_bonds"]]
+    mols.update(cursor.commit())
+
+    # Build a dynamics object with the same schedule but without the ring-breaking force.
+    d = _build_dynamics(mols, ring_break_morph(), swap_end_states=False)
+
+    # Get the λ=0 energies. At this end state the softcore is fully off (α=1
+    # gives LJ=0; coul_kappa=0 gives Coulomb=0), so the force contributes
+    # nothing and both systems should agree to within numerical precision.
+    d.set_lambda(0.0, update_constraints=True)
+    forward_dynamics.set_lambda(0.0, update_constraints=True)
+    nrg_no_force = d.current_potential_energy().value()
+    nrg_with_force = forward_dynamics.current_potential_energy().value()
+
+    assert abs(nrg_no_force - nrg_with_force) < 0.05, (
+        f"Energy mismatch at λ=0: energy with force = {nrg_with_force:.6f} kcal/mol, "
+        f"energy without force = {nrg_no_force:.6f} kcal/mol, "
+        f"difference = {abs(nrg_with_force - nrg_no_force):.2e} kcal/mol"
+    )
+
+    # Get the λ=1 energies. At this end state the exclusion between the
+    # ring-break atoms has morphed away, so without the force they interact via
+    # the regular NonbondedForce with their perturbed LJ parameters (large sigma)
+    # at bonded distance, giving enormous repulsion. With the softcore force the
+    # repulsion is smoothed, giving a substantially lower energy.
+    d.set_lambda(1.0, update_constraints=True)
+    forward_dynamics.set_lambda(1.0, update_constraints=True)
+    nrg_no_force = d.current_potential_energy().value()
+    nrg_with_force = forward_dynamics.current_potential_energy().value()
+
+    assert nrg_with_force < nrg_no_force, (
+        f"Energy with softcore force ({nrg_with_force:.6f} kcal/mol) should be lower "
+        f"than without ({nrg_no_force:.6f} kcal/mol) at λ=1 with ring-closed geometry: "
+        f"the softcore should smooth the large LJ repulsion when the exclusion morphs away"
+    )
