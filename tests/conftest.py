@@ -98,3 +98,18 @@ def syk_ring_break_mols():
     """
     mols = sr.load_test_files("syk_5035_5033.s3")
     return sr.morph.link_to_reference(mols)
+
+
+@pytest.fixture(scope="session")
+def ring_break_mols():
+    """
+    Load the 6YNGD→intgd ring-breaking perturbation system.
+
+    Reference state (λ=0): 6YNGD ligand with an intact N-C ring bond.
+    Perturbed state (λ=1): open-chain analogue (intgd) where that bond
+    is absent.  The cross-bond angles, dihedrals, and impropers spanning
+    the breaking bond are non-ghost unique-to-state0 terms and must be
+    preserved by make_compatible.
+    """
+    mols = sr.load_test_files("6yngd_to_intgd.s3")
+    return sr.morph.link_to_reference(mols)

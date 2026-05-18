@@ -264,6 +264,19 @@ def make_compatible(system, fix_perturbable_zero_sigmas=False):
                 new_bonds0.set(idx0, idx1, p0.function())
                 new_bonds1.set(idx0, idx1, p1.function())
 
+        # Pass through unique terms that have no ghost in the state they exist in.
+        for b_idx in bonds0_unique_idx.values():
+            p = bonds0[b_idx]
+            a0, a1 = p.atom0(), p.atom1()
+            if not _has_ghost(mol, [a0, a1]):
+                new_bonds0.set(a0, a1, p.function())
+
+        for b_idx in bonds1_unique_idx.values():
+            p = bonds1[b_idx]
+            a0, a1 = p.atom0(), p.atom1()
+            if not _has_ghost(mol, [a0, a1], True):
+                new_bonds1.set(a0, a1, p.function())
+
         # Set the new bonded terms.
         edit_mol = edit_mol.set_property("bond0", new_bonds0).molecule()
         edit_mol = edit_mol.set_property("bond1", new_bonds1).molecule()
@@ -365,6 +378,19 @@ def make_compatible(system, fix_perturbable_zero_sigmas=False):
             else:
                 new_angles0.set(idx0, idx1, idx2, p0.function())
                 new_angles1.set(idx0, idx1, idx2, p1.function())
+
+        # Pass through unique terms that have no ghost in the state they exist in.
+        for a_idx in angles0_unique_idx.values():
+            p = angles0[a_idx]
+            a0, a1, a2 = p.atom0(), p.atom1(), p.atom2()
+            if not _has_ghost(mol, [a0, a1, a2]):
+                new_angles0.set(a0, a1, a2, p.function())
+
+        for a_idx in angles1_unique_idx.values():
+            p = angles1[a_idx]
+            a0, a1, a2 = p.atom0(), p.atom1(), p.atom2()
+            if not _has_ghost(mol, [a0, a1, a2], True):
+                new_angles1.set(a0, a1, a2, p.function())
 
         # Set the new angle terms.
         edit_mol = edit_mol.set_property("angle0", new_angles0).molecule()
@@ -478,6 +504,25 @@ def make_compatible(system, fix_perturbable_zero_sigmas=False):
             else:
                 new_dihedrals0.set(idx0, idx1, idx2, idx3, p0.function())
                 new_dihedrals1.set(idx0, idx1, idx2, idx3, p1.function())
+
+        # Pass through unique terms that have no ghost in the state they exist in.
+        for d_idx in dihedrals0_unique_idx.values():
+            p = dihedrals0[d_idx]
+            a0 = info.atom_idx(p.atom0())
+            a1 = info.atom_idx(p.atom1())
+            a2 = info.atom_idx(p.atom2())
+            a3 = info.atom_idx(p.atom3())
+            if not _has_ghost(mol, [a0, a1, a2, a3]):
+                new_dihedrals0.set(a0, a1, a2, a3, p.function())
+
+        for d_idx in dihedrals1_unique_idx.values():
+            p = dihedrals1[d_idx]
+            a0 = info.atom_idx(p.atom0())
+            a1 = info.atom_idx(p.atom1())
+            a2 = info.atom_idx(p.atom2())
+            a3 = info.atom_idx(p.atom3())
+            if not _has_ghost(mol, [a0, a1, a2, a3], True):
+                new_dihedrals1.set(a0, a1, a2, a3, p.function())
 
         # Set the new dihedral terms.
         edit_mol = edit_mol.set_property("dihedral0", new_dihedrals0).molecule()
@@ -604,6 +649,25 @@ def make_compatible(system, fix_perturbable_zero_sigmas=False):
             else:
                 new_impropers0.set(idx0, idx1, idx2, idx3, p0.function())
                 new_impropers1.set(idx0, idx1, idx2, idx3, p1.function())
+
+        # Pass through unique terms that have no ghost in the state they exist in.
+        for i_idx in impropers0_unique_idx.values():
+            p = impropers0[i_idx]
+            a0 = info.atom_idx(p.atom0())
+            a1 = info.atom_idx(p.atom1())
+            a2 = info.atom_idx(p.atom2())
+            a3 = info.atom_idx(p.atom3())
+            if not _has_ghost(mol, [a0, a1, a2, a3]):
+                new_impropers0.set(a0, a1, a2, a3, p.function())
+
+        for i_idx in impropers1_unique_idx.values():
+            p = impropers1[i_idx]
+            a0 = info.atom_idx(p.atom0())
+            a1 = info.atom_idx(p.atom1())
+            a2 = info.atom_idx(p.atom2())
+            a3 = info.atom_idx(p.atom3())
+            if not _has_ghost(mol, [a0, a1, a2, a3], True):
+                new_impropers1.set(a0, a1, a2, a3, p.function())
 
         # Set the new improper terms.
         edit_mol = edit_mol.set_property("improper0", new_impropers0).molecule()
