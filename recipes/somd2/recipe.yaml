@@ -20,6 +20,7 @@ requirements:
     - versioningit
   run:
     - biosimspace
+    - filelock
     - ghostly
     - loch
     - loguru
