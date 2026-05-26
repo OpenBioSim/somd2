@@ -647,11 +647,6 @@ class RunnerBase:
                 _logger.error(msg)
                 raise ValueError(msg)
 
-            if self._config.pressure != None:
-                msg = "GCMC simulations must be run in the NVT ensemble."
-                _logger.error(msg)
-                raise ValueError(msg)
-
             if isinstance(self._system, list):
                 mols = self._system[0]
             else:
@@ -894,6 +889,7 @@ class RunnerBase:
                 "lambda_schedule": self._config.lambda_schedule,
                 "no_logger": True,
                 "num_ghost_waters": self._config.gcmc_num_waters,
+                "pressure": self._config.pressure,
                 "overwrite": self._config.overwrite,
                 "radius": str(self._config.gcmc_radius),
                 "reference": self._config.gcmc_selection,
