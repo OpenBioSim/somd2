@@ -1273,6 +1273,7 @@ class RunnerBase:
         lam = f"{lambda_value:.5f}"
         filenames = {}
         filenames["checkpoint"] = str(output_directory / f"checkpoint_{lam}.s3")
+        filenames["checkpoint_state"] = str(output_directory / f"checkpoint_{lam}.npz")
         filenames["energy_traj"] = str(output_directory / f"energy_traj_{lam}.parquet")
         filenames["trajectory"] = str(output_directory / f"traj_{lam}.dcd")
         filenames["trajectory_chunk"] = str(output_directory / f"traj_{lam}_")
@@ -1628,18 +1629,22 @@ class RunnerBase:
                 f"No config files found in {self._config.output_directory}, "
                 "attempting to retrieve config from lambda = 0 checkpoint file."
             )
-            try:
-                system_temp = _sr.stream.load(
-                    str(self._config.output_directory / "checkpoint_0.00000.s3")
-                )
-            except:
-                expdir = self._config.output_directory / "checkpoint_0.00000.s3"
-                _logger.error(f"Unable to load checkpoint file from {expdir}.")
-                raise
+            s3_path = self._config.output_directory / "checkpoint_0.00000.s3"
+            if s3_path.exists():
+                try:
+                    system_temp = _sr.stream.load(str(s3_path))
+                except:
+                    _logger.error(f"Unable to load checkpoint file from {s3_path}.")
+                    raise
+                else:
+                    self._last_config = dict(system_temp.property("config"))
+                    config = self._config.as_dict(sire_compatible=True)
+                    del system_temp
             else:
-                self._last_config = dict(system_temp.property("config"))
-                config = self._config.as_dict(sire_compatible=True)
-                del system_temp
+                raise OSError(
+                    f"No config file found in {self._config.output_directory}. "
+                    "Cannot validate restart config without a config.yaml file."
+                )
 
         self._compare_configs(self._last_config, config)
 
@@ -1854,6 +1859,8 @@ class RunnerBase:
         lambda_energy=None,
         lambda_grad=None,
         is_final_block=False,
+        context=None,
+        gcmc_sampler=None,
     ):
         """
         Save a checkpoint file.
@@ -1997,24 +2004,18 @@ class RunnerBase:
                         for chunk in traj_chunks:
                             _Path(chunk).unlink()
 
-                # Add config and lambda value to the system properties.
-                system.set_property(
-                    "config", self._config.as_dict(sire_compatible=True)
+                # Write the checkpoint system to file.
+                self._write_checkpoint_system(
+                    system, index, context=context, gcmc_sampler=gcmc_sampler
                 )
-                system.set_property("lambda", lam)
 
-                # Delete all frames from the system.
-                system.delete_all_frames()
-
-                # Stream the final system to file.
-                _sr.stream.save(system, self._filenames[index]["checkpoint"])
-
-                # Create the final parquet file.
-                _dataframe_to_parquet(
-                    df,
-                    metadata=metadata,
-                    filename=self._filenames[index]["energy_traj"],
-                )
+                # Append the final block's energy data. If no parquet exists
+                # yet (e.g. checkpoint_frequency=0), create one from scratch.
+                _energy_traj = self._filenames[index]["energy_traj"]
+                if _Path(_energy_traj).exists():
+                    _parquet_append(_energy_traj, df.iloc[-self._energy_per_block :])
+                else:
+                    _dataframe_to_parquet(df, metadata=metadata, filename=_energy_traj)
 
             else:
                 # Update the starting block if necessary.
@@ -2034,27 +2035,23 @@ class RunnerBase:
                             format=["DCD"],
                         )
 
-                # Encode the configuration and lambda value as system properties.
-                system.set_property(
-                    "config", self._config.as_dict(sire_compatible=True)
+                # Write the checkpoint system to file.
+                self._write_checkpoint_system(
+                    system, index, context=context, gcmc_sampler=gcmc_sampler
                 )
-                system.set_property("lambda", lam)
-
-                # Delete all frames from the system.
-                system.delete_all_frames()
-
-                # Stream the checkpoint to file.
-                _sr.stream.save(system, self._filenames[index]["checkpoint"])
 
                 # Skip parquet creation for post-equilibration checkpoints.
                 if not is_post_equilibration:
                     # Create the parquet file name.
                     filename = self._filenames[index]["energy_traj"]
 
-                    # Create the parquet file.
-                    if block == self._start_block:
+                    # At the start block of a restart, append to the existing
+                    # parquet so that historical data is preserved. For fresh
+                    # runs, overwrite (or create) the parquet file.
+                    if block == self._start_block and not (
+                        self._is_restart and _Path(filename).exists()
+                    ):
                         _dataframe_to_parquet(df, metadata=metadata, filename=filename)
-                    # Append to the parquet file.
                     else:
                         _parquet_append(
                             filename,
@@ -2065,6 +2062,35 @@ class RunnerBase:
             return index, e
 
         return index, None
+
+    def _write_checkpoint_system(self, system, index, context=None, gcmc_sampler=None):
+        """
+        Write the system state to the checkpoint file.
+
+        Subclasses may override this to store state differently, e.g. repex
+        records the simulation time in the dynamics cache pickle instead of
+        streaming a per-replica file.
+
+        Parameters
+        ----------
+
+        system: :class: `System <sire.system.System>`
+            The committed system to checkpoint.
+
+        index: int
+            The index of the lambda window.
+
+        context: openmm.Context, optional
+            The OpenMM context. Unused in the base implementation.
+
+        gcmc_sampler: GCMCSampler, optional
+            The GCMC sampler. Unused in the base implementation.
+        """
+        lam = self._lambda_values[index]
+        system.set_property("config", self._config.as_dict(sire_compatible=True))
+        system.set_property("lambda", lam)
+        system.delete_all_frames()
+        _sr.stream.save(system, self._filenames[index]["checkpoint"])
 
     def _backup_checkpoint(self, index):
         """
@@ -2087,6 +2113,17 @@ class RunnerBase:
                 _copyfile(
                     self._filenames[index]["checkpoint"],
                     str(self._filenames[index]["checkpoint"]) + ".bak",
+                )
+        except Exception as e:
+            return index, e
+
+        try:
+            # Backup the existing compact numpy checkpoint file, if it exists.
+            path = _Path(self._filenames[index]["checkpoint_state"])
+            if path.exists() and path.stat().st_size > 0:
+                _copyfile(
+                    self._filenames[index]["checkpoint_state"],
+                    str(self._filenames[index]["checkpoint_state"]) + ".bak",
                 )
             traj_filename = self._filenames[index]["trajectory"]
         except Exception as e:

@@ -102,6 +102,7 @@ class DynamicsCache:
         self._lambdas = lambdas
         self._rest2_scale_factors = rest2_scale_factors
         self._states = _np.array(range(len(lambdas)))
+        self._time = None
         self._openmm_states = [None] * len(lambdas)
         self._gcmc_samplers = [None] * len(lambdas)
         self._gcmc_states = [None] * len(lambdas)
@@ -136,8 +137,12 @@ class DynamicsCache:
         n = len(self._lambdas)
         if not hasattr(self, "_gcmc_stats"):
             self._gcmc_stats = [None] * n
+        if not hasattr(self, "_gcmc_states"):
+            self._gcmc_states = [None] * n
         if not hasattr(self, "_terminal_flip_stats"):
             self._terminal_flip_stats = [[0, 0]] * n
+        if not hasattr(self, "_time"):
+            self._time = None
 
     def __getstate__(self):
         """
@@ -149,6 +154,7 @@ class DynamicsCache:
             "_lambdas": self._lambdas,
             "_rest2_scale_factors": self._rest2_scale_factors,
             "_states": self._states,
+            "_time": self._time,
             "_openmm_states": self._openmm_states,
             # Don't pickle the GCMC samplers since they need to be recreated.
             "_gcmc_samplers": len(self._gcmc_samplers) * [None],
@@ -820,7 +826,27 @@ class RepexRunner(_RunnerBase):
         else:
             _logger.debug("Restarting from file")
 
-            time = self._system[0].time()
+            # Load the dynamics cache first so we can read the simulation time
+            # from it (new format). Old-format restarts with .s3 files fall
+            # back to reading the time from the loaded Sire system.
+            try:
+                with open(self._repex_state, "rb") as f:
+                    self._dynamics_cache = _pickle.load(f)
+            except Exception as e:
+                _logger.error(
+                    f"Could not load dynamics cache from {self._repex_state}: {e}"
+                )
+                raise e
+
+            # Derive the simulation time: prefer the value stored in the
+            # pickle (_time is set by the new-format _write_checkpoint_system);
+            # fall back to the Sire system for old-format checkpoints.
+            if self._dynamics_cache._time is not None and not isinstance(
+                self._system, list
+            ):
+                time = self._dynamics_cache._time
+            else:
+                time = self._system[0].time()
 
             # Check to see if the simulation is already complete.
             if self._done_file.exists():
@@ -852,15 +878,6 @@ class RepexRunner(_RunnerBase):
                 _logger.info(
                     f"Restarting at time {time}, time remaining = {self._config.runtime - time}"
                 )
-
-            try:
-                with open(self._repex_state, "rb") as f:
-                    self._dynamics_cache = _pickle.load(f)
-            except Exception as e:
-                _logger.error(
-                    f"Could not load dynamics cache from {self._repex_state}: {e}"
-                )
-                raise e
 
             # Make sure the number of replicas is the same.
             if len(self._dynamics_cache._lambdas) != self._config.num_lambda:
@@ -911,7 +928,14 @@ class RepexRunner(_RunnerBase):
 
         # If restarting, subtract the time already run from the total runtime
         if self._config.restart:
-            time = self._system[0].time()
+            time = (
+                self._dynamics_cache._time
+                if (
+                    self._dynamics_cache._time is not None
+                    and not isinstance(self._system, list)
+                )
+                else self._system[0].time()
+            )
             self._config.runtime = str(self._config.runtime - time)
 
             # Work out the current block number.
@@ -1845,6 +1869,43 @@ class RepexRunner(_RunnerBase):
 
         return matrix
 
+    def _check_restart(self):
+        """
+        Check the output directory for a valid restart state.
+
+        If per-replica checkpoint stream files (.s3) exist the base class is
+        used to load them (old format, backwards compatible). Otherwise the
+        repex state pickle is used and the original input system is returned
+        directly, since positions and velocities come from the OpenMM states
+        stored in the pickle.
+        """
+        from pathlib import Path as _Path_local
+
+        checkpoint_path = _Path_local(self._filenames[0]["checkpoint"])
+        if checkpoint_path.exists():
+            # Old format: load per-replica .s3 files via base class.
+            return super()._check_restart()
+
+        repex_state = self._config.output_directory / "repex_state.pkl"
+        if not repex_state.exists():
+            return False, self._system
+
+        _logger.info(
+            "No checkpoint stream files found; restarting from repex state pickle."
+        )
+        return True, self._system
+
+    def _write_checkpoint_system(self, system, index, context=None, gcmc_sampler=None):
+        """
+        Record the current simulation time in the dynamics cache.
+
+        For repex, per-replica stream files are not written. The simulation
+        time is stored in the dynamics cache pickle instead, and positions and
+        velocities are already stored as compact numpy arrays in the OpenMM
+        state dict.
+        """
+        self._dynamics_cache._time = system.time()
+
     def _checkpoint(self, index, lambdas, block, num_blocks, is_final_block=False):
         """
         Checkpoint the simulation.
@@ -1885,10 +1946,6 @@ class RepexRunner(_RunnerBase):
 
             # Commit the current system.
             system = dynamics.commit()
-
-            # If performing GCMC, then we need to flag the ghost waters.
-            if gcmc_sampler is not None:
-                system = gcmc_sampler._flag_ghost_waters(system)
 
             # Get the simulation speed.
             speed = dynamics.time_speed()

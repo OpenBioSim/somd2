@@ -266,6 +266,69 @@ class Runner(_RunnerBase):
             # Cleanup backup files.
             self._cleanup()
 
+    def _check_restart(self):
+        """
+        Check the output directory for a valid restart state.
+
+        Detects new-format (.npz) checkpoints and falls back to the legacy
+        .s3 stream file format when only old checkpoints are present.
+        """
+        from pathlib import Path as _Path
+
+        npz_path = _Path(self._filenames[0]["checkpoint_state"])
+        s3_path = _Path(self._filenames[0]["checkpoint"])
+
+        if npz_path.exists():
+            _logger.info("Restarting from compact numpy checkpoint state.")
+            return True, self._system
+        elif s3_path.exists():
+            return super()._check_restart()
+        else:
+            return False, self._system
+
+    def _write_checkpoint_system(self, system, index, context=None, gcmc_sampler=None):
+        """
+        Write the system state to a compact numpy checkpoint file.
+
+        Saves positions, velocities, box vectors, simulation time, and (for
+        GCMC) ghost water indices to a .npz file. The legacy .s3 stream file
+        is not written.
+
+        If no context is provided (should not happen in normal operation),
+        falls back to the base .s3 implementation.
+        """
+        if context is None:
+            super()._write_checkpoint_system(system, index)
+            return
+
+        import openmm.unit as _omm_unit
+
+        state = context.getState(getPositions=True, getVelocities=True)
+        pos = state.getPositions(asNumpy=True).value_in_unit(_omm_unit.nanometer)
+        vel = state.getVelocities(asNumpy=True).value_in_unit(
+            _omm_unit.nanometer / _omm_unit.picosecond
+        )
+        time_ps = system.time().to("ps")
+
+        save_kwargs = {
+            "positions": pos,
+            "velocities": vel,
+            "time_ps": _np.array([time_ps]),
+        }
+
+        box = state.getPeriodicBoxVectors(asNumpy=True)
+        if box is not None:
+            save_kwargs["box"] = box.value_in_unit(_omm_unit.nanometer)
+
+        if gcmc_sampler is not None:
+            # water_state() returns 1 for active, 0 for ghost.
+            water_state = gcmc_sampler.water_state()
+            save_kwargs["ghost_water_indices"] = _np.where(water_state == 0)[0].astype(
+                _np.int32
+            )
+
+        _np.savez(self._filenames[index]["checkpoint_state"], **save_kwargs)
+
     def run_window(self, index):
         """
         Run a single lamdba window.
@@ -295,9 +358,16 @@ class Runner(_RunnerBase):
 
         if self._is_restart:
             _logger.debug(f"Restarting {_lam_sym} = {lambda_value} from file")
-            system = self._system[index].clone()
-
-            time = system.time()
+            if isinstance(self._system, list):
+                # Old format: system with saved positions loaded from .s3 stream file.
+                system = self._system[index].clone()
+                time = system.time()
+            else:
+                # New format: original input system; time stored in .npz checkpoint.
+                system = self._system.clone()
+                time = _sr.u(
+                    f"{float(_np.load(self._filenames[index]['checkpoint_state'])['time_ps'].item()):.6f} ps"
+                )
             if time > self._config.runtime - self._config.timestep:
                 _logger.success(
                     f"{_lam_sym} = {lambda_value} already complete. Skipping."
@@ -398,7 +468,14 @@ class Runner(_RunnerBase):
 
         # Check for completion if this is a restart.
         if is_restart:
-            time = system.time()
+            if isinstance(self._system, list):
+                time = system.time()
+            else:
+                # New format: time stored in .npz, not in the Sire system.
+                time = _sr.u(
+                    f"{float(_np.load(self._filenames[index]['checkpoint_state'])['time_ps'].item()):.6f} ps"
+                )
+                system.set_time(time)
             if time > self._config.runtime - self._config.timestep:
                 _logger.success(
                     f"{_lam_sym} = {lambda_value} already complete. Skipping."
@@ -644,6 +721,28 @@ class Runner(_RunnerBase):
             _logger.info(f"Writing OpenMM XML for {_lam_sym} = {lambda_value:.5f}")
             dynamics.to_xml(self._filenames[index]["xml"])
 
+        # For new-format restarts, apply saved positions/velocities/box to context.
+        _new_format_restart = is_restart and not isinstance(self._system, list)
+        if _new_format_restart:
+            import openmm.unit as _omm_unit
+
+            _npz_state = _np.load(self._filenames[index]["checkpoint_state"])
+            dynamics.context().setPositions(
+                _npz_state["positions"] * _omm_unit.nanometer
+            )
+            dynamics.context().setVelocities(
+                _npz_state["velocities"] * _omm_unit.nanometer / _omm_unit.picosecond
+            )
+            if "box" in _npz_state:
+                from openmm import Vec3 as _Vec3
+
+                _box = _npz_state["box"]
+                dynamics.context().setPeriodicBoxVectors(
+                    _Vec3(*_box[0]) * _omm_unit.nanometer,
+                    _Vec3(*_box[1]) * _omm_unit.nanometer,
+                    _Vec3(*_box[2]) * _omm_unit.nanometer,
+                )
+
         # Reset the GCMC sampler. This resets the sampling statistics and clears
         # the associated OpenMM forces.
         if gcmc_sampler is not None:
@@ -655,31 +754,52 @@ class Runner(_RunnerBase):
             # If this is a restart, then we need to reset the GCMC water state
             # to match that of the restart system.
             if self._is_restart:
-                from openmm.unit import angstrom
+                if isinstance(self._system, list):
+                    # Old format: restore ghost waters from cached indices/positions.
+                    from openmm.unit import angstrom
 
-                gcmc_sampler.push()
-                try:
-                    # First set all waters to non-ghosts.
-                    gcmc_sampler._set_water_state(
-                        dynamics.context(),
-                        states=_np.ones(len(gcmc_sampler._water_indices)),
-                        force=True,
+                    gcmc_sampler.push()
+                    try:
+                        # First set all waters to non-ghosts.
+                        gcmc_sampler._set_water_state(
+                            dynamics.context(),
+                            states=_np.ones(len(gcmc_sampler._water_indices)),
+                            force=True,
+                        )
+
+                        # Now set the ghost waters.
+                        gcmc_sampler._set_water_state(
+                            dynamics.context(),
+                            self._restart_ghost_waters[index],
+                            states=_np.zeros(len(gcmc_sampler._water_indices)),
+                            force=True,
+                        )
+                    finally:
+                        gcmc_sampler.pop()
+
+                    # Finally, reset the context positions to match the restart system.
+                    dynamics.context().setPositions(
+                        self._restart_positions[index] * angstrom
                     )
-
-                    # Now set the ghost waters.
-                    gcmc_sampler._set_water_state(
-                        dynamics.context(),
-                        self._restart_ghost_waters[index],
-                        states=_np.zeros(len(gcmc_sampler._water_indices)),
-                        force=True,
-                    )
-                finally:
-                    gcmc_sampler.pop()
-
-                # Finally, reset the context positions to match the restart system.
-                dynamics.context().setPositions(
-                    self._restart_positions[index] * angstrom
-                )
+                else:
+                    # New format: positions already applied; restore ghost water state.
+                    ghost_idxs = _npz_state["ghost_water_indices"].tolist()
+                    gcmc_sampler.push()
+                    try:
+                        gcmc_sampler._set_water_state(
+                            dynamics.context(),
+                            states=_np.ones(len(gcmc_sampler._water_indices)),
+                            force=True,
+                        )
+                        if ghost_idxs:
+                            gcmc_sampler._set_water_state(
+                                dynamics.context(),
+                                ghost_idxs,
+                                states=_np.zeros(len(gcmc_sampler._water_indices)),
+                                force=True,
+                            )
+                    finally:
+                        gcmc_sampler.pop()
 
             # Otherwise, if we've performed equilibration, then we need to reset
             # the water state in the new context to match the equilibrated system.
@@ -731,6 +851,8 @@ class Runner(_RunnerBase):
                     speed=0.0,
                     lambda_energy=lambda_energy,
                     lambda_grad=lambda_grad,
+                    context=dynamics.context(),
+                    gcmc_sampler=gcmc_sampler,
                 )
                 if error is not None:
                     msg = (
@@ -940,10 +1062,6 @@ class Runner(_RunnerBase):
                     # Commit the current system.
                     system = dynamics.commit()
 
-                    # If performing GCMC, then we need to flag the ghost waters.
-                    if gcmc_sampler is not None:
-                        system = gcmc_sampler._flag_ghost_waters(system)
-
                     # Record the end time.
                     block_end = _timer()
 
@@ -979,6 +1097,8 @@ class Runner(_RunnerBase):
                             lambda_energy=lambda_energy,
                             lambda_grad=lambda_grad,
                             is_final_block=is_final_block,
+                            context=dynamics.context(),
+                            gcmc_sampler=gcmc_sampler,
                         )
 
                         if error is not None:
@@ -1097,6 +1217,8 @@ class Runner(_RunnerBase):
                             lambda_energy=lambda_energy,
                             lambda_grad=lambda_grad,
                             is_final_block=True,
+                            context=dynamics.context(),
+                            gcmc_sampler=gcmc_sampler,
                         )
 
                     # Delete all trajectory frames from the Sire system within the
@@ -1300,6 +1422,8 @@ class Runner(_RunnerBase):
                     lambda_energy=lambda_energy,
                     lambda_grad=lambda_grad,
                     is_final_block=True,
+                    context=dynamics.context(),
+                    gcmc_sampler=gcmc_sampler,
                 )
 
                 if error is not None:
