@@ -129,47 +129,49 @@ def test_reverse_has_ring_make_not_ring_break(reverse_dynamics):
 # They are completely independent of Sire's energy formula and will continue to
 # work correctly regardless of changes to the softcore implementation.
 
-# ring_break_morph kappa/alpha points:
-#   λ=0.00  potential_swap start  kappa=0, alpha=1
-#   λ=0.15  potential_swap mid    kappa=0, alpha=1
-#   λ=1/3   restraints_off start  kappa=0, alpha=1
-#   λ=0.45  restraints_off mid    kappa=0, alpha=1
-#   λ=0.50  ring_open start       kappa=0, alpha=1  (within-stage lam=0)
-#   λ=0.55  ring_open mid         kappa=0.3, alpha=0.7
-#   λ=0.60  ring_open mid         kappa=0.6, alpha=0.4
-#   λ=2/3   morph start           kappa=1, alpha=0
-#   λ=0.85  morph mid             kappa=1, alpha=0
-#   λ=1.00  morph end             kappa=1, alpha=0
+# ring_break_morph kappa/alpha points (3 equal stages: [0,1/3), [1/3,2/3), [2/3,1]):
+#   λ=0.00  potential_swap start     kappa=0, alpha=1
+#   λ=0.15  potential_swap mid       kappa=0, alpha=1
+#   λ=1/3   restraints_off start     kappa=0, alpha=1  (within-stage lam=0)
+#   λ=0.45  restraints_off mid       kappa=0.35, alpha=0.65  (within-stage lam=0.35)
+#   λ=0.50  restraints_off mid       kappa=0.5, alpha=0.5   (within-stage lam=0.5)
+#   λ=0.55  restraints_off mid       kappa=0.65, alpha=0.35  (within-stage lam=0.65)
+#   λ=0.60  restraints_off near end  kappa=0.8, alpha=0.2   (within-stage lam=0.8)
+#   λ=2/3   morph start              kappa=1, alpha=0
+#   λ=0.85  morph mid                kappa=1, alpha=0
+#   λ=1.00  morph end                kappa=1, alpha=0
 _FWD_KAPPA_ALPHA = [
     (0.00, 0.0, 1.0),
     (0.15, 0.0, 1.0),
     (1 / 3, 0.0, 1.0),
-    (0.45, 0.0, 1.0),
-    (0.50, 0.0, 1.0),
-    (0.55, 0.3, 0.7),
-    (0.60, 0.6, 0.4),
+    (0.45, 0.35, 0.65),
+    (0.50, 0.5, 0.5),
+    (0.55, 0.65, 0.35),
+    (0.60, 0.8, 0.2),
     (2 / 3, 1.0, 0.0),
     (0.85, 1.0, 0.0),
     (1.00, 1.0, 0.0),
 ]
 
 # reverse_ring_break_morph ring-make kappa/alpha points (mirror of forward):
-#   λ=0.00  morph start           kappa=1, alpha=0
-#   λ=0.15  morph mid             kappa=1, alpha=0
-#   λ=1/3   ring_open start       kappa=1, alpha=0  (within-stage lam=0)
-#   λ=0.45  ring_open mid         kappa=0.3, alpha=0.7  (within-stage lam=0.7)
-#   λ=0.50  restraints_off start  kappa=0, alpha=1
-#   λ=0.60  restraints_off mid    kappa=0, alpha=1
-#   λ=2/3   potential_swap start  kappa=0, alpha=1
-#   λ=0.85  potential_swap mid    kappa=0, alpha=1
-#   λ=1.00  potential_swap end    kappa=0, alpha=1
+#   λ=0.00  reversed morph start      kappa=1, alpha=0
+#   λ=0.15  reversed morph mid        kappa=1, alpha=0
+#   λ=1/3   reversed restraints_off start  kappa=1, alpha=0  (within-stage lam=0)
+#   λ=0.45  reversed restraints_off mid    kappa=0.65, alpha=0.35
+#   λ=0.50  reversed restraints_off mid    kappa=0.5, alpha=0.5
+#   λ=0.55  reversed restraints_off mid    kappa=0.35, alpha=0.65
+#   λ=0.60  reversed restraints_off near end  kappa=0.2, alpha=0.8
+#   λ=2/3   reversed potential_swap start  kappa=0, alpha=1
+#   λ=0.85  reversed potential_swap mid    kappa=0, alpha=1
+#   λ=1.00  reversed potential_swap end    kappa=0, alpha=1
 _REV_KAPPA_ALPHA = [
     (0.00, 1.0, 0.0),
     (0.15, 1.0, 0.0),
     (1 / 3, 1.0, 0.0),
-    (0.45, 0.3, 0.7),
-    (0.50, 0.0, 1.0),
-    (0.60, 0.0, 1.0),
+    (0.45, 0.65, 0.35),
+    (0.50, 0.5, 0.5),
+    (0.55, 0.35, 0.65),
+    (0.60, 0.2, 0.8),
     (2 / 3, 0.0, 1.0),
     (0.85, 0.0, 1.0),
     (1.00, 0.0, 1.0),
@@ -194,10 +196,10 @@ _FWD_COUL_KAPPA = [
 ]
 
 # reverse_ring_break_morph ring-make coul_kappa points (initial=1, final=0):
-#   λ=0.00      morph start (reversed)  coul_kappa=1.0
-#   λ=0.15      morph mid               coul_kappa=0.55  (1 - 0.15*3)
-#   λ=1/3       morph end / ring_open   coul_kappa=0.0
-#   λ=0.45–1.0  ring_open/restraints_off/potential_swap  coul_kappa=0
+#   λ=0.00      reversed morph start    coul_kappa=1.0
+#   λ=0.15      reversed morph mid      coul_kappa=0.55  (1 - 0.15*3)
+#   λ=1/3       reversed morph end      coul_kappa=0.0
+#   λ=0.45–1.0  restraints_off/potential_swap  coul_kappa=0
 _REV_COUL_KAPPA = [
     (0.00, 1.0),
     (0.15, 0.55),
@@ -293,10 +295,9 @@ def test_reverse_ring_break_morph_coul_kappa(lam, expected_coul_kappa):
 
 
 @pytest.mark.parametrize("lam", [2 / 3, 1.0])
-def test_ring_break_active_after_ring_open(forward_dynamics, lam):
+def test_ring_break_active_in_morph(forward_dynamics, lam):
     """
-    Ring-break energy is clearly non-zero (kappa=1) at the end of ring_open
-    and throughout morph.
+    Ring-break energy is clearly non-zero (kappa=1) throughout the morph stage.
     """
     e = _force_energy_kcal(forward_dynamics, lam, "ring-break")
     assert abs(e) > _ACTIVE_THRESHOLD, (
@@ -343,8 +344,8 @@ def test_ring_make_inactive_at_lambda_one(reverse_dynamics):
 #
 # Test points span zero and non-zero energy regions:
 #   λ=0.0  → forward kappa=0, reverse at 1-λ=1.0 kappa=0 (both ≈0)
-#   λ=0.55 → forward ring_open (kappa=0.3), reverse ring_open at 0.45 (kappa=0.3)
-#   λ=2/3  → forward morph start (kappa=1), reverse ring_open start at 1/3 (kappa=1)
+#   λ=0.55 → forward restraints_off (kappa=0.65), reverse restraints_off at 0.45 (kappa=0.65)
+#   λ=2/3  → forward morph start (kappa=1), reverse restraints_off start at 1/3 (kappa=1)
 #   λ=0.85 → forward morph (kappa=1), reverse reversed-morph at 0.15 (kappa=1)
 #   λ=1.0  → forward morph end (kappa=1), reverse at 0.0 reversed-morph (kappa=1)
 

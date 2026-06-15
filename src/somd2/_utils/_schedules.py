@@ -151,14 +151,16 @@ def ring_break_morph():
     """
     Build a lambda schedule for ring-breaking perturbations.
 
-    Four stages: potential_swap → restraints_off → ring_open → morph.
+    Three stages: potential_swap → restraints_off → morph.
 
-    The ring-break softcore kappa ramps 0→1 through ring_open and is fixed at 1
-    in morph.  The ring-make equations mirror ring-break so that
-    ``ring_break_morph().reverse()`` is the correct schedule for the ring-making
-    direction (used by :func:`reverse_ring_break_morph`).  Because ring_break_morph
-    is only used for ring-breaking perturbations (no ring-make force present), the
-    ring-make equations have no effect on forward simulations.
+    During restraints_off the Morse restraint ramps off (morse_soft: 1→0) while
+    the ring-break softcore simultaneously ramps on (alpha: 1→0, kappa: 0→1),
+    equations mirror ring-break so that ``ring_break_morph().reverse()`` is the
+    providing a smooth handover with no gap between the two forces. The ring-make
+    correct schedule for the ring-making direction (used by
+    :func:`reverse_ring_break_morph`). Because ring_break_morph is only used for
+    ring-breaking perturbations (no ring-make force present), the ring-make
+    equations have no effect on forward simulations.
 
     Returns
     -------
@@ -169,41 +171,13 @@ def ring_break_morph():
     from sire.cas import LambdaSchedule as _LambdaSchedule
 
     s = _LambdaSchedule.standard_morph()
-    s.set_stage_weight("morph", 2)
 
-    # ring_open: Morse is already off; ring-break nonbonded interaction ramps
-    # on (alpha: 1→0, kappa: 0→1) while non-bonded terms stay at initial and
-    # bonded terms remain at final. The softcore interaction gently pushes the
-    # atoms into the open-chain geometry before the full nonbonded morph begins,
-    # improving HREX overlap at the ring-break boundary.
-    #
-    # ring-make equations mirror ring-break so the reversed schedule is correct:
-    # after .reverse(), ring-make kappa ramps 1→0 through this stage, matching
-    # what ring-break does here in the forward direction.
-    s.prepend_stage("ring_open", s.initial(), weight=1)
-    s.set_equation(stage="ring_open", lever="morse_hard", equation=0)
-    s.set_equation(stage="ring_open", lever="morse_soft", equation=0)
-    s.set_equation(stage="ring_open", lever="bond_k", equation=s.final())
-    s.set_equation(stage="ring_open", lever="bond_length", equation=s.final())
-    s.set_equation(stage="ring_open", lever="angle_k", equation=s.final())
-    s.set_equation(stage="ring_open", lever="angle_size", equation=s.final())
-    s.set_equation(stage="ring_open", lever="torsion_k", equation=s.final())
-    s.set_equation(stage="ring_open", lever="torsion_phase", equation=s.final())
-    s.set_equation(
-        stage="ring_open", force="ring-break", lever="alpha", equation=1 - s.lam()
-    )
-    s.set_equation(
-        stage="ring_open", force="ring-break", lever="kappa", equation=s.lam()
-    )
-    # ring-make mirrors ring-break so reversed schedule ramps ring-make 1→0 here.
-    s.set_equation(
-        stage="ring_open", force="ring-make", lever="alpha", equation=1 - s.lam()
-    )
-    s.set_equation(
-        stage="ring_open", force="ring-make", lever="kappa", equation=s.lam()
-    )
-
-    s.prepend_stage("restraints_off", s.initial(), weight=1)
+    # restraints_off [1/3, 2/3): Morse ramps off while ring-break softcore ramps
+    # on simultaneously (alpha: 1→0, kappa: 0→1). Bonded terms (angles, torsions)
+    # interpolate initial→final over the same stage. ring-make mirrors ring-break
+    # so that after .reverse(), the ring-make softcore ramps off as morse_soft ramps
+    # on in the reversed restraints_off stage, correct for ring-making perturbations.
+    s.prepend_stage("restraints_off", s.initial())
     s.set_equation(stage="restraints_off", lever="morse_soft", equation=1 - s.lam())
     s.set_equation(stage="restraints_off", lever="morse_hard", equation=0)
     s.set_equation(stage="restraints_off", lever="bond_k", equation=s.final())
@@ -228,8 +202,20 @@ def ring_break_morph():
         lever="torsion_phase",
         equation=(1 - s.lam()) * s.initial() + s.lam() * s.final(),
     )
+    s.set_equation(
+        stage="restraints_off", force="ring-break", lever="alpha", equation=1 - s.lam()
+    )
+    s.set_equation(
+        stage="restraints_off", force="ring-break", lever="kappa", equation=s.lam()
+    )
+    s.set_equation(
+        stage="restraints_off", force="ring-make", lever="alpha", equation=1 - s.lam()
+    )
+    s.set_equation(
+        stage="restraints_off", force="ring-make", lever="kappa", equation=s.lam()
+    )
 
-    s.prepend_stage("potential_swap", s.initial(), weight=2)
+    s.prepend_stage("potential_swap", s.initial())
     s.set_equation(stage="potential_swap", lever="morse_hard", equation=1 - s.lam())
     s.set_equation(stage="potential_swap", lever="morse_soft", equation=0 + s.lam())
     s.set_equation(
@@ -247,10 +233,9 @@ def ring_break_morph():
     s.set_equation(stage="potential_swap", lever="torsion_k", equation=s.initial())
     s.set_equation(stage="potential_swap", lever="torsion_phase", equation=s.initial())
 
-    # morph: standard nonbonded morphing. Ring-break is fixed at fully open
-    # (kappa=1, alpha=0) since geometry has already relaxed in ring_open.
-    # ring-make mirrors ring-break: kappa=1, alpha=0 so that .reverse() gives
-    # kappa=1 at lam=0 of the reversed morph stage (ring-making direction start).
+    # morph [2/3, 1]: standard nonbonded morphing with ring-break/ring-make fixed
+    # at fully open (kappa=1, alpha=0). ring-make mirrors ring-break so .reverse()
+    # gives kappa=1 at lam=0 of the reversed morph stage (ring-making start).
     s.set_equation(stage="morph", lever="morse_hard", equation=0)
     s.set_equation(stage="morph", lever="morse_soft", equation=0)
     s.set_equation(stage="morph", lever="bond_k", equation=s.final())
@@ -264,20 +249,15 @@ def ring_break_morph():
     s.set_equation(stage="morph", force="ring-make", lever="alpha", equation=0)
     s.set_equation(stage="morph", force="ring-make", lever="kappa", equation=1)
 
-    # coul_kappa decouples Coulomb onset from LJ onset: zero throughout the
-    # bonded stages so the CLJ exception carries no charge while atoms are at
-    # covalent distances, then ramps 0→1 during morph only (where the LJ
-    # softcore has already separated the atoms).  ring-make mirrors ring-break
-    # so that .reverse() gives the correct reversed schedule (coul_kappa ramps
-    # 1→0 through the reversed morph stage for the ring-making direction).
+    # coul_kappa: zero through both bonded stages so the CLJ exception carries no
+    # charge while atoms are at covalent distances; ramps 0→1 in morph only once
+    # the softcore has already separated the atoms. ring-make mirrors ring-break
+    # so .reverse() gives coul_kappa ramps 1→0 through the reversed morph stage.
     s.set_equation(
         stage="potential_swap", force="ring-break", lever="coul_kappa", equation=0
     )
     s.set_equation(
         stage="restraints_off", force="ring-break", lever="coul_kappa", equation=0
-    )
-    s.set_equation(
-        stage="ring_open", force="ring-break", lever="coul_kappa", equation=0
     )
     s.set_equation(
         stage="morph", force="ring-break", lever="coul_kappa", equation=s.lam()
@@ -288,7 +268,6 @@ def ring_break_morph():
     s.set_equation(
         stage="restraints_off", force="ring-make", lever="coul_kappa", equation=0
     )
-    s.set_equation(stage="ring_open", force="ring-make", lever="coul_kappa", equation=0)
     s.set_equation(
         stage="morph", force="ring-make", lever="coul_kappa", equation=s.lam()
     )
@@ -300,9 +279,9 @@ def reverse_ring_break_morph():
     """
     Build a lambda schedule for ring-making perturbations (reverse ring-break).
 
-    Returns ``ring_break_morph().reverse()``: four stages in reversed order
-    (morph → ring_open → restraints_off → potential_swap) with all equations
-    reflected about λ=½ and initial/final end-states swapped.
+    Returns ``ring_break_morph().reverse()``: three stages in reversed order
+    (morph → restraints_off → potential_swap) with all equations reflected about
+    λ=½ and initial/final end-states swapped.
 
     This schedule is correct for two equivalent use-cases:
 
