@@ -102,7 +102,6 @@ class DynamicsCache:
         self._lambdas = lambdas
         self._rest2_scale_factors = rest2_scale_factors
         self._states = _np.array(range(len(lambdas)))
-        self._old_states = _np.array(range(len(lambdas)))
         self._openmm_states = [None] * len(lambdas)
         self._gcmc_samplers = [None] * len(lambdas)
         self._gcmc_states = [None] * len(lambdas)
@@ -150,7 +149,6 @@ class DynamicsCache:
             "_lambdas": self._lambdas,
             "_rest2_scale_factors": self._rest2_scale_factors,
             "_states": self._states,
-            "_old_states": self._old_states,
             "_openmm_states": self._openmm_states,
             # Don't pickle the GCMC samplers since they need to be recreated.
             "_gcmc_samplers": len(self._gcmc_samplers) * [None],
@@ -511,9 +509,14 @@ class DynamicsCache:
         """
         self._states = states
 
-    def mix_states(self):
+    def mix_states(self, old_states):
         """
         Mix the states of the dynamics objects.
+
+        Parameters
+        ----------
+        old_states : numpy.ndarray
+            The state indices from before the last replica mix.
         """
         # Mix the states.
         for i, state in enumerate(self._states):
@@ -541,11 +544,7 @@ class DynamicsCache:
                         self._gcmc_samplers[i].pop()
 
             # Update the swap matrix.
-            old_state = self._old_states[i]
-            self._num_swaps[old_state, state] += 1
-
-        # Store the current states.
-        self._old_states = self._states.copy()
+            self._num_swaps[old_states[i], state] += 1
 
     def get_proposed(self):
         """
@@ -1242,6 +1241,7 @@ class RepexRunner(_RunnerBase):
 
             # Mix the replicas.
             _logger.info("Mixing replicas")
+            old_states = self._dynamics_cache.get_states()
             self._dynamics_cache.set_states(
                 self._mix_replicas(
                     self._config.num_lambda,
@@ -1250,7 +1250,7 @@ class RepexRunner(_RunnerBase):
                     self._dynamics_cache.get_accepted(),
                 )
             )
-            self._dynamics_cache.mix_states()
+            self._dynamics_cache.mix_states(old_states)
 
             # Snapshot the pre-run state for crash recovery.
             if self._config.auto_fix_minimise:
