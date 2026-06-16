@@ -883,7 +883,7 @@ class Runner(_RunnerBase):
             # Handle the case where the runtime is less than the checkpoint frequency.
             if frac < 1.0:
                 frac = 1.0
-                checkpoint_frequency = _sr.u(f"{time} ps")
+                checkpoint_frequency = time
                 checkpoint_interval = checkpoint_frequency.to("ns")
 
             num_blocks = int(frac)
