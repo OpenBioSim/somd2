@@ -1897,16 +1897,13 @@ class RepexRunner(_RunnerBase):
 
         checkpoint_path = _Path_local(self._filenames[0]["checkpoint"])
         if checkpoint_path.exists():
-            # Old format: load per-replica .s3 files via base class.
+            _logger.info("Restarting from legacy stream file checkpoint.")
             return super()._check_restart()
 
         repex_state = self._config.output_directory / "repex_state.pkl"
         if not repex_state.exists():
             return False, self._system
 
-        _logger.info(
-            "No checkpoint stream files found; restarting from repex state pickle."
-        )
         return True, self._system
 
     def _write_checkpoint_system(self, system, index, context=None, gcmc_sampler=None):

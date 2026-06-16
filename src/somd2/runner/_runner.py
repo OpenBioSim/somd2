@@ -279,9 +279,9 @@ class Runner(_RunnerBase):
         s3_path = _Path(self._filenames[0]["checkpoint"])
 
         if npz_path.exists():
-            _logger.info("Restarting from compact numpy checkpoint state.")
             return True, self._system
         elif s3_path.exists():
+            _logger.info("Restarting from legacy stream file checkpoint.")
             return super()._check_restart()
         else:
             return False, self._system
