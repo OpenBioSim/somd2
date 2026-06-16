@@ -530,15 +530,6 @@ class Runner(_RunnerBase):
             # Get the GCMC system.
             system = gcmc_sampler.system()
 
-            # Log the initial position of the GCMC sphere.
-            if gcmc_sampler._reference is not None:
-                positions = _sr.io.get_coords_array(system)
-                target = gcmc_sampler._get_target_position(positions)
-                _logger.info(
-                    f"Initial GCMC sphere centre at {_lam_sym} = {lambda_value:.5f}: "
-                    f"[{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}] A"
-                )
-
         else:
             gcmc_sampler = None
 
@@ -824,6 +815,21 @@ class Runner(_RunnerBase):
                 if terminal_flip_sampler is not None and "terminal_flip" in stats:
                     attempted, accepted = stats["terminal_flip"]
                     terminal_flip_sampler.reset(attempted, accepted)
+
+        # Log the GCMC sphere centre using the actual context positions
+        # (accurate for both fresh runs and restarts).
+        if gcmc_sampler is not None and gcmc_sampler._reference is not None:
+            import openmm.unit as _omm_unit
+
+            state = dynamics.context().getState(getPositions=True)
+            positions = state.getPositions(asNumpy=True).value_in_unit(
+                _omm_unit.angstrom
+            )
+            target = gcmc_sampler._get_target_position(positions)
+            _logger.info(
+                f"Initial GCMC sphere centre at {_lam_sym} = {lambda_value:.5f}: "
+                f"[{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}] A"
+            )
 
         # Set the number of neighbours used for the energy calculation.
         # If not None, then we add one to account for the extra windows

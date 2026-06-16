@@ -103,6 +103,7 @@ class DynamicsCache:
         self._rest2_scale_factors = rest2_scale_factors
         self._states = _np.array(range(len(lambdas)))
         self._time = None
+        self._time_offset = None
         self._openmm_states = [None] * len(lambdas)
         self._gcmc_samplers = [None] * len(lambdas)
         self._gcmc_states = [None] * len(lambdas)
@@ -143,6 +144,8 @@ class DynamicsCache:
             self._terminal_flip_stats = [[0, 0]] * n
         if not hasattr(self, "_time"):
             self._time = None
+        if not hasattr(self, "_time_offset"):
+            self._time_offset = None
 
     def __getstate__(self):
         """
@@ -303,15 +306,6 @@ class DynamicsCache:
                 _logger.info(
                     f"Created GCMC sampler for lambda {lam:.5f} on device {device}"
                 )
-
-                # Log the initial position of the GCMC sphere.
-                if self._gcmc_samplers[i]._reference is not None:
-                    positions = _sr.io.get_coords_array(mols)
-                    target = self._gcmc_samplers[i]._get_target_position(positions)
-                    _logger.info(
-                        f"Initial GCMC sphere centre for lambda {lam:.5f} on device {device}: "
-                        f"[{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}] A"
-                    )
 
             # Create the dynamics object.
             try:
@@ -823,6 +817,7 @@ class RepexRunner(_RunnerBase):
                 output_directory=self._config.output_directory,
                 xml_filenames=xml_filenames,
             )
+
         else:
             _logger.debug("Restarting from file")
 
@@ -847,6 +842,11 @@ class RepexRunner(_RunnerBase):
                 time = self._dynamics_cache._time
             else:
                 time = self._system[0].time()
+
+            # Store the absolute start time so _write_checkpoint_system can
+            # compute the correct absolute time across multiple restarts.
+            if not isinstance(self._system, list):
+                self._dynamics_cache._time_offset = time
 
             # Check to see if the simulation is already complete.
             if self._done_file.exists():
@@ -921,6 +921,23 @@ class RepexRunner(_RunnerBase):
                         gcmc_sampler.pop()
                     if self._dynamics_cache._gcmc_stats[i] is not None:
                         gcmc_sampler.restore_stats(self._dynamics_cache._gcmc_stats[i])
+
+        # Log the GCMC sphere centre for each replica using the actual context
+        # positions (accurate for both fresh runs and restarts).
+        import openmm.unit as _omm_unit
+
+        for i, lam in enumerate(self._lambda_values):
+            dynamics, gcmc_sampler = self._dynamics_cache.get(i)
+            if gcmc_sampler is not None and gcmc_sampler._reference is not None:
+                state = dynamics.context().getState(getPositions=True)
+                positions = state.getPositions(asNumpy=True).value_in_unit(
+                    _omm_unit.angstrom
+                )
+                target = gcmc_sampler._get_target_position(positions)
+                _logger.info(
+                    f"Initial GCMC sphere centre for lambda {lam:.5f}: "
+                    f"[{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}] A"
+                )
 
         # Conversion factor for reduced potential.
         kT = (_sr.units.k_boltz * self._config.temperature).to(_sr.units.kcal_per_mol)
@@ -1579,7 +1596,7 @@ class RepexRunner(_RunnerBase):
             # Get the dynamics object (and GCMC sampler).
             dynamics, gcmc_sampler = self._dynamics_cache.get(index)
 
-            if gcmc_sampler is not None:
+            if gcmc_sampler is not None and not self._is_restart:
                 gcmc_sampler.push()
                 try:
                     _logger.info(
@@ -1904,7 +1921,11 @@ class RepexRunner(_RunnerBase):
         velocities are already stored as compact numpy arrays in the OpenMM
         state dict.
         """
-        self._dynamics_cache._time = system.time()
+        offset = self._dynamics_cache._time_offset
+        elapsed = system.time()
+        self._dynamics_cache._time = (
+            (offset + elapsed) if offset is not None else elapsed
+        )
 
     def _checkpoint(self, index, lambdas, block, num_blocks, is_final_block=False):
         """
