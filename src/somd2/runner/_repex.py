@@ -103,7 +103,6 @@ class DynamicsCache:
         self._rest2_scale_factors = rest2_scale_factors
         self._states = _np.array(range(len(lambdas)))
         self._time = None
-        self._time_offset = None
         self._openmm_states = [None] * len(lambdas)
         self._gcmc_samplers = [None] * len(lambdas)
         self._gcmc_states = [None] * len(lambdas)
@@ -144,8 +143,6 @@ class DynamicsCache:
             self._terminal_flip_stats = [[0, 0]] * n
         if not hasattr(self, "_time"):
             self._time = None
-        if not hasattr(self, "_time_offset"):
-            self._time_offset = None
 
     def __getstate__(self):
         """
@@ -842,11 +839,6 @@ class RepexRunner(_RunnerBase):
                 time = self._dynamics_cache._time
             else:
                 time = self._system[0].time()
-
-            # Store the absolute start time so _write_checkpoint_system can
-            # compute the correct absolute time across multiple restarts.
-            if not isinstance(self._system, list):
-                self._dynamics_cache._time_offset = time
 
             # Check to see if the simulation is already complete.
             if self._done_file.exists():
@@ -1926,11 +1918,7 @@ class RepexRunner(_RunnerBase):
         velocities are already stored as compact numpy arrays in the OpenMM
         state dict.
         """
-        offset = self._dynamics_cache._time_offset
-        elapsed = system.time()
-        self._dynamics_cache._time = (
-            (offset + elapsed) if offset is not None else elapsed
-        )
+        self._dynamics_cache._time = system.time()
 
     def _checkpoint(self, index, lambdas, block, num_blocks, is_final_block=False):
         """
