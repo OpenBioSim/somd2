@@ -886,6 +886,11 @@ class RepexRunner(_RunnerBase):
                     f"does not match the number of replicas in the configuration ({self._config.num_lambda})."
                 )
 
+            # For new-format restarts, set the system time so that dynamics
+            # objects are initialised with the correct integrator step count.
+            if not isinstance(self._system, list):
+                self._system.set_time(time)
+
             # Create the dynamics objects.
             self._dynamics_cache._create_dynamics(
                 self._system,
