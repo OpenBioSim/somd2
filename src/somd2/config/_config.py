@@ -953,12 +953,13 @@ class Config:
                 "This will result in a reduction of the mass of hydrogen atoms, "
                 "and will likely lead to undesired simulation behaviour."
             )
-        if h_mass_factor > 4.0:
+        if h_mass_factor > 3.0:
             raise ValueError(
-                "Requested hydrogen mass repartitioning factor is greater than 4.0. "
-                "At this factor, repartitioned hydrogen masses would exceed the "
-                "4.5 g/mol threshold used for hydrogen detection in the OpenMM "
-                "conversion layer, causing hydrogen bonds not to be constrained."
+                "Requested hydrogen mass repartitioning factor is greater than 3.0. "
+                "Above this value, heavy atoms bonded to multiple hydrogens can have "
+                "their mass reduced below the 3.5 g/mol threshold used for hydrogen "
+                "detection in the OpenMM conversion layer, causing hydrogen bonds not "
+                "to be constrained."
             )
         self._h_mass_factor = h_mass_factor
 
