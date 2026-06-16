@@ -953,6 +953,13 @@ class Config:
                 "This will result in a reduction of the mass of hydrogen atoms, "
                 "and will likely lead to undesired simulation behaviour."
             )
+        if h_mass_factor > 4.0:
+            raise ValueError(
+                "Requested hydrogen mass repartitioning factor is greater than 4.0. "
+                "This would exceed the maximum hydrogen mass threshold used for "
+                "constraint detection and will result in hydrogen bonds not being "
+                "constrained."
+            )
         self._h_mass_factor = h_mass_factor
 
     @property
