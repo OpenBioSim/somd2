@@ -48,12 +48,13 @@ def test_restart(mols, request):
             [str(Path(tmpdir) / "system0.prm7"), str(Path(tmpdir) / "traj_0.00000.dcd")]
         )
 
-        # Check that both config and lambda have been written
-        # as properties to the streamed checkpoint file.
-        checkpoint = sr.stream.load(str(Path(tmpdir) / "checkpoint_0.00000.s3"))
-        props = checkpoint.property_keys()
-        assert "config" in props
-        assert "lambda" in props
+        # Check that the compact numpy checkpoint file was written.
+        import numpy as np
+
+        checkpoint_state = np.load(str(Path(tmpdir) / "checkpoint_0.00000.npz"))
+        assert "positions" in checkpoint_state
+        assert "velocities" in checkpoint_state
+        assert "time_ps" in checkpoint_state
 
         del runner
 
@@ -199,26 +200,22 @@ def test_restart(mols, request):
         with pytest.raises(ValueError):
             runner_swapendstates = Runner(mols, Config(**config_diffswapendstates))
 
-        # Need to test restart from sire checkpoint file
-        # this needs to be done last as it requires unlinking the config files
+        # Removing the config yaml should raise an OSError since the new-format
+        # checkpoint stores no config (the yaml is the sole validation source).
         for file in Path(tmpdir).glob("*.yaml"):
             file.unlink()
 
-        # This should work as the config is read from the lambda=0 checkpoint file
-        runner_noconfig = Runner(mols, Config(**config_new))
+        with pytest.raises(OSError):
+            runner_noconfig = Runner(mols, Config(**config_new))
 
-        # remove config again
-        for file in Path(tmpdir).glob("*.yaml"):
-            file.unlink()
+        # Write a config yaml with a wrong pressure value and verify restart fails.
+        import yaml
 
-        # Load the checkpoint file using sire and change the pressure option
-        sire_checkpoint = sr.stream.load(str(Path(tmpdir) / "checkpoint_0.00000.s3"))
-        cfg = sire_checkpoint.property("config")
-        cfg["pressure"] = "0.5 atm"
-        sire_checkpoint.set_property("config", cfg)
-        sr.stream.save(sire_checkpoint, str(Path(tmpdir) / "checkpoint_0.00000.s3"))
+        bad_config = config_new.copy()
+        bad_config["pressure"] = "0.5 atm"
+        with open(Path(tmpdir) / "config.yaml", "w") as f:
+            yaml.dump(bad_config, f)
 
-        # Load the new checkpoint file and make sure the restart fails
         with pytest.raises(ValueError):
             runner_badconfig = Runner(mols, Config(**config_new))
 
