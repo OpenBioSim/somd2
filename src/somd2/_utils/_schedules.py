@@ -282,6 +282,64 @@ def ring_break_morph():
         stage="morph", force="ring-make", lever="coul_kappa", equation=s.lam()
     )
 
+    # Per-atom nonbonded decoupling (clj charge/sigma/epsilon/alpha/kappa, and
+    # the dedicated ghost/ghost, ghost/non-ghost, ghost-14 forces) is otherwise
+    # left on the default equation, which - because potential_swap and
+    # restraints_off both default to s.initial() - freezes it at the λ=0 value
+    # until morph begins. For a normal perturbing atom that's usually fine,
+    # but for an atom that's also losing a bonded restraint during
+    # restraints_off (e.g. a real->ghost atom whose only remaining anchor was
+    # an angle/torsion spanning the ring-breaking bond, removed by the
+    # BioSimSpace merge), this produces a fully-charged, fully-LJ-active atom
+    # with no orientational restraint for up to a third of the schedule - a
+    # "floppy atom with charge and LJ" - since its nonbonded decoupling hasn't
+    # even started by the point its bonded restraint is already gone.
+    #
+    # Fix: make these levers ramp as a single continuous straight line across
+    # the entire λ=0→1 range, expressed piecewise across the three stages
+    # (each spanning 1/3 of λ) since s.lam() is stage-local, not global. This
+    # also smooths charge/LJ interpolation for ordinary (non-ghost) perturbing
+    # atoms - e.g. atoms 15/37 transmuting element here - which were
+    # previously subject to the same unintended freeze. Pair-exception scale
+    # levers (charge_scale/lj_scale on clj and ghost-14) are deliberately left
+    # alone: an earlier attempt to give a related set of pairs an early,
+    # synchronized nonbonded ramp did not fix (and partially worsened) the
+    # PMF/overlap problem it was meant to address, so that timing change is
+    # not repeated here without separate justification.
+    _continuous_nb_levers = [
+        ("clj", "charge"),
+        ("clj", "sigma"),
+        ("clj", "epsilon"),
+        ("clj", "alpha"),
+        ("clj", "kappa"),
+        ("ghost/ghost", "charge"),
+        ("ghost/ghost", "sigma"),
+        ("ghost/ghost", "epsilon"),
+        ("ghost/ghost", "alpha"),
+        ("ghost/ghost", "kappa"),
+        ("ghost/non-ghost", "charge"),
+        ("ghost/non-ghost", "sigma"),
+        ("ghost/non-ghost", "epsilon"),
+        ("ghost/non-ghost", "alpha"),
+        ("ghost/non-ghost", "kappa"),
+        ("ghost-14", "charge"),
+        ("ghost-14", "sigma"),
+        ("ghost-14", "epsilon"),
+        ("ghost-14", "alpha"),
+        ("ghost-14", "kappa"),
+    ]
+    for _stage_index, _stage_name in enumerate(
+        ("potential_swap", "restraints_off", "morph")
+    ):
+        # Fraction of the *global* λ=0→1 range completed at the start of this
+        # stage, plus this stage's own (1/3-scaled) contribution.
+        _global_progress = _stage_index / 3 + s.lam() / 3
+        _equation = (1 - _global_progress) * s.initial() + _global_progress * s.final()
+        for _force, _lever in _continuous_nb_levers:
+            s.set_equation(
+                stage=_stage_name, force=_force, lever=_lever, equation=_equation
+            )
+
     return s
 
 
