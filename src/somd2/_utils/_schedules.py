@@ -300,12 +300,20 @@ def ring_break_morph():
     # (each spanning 1/3 of λ) since s.lam() is stage-local, not global. This
     # also smooths charge/LJ interpolation for ordinary (non-ghost) perturbing
     # atoms - e.g. atoms 15/37 transmuting element here - which were
-    # previously subject to the same unintended freeze. Pair-exception scale
-    # levers (charge_scale/lj_scale on clj and ghost-14) are deliberately left
-    # alone: an earlier attempt to give a related set of pairs an early,
-    # synchronized nonbonded ramp did not fix (and partially worsened) the
-    # PMF/overlap problem it was meant to address, so that timing change is
-    # not repeated here without separate justification.
+    # previously subject to the same unintended freeze.
+    #
+    # ghost-14's charge_scale/lj_scale are included too: a pair like 15-67
+    # (1-3 excluded at one end state, fully unmasked at the other once a
+    # ring-breaking bond removes the connecting path) only gets a slot in
+    # this force at all once the ghost-14 allocation bug is fixed. Before
+    # that fix, an earlier attempt to ramp charge_scale/lj_scale early had no
+    # effect on such pairs (no slot existed yet) and made other things worse,
+    # so it was left on the default (frozen until morph) timing. Now that the
+    # slot exists, leaving it frozen until morph means the pair's interaction
+    # switches on abruptly right at the morph-stage boundary - coincident
+    # with the observed PMF collapse - so it gets the same continuous ramp.
+    # clj's charge_scale/lj_scale (ordinary, non-ghost 1-4 pairs) are left on
+    # the default timing, unaffected by this reasoning.
     _continuous_nb_levers = [
         ("clj", "charge"),
         ("clj", "sigma"),
@@ -327,6 +335,8 @@ def ring_break_morph():
         ("ghost-14", "epsilon"),
         ("ghost-14", "alpha"),
         ("ghost-14", "kappa"),
+        ("ghost-14", "charge_scale"),
+        ("ghost-14", "lj_scale"),
     ]
     for _stage_index, _stage_name in enumerate(
         ("potential_swap", "restraints_off", "morph")
