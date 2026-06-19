@@ -182,15 +182,20 @@ def ring_break_morph():
     s.set_equation(stage="restraints_off", lever="morse_hard", equation=0)
     s.set_equation(stage="restraints_off", lever="bond_k", equation=s.final())
     s.set_equation(stage="restraints_off", lever="bond_length", equation=s.final())
+    # Front-loaded (cubic) rather than linear decay, so angle_k/angle_size
+    # are negligible well before the end of restraints_off, while still
+    # reaching the same endpoints smoothly (no derivative kink).
     s.set_equation(
         stage="restraints_off",
         lever="angle_k",
-        equation=(1 - s.lam()) * s.initial() + s.lam() * s.final(),
+        equation=(1 - s.lam()) ** 3 * s.initial()
+        + (1 - (1 - s.lam()) ** 3) * s.final(),
     )
     s.set_equation(
         stage="restraints_off",
         lever="angle_size",
-        equation=(1 - s.lam()) * s.initial() + s.lam() * s.final(),
+        equation=(1 - s.lam()) ** 3 * s.initial()
+        + (1 - (1 - s.lam()) ** 3) * s.final(),
     )
     s.set_equation(
         stage="restraints_off",
