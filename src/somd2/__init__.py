@@ -38,8 +38,31 @@ from ._version import __version__
 from sire import __version__ as _sire_version
 from sire import __revisionid__ as _sire_revisionid
 
+# Store the BioSimSpace version.
+from BioSimSpace import __version__ as _biosimspace_version
+
 # Store the ghostly version.
 from ghostly import __version__ as _ghostly_version
 
 # Store the loch version.
 from loch import __version__ as _loch_version
+
+
+def get_versions():
+    """
+    Return the versions of SOMD2 and the OpenBioSim packages that it depends
+    on.
+
+    Returns
+    -------
+
+    versions: dict
+        A dictionary mapping package name to version string.
+    """
+    return {
+        "somd2": __version__,
+        "sire": f"{_sire_version}+{_sire_revisionid}",
+        "biosimspace": _biosimspace_version,
+        "ghostly": _ghostly_version,
+        "loch": _loch_version,
+    }

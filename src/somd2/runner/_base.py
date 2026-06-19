@@ -98,21 +98,17 @@ class RunnerBase:
                 _logger.error(msg)
                 raise ValueError(msg)
 
-        # Log the versions of somd2 and sire.
-        from somd2 import (
-            __version__,
-            _sire_version,
-            _sire_revisionid,
-            _ghostly_version,
-            _loch_version,
-        )
+        # Log the versions of somd2 and its OpenBioSim dependencies.
+        from somd2 import get_versions as _get_versions
 
-        _logger.info(f"somd2 version: {__version__}")
-        _logger.info(f"sire version: {_sire_version}+{_sire_revisionid}")
+        versions = _get_versions()
+        _logger.info(f"somd2 version: {versions['somd2']}")
+        _logger.info(f"sire version: {versions['sire']}")
+        _logger.info(f"biosimspace version: {versions['biosimspace']}")
         if self._config.ghost_modifications:
-            _logger.info(f"ghostly version: {_ghostly_version}")
+            _logger.info(f"ghostly version: {versions['ghostly']}")
         if self._config.gcmc:
-            _logger.info(f"loch version: {_loch_version}")
+            _logger.info(f"loch version: {versions['loch']}")
 
         # Flag whether frames are being saved.
         if (
@@ -1907,7 +1903,9 @@ class RunnerBase:
         """
 
         try:
-            from somd2 import __version__, _sire_version, _sire_revisionid
+            from somd2 import get_versions as _get_versions
+
+            versions = _get_versions()
 
             # Get the lambda value.
             lam = self._lambda_values[index]
@@ -1929,8 +1927,8 @@ class RunnerBase:
             if not is_post_equilibration:
                 metadata = {
                     "attrs": df.attrs,
-                    "somd2 version": __version__,
-                    "sire version": f"{_sire_version}+{_sire_revisionid}",
+                    "somd2 version": versions["somd2"],
+                    "sire version": versions["sire"],
                     "lambda": f"{lam:.5f}",
                     "speed": speed,
                     "temperature": str(self._config.temperature.value()),
