@@ -62,18 +62,22 @@ def test_dynamics_options():
 
 
 def test_logfile_creation():
-    # Test that the logfile is created by either the initialisation of the runner or of a config
+    # Test that the logfile is only created once a runner is initialised, not
+    # by the config alone - this is deferred so that a user can change
+    # output_directory after constructing a Config (e.g. via the Python API)
+    # without leaving behind a stale directory/duplicate log sink from the
+    # default value.
     with tempfile.TemporaryDirectory() as tmpdir:
         # Load the demo stream file.
         mols = sr.load(sr.expand(sr.tutorial_url, "merged_molecule.s3"))
         from pathlib import Path
 
-        # Test that a logfile is created once a config object is initialised
+        # A config object alone should not create the logfile.
         config = Config(output_directory=tmpdir, log_file="test.log")
         assert config.log_file is not None
-        assert Path.exists(config.output_directory / config.log_file)
+        assert not Path.exists(config.output_directory / config.log_file)
 
-        # Test that a logfile is created once a runner object is initialised
+        # Test that a logfile is created once a runner object is initialised.
         runner = Runner(mols, Config(output_directory=tmpdir, log_file="test1.log"))
         assert runner._config.log_file is not None
         assert Path.exists(runner._config.output_directory / runner._config.log_file)

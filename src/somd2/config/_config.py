@@ -2306,18 +2306,32 @@ class Config:
                 output_directory = _Path(output_directory)
             except Exception as e:
                 raise ValueError(f"Could not convert output path. {e}")
-        if not _Path(output_directory).exists() or not _Path(output_directory).is_dir():
+        # Directory creation and logger setup are deferred until the runner
+        # is created (see _setup_output_directory), since this setter can be
+        # called multiple times via the Python API (e.g. before the user
+        # overrides the default) and doing it here would create stale
+        # directories and duplicate logger sinks.
+        self._output_directory = output_directory
+
+    def _setup_output_directory(self):
+        """
+        Internal method to create the output directory (if needed) and
+        configure the logger to write to it. Called once a runner is
+        created, by which point the user's final choice of output
+        directory is known.
+        """
+
+        output_directory = self._output_directory
+
+        if not output_directory.exists() or not output_directory.is_dir():
             try:
-                _Path(output_directory).mkdir(parents=True, exist_ok=True)
+                output_directory.mkdir(parents=True, exist_ok=True)
             except:
                 raise ValueError(
                     f"Output directory {output_directory} does not exist and cannot be created"
                 )
-        if self.log_file is not None:
-            # Can now add the log file
-            _logger.add(output_directory / self.log_file, level=self.log_level.upper())
-            _logger.debug(f"Logging to {output_directory / self.log_file}")
-        self._output_directory = output_directory
+
+        self._reset_logger(_logger)
 
     @property
     def write_config(self):
@@ -2540,8 +2554,9 @@ class Config:
         """
         Internal method to reset the logger.
 
-        This can be used when a parallel process is spawned to ensure that
-        the logger is correctly configured.
+        Removes any existing sinks and re-adds them based on the current
+        config state. Used both when a parallel process is spawned, and
+        when the output directory is finalised for the main process.
         """
 
         import sys
@@ -2549,6 +2564,6 @@ class Config:
         logger.remove()
         logger.add(sys.stderr, level=self.log_level.upper(), enqueue=True)
         if self.log_file is not None and self.output_directory is not None:
-            logger.add(
-                self.output_directory / self.log_file, level=self.log_level.upper()
-            )
+            log_path = self.output_directory / self.log_file
+            logger.add(log_path, level=self.log_level.upper())
+            logger.debug(f"Logging to {log_path}")

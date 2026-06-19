@@ -81,6 +81,10 @@ class RunnerBase:
         self._config = config
         self._config._extra_args = {}
 
+        # Create the output directory and configure the logger now that the
+        # user's final choice of output directory is known.
+        self._config._setup_output_directory()
+
         if self._config.replica_exchange and self._config.perturbed_system is not None:
             # Make sure the number of positions is correct.
             num_atoms = self._system.num_atoms()
