@@ -125,6 +125,180 @@ def _round_to_symmetry_angle(raw_angle, tolerance=10.0):
     return symmetry_angles[min_idx]
 
 
+def _detect_for_view(mol, all_atoms, flip_angle, max_mobile_atoms, seen):
+    """
+    Detect terminal ring groups using a single, self-consistent end-state
+    view of a molecule (i.e. its "connectivity" and "coordinates" properties
+    both resolve to the same end state).
+
+    Parameters
+    ----------
+
+    mol : sire.legacy.Mol.Molecule
+        The molecule, already linked to one end state (via
+        :func:`sire.morph.link_to_reference` or
+        :func:`sire.morph.link_to_perturbed`).
+
+    all_atoms : sire molecule view
+        All atoms in the system, used to obtain absolute (OpenMM) atom
+        indices.
+
+    flip_angle : float or None
+        See :func:`detect_terminal_groups`.
+
+    max_mobile_atoms : int or None
+        See :func:`detect_terminal_groups`.
+
+    seen : set
+        Set of (anchor_abs, pivot_abs, frozenset(mobile_abs)) tuples already
+        found by a previous call (e.g. for the other end state). Updated in
+        place; groups already present are skipped so the same physical group
+        is not double-counted when it is identical at both end states.
+
+    Returns
+    -------
+
+    list of tuple
+        Each entry is (angle, [anchor_idx, pivot_idx, mobile_idx_0, ...])
+        using absolute atom indices.
+    """
+    groups = []
+
+    try:
+        connectivity = mol.property("connectivity")
+    except Exception:
+        _logger.warning(f"Molecule {mol} has no 'connectivity' property. Skipping.")
+        return groups
+
+    num_atoms = mol.num_atoms()
+    seen_bonds = set()
+    rdmol = None  # lazily initialised if geometric detection fails
+
+    for i in range(num_atoms):
+        atom_i_idx = _Mol.AtomIdx(i)
+
+        # Only consider non-ring atoms as anchors.
+        if connectivity.in_ring(atom_i_idx):
+            continue
+
+        # Skip dead-end atoms (e.g. hydrogen bonded only to a ring
+        # carbon): a valid anchor must be part of a chain, so it needs
+        # at least two connections (one to the pivot, one elsewhere).
+        if len(connectivity.connections_to(atom_i_idx)) < 2:
+            continue
+
+        for neighbor_idx in connectivity.connections_to(atom_i_idx):
+            j = neighbor_idx.value()
+
+            # Only consider ring atoms as pivots.
+            if not connectivity.in_ring(_Mol.AtomIdx(j)):
+                continue
+
+            # Avoid processing the same bond twice.
+            bond_key = (min(i, j), max(i, j))
+            if bond_key in seen_bonds:
+                continue
+            seen_bonds.add(bond_key)
+
+            # Collect mobile atoms via BFS from the pivot, not crossing
+            # the anchor. The pivot itself does not move (it is the
+            # rotation centre), so it is excluded from the mobile list.
+            mobile = _bfs_mobile(connectivity, i, j, num_atoms)
+
+            if not mobile:
+                continue
+
+            # Skip groups with too many mobile atoms.
+            if max_mobile_atoms is not None and len(mobile) > max_mobile_atoms:
+                _logger.warning(
+                    f"Terminal group at pivot atom {j} has {len(mobile)} mobile "
+                    f"atoms (max_mobile_atoms={max_mobile_atoms}). Skipping group."
+                )
+                continue
+
+            # Map molecule-local indices to absolute system indices, and
+            # deduplicate against any group already found for the other end
+            # state (the same physical group away from a perturbed region
+            # will typically be identical at both end states).
+            anchor_abs = all_atoms.find(mol.atom(atom_i_idx))
+            pivot_abs = all_atoms.find(mol.atom(_Mol.AtomIdx(j)))
+            mobile_abs = [all_atoms.find(mol.atom(_Mol.AtomIdx(k))) for k in mobile]
+
+            dedup_key = (anchor_abs, pivot_abs, frozenset(mobile_abs))
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+
+            # Determine the flip angle for this group.
+            if flip_angle is not None:
+                group_angle = flip_angle
+            else:
+                # Find the two ring neighbours of the pivot (mobile atoms
+                # directly bonded to the pivot that are in the ring).
+                mobile_set = set(mobile)
+                pivot_idx_obj = _Mol.AtomIdx(j)
+                ring_neighbors = [
+                    n.value()
+                    for n in connectivity.connections_to(pivot_idx_obj)
+                    if n.value() in mobile_set
+                    and connectivity.in_ring(_Mol.AtomIdx(n.value()))
+                ]
+
+                if len(ring_neighbors) != 2:
+                    _logger.warning(
+                        f"Expected 2 ring neighbours for pivot atom {j}, "
+                        f"found {len(ring_neighbors)}. Skipping group."
+                    )
+                    continue
+
+                raw = _auto_flip_angle(mol, i, j, ring_neighbors)
+                group_angle = _round_to_symmetry_angle(raw)
+
+                if group_angle is None:
+                    # Geometric detection failed; fall back to hybridization.
+                    try:
+                        if rdmol is None:
+                            from sire.convert import to_rdkit as _to_rdkit
+                            from rdkit.Chem import HybridizationType as _HybType
+
+                            rdmol = _to_rdkit(mol)
+                        hyb = rdmol.GetAtomWithIdx(j).GetHybridization()
+                        if hyb == _HybType.SP2:
+                            group_angle = 180.0
+                        elif hyb == _HybType.SP3:
+                            group_angle = 120.0
+                        else:
+                            _logger.warning(
+                                f"Terminal group at pivot atom {j}: geometric "
+                                f"detection gave unrecognised angle "
+                                f"({raw:.1f}{_degree_sym}) and hybridization "
+                                f"({hyb}) has no defined flip angle. Skipping."
+                            )
+                            continue
+                        _logger.warning(
+                            f"Terminal group at pivot atom {j}: geometric "
+                            f"detection gave unrecognised angle "
+                            f"({raw:.1f}{_degree_sym}), using hybridization-based "
+                            f"angle {group_angle}{_degree_sym} (pivot is {hyb.name})."
+                        )
+                    except Exception as e:
+                        _logger.warning(
+                            f"Terminal group at pivot atom {j} has no recognised "
+                            f"rotational symmetry (raw angle = {raw:.1f}{_degree_sym}) "
+                            f"and hybridization fallback failed: {e}. Skipping."
+                        )
+                        continue
+
+                _logger.debug(
+                    f"Terminal group at pivot atom {j}: auto-detected flip "
+                    f"angle = {group_angle}{_degree_sym} (raw = {raw:.1f}{_degree_sym})."
+                )
+
+            groups.append((group_angle, [anchor_abs, pivot_abs] + mobile_abs))
+
+    return groups
+
+
 def detect_terminal_groups(system, flip_angle=None, max_mobile_atoms=None):
     """
     Detect terminal ring groups in perturbable molecules using Sire's native
@@ -135,6 +309,19 @@ def detect_terminal_groups(system, flip_angle=None, max_mobile_atoms=None):
     is connected to the rest of the molecule only through that single bond.
     The mobile atoms are all atoms reachable from the pivot when the
     anchor-pivot bond is cut.
+
+    Each end state's connectivity is searched independently (rather than
+    requiring the two end states to share identical connectivity), so a
+    group that only exists as a genuine terminal ring at one end state (for
+    example, a ring fused to a second ring that breaks elsewhere in a
+    ring-breaking perturbation) is still detected. A group found identically
+    at both end states is only added once. A group detected from one end
+    state's connectivity may not correspond to a real, rotatable fragment at
+    the other end state (the rotation axis may still be part of a closed
+    ring there); attempting such a move is not unsafe, since the resulting
+    large bond stretch is simply rejected by the Metropolis criterion, but
+    it does waste a move attempt outside the lambda range where the group is
+    actually valid.
 
     Parameters
     ----------
@@ -181,149 +368,17 @@ def detect_terminal_groups(system, flip_angle=None, max_mobile_atoms=None):
     import sire.morph as _morph
 
     for mol in pert_mols:
-        mol = _morph.link_to_reference(mol)
+        seen = set()
 
-        try:
-            connectivity = mol.property("connectivity")
-        except Exception:
-            _logger.warning(f"Molecule {mol} has no 'connectivity' property. Skipping.")
-            continue
+        mol_ref = _morph.link_to_reference(mol)
+        terminal_groups.extend(
+            _detect_for_view(mol_ref, all_atoms, flip_angle, max_mobile_atoms, seen)
+        )
 
-        # Skip molecules whose connectivity changes between end states (e.g.
-        # ring-breaking/growing perturbations). Terminal groups detected from
-        # the lambda=0 connectivity would be invalid at lambda=1.
-        try:
-            conn0 = mol.property("connectivity0")
-            conn1 = mol.property("connectivity1")
-            if conn0 != conn1:
-                _logger.warning(
-                    f"Molecule {mol} has different connectivity at lambda=0 and "
-                    "lambda=1 (ring-breaking/growing perturbation). Skipping "
-                    "terminal flip detection for this molecule."
-                )
-                continue
-        except Exception:
-            pass
-
-        num_atoms = mol.num_atoms()
-        seen_bonds = set()
-        rdmol = None  # lazily initialised if geometric detection fails
-
-        for i in range(num_atoms):
-            atom_i_idx = _Mol.AtomIdx(i)
-
-            # Only consider non-ring atoms as anchors.
-            if connectivity.in_ring(atom_i_idx):
-                continue
-
-            # Skip dead-end atoms (e.g. hydrogen bonded only to a ring
-            # carbon): a valid anchor must be part of a chain, so it needs
-            # at least two connections (one to the pivot, one elsewhere).
-            if len(connectivity.connections_to(atom_i_idx)) < 2:
-                continue
-
-            for neighbor_idx in connectivity.connections_to(atom_i_idx):
-                j = neighbor_idx.value()
-
-                # Only consider ring atoms as pivots.
-                if not connectivity.in_ring(_Mol.AtomIdx(j)):
-                    continue
-
-                # Avoid processing the same bond twice.
-                bond_key = (min(i, j), max(i, j))
-                if bond_key in seen_bonds:
-                    continue
-                seen_bonds.add(bond_key)
-
-                # Collect mobile atoms via BFS from the pivot, not crossing
-                # the anchor. The pivot itself does not move (it is the
-                # rotation centre), so it is excluded from the mobile list.
-                mobile = _bfs_mobile(connectivity, i, j, num_atoms)
-
-                if not mobile:
-                    continue
-
-                # Skip groups with too many mobile atoms.
-                if max_mobile_atoms is not None and len(mobile) > max_mobile_atoms:
-                    _logger.warning(
-                        f"Terminal group at pivot atom {j} has {len(mobile)} mobile "
-                        f"atoms (max_mobile_atoms={max_mobile_atoms}). Skipping group."
-                    )
-                    continue
-
-                # Determine the flip angle for this group.
-                if flip_angle is not None:
-                    group_angle = flip_angle
-                else:
-                    # Find the two ring neighbours of the pivot (mobile atoms
-                    # directly bonded to the pivot that are in the ring).
-                    mobile_set = set(mobile)
-                    pivot_idx_obj = _Mol.AtomIdx(j)
-                    ring_neighbors = [
-                        n.value()
-                        for n in connectivity.connections_to(pivot_idx_obj)
-                        if n.value() in mobile_set
-                        and connectivity.in_ring(_Mol.AtomIdx(n.value()))
-                    ]
-
-                    if len(ring_neighbors) != 2:
-                        _logger.warning(
-                            f"Expected 2 ring neighbours for pivot atom {j}, "
-                            f"found {len(ring_neighbors)}. Skipping group."
-                        )
-                        continue
-
-                    raw = _auto_flip_angle(mol, i, j, ring_neighbors)
-                    group_angle = _round_to_symmetry_angle(raw)
-
-                    if group_angle is None:
-                        # Geometric detection failed; fall back to hybridization.
-                        try:
-                            if rdmol is None:
-                                from sire.convert import to_rdkit as _to_rdkit
-                                from rdkit.Chem import HybridizationType as _HybType
-
-                                rdmol = _to_rdkit(mol)
-                            hyb = rdmol.GetAtomWithIdx(j).GetHybridization()
-                            if hyb == _HybType.SP2:
-                                group_angle = 180.0
-                            elif hyb == _HybType.SP3:
-                                group_angle = 120.0
-                            else:
-                                _logger.warning(
-                                    f"Terminal group at pivot atom {j}: geometric "
-                                    f"detection gave unrecognised angle "
-                                    f"({raw:.1f}{_degree_sym}) and hybridization "
-                                    f"({hyb}) has no defined flip angle. Skipping."
-                                )
-                                continue
-                            _logger.warning(
-                                f"Terminal group at pivot atom {j}: geometric "
-                                f"detection gave unrecognised angle "
-                                f"({raw:.1f}{_degree_sym}), using hybridization-based "
-                                f"angle {group_angle}{_degree_sym} (pivot is {hyb.name})."
-                            )
-                        except Exception as e:
-                            _logger.warning(
-                                f"Terminal group at pivot atom {j} has no recognised "
-                                f"rotational symmetry (raw angle = {raw:.1f}{_degree_sym}) "
-                                f"and hybridization fallback failed: {e}. Skipping."
-                            )
-                            continue
-
-                    _logger.debug(
-                        f"Terminal group at pivot atom {j}: auto-detected flip "
-                        f"angle = {group_angle}{_degree_sym} (raw = {raw:.1f}{_degree_sym})."
-                    )
-
-                # Map molecule-local indices to absolute system indices.
-                anchor_abs = all_atoms.find(mol.atom(atom_i_idx))
-                pivot_abs = all_atoms.find(mol.atom(_Mol.AtomIdx(j)))
-                mobile_abs = [all_atoms.find(mol.atom(_Mol.AtomIdx(k))) for k in mobile]
-
-                terminal_groups.append(
-                    (group_angle, [anchor_abs, pivot_abs] + mobile_abs)
-                )
+        mol_pert = _morph.link_to_perturbed(mol)
+        terminal_groups.extend(
+            _detect_for_view(mol_pert, all_atoms, flip_angle, max_mobile_atoms, seen)
+        )
 
     return terminal_groups
 
@@ -524,7 +579,7 @@ class TerminalFlipSampler:
             _logger.debug(
                 f"Terminal flip accepted (group {group_idx}, "
                 f"{_delta_sym} = {e_new - e_old:.2f} kJ/mol, "
-                f"acc = {min(1.0, _np.exp(-delta_e)):.3f})"
+                f"acc = {_np.exp(min(0.0, -delta_e)):.3f})"
             )
             return True
         else:
