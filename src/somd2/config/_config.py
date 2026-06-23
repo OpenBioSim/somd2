@@ -158,6 +158,7 @@ class Config:
         softcore_form="zacharias",
         taylor_power=1,
         beutler_alpha=0.5,
+        beutler_fix_epsilon=True,
         output_directory="output",
         restart=False,
         use_backup=False,
@@ -477,6 +478,15 @@ class Config:
             form. Must be >= 0. The default is 0.5. Only used when softcore_form is
             "beutler".
 
+        beutler_fix_epsilon: bool
+            Whether to hold LJ epsilon fixed at its real-atom value for
+            ghost-decoupling molecules when softcore_form is "beutler", so that the
+            Beutler (1-alpha) prefactor provides the sole LJ decay pathway. The
+            default is True. This is automatically disabled (regardless of this
+            setting) for any alchemical ion added to maintain a constant charge,
+            since an ion's persisting atom is a real (non-ghost) mutation and needs
+            its LJ epsilon to interpolate normally rather than being held fixed.
+
         output_directory: str
             Path to a directory to store output files.
 
@@ -623,6 +633,7 @@ class Config:
         self.softcore_form = softcore_form
         self.taylor_power = taylor_power
         self.beutler_alpha = beutler_alpha
+        self.beutler_fix_epsilon = beutler_fix_epsilon
         self.somd1_compatibility = somd1_compatibility
         self.pert_file = pert_file
         self.auto_fix_minimise = auto_fix_minimise
@@ -2140,6 +2151,16 @@ class Config:
         if beutler_alpha < 0.0:
             raise ValueError("'beutler_alpha' must be >= 0")
         self._beutler_alpha = beutler_alpha
+
+    @property
+    def beutler_fix_epsilon(self):
+        return self._beutler_fix_epsilon
+
+    @beutler_fix_epsilon.setter
+    def beutler_fix_epsilon(self, beutler_fix_epsilon):
+        if not isinstance(beutler_fix_epsilon, bool):
+            raise TypeError("'beutler_fix_epsilon' must be of type 'bool'")
+        self._beutler_fix_epsilon = beutler_fix_epsilon
 
     @property
     def use_backup(self):

@@ -253,31 +253,6 @@ class RunnerBase:
             self._config._extra_args["use_gcmc_lrc"] = True
             self._config._extra_args["num_gcmc_waters"] = self._config.gcmc_num_waters
 
-        # Set the soft-core form.
-        if self._config.softcore_form == "taylor":
-            self._config._extra_args["use_taylor_softening"] = True
-            self._config._extra_args["taylor_power"] = self._config.taylor_power
-        elif self._config.softcore_form == "beutler":
-            schedule_name = self._config._lambda_schedule_name
-            if schedule_name not in (None, "annihilate", "decouple"):
-                raise ValueError(
-                    "The Beutler soft-core form is only supported with the 'annihilate' "
-                    "or 'decouple' lambda schedules, or a custom schedule."
-                )
-            self._config._extra_args["use_beutler_softening"] = True
-            self._config._extra_args["beutler_alpha"] = self._config.beutler_alpha
-
-        # Build deferred schedules now that the softcore form is known.
-        fix_epsilon = self._config.softcore_form == "beutler"
-        if self._config._lambda_schedule_name == "annihilate":
-            from .._utils._schedules import annihilate as _annihilate
-
-            self._config._lambda_schedule = _annihilate(fix_epsilon=fix_epsilon)
-        elif self._config._lambda_schedule_name == "decouple":
-            from .._utils._schedules import decouple as _decouple
-
-            self._config._lambda_schedule = _decouple(fix_epsilon=fix_epsilon)
-
         # We're running in SOMD1 compatibility mode.
         if self._config.somd1_compatibility:
             from .._utils._somd1 import make_compatible
@@ -406,6 +381,47 @@ class RunnerBase:
                 self._config._extra_args["coalchemical_restraints"] = (
                     coalchemical_restraints
                 )
+
+        # Set the soft-core form.
+        if self._config.softcore_form == "taylor":
+            self._config._extra_args["use_taylor_softening"] = True
+            self._config._extra_args["taylor_power"] = self._config.taylor_power
+        elif self._config.softcore_form == "beutler":
+            schedule_name = self._config._lambda_schedule_name
+            if schedule_name not in (None, "annihilate", "decouple"):
+                raise ValueError(
+                    "The Beutler soft-core form is only supported with the 'annihilate' "
+                    "or 'decouple' lambda schedules, or a custom schedule."
+                )
+            self._config._extra_args["use_beutler_softening"] = True
+            self._config._extra_args["beutler_alpha"] = self._config.beutler_alpha
+
+        # Build deferred schedules now that the softcore form is known. Epsilon is
+        # only held fixed (with LJ decay handled entirely by the Beutler soft-core
+        # prefactor) for molecules undergoing a ghost-atom decoupling/annihilation.
+        # An alchemical ion is a real (non-ghost) atom mutating identity (e.g. a
+        # water oxygen turning into Na+), so its LJ epsilon needs to interpolate
+        # normally; fixing it would leave the ion's persisting atom stuck at its
+        # initial LJ parameters for the whole stage. Disable fix_epsilon whenever
+        # an alchemical ion has been added, regardless of the configured value.
+        fix_epsilon = (
+            self._config.softcore_form == "beutler" and self._config.beutler_fix_epsilon
+        )
+        if fix_epsilon and charge_diff != 0:
+            _logger.info(
+                "Disabling Beutler 'fix_epsilon' since an alchemical ion has been "
+                "added: the ion's persisting atom is a real (non-ghost) mutation "
+                "and needs its LJ epsilon to interpolate normally."
+            )
+            fix_epsilon = False
+        if self._config._lambda_schedule_name == "annihilate":
+            from .._utils._schedules import annihilate as _annihilate
+
+            self._config._lambda_schedule = _annihilate(fix_epsilon=fix_epsilon)
+        elif self._config._lambda_schedule_name == "decouple":
+            from .._utils._schedules import decouple as _decouple
+
+            self._config._lambda_schedule = _decouple(fix_epsilon=fix_epsilon)
 
         # Set the lambda values.
         if self._config.lambda_values:
