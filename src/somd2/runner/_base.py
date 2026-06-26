@@ -266,54 +266,6 @@ class RunnerBase:
             )
             self._system = _sr.morph.link_to_reference(self._system)
 
-            # Next, swap the water topology so that it is in AMBER format.
-
-            try:
-                waters = self._system["water"]
-            except:
-                waters = []
-
-            if len(waters) > 0:
-                from sire.legacy.IO import isAmberWater as _isAmberWater
-                from sire.legacy.IO import setAmberWater as _setAmberWater
-
-                if not _isAmberWater(waters[0]):
-                    num_atoms = waters[0].num_atoms()
-
-                    if num_atoms == 3:
-                        # Here we assume TIP3P for any 3-point water model.
-                        model = "tip3p"
-                    elif num_atoms == 4:
-                        # Check for OPC water.
-                        try:
-                            if (
-                                waters[0]
-                                .search("element Xx")
-                                .atoms()[0]
-                                .charge()
-                                .value()
-                                < -1.1
-                            ):
-                                model = "opc"
-                            else:
-                                model = "tip4p"
-                        except:
-                            model = "tip4p"
-                    elif num_atoms == 5:
-                        model = "tip5p"
-                    try:
-                        self._system = _System(
-                            _setAmberWater(self._system._system, model)
-                        )
-                        _logger.info(
-                            "Converting water topology to AMBER format for SOMD1 compatibility."
-                        )
-                    except Exception as e:
-                        _logger.error(
-                            "Unable to convert water topology to AMBER format for SOMD1 compatibility."
-                        )
-                        raise e
-
             # Ghost atoms are considered light when adding bond constraints.
             self._config._extra_args["ghosts_are_light"] = True
 
@@ -333,6 +285,45 @@ class RunnerBase:
                     msg = f"Unable to apply modifications to ghost atom bonded terms: {e1}; {e2}"
                     _logger.error(msg)
                     raise RuntimeError(msg)
+
+        # Convert water topology to AMBER format if not already done. AMBER
+        # format adds an explicit H-H bond, giving fully rigid water (O-H and
+        # H-H constraints) rather than just O-H constraints under h_bonds.
+        try:
+            waters = self._system["water"]
+        except:
+            waters = []
+
+        if len(waters) > 0:
+            from sire.legacy.IO import isAmberWater as _isAmberWater
+            from sire.legacy.IO import setAmberWater as _setAmberWater
+
+            if not _isAmberWater(waters[0]):
+                num_atoms = waters[0].num_atoms()
+
+                if num_atoms == 3:
+                    model = "tip3p"
+                elif num_atoms == 4:
+                    try:
+                        if (
+                            waters[0].search("element Xx").atoms()[0].charge().value()
+                            < -1.1
+                        ):
+                            model = "opc"
+                        else:
+                            model = "tip4p"
+                    except:
+                        model = "tip4p"
+                elif num_atoms == 5:
+                    model = "tip5p"
+                try:
+                    self._system = _System(_setAmberWater(self._system._system, model))
+                    _logger.info(
+                        f"Converting water topology to AMBER {model.upper()} format."
+                    )
+                except Exception as e:
+                    _logger.error("Unable to convert water topology to AMBER format.")
+                    raise e
 
         # Check the end state constraints.
         self._check_end_state_constraints()
