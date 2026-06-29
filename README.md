@@ -423,3 +423,7 @@ some systems, causing the simulation to hang. This can be resolved by either
 reducing the frequency at which frames are stored, or checkpointing more
 frequently. (Frames are written to disk and cleared from memory at each
 checkpoint.)
+
+PyMBAR uses JAX by default for GPU acceleration, which can cause issues in
+some environments. If you encounter issues when analysing simlation output,
+try setting the `PYMBAR_DISABLE_JAX` environment variable to `1`.
