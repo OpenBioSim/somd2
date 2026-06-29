@@ -5,7 +5,10 @@ platforms = ["linux-64", "osx-arm64"]
 
 [dependencies]
 python = ">=3.10"
-biosimspace = "*"
+# main
+biosimspace = ">=2026.1.0,<2026.2.0"
+# devel
+#biosimspace = "==2026.2.0.dev"
 filelock = "*"
 ghostly = "*"
 loch = "*"
