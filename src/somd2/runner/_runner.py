@@ -40,11 +40,20 @@ class Runner(_RunnerBase):
     Standard simulation runner class. (Uncoupled simulations.)
     """
 
-    from multiprocessing import Manager
+    _manager = None
 
-    _manager = Manager()
-    _lock = _manager.Lock()
-    _queue = _manager.Queue()
+    @classmethod
+    def _init_manager(cls):
+        """
+        Initialise the shared-memory Manager the first time a Runner is
+        constructed in the parent process. Deferred from class definition time
+        so that importing this module does not fork a manager process before
+        OpenMM threads have been started.
+        """
+        if cls._manager is None:
+            from multiprocessing import Manager
+
+            cls._manager = Manager()
 
     def __init__(self, system, config):
         """
@@ -72,6 +81,16 @@ class Runner(_RunnerBase):
 
         # Call the base class constructor.
         super().__init__(system, config)
+
+        # Initialise the shared-memory manager lazily so that importing this
+        # module does not fork a manager process before OpenMM threads exist.
+        Runner._init_manager()
+
+        # Create Lock and Queue as instance attributes so that they are
+        # pickled as manager proxies and shared correctly across all spawned
+        # worker processes, preventing race conditions on the GPU pool.
+        self._lock = Runner._manager.Lock()
+        self._queue = Runner._manager.Queue()
 
         # Store the array of lambda values for energy sampling.
         if self._config.lambda_energy is not None:
@@ -155,7 +174,7 @@ class Runner(_RunnerBase):
         Returns
         -------
 
-        devices : [(str, int)]
+        devices: [(str, int)]
             List of available device numbers with oversubscription factor.
         """
         devices = []
@@ -247,6 +266,69 @@ class Runner(_RunnerBase):
             # Cleanup backup files.
             self._cleanup()
 
+    def _check_restart(self):
+        """
+        Check the output directory for a valid restart state.
+
+        Detects new-format (.npz) checkpoints and falls back to the legacy
+        .s3 stream file format when only old checkpoints are present.
+        """
+        from pathlib import Path as _Path
+
+        npz_path = _Path(self._filenames[0]["checkpoint_state"])
+        s3_path = _Path(self._filenames[0]["checkpoint"])
+
+        if npz_path.exists():
+            return True, self._system
+        elif s3_path.exists():
+            _logger.info("Restarting from legacy stream file checkpoint.")
+            return super()._check_restart()
+        else:
+            return False, self._system
+
+    def _write_checkpoint_system(self, system, index, context=None, gcmc_sampler=None):
+        """
+        Write the system state to a compact numpy checkpoint file.
+
+        Saves positions, velocities, box vectors, simulation time, and (for
+        GCMC) ghost water indices to a .npz file. The legacy .s3 stream file
+        is not written.
+
+        If no context is provided (should not happen in normal operation),
+        falls back to the base .s3 implementation.
+        """
+        if context is None:
+            super()._write_checkpoint_system(system, index)
+            return
+
+        import openmm.unit as _omm_unit
+
+        state = context.getState(getPositions=True, getVelocities=True)
+        pos = state.getPositions(asNumpy=True).value_in_unit(_omm_unit.nanometer)
+        vel = state.getVelocities(asNumpy=True).value_in_unit(
+            _omm_unit.nanometer / _omm_unit.picosecond
+        )
+        time_ps = system.time().to("ps")
+
+        save_kwargs = {
+            "positions": pos,
+            "velocities": vel,
+            "time_ps": _np.array([time_ps]),
+        }
+
+        box = state.getPeriodicBoxVectors(asNumpy=True)
+        if box is not None:
+            save_kwargs["box"] = box.value_in_unit(_omm_unit.nanometer)
+
+        if gcmc_sampler is not None:
+            # water_state() returns 1 for active, 0 for ghost.
+            water_state = gcmc_sampler.water_state()
+            save_kwargs["ghost_water_indices"] = _np.where(water_state == 0)[0].astype(
+                _np.int32
+            )
+
+        _np.savez(self._filenames[index]["checkpoint_state"], **save_kwargs)
+
     def run_window(self, index):
         """
         Run a single lamdba window.
@@ -276,9 +358,16 @@ class Runner(_RunnerBase):
 
         if self._is_restart:
             _logger.debug(f"Restarting {_lam_sym} = {lambda_value} from file")
-            system = self._system[index].clone()
-
-            time = system.time()
+            if isinstance(self._system, list):
+                # Old format: system with saved positions loaded from .s3 stream file.
+                system = self._system[index].clone()
+                time = system.time()
+            else:
+                # New format: original input system; time stored in .npz checkpoint.
+                system = self._system.clone()
+                time = _sr.u(
+                    f"{float(_np.load(self._filenames[index]['checkpoint_state'])['time_ps'].item()):.6f} ps"
+                )
             if time > self._config.runtime - self._config.timestep:
                 _logger.success(
                     f"{_lam_sym} = {lambda_value} already complete. Skipping."
@@ -379,7 +468,14 @@ class Runner(_RunnerBase):
 
         # Check for completion if this is a restart.
         if is_restart:
-            time = system.time()
+            if isinstance(self._system, list):
+                time = system.time()
+            else:
+                # New format: time stored in .npz, not in the Sire system.
+                time = _sr.u(
+                    f"{float(_np.load(self._filenames[index]['checkpoint_state'])['time_ps'].item()):.6f} ps"
+                )
+                system.set_time(time)
             if time > self._config.runtime - self._config.timestep:
                 _logger.success(
                     f"{_lam_sym} = {lambda_value} already complete. Skipping."
@@ -434,17 +530,23 @@ class Runner(_RunnerBase):
             # Get the GCMC system.
             system = gcmc_sampler.system()
 
-            # Log the initial position of the GCMC sphere.
-            if gcmc_sampler._reference is not None:
-                positions = _sr.io.get_coords_array(system)
-                target = gcmc_sampler._get_target_position(positions)
-                _logger.info(
-                    f"Initial GCMC sphere centre at {_lam_sym} = {lambda_value:.5f}: "
-                    f"[{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}] A"
-                )
-
         else:
             gcmc_sampler = None
+
+        # Create the terminal flip sampler (if terminal groups were detected).
+        if self._terminal_groups:
+            from ._samplers import TerminalFlipSampler
+
+            terminal_flip_sampler = TerminalFlipSampler(
+                self._terminal_groups,
+                float(self._config.temperature.value()),
+            )
+            _logger.info(
+                f"Terminal flip sampler ready at {_lam_sym} = {lambda_value:.5f} "
+                f"(every {self._config.terminal_flip_frequency})"
+            )
+        else:
+            terminal_flip_sampler = None
 
         # Minimisation.
         if self._config.minimise:
@@ -512,6 +614,13 @@ class Runner(_RunnerBase):
                 # Create the dynamics object.
                 dynamics = system.dynamics(**dynamics_kwargs)
 
+                # Write the OpenMM XML file to the output directory.
+                if self._config.save_xml and not is_restart:
+                    _logger.info(
+                        f"Writing OpenMM XML for {_lam_sym} = {lambda_value:.5f}"
+                    )
+                    dynamics.to_xml(self._filenames[index]["xml"])
+
                 # Equilibrate with GCMC moves.
                 if gcmc_sampler is not None:
                     # Bind the GCMC sampler to the dynamics object.
@@ -521,8 +630,12 @@ class Runner(_RunnerBase):
                         f"Equilibrating with GCMC moves at {_lam_sym} = {lambda_value:.5f}"
                     )
 
-                    for i in range(100):
-                        gcmc_sampler.move(dynamics.context())
+                    gcmc_sampler.push()
+                    try:
+                        for i in range(100):
+                            gcmc_sampler.move(dynamics.context())
+                    finally:
+                        gcmc_sampler.pop()
 
                 # Run without saving energies or frames.
                 dynamics.run(
@@ -530,7 +643,7 @@ class Runner(_RunnerBase):
                     energy_frequency=0,
                     frame_frequency=0,
                     save_velocities=False,
-                    auto_fix_minimise=True,
+                    auto_fix_minimise=self._config.auto_fix_minimise,
                     save_crash_report=self._config.save_crash_report,
                 )
 
@@ -544,10 +657,6 @@ class Runner(_RunnerBase):
                     system.set_time(_sr.u("0ps"))
 
             except Exception as e:
-                try:
-                    self._save_energy_components(index, dynamics.context())
-                except:
-                    pass
                 raise RuntimeError(f"Equilibration failed: {e}")
 
         # Work out the lambda values for finite-difference gradient analysis.
@@ -597,6 +706,34 @@ class Runner(_RunnerBase):
         # Create the dynamics object.
         dynamics = system.dynamics(**dynamics_kwargs)
 
+        # Write the OpenMM XML file to the output directory (only if not already
+        # written during equilibration).
+        if self._config.save_xml and not is_restart and not is_equilibrated:
+            _logger.info(f"Writing OpenMM XML for {_lam_sym} = {lambda_value:.5f}")
+            dynamics.to_xml(self._filenames[index]["xml"])
+
+        # For new-format restarts, apply saved positions/velocities/box to context.
+        _new_format_restart = is_restart and not isinstance(self._system, list)
+        if _new_format_restart:
+            import openmm.unit as _omm_unit
+
+            _npz_state = _np.load(self._filenames[index]["checkpoint_state"])
+            dynamics.context().setPositions(
+                _npz_state["positions"] * _omm_unit.nanometer
+            )
+            dynamics.context().setVelocities(
+                _npz_state["velocities"] * _omm_unit.nanometer / _omm_unit.picosecond
+            )
+            if "box" in _npz_state:
+                from openmm import Vec3 as _Vec3
+
+                _box = _npz_state["box"]
+                dynamics.context().setPeriodicBoxVectors(
+                    _Vec3(*_box[0]) * _omm_unit.nanometer,
+                    _Vec3(*_box[1]) * _omm_unit.nanometer,
+                    _Vec3(*_box[2]) * _omm_unit.nanometer,
+                )
+
         # Reset the GCMC sampler. This resets the sampling statistics and clears
         # the associated OpenMM forces.
         if gcmc_sampler is not None:
@@ -608,36 +745,91 @@ class Runner(_RunnerBase):
             # If this is a restart, then we need to reset the GCMC water state
             # to match that of the restart system.
             if self._is_restart:
-                from openmm.unit import angstrom
+                if isinstance(self._system, list):
+                    # Old format: restore ghost waters from cached indices/positions.
+                    from openmm.unit import angstrom
 
-                # First set all waters to non-ghosts.
-                gcmc_sampler._set_water_state(
-                    dynamics.context(),
-                    states=_np.ones(len(gcmc_sampler._water_indices)),
-                    force=True,
-                )
+                    gcmc_sampler.push()
+                    try:
+                        # First set all waters to non-ghosts.
+                        gcmc_sampler._set_water_state(
+                            dynamics.context(),
+                            states=_np.ones(len(gcmc_sampler._water_indices)),
+                            force=True,
+                        )
 
-                # Now set the ghost waters.
-                gcmc_sampler._set_water_state(
-                    dynamics.context(),
-                    self._restart_ghost_waters[index],
-                    states=_np.zeros(len(gcmc_sampler._water_indices)),
-                    force=True,
-                )
+                        # Now set the ghost waters.
+                        gcmc_sampler._set_water_state(
+                            dynamics.context(),
+                            self._restart_ghost_waters[index],
+                            states=_np.zeros(len(gcmc_sampler._water_indices)),
+                            force=True,
+                        )
+                    finally:
+                        gcmc_sampler.pop()
 
-                # Finally, reset the context positions to match the restart system.
-                dynamics.context().setPositions(
-                    self._restart_positions[index] * angstrom
-                )
+                    # Finally, reset the context positions to match the restart system.
+                    dynamics.context().setPositions(
+                        self._restart_positions[index] * angstrom
+                    )
+                else:
+                    # New format: positions already applied; restore ghost water state.
+                    ghost_idxs = _npz_state["ghost_water_indices"].tolist()
+                    gcmc_sampler.push()
+                    try:
+                        gcmc_sampler._set_water_state(
+                            dynamics.context(),
+                            states=_np.ones(len(gcmc_sampler._water_indices)),
+                            force=True,
+                        )
+                        if ghost_idxs:
+                            gcmc_sampler._set_water_state(
+                                dynamics.context(),
+                                ghost_idxs,
+                                states=_np.zeros(len(gcmc_sampler._water_indices)),
+                                force=True,
+                            )
+                    finally:
+                        gcmc_sampler.pop()
 
             # Otherwise, if we've performed equilibration, then we need to reset
             # the water state in the new context to match the equilibrated system.
             elif is_equilibrated:
                 # Reset the water state.
-                gcmc_sampler._set_water_state(
-                    dynamics.context(),
-                    force=True,
-                )
+                gcmc_sampler.push()
+                try:
+                    gcmc_sampler._set_water_state(
+                        dynamics.context(),
+                        force=True,
+                    )
+                    gcmc_sampler.num_waters(context=dynamics.context())
+                finally:
+                    gcmc_sampler.pop()
+
+        # Restore sampler statistics from a previous run.
+        if self._is_restart:
+            stats = self._load_sampler_stats(index)
+            if stats is not None:
+                if gcmc_sampler is not None and "gcmc" in stats:
+                    gcmc_sampler.restore_stats(stats["gcmc"])
+                if terminal_flip_sampler is not None and "terminal_flip" in stats:
+                    attempted, accepted = stats["terminal_flip"]
+                    terminal_flip_sampler.reset(attempted, accepted)
+
+        # Log the GCMC sphere centre using the actual context positions
+        # (accurate for both fresh runs and restarts).
+        if gcmc_sampler is not None and gcmc_sampler._reference is not None:
+            import openmm.unit as _omm_unit
+
+            state = dynamics.context().getState(getPositions=True)
+            positions = state.getPositions(asNumpy=True).value_in_unit(
+                _omm_unit.angstrom
+            )
+            target = gcmc_sampler._get_target_position(positions)
+            _logger.info(
+                f"Initial GCMC sphere centre at {_lam_sym} = {lambda_value:.5f}: "
+                f"[{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}] A"
+            )
 
         # Set the number of neighbours used for the energy calculation.
         # If not None, then we add one to account for the extra windows
@@ -653,19 +845,45 @@ class Runner(_RunnerBase):
         # Store the checkpoint time in nanoseconds.
         checkpoint_interval = checkpoint_frequency.to("ns")
 
+        # Write a checkpoint immediately after equilibration so that a restart
+        # after an early production crash doesn't need to re-equilibrate.
+        if is_equilibrated:
+            lock = _FileLock(self._lock_file)
+            with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                _, error = self._checkpoint(
+                    system,
+                    index,
+                    block=-1,
+                    speed=0.0,
+                    lambda_energy=lambda_energy,
+                    lambda_grad=lambda_grad,
+                    context=dynamics.context(),
+                    gcmc_sampler=gcmc_sampler,
+                )
+                if error is not None:
+                    msg = (
+                        f"Post-equilibration checkpoint failed for {_lam_sym} = "
+                        f"{lambda_value:.5f}:\n{error}"
+                    )
+                    _logger.error(msg)
+                    raise error
+                _logger.info(
+                    f"Writing post-equilibration checkpoint "
+                    f"for {_lam_sym} = {lambda_value:.5f}"
+                )
+
         # Store the start time.
         start = _timer()
 
         # Run the simulation, checkpointing in blocks.
         if checkpoint_frequency.value() > 0.0:
-
             # Calculate the number of blocks and the remainder time.
             frac = (time / checkpoint_frequency).value()
 
             # Handle the case where the runtime is less than the checkpoint frequency.
             if frac < 1.0:
                 frac = 1.0
-                checkpoint_frequency = _sr.u(f"{time} ps")
+                checkpoint_frequency = time
                 checkpoint_interval = checkpoint_frequency.to("ns")
 
             num_blocks = int(frac)
@@ -681,30 +899,128 @@ class Runner(_RunnerBase):
 
                 # Run the dynamics.
                 try:
-                    # GCMC specific handling. Note that the frame and checkpoint
-                    # frequencies are multiples of the energy frequency so we can
-                    # run in energy frequency blocks with no remainder.
-                    if self._config.gcmc:
-                        # Initialise the run time and time at which the next frame is saved.
+                    # Run in sub-blocks when any MC sampler is active or energy
+                    # components are being saved; otherwise run the full block.
+                    needs_subblock = (
+                        gcmc_sampler is not None
+                        or terminal_flip_sampler is not None
+                        or self._config.save_energy_components
+                    )
+                    if needs_subblock:
                         runtime = _sr.u("0ps")
-                        save_frames = self._config.frame_frequency > 0
-                        next_frame = self._config.frame_frequency
-
-                        # Loop until we reach the runtime.
-                        while runtime <= checkpoint_frequency:
-                            # Run the dynamics in blocks of the GCMC frequency.
-                            dynamics.run(
+                        ec_elapsed = _sr.u("0ps")
+                        flip_counter = 0
+                        save_frames = (
+                            gcmc_sampler is not None
+                            and self._config.frame_frequency > 0
+                        )
+                        next_frame = (
+                            self._config.frame_frequency if save_frames else None
+                        )
+                        # Sub-block size: shortest active MC frequency, or
+                        # energy_frequency when only saving energy components.
+                        if (
+                            gcmc_sampler is not None
+                            and terminal_flip_sampler is not None
+                        ):
+                            block_size = min(
                                 self._config.gcmc_frequency,
+                                self._config.terminal_flip_frequency,
+                            )
+                        elif gcmc_sampler is not None:
+                            block_size = self._config.gcmc_frequency
+                        elif terminal_flip_sampler is not None:
+                            block_size = self._config.terminal_flip_frequency
+                        else:
+                            block_size = self._config.energy_frequency
+                        # How often to attempt each MC move (in sub-block units).
+                        gcmc_every = (
+                            max(
+                                1,
+                                round(
+                                    (self._config.gcmc_frequency / block_size).value()
+                                ),
+                            )
+                            if gcmc_sampler is not None
+                            else None
+                        )
+                        mc_flip_every = (
+                            max(
+                                1,
+                                round(
+                                    (
+                                        self._config.terminal_flip_frequency
+                                        / block_size
+                                    ).value()
+                                ),
+                            )
+                            if terminal_flip_sampler is not None
+                            else None
+                        )
+
+                        while runtime < checkpoint_frequency:
+                            needs_pre_run_snapshot = False
+
+                            # GCMC move.
+                            if (
+                                gcmc_sampler is not None
+                                and flip_counter % gcmc_every == 0
+                            ):
+                                _logger.info(
+                                    f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
+                                )
+                                gcmc_sampler.push()
+                                try:
+                                    gcmc_sampler.move(dynamics.context())
+                                finally:
+                                    gcmc_sampler.pop()
+                                needs_pre_run_snapshot = self._config.auto_fix_minimise
+
+                            # Terminal flip move.
+                            if (
+                                terminal_flip_sampler is not None
+                                and flip_counter % mc_flip_every == 0
+                            ):
+                                _logger.info(
+                                    f"Performing terminal flip move at "
+                                    f"{_lam_sym} = {lambda_value:.5f}"
+                                )
+                                flip_accepted = terminal_flip_sampler.move(
+                                    dynamics.context()
+                                )
+                                if flip_accepted:
+                                    if self._config.auto_fix_minimise:
+                                        needs_pre_run_snapshot = True
+                                    if self._config.randomise_velocities:
+                                        dynamics.randomise_velocities()
+
+                            # Snapshot the context state for crash recovery if
+                            # any MC move changed positions.
+                            if needs_pre_run_snapshot:
+                                dynamics._d._pre_run_state = (
+                                    dynamics.context().getState(
+                                        getPositions=True, getVelocities=True
+                                    )
+                                )
+
+                            # Write ghost residues immediately before the dynamics
+                            # block if a frame will be saved within it.
+                            if save_frames and runtime + block_size >= next_frame:
+                                gcmc_sampler.write_ghost_residues()
+                                next_frame += self._config.frame_frequency
+
+                            # Run the dynamics block.
+                            dynamics.run(
+                                block_size,
                                 energy_frequency=self._config.energy_frequency,
                                 frame_frequency=self._config.frame_frequency,
                                 lambda_windows=lambda_array,
                                 rest2_scale_factors=rest2_scale_factors,
                                 save_velocities=self._config.save_velocities,
-                                auto_fix_minimise=True,
+                                auto_fix_minimise=self._config.auto_fix_minimise,
                                 num_energy_neighbours=num_energy_neighbours,
                                 null_energy=self._config.null_energy,
                                 save_crash_report=self._config.save_crash_report,
-                                # GCMC specific options.
                                 excess_chemical_potential=(
                                     self._mu_ex if gcmc_sampler is not None else None
                                 ),
@@ -715,20 +1031,19 @@ class Runner(_RunnerBase):
                                 ),
                             )
 
-                            # Perform a GCMC move.
-                            _logger.info(
-                                f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
-                            )
-                            gcmc_sampler.move(dynamics.context())
+                            runtime += block_size
+                            ec_elapsed += block_size
+                            flip_counter += 1
 
-                            # Update the runtime.
-                            runtime += self._config.energy_frequency
-
-                            # If a frame is saved, then we need to save current indices
-                            # of the ghost water residues.
-                            if save_frames and runtime >= next_frame:
-                                gcmc_sampler.write_ghost_residues()
-                                next_frame += self._config.frame_frequency
+                            # Save energy components.
+                            if self._config.save_energy_components:
+                                self._save_energy_components(
+                                    index,
+                                    dynamics.context(),
+                                    (block * checkpoint_frequency + ec_elapsed).to(
+                                        "ns"
+                                    ),
+                                )
 
                     else:
                         dynamics.run(
@@ -738,32 +1053,20 @@ class Runner(_RunnerBase):
                             lambda_windows=lambda_array,
                             rest2_scale_factors=rest2_scale_factors,
                             save_velocities=self._config.save_velocities,
-                            auto_fix_minimise=True,
+                            auto_fix_minimise=self._config.auto_fix_minimise,
                             num_energy_neighbours=num_energy_neighbours,
                             null_energy=self._config.null_energy,
                             save_crash_report=self._config.save_crash_report,
                         )
                 except Exception as e:
-                    try:
-                        self._save_energy_components(index, dynamics.context())
-                    except:
-                        pass
                     raise RuntimeError(
-                        f"Dynamics block {block+1} for {_lam_sym} = {lambda_value:.5f} failed: {e}"
+                        f"Dynamics block {block + 1} for {_lam_sym} = {lambda_value:.5f} failed: {e}"
                     )
 
                 # Checkpoint.
                 try:
-                    # Save the energy contribution for each force.
-                    if self._config.save_energy_components:
-                        self._save_energy_components(index, dynamics.context())
-
                     # Commit the current system.
                     system = dynamics.commit()
-
-                    # If performing GCMC, then we need to flag the ghost waters.
-                    if gcmc_sampler is not None:
-                        system = gcmc_sampler._flag_ghost_waters(system)
 
                     # Record the end time.
                     block_end = _timer()
@@ -800,25 +1103,53 @@ class Runner(_RunnerBase):
                             lambda_energy=lambda_energy,
                             lambda_grad=lambda_grad,
                             is_final_block=is_final_block,
+                            context=dynamics.context(),
+                            gcmc_sampler=gcmc_sampler,
                         )
 
                         if error is not None:
                             raise error
+
+                        # Save sampler statistics alongside the checkpoint.
+                        self._save_sampler_stats(
+                            index, gcmc_sampler, terminal_flip_sampler
+                        )
 
                     # Delete all trajectory frames from the Sire system within the
                     # dynamics object.
                     dynamics._d._sire_mols.delete_all_frames()
 
                     _logger.info(
-                        f"Finished block {block+1} of {self._start_block + num_blocks} "
+                        f"Finished block {block + 1} of {self._start_block + num_blocks} "
                         f"for {_lam_sym} = {lambda_value:.5f}"
                     )
 
                     # Log the number of waters within the GCMC sampling volume.
                     if gcmc_sampler is not None:
+                        gcmc_sampler.push()
+                        try:
+                            n_moves = gcmc_sampler._num_moves
+                            acc_str = (
+                                f", acceptance rate = {gcmc_sampler.move_acceptance_probability():.3f}"
+                                f" (ins = {gcmc_sampler.num_insertions()}, del = {gcmc_sampler.num_deletions()})"
+                                if n_moves > 0
+                                else ""
+                            )
+                            _logger.info(
+                                f"Current number of waters in GCMC volume at {_lam_sym} = {lambda_value:.5f} "
+                                f"is {gcmc_sampler.num_waters()}{acc_str}"
+                            )
+                        finally:
+                            gcmc_sampler.pop()
+
+                    # Log terminal flip acceptance rate.
+                    if terminal_flip_sampler is not None:
                         _logger.info(
-                            f"Current number of waters in GCMC volume at {_lam_sym} = {lambda_value:.5f} "
-                            f"is {gcmc_sampler.num_waters()}"
+                            f"Terminal flip acceptance rate at "
+                            f"{_lam_sym} = {lambda_value:.5f}: "
+                            f"{terminal_flip_sampler.acceptance_rate:.3f} "
+                            f"({terminal_flip_sampler.num_accepted}/"
+                            f"{terminal_flip_sampler.num_attempted})"
                         )
 
                     if is_final_block:
@@ -835,6 +1166,18 @@ class Runner(_RunnerBase):
                 block += 1
                 block_start = _timer()
                 try:
+                    # Perform one terminal flip at the start of the remainder block.
+                    if terminal_flip_sampler is not None:
+                        _logger.info(
+                            f"Performing terminal flip move at "
+                            f"{_lam_sym} = {lambda_value:.5f}"
+                        )
+                        if (
+                            terminal_flip_sampler.move(dynamics.context())
+                            and self._config.randomise_velocities
+                        ):
+                            dynamics.randomise_velocities()
+
                     dynamics.run(
                         rem,
                         energy_frequency=self._config.energy_frequency,
@@ -842,18 +1185,20 @@ class Runner(_RunnerBase):
                         lambda_windows=lambda_array,
                         rest2_scale_factors=rest2_scale_factors,
                         save_velocities=self._config.save_velocities,
-                        auto_fix_minimise=True,
+                        auto_fix_minimise=self._config.auto_fix_minimise,
                         num_energy_neighbours=num_energy_neighbours,
                         null_energy=self._config.null_energy,
                         save_crash_report=self._config.save_crash_report,
                     )
 
-                    # Save the energy contribution for each force.
-                    if self._config.save_energy_components:
-                        self._save_energy_components(index, dynamics.context())
-
                     # Commit the current system.
                     system = dynamics.commit()
+
+                    # Save the energy contribution for each force.
+                    if self._config.save_energy_components:
+                        self._save_energy_components(
+                            index, dynamics.context(), system.time().to("ns")
+                        )
 
                     # Record the end time.
                     block_end = _timer()
@@ -878,6 +1223,8 @@ class Runner(_RunnerBase):
                             lambda_energy=lambda_energy,
                             lambda_grad=lambda_grad,
                             is_final_block=True,
+                            context=dynamics.context(),
+                            gcmc_sampler=gcmc_sampler,
                         )
 
                     # Delete all trajectory frames from the Sire system within the
@@ -885,7 +1232,7 @@ class Runner(_RunnerBase):
                     dynamics._d._sire_mols.delete_all_frames()
 
                     _logger.info(
-                        f"Finished block {block+1} of {self._start_block + num_blocks} "
+                        f"Finished block {block + 1} of {self._start_block + num_blocks} "
                         f"for {_lam_sym} = {lambda_value:.5f}"
                     )
 
@@ -893,51 +1240,141 @@ class Runner(_RunnerBase):
                         f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"
                     )
                 except Exception as e:
-                    try:
-                        self._save_energy_components(index, dynamics.context())
-                    except:
-                        pass
                     raise RuntimeError(
-                        f"Final dynamics block for {lam_sym} = {lambda_value:.5f} failed: {e}"
+                        f"Final dynamics block for {_lam_sym} = {lambda_value:.5f} failed: {e}"
                     )
         else:
             try:
-                if gcmc_sampler is not None:
-                    # Initialise the run time and time at which the next frame is saved.
+                # Run in sub-blocks when any MC sampler is active or energy
+                # components are being saved; otherwise run a single block.
+                needs_subblock = (
+                    gcmc_sampler is not None
+                    or terminal_flip_sampler is not None
+                    or self._config.save_energy_components
+                )
+                if needs_subblock:
                     runtime = _sr.u("0ps")
-                    save_frames = self._config.frame_frequency > 0
-                    next_frame = self._config.frame_frequency
-
-                    # Loop until we reach the runtime.
-                    while runtime <= time:
-                        # Run the dynamics in blocks of the GCMC frequency.
-                        dynamics.run(
+                    ec_elapsed = _sr.u("0ps")
+                    flip_counter = 0
+                    save_frames = (
+                        gcmc_sampler is not None and self._config.frame_frequency > 0
+                    )
+                    next_frame = self._config.frame_frequency if save_frames else None
+                    # Sub-block size: shortest active MC frequency, or
+                    # energy_frequency when only saving energy components.
+                    if gcmc_sampler is not None and terminal_flip_sampler is not None:
+                        block_size = min(
                             self._config.gcmc_frequency,
+                            self._config.terminal_flip_frequency,
+                        )
+                    elif gcmc_sampler is not None:
+                        block_size = self._config.gcmc_frequency
+                    elif terminal_flip_sampler is not None:
+                        block_size = self._config.terminal_flip_frequency
+                    else:
+                        block_size = self._config.energy_frequency
+                    # How often to attempt each MC move (in sub-block units).
+                    gcmc_every = (
+                        max(
+                            1, round((self._config.gcmc_frequency / block_size).value())
+                        )
+                        if gcmc_sampler is not None
+                        else None
+                    )
+                    mc_flip_every = (
+                        max(
+                            1,
+                            round(
+                                (
+                                    self._config.terminal_flip_frequency / block_size
+                                ).value()
+                            ),
+                        )
+                        if terminal_flip_sampler is not None
+                        else None
+                    )
+                    time_base = self._config.runtime - time
+
+                    while runtime < time:
+                        needs_pre_run_snapshot = False
+
+                        # GCMC move.
+                        if gcmc_sampler is not None and flip_counter % gcmc_every == 0:
+                            _logger.info(
+                                f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
+                            )
+                            gcmc_sampler.push()
+                            try:
+                                gcmc_sampler.move(dynamics.context())
+                            finally:
+                                gcmc_sampler.pop()
+                            needs_pre_run_snapshot = self._config.auto_fix_minimise
+
+                        # Terminal flip move.
+                        if (
+                            terminal_flip_sampler is not None
+                            and flip_counter % mc_flip_every == 0
+                        ):
+                            _logger.info(
+                                f"Performing terminal flip move at "
+                                f"{_lam_sym} = {lambda_value:.5f}"
+                            )
+                            flip_accepted = terminal_flip_sampler.move(
+                                dynamics.context()
+                            )
+                            if flip_accepted:
+                                if self._config.auto_fix_minimise:
+                                    needs_pre_run_snapshot = True
+                                if self._config.randomise_velocities:
+                                    dynamics.randomise_velocities()
+
+                        # Snapshot the context state for crash recovery if
+                        # any MC move changed positions.
+                        if needs_pre_run_snapshot:
+                            dynamics._d._pre_run_state = dynamics.context().getState(
+                                getPositions=True, getVelocities=True
+                            )
+
+                        # Write ghost residues immediately before the dynamics
+                        # block if a frame will be saved within it.
+                        if save_frames and runtime + block_size >= next_frame:
+                            gcmc_sampler.write_ghost_residues()
+                            next_frame += self._config.frame_frequency
+
+                        # Run the dynamics block.
+                        dynamics.run(
+                            block_size,
                             energy_frequency=self._config.energy_frequency,
                             frame_frequency=self._config.frame_frequency,
                             lambda_windows=lambda_array,
                             rest2_scale_factors=rest2_scale_factors,
                             save_velocities=self._config.save_velocities,
-                            auto_fix_minimise=True,
+                            auto_fix_minimise=self._config.auto_fix_minimise,
                             num_energy_neighbours=num_energy_neighbours,
                             null_energy=self._config.null_energy,
                             save_crash_report=self._config.save_crash_report,
+                            excess_chemical_potential=(
+                                self._mu_ex if gcmc_sampler is not None else None
+                            ),
+                            num_waters=(
+                                _np.sum(gcmc_sampler.water_state())
+                                if gcmc_sampler is not None
+                                else None
+                            ),
                         )
 
-                        # Perform a GCMC move.
-                        _logger.info(
-                            f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}"
-                        )
-                        gcmc_sampler.move(dynamics.context())
+                        runtime += block_size
+                        ec_elapsed += block_size
+                        flip_counter += 1
 
-                        # Update the runtime.
-                        runtime += self._config.energy_frequency
+                        # Save energy components.
+                        if self._config.save_energy_components:
+                            self._save_energy_components(
+                                index,
+                                dynamics.context(),
+                                (time_base + ec_elapsed).to("ns"),
+                            )
 
-                        # If a frame is saved, then we need to save current indices
-                        # of the ghost water residues.
-                        if save_frames and runtime >= next_frame:
-                            gcmc_sampler.write_ghost_residues()
-                            next_frame += self._config.frame_frequency
                 else:
                     dynamics.run(
                         time,
@@ -946,16 +1383,12 @@ class Runner(_RunnerBase):
                         lambda_windows=lambda_array,
                         rest2_scale_factors=rest2_scale_factors,
                         save_velocities=self._config.save_velocities,
-                        auto_fix_minimise=True,
+                        auto_fix_minimise=self._config.auto_fix_minimise,
                         num_energy_neighbours=num_energy_neighbours,
                         null_energy=self._config.null_energy,
                         save_crash_report=self._config.save_crash_report,
                     )
             except Exception as e:
-                try:
-                    self._save_energy_components(index, dynamics.context())
-                except:
-                    pass
                 raise RuntimeError(
                     f"Dynamics for {_lam_sym} = {lambda_value:.5f} failed: {e}"
                 )
@@ -995,6 +1428,8 @@ class Runner(_RunnerBase):
                     lambda_energy=lambda_energy,
                     lambda_grad=lambda_grad,
                     is_final_block=True,
+                    context=dynamics.context(),
+                    gcmc_sampler=gcmc_sampler,
                 )
 
                 if error is not None:
@@ -1002,11 +1437,72 @@ class Runner(_RunnerBase):
                     _logger.error(msg)
                     raise RuntimeError(msg)
 
+                # Save sampler statistics alongside the final checkpoint.
+                self._save_sampler_stats(index, gcmc_sampler, terminal_flip_sampler)
+
             _logger.success(
                 f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"
             )
 
         return time
+
+    def _save_sampler_stats(self, index, gcmc_sampler, terminal_flip_sampler):
+        """
+        Save GCMC and terminal flip sampler statistics to a pickle file.
+
+        Parameters
+        ----------
+
+        index : int
+            The index of the lambda value.
+
+        gcmc_sampler : GCMCSampler or None
+            The GCMC sampler for this replica.
+
+        terminal_flip_sampler : TerminalFlipSampler or None
+            The terminal flip sampler for this replica.
+        """
+        import pickle as _pickle
+
+        stats = {}
+        if gcmc_sampler is not None:
+            stats["gcmc"] = gcmc_sampler.get_stats()
+        if terminal_flip_sampler is not None:
+            stats["terminal_flip"] = [
+                terminal_flip_sampler.num_attempted,
+                terminal_flip_sampler.num_accepted,
+            ]
+        with open(self._filenames[index]["sampler_stats"], "wb") as f:
+            _pickle.dump(stats, f)
+
+    def _load_sampler_stats(self, index):
+        """
+        Load sampler statistics from a pickle file.
+
+        Parameters
+        ----------
+
+        index : int
+            The index of the lambda value.
+
+        Returns
+        -------
+
+        dict or None
+            The sampler statistics, or None if the file does not exist.
+        """
+        import pickle as _pickle
+        from pathlib import Path as _Path
+
+        path = _Path(self._filenames[index]["sampler_stats"])
+        if not path.exists():
+            return None
+        try:
+            with open(path, "rb") as f:
+                return _pickle.load(f)
+        except Exception as e:
+            _logger.warning(f"Could not load sampler stats for index {index}: {e}")
+            return None
 
     def _minimisation(
         self,

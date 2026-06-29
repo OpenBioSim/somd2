@@ -19,7 +19,12 @@
 # along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
-__all__ = ["apply_pert", "make_compatible", "reconstruct_system"]
+__all__ = [
+    "apply_pert",
+    "make_compatible",
+    "reconstruct_intrascale",
+    "reconstruct_system",
+]
 
 from sire.system import System as _System
 from sire.legacy.System import System as _LegacySystem
@@ -259,6 +264,19 @@ def make_compatible(system, fix_perturbable_zero_sigmas=False):
                 new_bonds0.set(idx0, idx1, p0.function())
                 new_bonds1.set(idx0, idx1, p1.function())
 
+        # Pass through unique terms that have no ghost in the state they exist in.
+        for b_idx in bonds0_unique_idx.values():
+            p = bonds0[b_idx]
+            a0, a1 = p.atom0(), p.atom1()
+            if not _has_ghost(mol, [a0, a1]):
+                new_bonds0.set(a0, a1, p.function())
+
+        for b_idx in bonds1_unique_idx.values():
+            p = bonds1[b_idx]
+            a0, a1 = p.atom0(), p.atom1()
+            if not _has_ghost(mol, [a0, a1], True):
+                new_bonds1.set(a0, a1, p.function())
+
         # Set the new bonded terms.
         edit_mol = edit_mol.set_property("bond0", new_bonds0).molecule()
         edit_mol = edit_mol.set_property("bond1", new_bonds1).molecule()
@@ -360,6 +378,19 @@ def make_compatible(system, fix_perturbable_zero_sigmas=False):
             else:
                 new_angles0.set(idx0, idx1, idx2, p0.function())
                 new_angles1.set(idx0, idx1, idx2, p1.function())
+
+        # Pass through unique terms that have no ghost in the state they exist in.
+        for a_idx in angles0_unique_idx.values():
+            p = angles0[a_idx]
+            a0, a1, a2 = p.atom0(), p.atom1(), p.atom2()
+            if not _has_ghost(mol, [a0, a1, a2]):
+                new_angles0.set(a0, a1, a2, p.function())
+
+        for a_idx in angles1_unique_idx.values():
+            p = angles1[a_idx]
+            a0, a1, a2 = p.atom0(), p.atom1(), p.atom2()
+            if not _has_ghost(mol, [a0, a1, a2], True):
+                new_angles1.set(a0, a1, a2, p.function())
 
         # Set the new angle terms.
         edit_mol = edit_mol.set_property("angle0", new_angles0).molecule()
@@ -474,6 +505,25 @@ def make_compatible(system, fix_perturbable_zero_sigmas=False):
                 new_dihedrals0.set(idx0, idx1, idx2, idx3, p0.function())
                 new_dihedrals1.set(idx0, idx1, idx2, idx3, p1.function())
 
+        # Pass through unique terms that have no ghost in the state they exist in.
+        for d_idx in dihedrals0_unique_idx.values():
+            p = dihedrals0[d_idx]
+            a0 = info.atom_idx(p.atom0())
+            a1 = info.atom_idx(p.atom1())
+            a2 = info.atom_idx(p.atom2())
+            a3 = info.atom_idx(p.atom3())
+            if not _has_ghost(mol, [a0, a1, a2, a3]):
+                new_dihedrals0.set(a0, a1, a2, a3, p.function())
+
+        for d_idx in dihedrals1_unique_idx.values():
+            p = dihedrals1[d_idx]
+            a0 = info.atom_idx(p.atom0())
+            a1 = info.atom_idx(p.atom1())
+            a2 = info.atom_idx(p.atom2())
+            a3 = info.atom_idx(p.atom3())
+            if not _has_ghost(mol, [a0, a1, a2, a3], True):
+                new_dihedrals1.set(a0, a1, a2, a3, p.function())
+
         # Set the new dihedral terms.
         edit_mol = edit_mol.set_property("dihedral0", new_dihedrals0).molecule()
         edit_mol = edit_mol.set_property("dihedral1", new_dihedrals1).molecule()
@@ -548,7 +598,7 @@ def make_compatible(system, fix_perturbable_zero_sigmas=False):
             for idx0 in impropers0_idx.keys():
                 if idx1.equivalent(idx0):
                     # Don't store duplicates.
-                    if not idx0 in impropers_shared_idx.keys():
+                    if idx0 not in impropers_shared_idx.keys():
                         impropers_shared_idx[idx1] = (
                             impropers0_idx[idx0],
                             impropers1_idx[idx1],
@@ -600,6 +650,25 @@ def make_compatible(system, fix_perturbable_zero_sigmas=False):
                 new_impropers0.set(idx0, idx1, idx2, idx3, p0.function())
                 new_impropers1.set(idx0, idx1, idx2, idx3, p1.function())
 
+        # Pass through unique terms that have no ghost in the state they exist in.
+        for i_idx in impropers0_unique_idx.values():
+            p = impropers0[i_idx]
+            a0 = info.atom_idx(p.atom0())
+            a1 = info.atom_idx(p.atom1())
+            a2 = info.atom_idx(p.atom2())
+            a3 = info.atom_idx(p.atom3())
+            if not _has_ghost(mol, [a0, a1, a2, a3]):
+                new_impropers0.set(a0, a1, a2, a3, p.function())
+
+        for i_idx in impropers1_unique_idx.values():
+            p = impropers1[i_idx]
+            a0 = info.atom_idx(p.atom0())
+            a1 = info.atom_idx(p.atom1())
+            a2 = info.atom_idx(p.atom2())
+            a3 = info.atom_idx(p.atom3())
+            if not _has_ghost(mol, [a0, a1, a2, a3], True):
+                new_impropers1.set(a0, a1, a2, a3, p.function())
+
         # Set the new improper terms.
         edit_mol = edit_mol.set_property("improper0", new_impropers0).molecule()
         edit_mol = edit_mol.set_property("improper1", new_impropers1).molecule()
@@ -609,6 +678,92 @@ def make_compatible(system, fix_perturbable_zero_sigmas=False):
 
     # Return the updated system.
     return system
+
+
+def reconstruct_intrascale(system):
+    """
+    Reconstruct end-state connectivity and intrascale matrices for perturbable
+    molecules from their bonded terms. This is required when a perturbation
+    file is used with AMBER topology/coordinate input, since the pertfile
+    assumes unchanged connectivity, which does not hold for ring-breaking or
+    ring-size-changing perturbations.
+
+    Parameters
+    ----------
+
+    system : sire.system.System, sire.legacy.System.System
+        The system containing the perturbable molecules.
+
+    Returns
+    -------
+
+    system : sire.system.System
+        The updated system with corrected connectivity0, connectivity1,
+        intrascale0, and intrascale1 properties on each perturbable molecule.
+    """
+
+    import sire.legacy.CAS as _SireCAS
+
+    if not isinstance(system, (_System, _LegacySystem)):
+        raise TypeError(
+            "'system' must of type 'sire.system.System' or 'sire.legacy.System.System'"
+        )
+
+    if isinstance(system, _LegacySystem):
+        system = _System(system)
+
+    system = system.clone()
+
+    try:
+        pert_mols = system.molecules("property is_perturbable")
+    except KeyError:
+        raise KeyError("No perturbable molecules in the system")
+
+    r = _SireCAS.Symbol("r")
+
+    for mol in pert_mols:
+        info = mol.info()
+
+        # Build connectivity from bond0 potentials, skipping zero-k bonds.
+        conn0 = _SireMol.Connectivity(info).edit()
+        for bond in mol.property("bond0").potentials():
+            if _SireMM.AmberBond(bond.function(), r).k() != 0.0:
+                conn0.connect(bond.atom0(), bond.atom1())
+        conn0 = conn0.commit()
+
+        # Build connectivity from bond1 potentials, skipping zero-k bonds.
+        conn1 = _SireMol.Connectivity(info).edit()
+        for bond in mol.property("bond1").potentials():
+            if _SireMM.AmberBond(bond.function(), r).k() != 0.0:
+                conn1.connect(bond.atom0(), bond.atom1())
+        conn1 = conn1.commit()
+
+        # Get the 1-4 scale factors from the lambda=0 forcefield.
+        ff = mol.property("forcefield0")
+        sf14 = _SireMM.CLJScaleFactor(
+            ff.electrostatic14_scale_factor(), ff.vdw14_scale_factor()
+        )
+
+        # Build intrascale matrices from the per-state connectivity.
+        intra0 = _SireMM.CLJNBPairs(conn0, sf14)
+        intra1 = _SireMM.CLJNBPairs(conn1, sf14)
+
+        edit_mol = mol.edit()
+
+        if conn0 == conn1:
+            edit_mol = edit_mol.set_property("connectivity", conn0).molecule()
+        else:
+            edit_mol = edit_mol.set_property("connectivity0", conn0).molecule()
+            edit_mol = edit_mol.set_property("connectivity1", conn1).molecule()
+
+        edit_mol = edit_mol.set_property("intrascale0", intra0).molecule()
+        edit_mol = edit_mol.set_property("intrascale1", intra1).molecule()
+
+        system.update(edit_mol.commit())
+
+    from sire import morph as _morph
+
+    return _morph.link_to_reference(system)
 
 
 def reconstruct_system(system):
@@ -659,7 +814,6 @@ def reconstruct_system(system):
 
     # Loop over all perturbable molecules.
     for mol in pert_mols:
-
         # Delete any AmberParams properties.
         try:
             cursor = mol.cursor()

@@ -1,8 +1,44 @@
 import os
+from pathlib import Path
+
 import pytest
 import sire as sr
 
 has_cuda = True if "CUDA_VISIBLE_DEVICES" in os.environ else False
+
+
+@pytest.fixture(scope="session")
+def diphenylethane_mols():
+    """
+    Load a merged perturbable system built from 1,2-diphenylethane (reference,
+    lambda = 0) and 1,2-diphenylethanol (perturbed, lambda = 1).
+
+    SMILES:
+        reference : c1ccccc1CCc1ccccc1
+        perturbed : OC(Cc1ccccc1)c1ccccc1
+
+    Both phenyl rings are terminal, so two terminal ring groups should be
+    detected.
+    """
+    mols = sr.load_test_files("12diphenylethane_12diphenylethanol.s3")
+    return sr.morph.link_to_reference(mols)
+
+
+@pytest.fixture(scope="session")
+def phenethyl_mols():
+    """
+    Load a merged perturbable system built from phenethylamine (reference,
+    lambda = 0) and 2-phenylethanol (perturbed, lambda = 1).
+
+    SMILES:
+        reference : NCCc1ccccc1
+        perturbed : OCCc1ccccc1
+
+    The phenyl ring is terminal — attached to the aliphatic chain by a single
+    exocyclic bond — making it the only detectable terminal ring group.
+    """
+    mols = sr.load_test_files("phenethylamine_2phenylethanol.s3")
+    return sr.morph.link_to_reference(mols)
 
 
 @pytest.fixture(scope="session")
@@ -24,3 +60,56 @@ def ethane_methanol_ions():
     mols = sr.load(sr.expand(sr.tutorial_url, "merged_molecule_ions.s3"))
     mols = sr.morph.link_to_reference(mols)
     return mols
+
+
+@pytest.fixture(scope="session")
+def pert_fwd_mols():
+    """
+    Load the forward perturbation system from AMBER files hosted on the sire
+    test server and apply the local forward pert file.
+    """
+    from somd2._utils._somd1 import apply_pert
+
+    mols = sr.load_test_files("somd1_forward.prm7", "somd1_forward.rst7")
+    pert_file = str(Path(__file__).parent / "inputs" / "forward.pert")
+    return apply_pert(mols, pert_file)
+
+
+@pytest.fixture(scope="session")
+def pert_rev_mols():
+    """
+    Load the reverse perturbation system from AMBER files hosted on the sire
+    test server and apply the local backward pert file.
+    """
+    from somd2._utils._somd1 import apply_pert
+
+    mols = sr.load_test_files("somd1_backward.prm7", "somd1_backward.rst7")
+    pert_file = str(Path(__file__).parent / "inputs" / "backward.pert")
+    return apply_pert(mols, pert_file)
+
+
+@pytest.fixture(scope="session")
+def syk_ring_break_mols():
+    """
+    Load the SYK 5035→5033 ring-breaking perturbation system.
+
+    Reference state (λ=0): SYK-5035 with an intact ring containing a
+    breaking bond. Perturbed state (λ=1): SYK-5033, the open-chain analogue.
+    """
+    mols = sr.load_test_files("syk_5035_5033.s3")
+    return sr.morph.link_to_reference(mols)
+
+
+@pytest.fixture(scope="session")
+def ring_break_mols():
+    """
+    Load the 6YNGD→intgd ring-breaking perturbation system.
+
+    Reference state (λ=0): 6YNGD ligand with an intact N-C ring bond.
+    Perturbed state (λ=1): open-chain analogue (intgd) where that bond
+    is absent.  The cross-bond angles, dihedrals, and impropers spanning
+    the breaking bond are non-ghost unique-to-state0 terms and must be
+    preserved by make_compatible.
+    """
+    mols = sr.load_test_files("6yngd_to_intgd.s3")
+    return sr.morph.link_to_reference(mols)

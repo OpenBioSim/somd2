@@ -81,6 +81,10 @@ class RunnerBase:
         self._config = config
         self._config._extra_args = {}
 
+        # Create the output directory and configure the logger now that the
+        # user's final choice of output directory is known.
+        self._config._setup_output_directory()
+
         if self._config.replica_exchange and self._config.perturbed_system is not None:
             # Make sure the number of positions is correct.
             num_atoms = self._system.num_atoms()
@@ -94,33 +98,17 @@ class RunnerBase:
                 _logger.error(msg)
                 raise ValueError(msg)
 
-            # Make sure the coordinates property is linked.
-            perturbed_system = _sr.morph.link_to_perturbed(
-                self._config.perturbed_system
-            )
+        # Log the versions of somd2 and its OpenBioSim dependencies.
+        from somd2 import get_versions as _get_versions
 
-            # Store the positions.
-            self._perturbed_positions = _sr.io.get_coords_array(perturbed_system)
-
-            # Store the box vectors.
-            cell = self._config.perturbed_system.space().box_matrix()
-            c0 = cell.column0()
-            c1 = cell.column1()
-            c2 = cell.column2()
-            self._perturbed_box = (
-                (c0.x().value(), c0.y().value(), c0.z().value()),
-                (c1.x().value(), c1.y().value(), c1.z().value()),
-                (c2.x().value(), c2.y().value(), c2.z().value()),
-            )
-        else:
-            self._perturbed_positions = None
-            self._perturbed_box = None
-
-        # Log the versions of somd2 and sire.
-        from somd2 import __version__, _sire_version, _sire_revisionid
-
-        _logger.info(f"somd2 version: {__version__}")
-        _logger.info(f"sire version: {_sire_version}+{_sire_revisionid}")
+        versions = _get_versions()
+        _logger.info(f"somd2 version: {versions['somd2']}")
+        _logger.info(f"sire version: {versions['sire']}")
+        _logger.info(f"biosimspace version: {versions['biosimspace']}")
+        if self._config.ghost_modifications:
+            _logger.info(f"ghostly version: {versions['ghostly']}")
+        if self._config.gcmc:
+            _logger.info(f"loch version: {versions['loch']}")
 
         # Flag whether frames are being saved.
         if (
@@ -159,6 +147,14 @@ class RunnerBase:
                 _logger.error(msg)
                 raise IOError(msg)
 
+            # Reconstruct end-state connectivity and intrascale matrices from
+            # the bonded terms. The lambda=0 reference topology is used as the
+            # starting point and the pertfile does not express changes in
+            # connectivity or intrascale directly.
+            from .._utils._somd1 import reconstruct_intrascale
+
+            self._system = reconstruct_intrascale(self._system)
+
             # If we're not using SOMD1 compatibility, then reconstruct the original
             # perturbable system. We only need to do this if applying modifications
             # to ghost atom bonded terms.
@@ -182,6 +178,57 @@ class RunnerBase:
         # Link properties to the lambda = 0 end state.
         self._system = _sr.morph.link_to_reference(self._system)
 
+        # Whether this is a ring-breaking schedule.
+        if (
+            self._config._lambda_schedule_name is not None
+            and "ring_break" in self._config._lambda_schedule_name
+        ):
+            self._is_ring_breaking = True
+        else:
+            self._is_ring_breaking = False
+
+        # Check to see if the end-state connectivities are the same.
+        if not self._is_ring_breaking:
+            for mol in self._system["property is_perturbable"].molecules():
+                has_end_state_connectivity = False
+                try:
+                    # The molecule will have two connectivity properties if
+                    # the merge detected a change in connectivity.
+                    c0 = mol.property("connectivity0")
+                    c1 = mol.property("connectivity1")
+                    has_end_state_connectivity = True
+                except:
+                    # No connectivity change detected.
+                    has_end_state_connectivity = False
+                    pass
+
+                # Check the connectivities regardless.
+                if has_end_state_connectivity:
+                    if c0 != c1:
+                        msg = (
+                            "End-state connectivities are different. If this is a ring-breaking "
+                            "perturbation, please set 'lambda_schedule_name' to 'ring_breaking'."
+                        )
+                        _logger.warning(msg)
+                        break
+
+        # Check for a periodic space.
+        self._has_space = self._check_space()
+
+        # Check for water.
+        try:
+            # The search will fail if there are no water molecules.
+            water = self._system["water"].molecules()
+            self._has_water = True
+        except:
+            self._has_water = False
+
+        # Warn if dispersion correction is requested but can't be applied.
+        if self._config.use_dispersion_correction and not self._has_water:
+            msg = "Cannot use dispersion correction for vacuum simulations. Disabling!"
+            _logger.warning(msg)
+            self._config.use_dispersion_correction = False
+
         # Set the default configuration options.
 
         # Restrict the atomic properties used to define light atoms when
@@ -196,6 +243,16 @@ class RunnerBase:
             self._config.fix_perturbable_zero_sigmas
         )
 
+        # Long-range dispersion correction.
+        self._config._extra_args["use_dispersion_correction"] = (
+            self._config.use_dispersion_correction
+        )
+
+        # GCMC LRC map options.
+        if self._config.gcmc and self._config.use_dispersion_correction:
+            self._config._extra_args["use_gcmc_lrc"] = True
+            self._config._extra_args["num_gcmc_waters"] = self._config.gcmc_num_waters
+
         # We're running in SOMD1 compatibility mode.
         if self._config.somd1_compatibility:
             from .._utils._somd1 import make_compatible
@@ -208,54 +265,6 @@ class RunnerBase:
                 fix_perturbable_zero_sigmas=self._config.fix_perturbable_zero_sigmas,
             )
             self._system = _sr.morph.link_to_reference(self._system)
-
-            # Next, swap the water topology so that it is in AMBER format.
-
-            try:
-                waters = self._system["water"]
-            except:
-                waters = []
-
-            if len(waters) > 0:
-                from sire.legacy.IO import isAmberWater as _isAmberWater
-                from sire.legacy.IO import setAmberWater as _setAmberWater
-
-                if not _isAmberWater(waters[0]):
-                    num_atoms = waters[0].num_atoms()
-
-                    if num_atoms == 3:
-                        # Here we assume TIP3P for any 3-point water model.
-                        model = "tip3p"
-                    elif num_atoms == 4:
-                        # Check for OPC water.
-                        try:
-                            if (
-                                waters[0]
-                                .search("element Xx")
-                                .atoms()[0]
-                                .charge()
-                                .value()
-                                < -1.1
-                            ):
-                                model = "opc"
-                            else:
-                                model = "tip4p"
-                        except:
-                            model = "tip4p"
-                    elif num_atoms == 5:
-                        model = "tip5p"
-                    try:
-                        self._system = _System(
-                            _setAmberWater(self._system._system, model)
-                        )
-                        _logger.info(
-                            "Converting water topology to AMBER format for SOMD1 compatibility."
-                        )
-                    except Exception as e:
-                        _logger.error(
-                            "Unable to convert water topology to AMBER format for SOMD1 compatibility."
-                        )
-                        raise e
 
             # Ghost atoms are considered light when adding bond constraints.
             self._config._extra_args["ghosts_are_light"] = True
@@ -271,24 +280,50 @@ class RunnerBase:
             # Angle optimisation can sometimes fail.
             except Exception as e1:
                 try:
-                    self._system, self._modifications = modify(
-                        self._system, optimise_angles=False
-                    )
+                    self._system, self._modifications = modify(self._system)
                 except Exception as e2:
                     msg = f"Unable to apply modifications to ghost atom bonded terms: {e1}; {e2}"
                     _logger.error(msg)
                     raise RuntimeError(msg)
 
-        # Check for a periodic space.
-        self._has_space = self._check_space()
-
-        # Check for water.
+        # Convert water topology to AMBER format if not already done. AMBER
+        # format adds an explicit H-H bond, giving fully rigid water (O-H and
+        # H-H constraints) rather than just O-H constraints under h_bonds.
         try:
-            # The search will fail if there are no water molecules.
-            water = self._system["water"].molecules()
-            self._has_water = True
+            waters = self._system["water"]
         except:
-            self._has_water = False
+            waters = []
+
+        if len(waters) > 0:
+            from sire.legacy.IO import isAmberWater as _isAmberWater
+            from sire.legacy.IO import setAmberWater as _setAmberWater
+
+            if not _isAmberWater(waters[0]):
+                num_atoms = waters[0].num_atoms()
+
+                if num_atoms == 3:
+                    model = "tip3p"
+                elif num_atoms == 4:
+                    try:
+                        if (
+                            waters[0].search("element Xx").atoms()[0].charge().value()
+                            < -1.1
+                        ):
+                            model = "opc"
+                        else:
+                            model = "tip4p"
+                    except:
+                        model = "tip4p"
+                elif num_atoms == 5:
+                    model = "tip5p"
+                try:
+                    self._system = _System(_setAmberWater(self._system._system, model))
+                    _logger.info(
+                        f"Converting water topology to AMBER {model.upper()} format."
+                    )
+                except Exception as e:
+                    _logger.error("Unable to convert water topology to AMBER format.")
+                    raise e
 
         # Check the end state constraints.
         self._check_end_state_constraints()
@@ -337,6 +372,47 @@ class RunnerBase:
                 self._config._extra_args["coalchemical_restraints"] = (
                     coalchemical_restraints
                 )
+
+        # Set the soft-core form.
+        if self._config.softcore_form == "taylor":
+            self._config._extra_args["use_taylor_softening"] = True
+            self._config._extra_args["taylor_power"] = self._config.taylor_power
+        elif self._config.softcore_form == "beutler":
+            schedule_name = self._config._lambda_schedule_name
+            if schedule_name not in (None, "annihilate", "decouple"):
+                raise ValueError(
+                    "The Beutler soft-core form is only supported with the 'annihilate' "
+                    "or 'decouple' lambda schedules, or a custom schedule."
+                )
+            self._config._extra_args["use_beutler_softening"] = True
+            self._config._extra_args["beutler_alpha"] = self._config.beutler_alpha
+
+        # Build deferred schedules now that the softcore form is known. Epsilon is
+        # only held fixed (with LJ decay handled entirely by the Beutler soft-core
+        # prefactor) for molecules undergoing a ghost-atom decoupling/annihilation.
+        # An alchemical ion is a real (non-ghost) atom mutating identity (e.g. a
+        # water oxygen turning into Na+), so its LJ epsilon needs to interpolate
+        # normally; fixing it would leave the ion's persisting atom stuck at its
+        # initial LJ parameters for the whole stage. Disable fix_epsilon whenever
+        # an alchemical ion has been added, regardless of the configured value.
+        fix_epsilon = (
+            self._config.softcore_form == "beutler" and self._config.beutler_fix_epsilon
+        )
+        if fix_epsilon and charge_diff != 0:
+            _logger.info(
+                "Disabling Beutler 'fix_epsilon' since an alchemical ion has been "
+                "added: the ion's persisting atom is a real (non-ghost) mutation "
+                "and needs its LJ epsilon to interpolate normally."
+            )
+            fix_epsilon = False
+        if self._config._lambda_schedule_name == "annihilate":
+            from .._utils._schedules import annihilate as _annihilate
+
+            self._config._lambda_schedule = _annihilate(fix_epsilon=fix_epsilon)
+        elif self._config._lambda_schedule_name == "decouple":
+            from .._utils._schedules import decouple as _decouple
+
+            self._config._lambda_schedule = _decouple(fix_epsilon=fix_epsilon)
 
         # Set the lambda values.
         if self._config.lambda_values:
@@ -392,8 +468,8 @@ class RunnerBase:
                 if len(self._config.rest2_scale) != len(self._lambda_energy):
                     msg = f"Length of 'rest2_scale' must match the number of {_lam_sym} values."
                     if is_missing:
-                        msg += f"If you have omitted some 'lambda_values` from `lambda_energy`, please "
-                        f"add them to `lambda_energy`, along with the corresponding `rest2_scale` values."
+                        msg += "If you have omitted some 'lambda_values` from `lambda_energy`, please "
+                        "add them to `lambda_energy`, along with the corresponding `rest2_scale` values."
                     _logger.error(msg)
                     raise ValueError(msg)
                 # Make sure the end states are close to 1.0.
@@ -419,7 +495,6 @@ class RunnerBase:
 
         # Make sure the REST2 selection is valid.
         if self._config.rest2_selection is not None:
-
             try:
                 atoms = _sr.mol.selection_to_atoms(
                     self._system, self._config.rest2_selection
@@ -506,8 +581,33 @@ class RunnerBase:
         # Check the output directories and create names of output files.
         self._filenames = self._prepare_output()
 
+        # Per-window cache of the last saved energy-components time (ns),
+        # used to skip duplicate rows on restart.
+        self._last_ec_time = {}
+
         # Store the current system as a reference.
         self._reference_system = self._system.clone()
+
+        # Create a clone of the fully-prepared reference system with the
+        # perturbed end-state coordinates and periodic space. This is done
+        # after all system preparation so that the clone inherits the same
+        # topology and properties. It is used to seed starting coordinates
+        # for lambda > 0.5 replicas.
+        if self._config.replica_exchange and self._config.perturbed_system is not None:
+            from sire.legacy.IO import setCoordinates as _setCoordinates
+
+            pert_coords = _sr.io.get_coords_array(
+                _sr.morph.link_to_perturbed(self._config.perturbed_system)
+            )
+            self._perturbed_system = _sr.system.System(
+                _setCoordinates(self._system._system, pert_coords.tolist())
+            )
+            self._perturbed_system.set_space(self._config.perturbed_system.space())
+
+            # Link properties to the lambda = 0 end state.
+            self._perturbed_system = _sr.morph.link_to_reference(self._perturbed_system)
+        else:
+            self._perturbed_system = None
 
         # Check for a valid restart.
         if self._config.restart:
@@ -518,7 +618,19 @@ class RunnerBase:
             self._is_restart = False
             self._cleanup()
 
-        # Save config whenever 'configure' is called to keep it up to date.
+        if self._config.replica_exchange and self._config.perturbed_system is not None:
+            # Check whether the perturbed system was loaded from file. If not
+            # we need to save to the output directory and update the config to
+            # point to the new file.
+            if self._config._perturbed_system_file is None:
+                filename = str(
+                    _Path(self._config.output_directory) / "perturbed_system.s3"
+                )
+                _sr.stream.save(self._config.perturbed_system, filename)
+                self._config._perturbed_system_file = filename
+                _logger.info(f"Saving perturbed system to {filename}")
+
+        # Write YAML configuration file to the output directory.
         if self._config.write_config:
             _dict_to_yaml(
                 self._config.as_dict(),
@@ -530,23 +642,15 @@ class RunnerBase:
             self._config.checkpoint_frequency / self._config.energy_frequency
         )
 
-        # Zero the energy sample.
-        self._nrg_sample = 0
-
         # GCMC specific validation.
         if self._config.gcmc:
-            if self._config.platform != "cuda":
-                msg = "GCMC simulations require the CUDA platform."
+            if self._config.platform not in ["cuda", "opencl"]:
+                msg = "GCMC simulations require the CUDA or OpenCL platform."
                 _logger.error(msg)
                 raise ValueError(msg)
 
             if not self._has_space:
                 msg = "GCMC simulations require a periodic space."
-                _logger.error(msg)
-                raise ValueError(msg)
-
-            if self._config.pressure != None:
-                msg = "GCMC simulations must be run in the NVT ensemble."
                 _logger.error(msg)
                 raise ValueError(msg)
 
@@ -638,6 +742,59 @@ class RunnerBase:
             # Store the excess chemcical potential value.
             self._mu_ex = self._config.gcmc_excess_chemical_potential.value()
 
+        # Terminal flip specific validation and setup.
+        if self._config.terminal_flip_frequency is not None:
+            from math import isclose
+
+            # Make sure the terminal flip frequency is a multiple of the
+            # energy frequency.
+            ratio = (
+                self._config.terminal_flip_frequency / self._config.energy_frequency
+            ).value()
+
+            if not isclose(ratio, round(ratio), abs_tol=1e-4):
+                msg = "'terminal_flip_frequency' must be a multiple of 'energy_frequency'."
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            # Auto-detect terminal ring groups using Sire connectivity.
+            from ._samplers import detect_terminal_groups
+
+            if isinstance(self._system, list):
+                mols = self._system[0]
+            else:
+                mols = self._system
+
+            flip_angle = (
+                self._config.terminal_flip_angle.to("degrees").value()
+                if self._config.terminal_flip_angle is not None
+                else None
+            )
+            self._terminal_groups = detect_terminal_groups(
+                mols,
+                flip_angle=flip_angle,
+                max_mobile_atoms=self._config.terminal_flip_max_mobile_atoms,
+            )
+
+            if not self._terminal_groups:
+                _logger.warning(
+                    "No terminal ring groups detected. Terminal flip moves will not "
+                    "be performed."
+                )
+            else:
+                _logger.info(
+                    f"Detected {len(self._terminal_groups)} terminal ring group(s) "
+                    f"for terminal flip MC."
+                )
+                for i, (angle, indices) in enumerate(self._terminal_groups):
+                    _logger.info(
+                        f"  Group {i}: flip angle = {angle}°, "
+                        f"anchor = {indices[0]}, pivot = {indices[1]}, "
+                        f"{len(indices) - 2} mobile atom(s)"
+                    )
+        else:
+            self._terminal_groups = []
+
         # Store the initial system time.
         if isinstance(self._system, list):
             self._initial_time = []
@@ -697,60 +854,68 @@ class RunnerBase:
         self._initial_constraint = self._config.constraint
         self._initial_perturbable_constraint = self._config.perturbable_constraint
 
-        # Create the default dynamics kwargs dictionary. These can be overloaded
-        # as needed.
+        # Common kwargs shared by both dynamics and GCMC sampling.
+        self._common_kwargs = {
+            "cutoff": self._config.cutoff,
+            "cutoff_type": self._config.cutoff_type,
+            "platform": self._config.platform,
+            "rest2_selection": self._config.rest2_selection,
+            "shift_coulomb": self._config.shift_coulomb,
+            "shift_delta": self._config.shift_delta,
+            "swap_end_states": self._config.swap_end_states,
+            "temperature": self._config.temperature,
+        }
+
+        # Create the default dynamics kwargs dictionary.
         self._dynamics_kwargs = {
-            "integrator": config.integrator,
-            "temperature": config.temperature,
-            "pressure": config.pressure if self._has_water else None,
-            "surface_tension": config.surface_tension,
-            "barostat_frequency": config.barostat_frequency,
-            "timestep": config.timestep,
-            "restraints": config.restraints,
-            "cutoff_type": config.cutoff_type,
-            "cutoff": config.cutoff,
-            "schedule": config.lambda_schedule,
-            "platform": config.platform,
-            "constraint": config.constraint,
-            "perturbable_constraint": config.perturbable_constraint,
-            "include_constrained_energies": config.include_constrained_energies,
-            "dynamic_constraints": config.dynamic_constraints,
-            "swap_end_states": config.swap_end_states,
-            "com_reset_frequency": config.com_reset_frequency,
+            **self._common_kwargs,
+            "barostat_frequency": self._config.barostat_frequency,
+            "com_reset_frequency": self._config.com_reset_frequency,
+            "constraint": self._config.constraint,
+            "dynamic_constraints": self._config.dynamic_constraints,
+            "include_constrained_energies": self._config.include_constrained_energies,
+            "integrator": self._config.integrator,
+            "map": self._config._extra_args,
+            "perturbable_constraint": self._config.perturbable_constraint,
+            "pressure": self._config.pressure if self._has_water else None,
+            "restraints": self._config.restraints,
+            "schedule": self._config.lambda_schedule,
+            "surface_tension": self._config.surface_tension,
+            "timestep": self._config.timestep,
             "vacuum": not self._has_space,
-            "coulomb_power": config.coulomb_power,
-            "shift_coulomb": config.shift_coulomb,
-            "shift_delta": config.shift_delta,
-            "rest2_selection": config.rest2_selection,
-            "map": config._extra_args,
         }
 
         # Create the GCMC specific kwargs dictionary.
         if self._config.gcmc:
             self._gcmc_kwargs = {
-                "reference": self._config.gcmc_selection,
+                **self._common_kwargs,
+                "bulk_sampling_probability": self._config.gcmc_bulk_sampling_probability,
                 "excess_chemical_potential": str(
                     self._config.gcmc_excess_chemical_potential
                 ),
-                "standard_volume": str(self._config.gcmc_standard_volume),
-                "radius": str(self._config.gcmc_radius),
-                "num_ghost_waters": self._config.gcmc_num_waters,
-                "bulk_sampling_probability": self._config.gcmc_bulk_sampling_probability,
-                "cutoff_type": self._config.cutoff_type,
-                "cutoff": str(self._config.cutoff),
-                "temperature": str(self._config.temperature),
                 "lambda_schedule": self._config.lambda_schedule,
-                "coulomb_power": self._config.coulomb_power,
-                "shift_coulomb": str(self._config.shift_coulomb),
-                "shift_delta": str(self._config.shift_delta),
-                "swap_end_states": self._config.swap_end_states,
-                "tolerance": self._config.gcmc_tolerance,
-                "restart": self._is_restart,
-                "overwrite": self._config.overwrite,
                 "no_logger": True,
+                "num_ghost_waters": self._config.gcmc_num_waters,
+                "pressure": self._config.pressure,
+                "overwrite": self._config.overwrite,
+                "radius": str(self._config.gcmc_radius),
+                "reference": self._config.gcmc_selection,
+                "restart": self._is_restart,
+                "softcore_form": self._config.softcore_form,
+                "taylor_power": self._config.taylor_power,
+                "standard_volume": str(self._config.gcmc_standard_volume),
+                "tolerance": self._config.gcmc_tolerance,
             }
         else:
             self._gcmc_kwargs = None
+
+        # Reverse the lambda schedule when swapping end states so that the
+        # schedule progresses from the perturbed end state to the reference.
+        # (The GCMC schedule is reversed inside loch itself.)
+        if self._config.swap_end_states:
+            self._dynamics_kwargs["schedule"] = self._dynamics_kwargs[
+                "schedule"
+            ].reverse()
 
         # Limit the number of CPU threads available to Sire when running in parallel.
         if self._is_gpu:
@@ -1115,13 +1280,16 @@ class RunnerBase:
         lam = f"{lambda_value:.5f}"
         filenames = {}
         filenames["checkpoint"] = str(output_directory / f"checkpoint_{lam}.s3")
+        filenames["checkpoint_state"] = str(output_directory / f"checkpoint_{lam}.npz")
         filenames["energy_traj"] = str(output_directory / f"energy_traj_{lam}.parquet")
         filenames["trajectory"] = str(output_directory / f"traj_{lam}.dcd")
         filenames["trajectory_chunk"] = str(output_directory / f"traj_{lam}_")
         filenames["energy_components"] = str(
-            output_directory / f"energy_components_{lam}.txt"
+            output_directory / f"energy_components_{lam}.parquet"
         )
         filenames["gcmc_ghosts"] = str(output_directory / f"gcmc_ghosts_{lam}.txt")
+        filenames["sampler_stats"] = str(output_directory / f"sampler_stats_{lam}.pkl")
+        filenames["xml"] = str(output_directory / f"system_{lam}.xml")
         if restart:
             filenames["config"] = str(
                 output_directory / increment_filename("config", "yaml")
@@ -1316,6 +1484,7 @@ class RunnerBase:
             "energy_frequency",
             "frame_frequency",
             "save_velocities",
+            "perturbed_system",
             "platform",
             "max_threads",
             "max_gpus",
@@ -1334,6 +1503,80 @@ class RunnerBase:
                 v1 = config1[key]
                 v2 = config2[key]
 
+                # None config options stored as a Sire property are converted
+                # to False, so None and Fasle are equivalent for the purposes of
+                # comparison.
+                if v1 is None and not v2:
+                    continue
+                if v2 is None and not v1:
+                    continue
+
+                # Early exit equivalence check.
+                if v1 == v2:
+                    continue
+
+                # Custom lambda schedules are stored as a hexademical string of
+                # serialised object. We need to deserialise them before comparison.
+                if key == "lambda_schedule":
+                    # Standard schedules are stored as strings, so we can compare these directly.
+                    if v1 == v2:
+                        continue
+                    try:
+                        v1 = _Config._from_hex(v1)
+                    except Exception as e:
+                        raise ValueError(
+                            f"Unable to deserialise lambda schedule from config1: {str(e)}"
+                        )
+                    try:
+                        v2 = _Config._from_hex(v2)
+                    except Exception as e:
+                        raise ValueError(
+                            f"Unable to deserialise lambda schedule from config2: {str(e)}"
+                        )
+                    if v1 != v2:
+                        raise ValueError(
+                            f"{key} has changed since the last run. This is not "
+                            "allowed when using the restart option."
+                        )
+                    continue
+
+                # Restraints are stored as a list of hexadecimal strings of serialised objects.
+                # We need to deserialise them before comparison.
+                elif key == "restraints":
+                    if v1 and v2:
+                        if len(v1) != len(v2):
+                            raise ValueError(
+                                f"Number of restraints has changed since the last run "
+                                f"({len(v1)} vs {len(v2)}). This is not allowed when "
+                                "using the restart option."
+                            )
+                        # Deserialise all restraints from both configs.
+                        try:
+                            deserialized_v1 = [_Config._from_hex(r) for r in v1]
+                        except Exception as e:
+                            raise ValueError(
+                                f"Unable to deserialise restraint from config1: {str(e)}"
+                            )
+                        try:
+                            deserialized_v2 = [_Config._from_hex(r) for r in v2]
+                        except Exception as e:
+                            raise ValueError(
+                                f"Unable to deserialise restraint from config2: {str(e)}"
+                            )
+                        # Match each restraint in v1 against v2, regardless of order.
+                        unmatched = list(deserialized_v2)
+                        for r1 in deserialized_v1:
+                            for i, r2 in enumerate(unmatched):
+                                if r1 == r2:
+                                    unmatched.pop(i)
+                                    break
+                            else:
+                                raise ValueError(
+                                    f"{key} has changed since the last run. This is not "
+                                    "allowed when using the restart option."
+                                )
+                    continue
+
                 # Convert GeneralUnits to strings for comparison.
                 if isinstance(v1, _GeneralUnit):
                     v1 = str(v1)
@@ -1343,14 +1586,14 @@ class RunnerBase:
                 # Convert Sire containers to lists for comparison.
                 try:
                     v1 = v1.to_list()
-                except:
+                except Exception:
                     pass
                 try:
                     v2 = v2.to_list()
-                except:
+                except Exception:
                     pass
 
-                if (v1 == None and v2 == False) or (v2 == None and v1 == False):
+                if (v1 is None and v2 == False) or (v2 is None and v1 == False):
                     continue
                 # The GCMC frequency will be automaticall set if None.
                 elif key == "gcmc_frequency" and v1 is None:
@@ -1393,18 +1636,22 @@ class RunnerBase:
                 f"No config files found in {self._config.output_directory}, "
                 "attempting to retrieve config from lambda = 0 checkpoint file."
             )
-            try:
-                system_temp = _sr.stream.load(
-                    str(self._config.output_directory / "checkpoint_0.00000.s3")
-                )
-            except:
-                expdir = self._config.output_directory / "checkpoint_0.00000.s3"
-                _logger.error(f"Unable to load checkpoint file from {expdir}.")
-                raise
+            s3_path = self._config.output_directory / "checkpoint_0.00000.s3"
+            if s3_path.exists():
+                try:
+                    system_temp = _sr.stream.load(str(s3_path))
+                except:
+                    _logger.error(f"Unable to load checkpoint file from {s3_path}.")
+                    raise
+                else:
+                    self._last_config = dict(system_temp.property("config"))
+                    config = self._config.as_dict(sire_compatible=True)
+                    del system_temp
             else:
-                self._last_config = dict(system_temp.property("config"))
-                config = self._config.as_dict(sire_compatible=True)
-                del system_temp
+                raise OSError(
+                    f"No config file found in {self._config.output_directory}. "
+                    "Cannot validate restart config without a config.yaml file."
+                )
 
         self._compare_configs(self._last_config, config)
 
@@ -1619,6 +1866,8 @@ class RunnerBase:
         lambda_energy=None,
         lambda_grad=None,
         is_final_block=False,
+        context=None,
+        gcmc_sampler=None,
     ):
         """
         Save a checkpoint file.
@@ -1661,31 +1910,40 @@ class RunnerBase:
         """
 
         try:
-            from somd2 import __version__, _sire_version, _sire_revisionid
+            from somd2 import get_versions as _get_versions
+
+            versions = _get_versions()
 
             # Get the lambda value.
             lam = self._lambda_values[index]
 
+            # -1 is the sentinel for a post-equilibration checkpoint. No
+            # energies are collected during equilibration, so skip all
+            # parquet-related work in this case.
+            is_post_equilibration = block == -1
+
             # Get the energy trajectory.
-            df = system.energy_trajectory(to_alchemlyb=True, energy_unit="kT")
+            if not is_post_equilibration:
+                df = system.energy_trajectory(to_alchemlyb=True, energy_unit="kT")
 
             # Set the lambda values at which energies were sampled.
             if lambda_energy is None:
                 lambda_energy = self._lambda_values
 
             # Create the metadata.
-            metadata = {
-                "attrs": df.attrs,
-                "somd2 version": __version__,
-                "sire version": f"{_sire_version}+{_sire_revisionid}",
-                "lambda": str(lam),
-                "speed": speed,
-                "temperature": str(self._config.temperature.value()),
-            }
+            if not is_post_equilibration:
+                metadata = {
+                    "attrs": df.attrs,
+                    "somd2 version": versions["somd2"],
+                    "sire version": versions["sire"],
+                    "lambda": f"{lam:.5f}",
+                    "speed": speed,
+                    "temperature": str(self._config.temperature.value()),
+                }
 
-            # Add the lambda gradient if available.
-            if lambda_grad is not None:
-                metadata["lambda_grad"] = lambda_grad
+                # Add the lambda gradient if available.
+                if lambda_grad is not None:
+                    metadata["lambda_grad"] = [f"{v:.5f}" for v in lambda_grad]
 
             if is_final_block:
                 # Save the end-state GCMC topologies for trajectory analysis and visualisation.
@@ -1755,28 +2013,22 @@ class RunnerBase:
                         for chunk in traj_chunks:
                             _Path(chunk).unlink()
 
-                # Add config and lambda value to the system properties.
-                system.set_property(
-                    "config", self._config.as_dict(sire_compatible=True)
+                # Write the checkpoint system to file.
+                self._write_checkpoint_system(
+                    system, index, context=context, gcmc_sampler=gcmc_sampler
                 )
-                system.set_property("lambda", lam)
 
-                # Delete all frames from the system.
-                system.delete_all_frames()
-
-                # Stream the final system to file.
-                _sr.stream.save(system, self._filenames[index]["checkpoint"])
-
-                # Create the final parquet file.
-                _dataframe_to_parquet(
-                    df,
-                    metadata=metadata,
-                    filename=self._filenames[index]["energy_traj"],
-                )
+                # Append the final block's energy data. If no parquet exists
+                # yet (e.g. checkpoint_frequency=0), create one from scratch.
+                _energy_traj = self._filenames[index]["energy_traj"]
+                if _Path(_energy_traj).exists():
+                    _parquet_append(_energy_traj, df.iloc[-self._energy_per_block :])
+                else:
+                    _dataframe_to_parquet(df, metadata=metadata, filename=_energy_traj)
 
             else:
                 # Update the starting block if necessary.
-                if block == 0:
+                if block <= 0:
                     block = self._start_block
 
                 # Save the current trajectory chunk to file.
@@ -1792,35 +2044,62 @@ class RunnerBase:
                             format=["DCD"],
                         )
 
-                # Encode the configuration and lambda value as system properties.
-                system.set_property(
-                    "config", self._config.as_dict(sire_compatible=True)
+                # Write the checkpoint system to file.
+                self._write_checkpoint_system(
+                    system, index, context=context, gcmc_sampler=gcmc_sampler
                 )
-                system.set_property("lambda", lam)
 
-                # Delete all frames from the system.
-                system.delete_all_frames()
+                # Skip parquet creation for post-equilibration checkpoints.
+                if not is_post_equilibration:
+                    # Create the parquet file name.
+                    filename = self._filenames[index]["energy_traj"]
 
-                # Stream the checkpoint to file.
-                _sr.stream.save(system, self._filenames[index]["checkpoint"])
-
-                # Create the parquet file name.
-                filename = self._filenames[index]["energy_traj"]
-
-                # Create the parquet file.
-                if block == self._start_block:
-                    _dataframe_to_parquet(df, metadata=metadata, filename=filename)
-                # Append to the parquet file.
-                else:
-                    _parquet_append(
-                        filename,
-                        df.iloc[-self._energy_per_block :],
-                    )
+                    # At the start block of a restart, append to the existing
+                    # parquet so that historical data is preserved. For fresh
+                    # runs, overwrite (or create) the parquet file.
+                    if block == self._start_block and not (
+                        self._is_restart and _Path(filename).exists()
+                    ):
+                        _dataframe_to_parquet(df, metadata=metadata, filename=filename)
+                    else:
+                        _parquet_append(
+                            filename,
+                            df.iloc[-self._energy_per_block :],
+                        )
 
         except Exception as e:
             return index, e
 
         return index, None
+
+    def _write_checkpoint_system(self, system, index, context=None, gcmc_sampler=None):
+        """
+        Write the system state to the checkpoint file.
+
+        Subclasses may override this to store state differently, e.g. repex
+        records the simulation time in the dynamics cache pickle instead of
+        streaming a per-replica file.
+
+        Parameters
+        ----------
+
+        system: :class: `System <sire.system.System>`
+            The committed system to checkpoint.
+
+        index: int
+            The index of the lambda window.
+
+        context: openmm.Context, optional
+            The OpenMM context. Unused in the base implementation.
+
+        gcmc_sampler: GCMCSampler, optional
+            The GCMC sampler. Unused in the base implementation.
+        """
+        lam = self._lambda_values[index]
+        system.set_property("config", self._config.as_dict(sire_compatible=True))
+        system.set_property("lambda", lam)
+        system.delete_all_frames()
+        _sr.stream.save(system, self._filenames[index]["checkpoint"])
 
     def _backup_checkpoint(self, index):
         """
@@ -1844,6 +2123,17 @@ class RunnerBase:
                     self._filenames[index]["checkpoint"],
                     str(self._filenames[index]["checkpoint"]) + ".bak",
                 )
+        except Exception as e:
+            return index, e
+
+        try:
+            # Backup the existing compact numpy checkpoint file, if it exists.
+            path = _Path(self._filenames[index]["checkpoint_state"])
+            if path.exists() and path.stat().st_size > 0:
+                _copyfile(
+                    self._filenames[index]["checkpoint_state"],
+                    str(self._filenames[index]["checkpoint_state"]) + ".bak",
+                )
             traj_filename = self._filenames[index]["trajectory"]
         except Exception as e:
             return index, e
@@ -1859,11 +2149,23 @@ class RunnerBase:
         except Exception as e:
             return index, e
 
+        try:
+            # Backup the existing energy components file, if it exists.
+            path = _Path(self._filenames[index]["energy_components"])
+            if path.exists() and path.stat().st_size > 0:
+                _copyfile(
+                    self._filenames[index]["energy_components"],
+                    str(self._filenames[index]["energy_components"]) + ".bak",
+                )
+        except Exception as e:
+            return index, e
+
         return index, None
 
-    def _save_energy_components(self, index, context):
+    def _save_energy_components(self, index, context, time_ns):
         """
-        Internal function to save the energy components for each force group to file.
+        Internal function to save the energy components for each force group to a
+        Parquet file.
 
         Parameters
         ----------
@@ -1873,44 +2175,62 @@ class RunnerBase:
 
         context : openmm.Context
             The current OpenMM context.
+
+        time_ns : float
+            The current simulation time in nanoseconds.
         """
 
-        from copy import deepcopy
+        import json as _json
         import openmm
+        import pandas as _pd
+        import pyarrow as _pa
+        import pyarrow.parquet as _pq_local
 
-        # Get the current context and system.
-        system = deepcopy(context.getSystem())
+        filepath = self._filenames[index]["energy_components"]
 
-        # Add each force to a unique group.
-        for i, f in enumerate(system.getForces()):
-            f.setForceGroup(i)
+        # Lazy-initialise the last saved time for restart deduplication.
+        # On the first call for this window, read the existing file (if any)
+        # to find the maximum time already written.
+        if index not in self._last_ec_time:
+            path = _Path(filepath)
+            if path.exists() and path.stat().st_size > 0:
+                existing = _pq_local.read_table(filepath).to_pandas()
+                self._last_ec_time[index] = float(existing["time"].max())
+            else:
+                self._last_ec_time[index] = -1.0
 
-        # Create a new context.
-        new_context = openmm.Context(system, deepcopy(context.getIntegrator()))
-        new_context.setPositions(context.getState(getPositions=True).getPositions())
+        # Skip rows that have already been written (restart deduplication).
+        if time_ns <= self._last_ec_time[index]:
+            return
 
-        header = f"{'# Sample':>10}"
-        record = f"{self._nrg_sample:>10}"
+        # Use the named force groups already assigned by sire_to_openmm_system,
+        # sorted alphabetically for a consistent column order across runs.
+        energies = {}
+        for name, grp in sorted(context._force_group_map.items()):
+            state = context.getState(getEnergy=True, groups=(1 << grp))
+            energies[name] = state.getPotentialEnergy().value_in_unit(
+                openmm.unit.kilocalories_per_mole
+            )
 
-        # Process the records.
-        for i, f in enumerate(system.getForces()):
-            state = new_context.getState(getEnergy=True, groups={i})
-            name = f.getName()
-            name_len = len(name)
-            header += f"{f.getName():>{name_len+2}}"
-            record += f"{state.getPotentialEnergy().value_in_unit(openmm.unit.kilocalories_per_mole):>{name_len+2}.2f}"
+        row = {"time": round(time_ns, 6)} | energies
+        df = _pd.DataFrame([row])
 
-        # Write to file.
-        if self._nrg_sample == 0:
-            with open(self._filenames[index]["energy_components"], "w") as f:
-                f.write(header + "\n")
-                f.write(record + "\n")
+        path = _Path(filepath)
+        if path.exists() and path.stat().st_size > 0:
+            _parquet_append(filepath, df)
         else:
-            with open(self._filenames[index]["energy_components"], "a") as f:
-                f.write(record + "\n")
+            # First write: embed units as schema metadata under the "somd2" key,
+            # consistent with how the energy trajectory parquet files are written.
+            table = _pa.Table.from_pandas(df)
+            meta = _json.dumps(
+                {"time_units": "ns", "energy_units": "kcal/mol"}
+            ).encode()
+            table = table.replace_schema_metadata(
+                {b"somd2": meta, **table.schema.metadata}
+            )
+            _pq_local.write_table(table, filepath)
 
-        # Increment the sample number.
-        self._nrg_sample += 1
+        self._last_ec_time[index] = time_ns
 
     def _restore_backup_files(self):
         """

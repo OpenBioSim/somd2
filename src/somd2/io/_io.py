@@ -34,7 +34,14 @@ import os as _os
 import pyarrow as _pa
 import pyarrow.parquet as _pq
 import pandas as _pd
+import warnings as _warnings
 import yaml as _yaml
+
+# Options that have been removed from the config. Any of these found in a YAML
+# config file will be silently dropped after emitting a deprecation warning.
+_REMOVED_OPTIONS = {
+    "coulomb_power": "'coulomb_power' has been removed and will be ignored.",
+}
 
 
 def dataframe_to_parquet(df, metadata, filepath=None, filename=None):
@@ -74,7 +81,7 @@ def dataframe_to_parquet(df, metadata, filepath=None, filename=None):
     table = table.replace_schema_metadata(combined_meta)
     if filename is None:
         if "lambda" in metadata and "temperature" in metadata:
-            filename = f"Lam_{metadata['lambda'].replace('.','')[:5]}_T_{metadata['temperature']}.parquet"
+            filename = f"Lam_{metadata['lambda'].replace('.', '')[:5]}_T_{metadata['temperature']}.parquet"
         else:
             filename = "output.parquet"
     if not filename.endswith(".parquet"):
@@ -141,6 +148,11 @@ def yaml_to_dict(path):
             d = _yaml.safe_load(f)
     except Exception as e:
         raise ValueError(f"Could not load YAML file: {e}")
+
+    for key, msg in _REMOVED_OPTIONS.items():
+        if key in d:
+            _warnings.warn(msg)
+            d.pop(key)
 
     return d
 

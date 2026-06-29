@@ -68,8 +68,13 @@ class Config:
         "lambda_schedule": [
             "standard_morph",
             "charge_scaled_morph",
+            "ring_break_morph",
+            "reverse_ring_break_morph",
+            "annihilate",
+            "decouple",
         ],
         "log_level": [level.lower() for level in _logger._core.levels],
+        "softcore_form": ["zacharias", "taylor", "beutler"],
     }
 
     # A dictionary of nargs for the various options.
@@ -100,7 +105,6 @@ class Config:
         lambda_schedule="standard_morph",
         charge_scale_factor=0.2,
         swap_end_states=False,
-        coulomb_power=0.0,
         shift_coulomb="1 A",
         shift_delta="1.5 A",
         restraints=None,
@@ -134,7 +138,11 @@ class Config:
         opencl_platform_index=0,
         oversubscription_factor=1,
         replica_exchange=False,
+        randomise_velocities=False,
         perturbed_system=None,
+        terminal_flip_frequency=None,
+        terminal_flip_angle=None,
+        terminal_flip_max_mobile_atoms=None,
         gcmc=False,
         gcmc_frequency=None,
         gcmc_selection=None,
@@ -144,8 +152,13 @@ class Config:
         gcmc_radius="4 A",
         gcmc_bulk_sampling_probability=0.1,
         gcmc_tolerance=0.0,
+        use_dispersion_correction=False,
         rest2_scale=1.0,
         rest2_selection=None,
+        softcore_form="zacharias",
+        taylor_power=1,
+        beutler_alpha=0.5,
+        beutler_fix_epsilon=True,
         output_directory="output",
         restart=False,
         use_backup=False,
@@ -153,8 +166,10 @@ class Config:
         overwrite=False,
         somd1_compatibility=False,
         pert_file=None,
+        auto_fix_minimise=True,
         save_crash_report=False,
-        save_energy_components=False,
+        save_energy_components=True,
+        save_xml=False,
         page_size=None,
         timeout="300 s",
     ):
@@ -221,10 +236,6 @@ class Config:
 
         swap_end_states: bool
             Whether to swap the end states of the alchemical system.
-
-        coulomb_power : float
-            Power to use for the soft-core Coulomb interaction. This is used
-            to soften the electrostatic interaction.
 
         shift_coulomb : str
             The soft-core shift-coulomb parameter. This is used to soften the
@@ -363,10 +374,30 @@ class Config:
             Whether to run replica exchange simulation. Currently this can only be used when
             GPU resources are available.
 
+        randomise_velocities: bool
+            Whether to randomise velocities at the start of each replica exchange cycle
+            or following a terminal flip Monte Carlo move.
+
         perturbed_system: str
             The path to a stream file containing a Sire system for the equilibrated perturbed
             end state (lambda = 1). This will be used as the starting conformation all lambda
             windows > 0.5 when performing a replica exchange simulation.
+
+        terminal_flip_frequency: str
+            Frequency at which to attempt terminal ring flip Monte Carlo moves. If None
+            (the default), no terminal flip moves will be performed. When set, terminal
+            ring groups in perturbable molecules are detected automatically using Sire's
+            native connectivity. This must be a multiple of 'energy_frequency'.
+
+        terminal_flip_angle: str
+            Override the flip angle used for all terminal ring groups, e.g.
+            ``"180 degrees"``. If None (the default), the angle is determined
+            automatically for each group from its geometry.
+
+        terminal_flip_max_mobile_atoms: int or None
+            Maximum number of mobile atoms allowed in a terminal ring group.
+            Groups with more mobile atoms than this threshold are skipped during
+            detection. Defaults to None (no limit).
 
         gcmc: bool
             Whether to perform Grand Canonical Monte Carlo (GCMC) water insertions/deletions.
@@ -407,6 +438,12 @@ class Config:
             of acceptance for a move. This can be used to exclude low probability candidates
             that can cause instabilities or crashes for the MD engine.
 
+        use_dispersion_correction: bool
+            Whether to use the long-range dispersion correction for LJ interactions.
+            When True, the correction is evaluated analytically via a CustomVolumeForce
+            and cached per lambda state, avoiding expensive recomputation on every
+            lambda change. Default False.
+
         rest2_scale: float, list(float)
             The scaling factor for Replica Exchange with Solute Tempering (REST) simulations.
             This is the factor by which the temperature of the solute is scaled with respect to
@@ -425,6 +462,30 @@ class Config:
             When atoms within a perturbable molecule are included in the selection, then only
             those atoms will be considered as part of the REST2 region. This allows REST2 to
             be applied to protein mutations.
+
+        softcore_form: str
+            The soft-core potential form to use for alchemical interactions. Valid
+            options are "zacharias" (default), "taylor", and "beutler". The Beutler
+            form is recommended for ABFE calculations.
+
+        taylor_power: int
+            The power to use for the alpha term in the Taylor soft-core LJ expression,
+            i.e. sig6 = sigma^6 / (alpha^m * sigma^6 + r^6). Must be between 0 and 4.
+            The default is 1. Only used when softcore_form is "taylor".
+
+        beutler_alpha: float
+            The dimensionless scale factor for the r^6 shift in the Beutler soft-core
+            form. Must be >= 0. The default is 0.5. Only used when softcore_form is
+            "beutler".
+
+        beutler_fix_epsilon: bool
+            Whether to hold LJ epsilon fixed at its real-atom value for
+            ghost-decoupling molecules when softcore_form is "beutler", so that the
+            Beutler (1-alpha) prefactor provides the sole LJ decay pathway. The
+            default is True. This is automatically disabled (regardless of this
+            setting) for any alchemical ion added to maintain a constant charge,
+            since an ion's persisting atom is a real (non-ghost) mutation and needs
+            its LJ epsilon to interpolate normally rather than being held fixed.
 
         output_directory: str
             Path to a directory to store output files.
@@ -458,12 +519,24 @@ class Config:
             The path to a SOMD1 perturbation file to apply to the reference system.
             When set, this will automatically set 'somd1_compatibility' to True.
 
+        auto_fix_minimise: bool
+            Whether to attempt to automatically recover from simulation instabilities
+            by minimising and restarting. Defaults to True.
+
         save_crash_report: bool
             Whether to save a crash report if the simulation crashes.
 
         save_energy_components: bool
-            Whether to save the energy contribution for each force when checkpointing.
-            This is useful when debugging crashes.
+            Whether to save per-force-group energy contributions to a Parquet file
+            in the output directory. Energies are recorded at every 'energy_frequency'
+            interval. When not running replica exchange, the interval is instead the
+            shortest active MC frequency when running with GCMC or terminal flip moves.
+            Intended for debugging purposes.
+
+        save_xml: bool
+            Whether to write an XML file for the OpenMM system to the output
+            directory on startup. This can be useful for debugging or for
+            use with other tools that can read OpenMM XML files.
 
         page_size: int
             The page size for trajectory handling in megabytes. If None, then Sire
@@ -507,7 +580,6 @@ class Config:
         self.lambda_schedule = lambda_schedule
         self.charge_scale_factor = charge_scale_factor
         self.swap_end_states = swap_end_states
-        self.coulomb_power = coulomb_power
         self.shift_coulomb = shift_coulomb
         self.shift_delta = shift_delta
         self.restraints = restraints
@@ -539,7 +611,11 @@ class Config:
         self.opencl_platform_index = opencl_platform_index
         self.oversubscription_factor = oversubscription_factor
         self.replica_exchange = replica_exchange
+        self.randomise_velocities = randomise_velocities
         self.perturbed_system = perturbed_system
+        self.terminal_flip_frequency = terminal_flip_frequency
+        self.terminal_flip_angle = terminal_flip_angle
+        self.terminal_flip_max_mobile_atoms = terminal_flip_max_mobile_atoms
         self.gcmc = gcmc
         self.gcmc_frequency = gcmc_frequency
         self.gcmc_selection = gcmc_selection
@@ -549,14 +625,21 @@ class Config:
         self.gcmc_radius = gcmc_radius
         self.gcmc_bulk_sampling_probability = gcmc_bulk_sampling_probability
         self.gcmc_tolerance = gcmc_tolerance
+        self.use_dispersion_correction = use_dispersion_correction
         self.rest2_scale = rest2_scale
         self.rest2_selection = rest2_selection
         self.restart = restart
         self.use_backup = use_backup
+        self.softcore_form = softcore_form
+        self.taylor_power = taylor_power
+        self.beutler_alpha = beutler_alpha
+        self.beutler_fix_epsilon = beutler_fix_epsilon
         self.somd1_compatibility = somd1_compatibility
         self.pert_file = pert_file
+        self.auto_fix_minimise = auto_fix_minimise
         self.save_crash_report = save_crash_report
         self.save_energy_components = save_energy_components
+        self.save_xml = save_xml
         self.timeout = timeout
         self.num_energy_neighbours = num_energy_neighbours
         self.null_energy = null_energy
@@ -644,20 +727,39 @@ class Config:
             if value is None and sire_compatible:
                 d[attr_l] = False
 
+        # Don't include lambda_schedule_name or perturbed_system_file in the dictionary,
+        # since these are just helper attributes.
+        d.pop("lambda_schedule_name", None)
+        d.pop("perturbed_system_file", None)
+
         # Handle the lambda schedule separately so that we can use simplified
         # keyword options.
-        if self.lambda_schedule == _LambdaSchedule.standard_morph():
-            d["lambda_schedule"] = "standard_morph"
-        elif self.lambda_schedule == _LambdaSchedule.charge_scaled_morph(
-            self._charge_scale_factor
-        ):
-            d["lambda_schedule"] = "charge_scaled_morph"
+
+        # A keyword exists for this lambda schedule.
+        if self._lambda_schedule_name is not None:
+            d["lambda_schedule"] = self._lambda_schedule_name
+        # Try to match the lambda schedule to a known schedule, if not then convert to hex.
+        else:
+            if self.lambda_schedule == _LambdaSchedule.standard_morph():
+                d["lambda_schedule"] = "standard_morph"
+            elif self.lambda_schedule == _LambdaSchedule.charge_scaled_morph(
+                self._charge_scale_factor
+            ):
+                d["lambda_schedule"] = "charge_scaled_morph"
+            else:
+                d["lambda_schedule"] = self._to_hex(self.lambda_schedule)
+
+        # Serialise restraints.
+        if self.restraints is not None:
+            d["restraints"] = [self._to_hex(restraint) for restraint in self.restraints]
 
         # Use the path for the perturbed_system option, since the system
         # isn't serializable.
-        if self.perturbed_system is not None:
+        if (
+            self.perturbed_system is not None
+            and self._perturbed_system_file is not None
+        ):
             d["perturbed_system"] = str(self._perturbed_system_file)
-            d.pop("perturbed_system_file", None)
 
         return d
 
@@ -862,6 +964,14 @@ class Config:
                 "This will result in a reduction of the mass of hydrogen atoms, "
                 "and will likely lead to undesired simulation behaviour."
             )
+        if h_mass_factor > 3.0:
+            raise ValueError(
+                "Requested hydrogen mass repartitioning factor is greater than 3.0. "
+                "Above this value, heavy atoms bonded to multiple hydrogens can have "
+                "their mass reduced below the 3.5 g/mol threshold used for hydrogen "
+                "detection in the OpenMM conversion layer, causing hydrogen bonds not "
+                "to be constrained."
+            )
         self._h_mass_factor = h_mass_factor
 
     @property
@@ -981,18 +1091,48 @@ class Config:
             if isinstance(lambda_schedule, str):
                 # Strip whitespace and convert to lower case.
                 lambda_schedule = lambda_schedule.strip().lower()
-                if lambda_schedule not in self._choices["lambda_schedule"]:
-                    raise ValueError(
-                        f"Lambda schedule not recognised. Valid lambda schedules are: {self._choices['lambda_schedule']}"
-                    )
                 if lambda_schedule == "standard_morph":
                     self._lambda_schedule = _LambdaSchedule.standard_morph()
+                    self._lambda_schedule_name = "standard_morph"
                 elif lambda_schedule == "charge_scaled_morph":
                     self._lambda_schedule = _LambdaSchedule.charge_scaled_morph(0.2)
+                    self._lambda_schedule_name = "charge_scaled_morph"
+                elif lambda_schedule == "ring_break_morph":
+                    from .._utils._schedules import (
+                        ring_break_morph as _ring_break_morph,
+                    )
+
+                    self._lambda_schedule = _ring_break_morph()
+                    self._lambda_schedule_name = "ring_break_morph"
+                elif lambda_schedule == "reverse_ring_break_morph":
+                    from .._utils._schedules import (
+                        reverse_ring_break_morph as _reverse_ring_break_morph,
+                    )
+
+                    self._lambda_schedule = _reverse_ring_break_morph()
+                    self._lambda_schedule_name = "reverse_ring_break_morph"
+                elif lambda_schedule == "annihilate":
+                    self._lambda_schedule = None
+                    self._lambda_schedule_name = "annihilate"
+                elif lambda_schedule == "decouple":
+                    self._lambda_schedule = None
+                    self._lambda_schedule_name = "decouple"
+                else:
+                    try:
+                        self._lambda_schedule = self._from_hex(lambda_schedule)
+                        self._lambda_schedule_name = None
+                    except Exception:
+                        raise ValueError(
+                            "Unable to deserialise 'lambda_schedule'. Ensure that this is a "
+                            "hex string representation of a valid LambdaSchedule object, or "
+                            f"one of the following strings: {', '.join(self._choices['lambda_schedule'])}"
+                        )
             else:
                 self._lambda_schedule = lambda_schedule
+                self._lambda_schedule_name = None
         else:
             self._lambda_schedule = _LambdaSchedule.standard_morph()
+            self._lambda_schedule_name = "standard_morph"
 
     @property
     def charge_scale_factor(self):
@@ -1021,19 +1161,6 @@ class Config:
         if not isinstance(swap_end_states, bool):
             raise ValueError("'swap_end_states' must be of type 'bool'")
         self._swap_end_states = swap_end_states
-
-    @property
-    def coulomb_power(self):
-        return self._coulomb_power
-
-    @coulomb_power.setter
-    def coulomb_power(self, coulomb_power):
-        if not isinstance(coulomb_power, float):
-            try:
-                coulomb_power = float(coulomb_power)
-            except Exception:
-                raise ValueError("'coulomb_power' must be a of type 'float'")
-        self._coulomb_power = coulomb_power
 
     @property
     def shift_coulomb(self):
@@ -1091,11 +1218,26 @@ class Config:
                 restraints = [restraints]
 
             # Check that all restraints are of the correct type.
+            deserialised_restraints = []
             for restraint in restraints:
-                if not isinstance(restraint, _sr.mm._MM.Restraints):
+                if isinstance(restraint, _sr.mm._MM.Restraints):
+                    continue
+                elif isinstance(restraint, str):
+                    try:
+                        restraint = self._from_hex(restraint)
+                    except Exception:
+                        raise ValueError(
+                            "Unable to deserialise restraint. Ensure that this "
+                            "is a hex string representation of a valid sire.mm._MM.Restraints object."
+                        )
+                    deserialised_restraints.append(restraint)
+                else:
                     raise ValueError(
                         "'restraints' must be a sire.mm._MM.Restraints object, or a list of these objects."
                     )
+
+            if len(deserialised_restraints) > 0:
+                restraints = deserialised_restraints
 
         self._restraints = restraints
 
@@ -1456,7 +1598,6 @@ class Config:
     @platform.setter
     def platform(self, platform):
         import os as _os
-        import sys as _sys
 
         if not isinstance(platform, str):
             raise TypeError("'platform' must be of type 'str'")
@@ -1618,6 +1759,16 @@ class Config:
         self._replica_exchange = replica_exchange
 
     @property
+    def randomise_velocities(self):
+        return self._randomise_velocities
+
+    @randomise_velocities.setter
+    def randomise_velocities(self, randomise_velocities):
+        if not isinstance(randomise_velocities, bool):
+            raise ValueError("'randomise_velocities' must be of type 'bool'")
+        self._randomise_velocities = randomise_velocities
+
+    @property
     def perturbed_system(self):
         return self._perturbed_system
 
@@ -1649,6 +1800,80 @@ class Config:
         else:
             self._perturbed_system = None
             self._perturbed_system_file = None
+
+    @property
+    def terminal_flip_frequency(self):
+        return self._terminal_flip_frequency
+
+    @terminal_flip_frequency.setter
+    def terminal_flip_frequency(self, terminal_flip_frequency):
+        if terminal_flip_frequency is not None:
+            if not isinstance(terminal_flip_frequency, str):
+                raise TypeError("'terminal_flip_frequency' must be of type 'str'")
+
+            from sire.units import picosecond
+
+            try:
+                t = _sr.u(terminal_flip_frequency)
+            except Exception:
+                raise ValueError(
+                    f"Unable to parse 'terminal_flip_frequency' as a Sire GeneralUnit: "
+                    f"{terminal_flip_frequency}"
+                )
+
+            if t.value() != 0 and not t.has_same_units(picosecond):
+                raise ValueError("'terminal_flip_frequency' units are invalid.")
+
+            self._terminal_flip_frequency = t
+        else:
+            self._terminal_flip_frequency = None
+
+    @property
+    def terminal_flip_angle(self):
+        return self._terminal_flip_angle
+
+    @terminal_flip_angle.setter
+    def terminal_flip_angle(self, terminal_flip_angle):
+        if terminal_flip_angle is not None:
+            if not isinstance(terminal_flip_angle, str):
+                raise TypeError("'terminal_flip_angle' must be of type 'str'")
+
+            from sire.units import degrees
+
+            try:
+                a = _sr.u(terminal_flip_angle)
+            except Exception:
+                raise ValueError(
+                    f"Unable to parse 'terminal_flip_angle' as a Sire GeneralUnit: "
+                    f"{terminal_flip_angle}"
+                )
+
+            if not a.has_same_units(degrees):
+                raise ValueError("'terminal_flip_angle' units are invalid.")
+
+            self._terminal_flip_angle = a
+        else:
+            self._terminal_flip_angle = None
+
+    @property
+    def terminal_flip_max_mobile_atoms(self):
+        return self._terminal_flip_max_mobile_atoms
+
+    @terminal_flip_max_mobile_atoms.setter
+    def terminal_flip_max_mobile_atoms(self, terminal_flip_max_mobile_atoms):
+        if terminal_flip_max_mobile_atoms is not None:
+            if not isinstance(terminal_flip_max_mobile_atoms, int):
+                try:
+                    terminal_flip_max_mobile_atoms = int(terminal_flip_max_mobile_atoms)
+                except:
+                    raise ValueError(
+                        "'terminal_flip_max_mobile_atoms' must be of type 'int'"
+                    )
+            if terminal_flip_max_mobile_atoms < 1:
+                raise ValueError(
+                    "'terminal_flip_max_mobile_atoms' must be greater than 0"
+                )
+        self._terminal_flip_max_mobile_atoms = terminal_flip_max_mobile_atoms
 
     @property
     def gcmc(self):
@@ -1785,7 +2010,7 @@ class Config:
             gcmc_r = _sr.u(gcmc_radius)
         except:
             raise ValueError(
-                "Unable to parse 'gcmc_radius' " f"as a Sire GeneralUnit: {gcmc_radius}"
+                f"Unable to parse 'gcmc_radius' as a Sire GeneralUnit: {gcmc_radius}"
             )
 
         if not gcmc_r.has_same_units(angstrom):
@@ -1824,6 +2049,16 @@ class Config:
         if gcmc_tolerance < 0.0:
             raise ValueError("'gcmc_tolerance' must be greater than or equal to 0.0")
         self._gcmc_tolerance = gcmc_tolerance
+
+    @property
+    def use_dispersion_correction(self):
+        return self._use_dispersion_correction
+
+    @use_dispersion_correction.setter
+    def use_dispersion_correction(self, use_dispersion_correction):
+        if not isinstance(use_dispersion_correction, bool):
+            raise TypeError("'use_dispersion_correction' must be of type 'bool'")
+        self._use_dispersion_correction = use_dispersion_correction
 
     @property
     def rest2_scale(self):
@@ -1872,6 +2107,62 @@ class Config:
         self._restart = restart
 
     @property
+    def softcore_form(self):
+        return self._softcore_form
+
+    @softcore_form.setter
+    def softcore_form(self, softcore_form):
+        if not isinstance(softcore_form, str):
+            raise TypeError("'softcore_form' must be of type 'str'")
+        softcore_form = softcore_form.lower().replace(" ", "")
+        if softcore_form not in self._choices["softcore_form"]:
+            raise ValueError(
+                f"'softcore_form' not recognised. Valid forms are: {', '.join(self._choices['softcore_form'])}"
+            )
+        else:
+            self._softcore_form = softcore_form
+
+    @property
+    def taylor_power(self):
+        return self._taylor_power
+
+    @taylor_power.setter
+    def taylor_power(self, taylor_power):
+        if not isinstance(taylor_power, int):
+            try:
+                taylor_power = int(taylor_power)
+            except Exception:
+                raise ValueError("'taylor_power' must be of type 'int'")
+        if not 0 <= taylor_power <= 4:
+            raise ValueError("'taylor_power' must be between 0 and 4")
+        self._taylor_power = taylor_power
+
+    @property
+    def beutler_alpha(self):
+        return self._beutler_alpha
+
+    @beutler_alpha.setter
+    def beutler_alpha(self, beutler_alpha):
+        if not isinstance(beutler_alpha, float):
+            try:
+                beutler_alpha = float(beutler_alpha)
+            except Exception:
+                raise ValueError("'beutler_alpha' must be of type 'float'")
+        if beutler_alpha < 0.0:
+            raise ValueError("'beutler_alpha' must be >= 0")
+        self._beutler_alpha = beutler_alpha
+
+    @property
+    def beutler_fix_epsilon(self):
+        return self._beutler_fix_epsilon
+
+    @beutler_fix_epsilon.setter
+    def beutler_fix_epsilon(self, beutler_fix_epsilon):
+        if not isinstance(beutler_fix_epsilon, bool):
+            raise TypeError("'beutler_fix_epsilon' must be of type 'bool'")
+        self._beutler_fix_epsilon = beutler_fix_epsilon
+
+    @property
     def use_backup(self):
         return self._use_backup
 
@@ -1908,6 +2199,16 @@ class Config:
         self._pert_file = pert_file
 
     @property
+    def auto_fix_minimise(self):
+        return self._auto_fix_minimise
+
+    @auto_fix_minimise.setter
+    def auto_fix_minimise(self, auto_fix_minimise):
+        if not isinstance(auto_fix_minimise, bool):
+            raise ValueError("'auto_fix_minimise' must be of type 'bool'")
+        self._auto_fix_minimise = auto_fix_minimise
+
+    @property
     def save_crash_report(self):
         return self._save_crash_report
 
@@ -1926,6 +2227,16 @@ class Config:
         if not isinstance(save_energy_components, bool):
             raise ValueError("'save_energy_components' must be of type 'bool'")
         self._save_energy_components = save_energy_components
+
+    @property
+    def save_xml(self):
+        return self._save_xml
+
+    @save_xml.setter
+    def save_xml(self, save_xml):
+        if not isinstance(save_xml, bool):
+            raise ValueError("'save_xml' must be of type 'bool'")
+        self._save_xml = save_xml
 
     @property
     def page_size(self):
@@ -2016,18 +2327,32 @@ class Config:
                 output_directory = _Path(output_directory)
             except Exception as e:
                 raise ValueError(f"Could not convert output path. {e}")
-        if not _Path(output_directory).exists() or not _Path(output_directory).is_dir():
+        # Directory creation and logger setup are deferred until the runner
+        # is created (see _setup_output_directory), since this setter can be
+        # called multiple times via the Python API (e.g. before the user
+        # overrides the default) and doing it here would create stale
+        # directories and duplicate logger sinks.
+        self._output_directory = output_directory
+
+    def _setup_output_directory(self):
+        """
+        Internal method to create the output directory (if needed) and
+        configure the logger to write to it. Called once a runner is
+        created, by which point the user's final choice of output
+        directory is known.
+        """
+
+        output_directory = self._output_directory
+
+        if not output_directory.exists() or not output_directory.is_dir():
             try:
-                _Path(output_directory).mkdir(parents=True, exist_ok=True)
+                output_directory.mkdir(parents=True, exist_ok=True)
             except:
                 raise ValueError(
                     f"Output directory {output_directory} does not exist and cannot be created"
                 )
-        if self.log_file is not None:
-            # Can now add the log file
-            _logger.add(output_directory / self.log_file, level=self.log_level.upper())
-            _logger.debug(f"Logging to {output_directory / self.log_file}")
-        self._output_directory = output_directory
+
+        self._reset_logger(_logger)
 
     @property
     def write_config(self):
@@ -2079,6 +2404,68 @@ class Config:
         if not isinstance(overwrite, bool):
             raise ValueError("'overwrite' must be of type 'bool'")
         self._overwrite = overwrite
+
+    @staticmethod
+    def _to_hex(obj):
+        """
+        Internal method to serialise a Sire object to a hex string representation
+        for storage in the YAML config file.
+
+        Parameters
+        ----------
+
+        obj: object
+            The Sire object to serialise.
+
+        Returns
+        --------
+
+        hex:
+            The hex string representation of the Sire object.
+        """
+
+        from sire.stream import save
+        from sire.legacy.Qt import QByteArray
+
+        try:
+            hex = QByteArray(save(obj)).to_hex().data()
+        except Exception as e:
+            raise ValueError(f"Unable to serialise object: {e}")
+
+        return hex
+
+    @staticmethod
+    def _from_hex(hex):
+        """
+        Internal method to deserialise a Sire object from a hex string representation.
+
+        Parameters
+        ----------
+
+        hex: str
+            The hex string representation of the Sire object.
+
+        Returns
+        -------
+
+        obj:
+            The deserialised Sire object.
+        """
+        from sire.stream import load
+        from sire.legacy.Qt import QByteArray
+
+        try:
+            # Convert StringProperty to string.
+            try:
+                hex = hex.value()
+            except Exception:
+                pass
+            hex_byte_arrary = QByteArray.from_raw_data(hex, len(hex))
+            obj = load(QByteArray.from_hex(hex_byte_arrary))
+        except Exception as e:
+            raise ValueError(f"Unable to deserialise object: {e}")
+
+        return obj
 
     @classmethod
     def _create_parser(cls):
@@ -2188,8 +2575,9 @@ class Config:
         """
         Internal method to reset the logger.
 
-        This can be used when a parallel process is spawned to ensure that
-        the logger is correctly configured.
+        Removes any existing sinks and re-adds them based on the current
+        config state. Used both when a parallel process is spawned, and
+        when the output directory is finalised for the main process.
         """
 
         import sys
@@ -2197,6 +2585,6 @@ class Config:
         logger.remove()
         logger.add(sys.stderr, level=self.log_level.upper(), enqueue=True)
         if self.log_file is not None and self.output_directory is not None:
-            logger.add(
-                self.output_directory / self.log_file, level=self.log_level.upper()
-            )
+            log_path = self.output_directory / self.log_file
+            logger.add(log_path, level=self.log_level.upper())
+            logger.debug(f"Logging to {log_path}")

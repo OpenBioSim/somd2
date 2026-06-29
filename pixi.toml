@@ -1,0 +1,33 @@
+[workspace]
+name = "somd2"
+channels = ["conda-forge", "openbiosim/label/dev"]
+platforms = ["linux-64", "osx-arm64"]
+
+[dependencies]
+python = ">=3.10"
+# main
+biosimspace = ">=2026.1.0,<2026.2.0"
+# devel
+#biosimspace = "==2026.2.0.dev"
+filelock = "*"
+ghostly = "*"
+loch = "*"
+loguru = "*"
+numba = "*"
+nvidia-ml-py = "*"
+
+[feature.test.dependencies]
+pytest = "*"
+
+[feature.lint.dependencies]
+pre-commit = "*"
+rattler-build = "*"
+ruff = "*"
+
+[environments]
+default = []
+test = ["test"]
+dev = ["test", "lint"]
+
+[activation]
+scripts = ["pixi.sh"]

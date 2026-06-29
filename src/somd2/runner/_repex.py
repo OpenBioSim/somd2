@@ -52,8 +52,8 @@ class DynamicsCache:
         dynamics_kwargs,
         gcmc_kwargs=None,
         output_directory=None,
-        perturbed_positions=None,
-        perturbed_box=None,
+        perturbed_system=None,
+        xml_filenames=None,
     ):
         """
         Constructor.
@@ -82,13 +82,13 @@ class DynamicsCache:
         output_directory: pathlib.Path
             The directory for simulation output.
 
-        perturbed_positions: numpy.ndarray
-            The positions for the perturbed state. If None, then the perturbed state
-            is not used.
+        perturbed_system: :class: `System <sire.system.System>`
+            The perturbed end-state system used to seed starting coordinates for
+            lambda > 0.5 replicas. If None, the perturbed state is not used.
 
-        perturbed_box: numpy.ndarray
-            The box vectors for the perturbed state. If None, then the perturbed state
-            is not used.
+        xml_filenames: list of str
+            A list of file paths for the OpenMM XML output, one per replica.
+            If None, XML files are not written.
         """
 
         # Warn if the number of replicas is not a multiple of the number of GPUs.
@@ -102,10 +102,12 @@ class DynamicsCache:
         self._lambdas = lambdas
         self._rest2_scale_factors = rest2_scale_factors
         self._states = _np.array(range(len(lambdas)))
-        self._old_states = _np.array(range(len(lambdas)))
+        self._time = None
         self._openmm_states = [None] * len(lambdas)
         self._gcmc_samplers = [None] * len(lambdas)
         self._gcmc_states = [None] * len(lambdas)
+        self._gcmc_stats = [None] * len(lambdas)
+        self._terminal_flip_stats = [[0, 0]] * len(lambdas)
         self._num_proposed = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
         self._num_accepted = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
         self._num_swaps = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
@@ -119,8 +121,8 @@ class DynamicsCache:
             dynamics_kwargs,
             gcmc_kwargs=gcmc_kwargs,
             output_directory=output_directory,
-            perturbed_positions=perturbed_positions,
-            perturbed_box=perturbed_box,
+            perturbed_system=perturbed_system,
+            xml_filenames=xml_filenames,
         )
 
     def __setstate__(self, state):
@@ -129,6 +131,18 @@ class DynamicsCache:
         """
         for key, value in state.items():
             setattr(self, key, value)
+
+        # Provide defaults for attributes added after the initial release,
+        # so that old checkpoint files can still be loaded.
+        n = len(self._lambdas)
+        if not hasattr(self, "_gcmc_stats"):
+            self._gcmc_stats = [None] * n
+        if not hasattr(self, "_gcmc_states"):
+            self._gcmc_states = [None] * n
+        if not hasattr(self, "_terminal_flip_stats"):
+            self._terminal_flip_stats = [[0, 0]] * n
+        if not hasattr(self, "_time"):
+            self._time = None
 
     def __getstate__(self):
         """
@@ -140,11 +154,13 @@ class DynamicsCache:
             "_lambdas": self._lambdas,
             "_rest2_scale_factors": self._rest2_scale_factors,
             "_states": self._states,
-            "_old_states": self._old_states,
+            "_time": self._time,
             "_openmm_states": self._openmm_states,
             # Don't pickle the GCMC samplers since they need to be recreated.
             "_gcmc_samplers": len(self._gcmc_samplers) * [None],
             "_gcmc_states": self._gcmc_states,
+            "_gcmc_stats": self._gcmc_stats,
+            "_terminal_flip_stats": self._terminal_flip_stats,
             "_num_proposed": self._num_proposed,
             "_num_accepted": self._num_accepted,
             "_num_swaps": self._num_swaps,
@@ -161,8 +177,8 @@ class DynamicsCache:
         dynamics_kwargs,
         gcmc_kwargs=None,
         output_directory=None,
-        perturbed_positions=None,
-        perturbed_box=None,
+        perturbed_system=None,
+        xml_filenames=None,
     ):
         """
         Create the dynamics objects.
@@ -191,13 +207,13 @@ class DynamicsCache:
         output_directory: pathlib.Path
             The directory for simulation output.
 
-        perturbed_positions: numpy.ndarray
-            The positions for the perturbed state. If None, then the perturbed state
-            is not used.
+        perturbed_system: :class: `System <sire.system.System>`
+            The perturbed end-state system used to seed starting coordinates for
+            lambda > 0.5 replicas. If None, the perturbed state is not used.
 
-        perturbed_box: numpy.ndarray
-            The box vectors for the perturbed state. If None, then the perturbed state
-            is not used.
+        xml_filenames: list of str
+            A list of file paths for the OpenMM XML output, one per replica.
+            If None, XML files are not written.
         """
 
         from math import floor
@@ -215,35 +231,39 @@ class DynamicsCache:
         # Initialise the dynamics object list.
         self._dynamics = []
 
-        # A set of visited device indices.
-        devices = set()
+        # Per-device memory tracking for estimation.
+        device_mem = {}
 
-        # Determine whether there is a remainder in the number of replicas.
+        # Work out how many replicas are assigned to each device.
+        # Replicas are assigned round-robin, so the first (num_replicas % num_gpus)
+        # devices get one extra replica.
+        base = floor(num_replicas / num_gpus)
         remainder = num_replicas % num_gpus
-
-        # Store the number of contexts for each device. The last device will
-        # have remainder contexts, while all others have
-        contexts_per_device = num_replicas * [floor(num_replicas / num_gpus)]
-
-        # Set the last device to have the remainder contexts.
-        contexts_per_device[-1] = remainder
+        contexts_per_device = [
+            base + (1 if i < remainder else 0) for i in range(num_gpus)
+        ]
 
         # Create the dynamics objects in serial.
         for i, (lam, scale) in enumerate(zip(lambdas, rest2_scale_factors)):
             # Work out the device index.
             device = i % num_gpus
 
-            # If we've not seen this device before then get the memory statistics
-            # prior to creating the dynamics object and GCMC sampler.
-            if device not in devices:
-                used_mem_before, free_mem_before, total_mem = self._check_device_memory(
-                    device
-                )
+            # Record baseline memory before the first replica on this device.
+            if device not in device_mem:
+                used_before, _, total_mem = self._check_device_memory(device)
+                device_mem[device] = {
+                    "before": used_before,
+                    "total": total_mem,
+                    "count": 0,
+                }
 
             # This is a restart, get the system for this replica.
             if isinstance(system, list):
                 mols = system[i]
-            # This is a new simulation.
+            # This is a new simulation. For lambda > 0.5, use the perturbed
+            # system to seed the starting coordinates and periodic space.
+            elif perturbed_system is not None and lam > 0.5:
+                mols = perturbed_system
             else:
                 mols = system
 
@@ -284,15 +304,6 @@ class DynamicsCache:
                     f"Created GCMC sampler for lambda {lam:.5f} on device {device}"
                 )
 
-                # Log the initial position of the GCMC sphere.
-                if self._gcmc_samplers[i]._reference is not None:
-                    positions = _sr.io.get_coords_array(mols)
-                    target = self._gcmc_samplers[i]._get_target_position(positions)
-                    _logger.info(
-                        f"Initial GCMC sphere centre for lambda {lam:.5f} on device {device}: "
-                        f"[{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}] A"
-                    )
-
             # Create the dynamics object.
             try:
                 dynamics = mols.dynamics(**dynamics_kwargs)
@@ -300,33 +311,6 @@ class DynamicsCache:
                 msg = f"Could not create dynamics object for lambda {lam:.5f} on device {device}: {e}"
                 _logger.error(msg)
                 raise RuntimeError(msg) from e
-
-            # Update the box vectors and positions if the perturbed state is used.
-            if (
-                perturbed_positions is not None
-                and perturbed_box is not None
-                and lam > 0.5
-            ):
-                from openmm.unit import angstrom
-
-                # Get the positions from the context.
-                positions = (
-                    dynamics.context()
-                    .getState(getPositions=True)
-                    .getPositions(asNumpy=True)
-                ) / angstrom
-
-                # The positions array also contains the ghost water atoms that
-                # were added during the GCMC setup. We need to make sure that
-                # we copy these over to the perturbed positions array.
-                diff = len(positions) - len(perturbed_positions)
-                if diff != 0:
-                    perturbed_positions = _np.concatenate(
-                        [perturbed_positions, positions[-diff:]]
-                    )
-
-                dynamics.context().setPeriodicBoxVectors(*perturbed_box * angstrom)
-                dynamics.context().setPositions(perturbed_positions * angstrom)
 
             # Bind the GCMC sampler to the dynamics object. This allows the
             # dynamics object to reset the water state in its internal OpenMM
@@ -337,26 +321,61 @@ class DynamicsCache:
             # Append the dynamics object.
             self._dynamics.append(dynamics)
 
-            # Check the memory footprint for this device.
-            if not device in devices:
-                # Add the device to the set of visited devices.
-                devices.add(device)
+            # Write the OpenMM XML file to the output directory.
+            if xml_filenames is not None:
+                _logger.info(
+                    f"Writing OpenMM XML for lambda {lam:.5f} on device {device}"
+                )
+                dynamics.to_xml(xml_filenames[i])
 
-                # Get the current memory usage.
-                used_mem, free_mem, total_mem = self._check_device_memory(device)
+            # Track memory footprint for this device.
+            info = device_mem[device]
+            info["count"] += 1
+            num_contexts = contexts_per_device[device]
 
-                # Work out the memory used by this dynamics object and GCMC sampler.
-                mem_used = used_mem - used_mem_before
+            # Estimate memory after the first or second replica.
+            if info["count"] == 1:
+                used_mem, _, _ = self._check_device_memory(device)
+                info["after_first"] = used_mem
 
-                # Work out the estimate for all replicas on this device.
-                est_total = mem_used * contexts_per_device[device]
+                if num_contexts == 1:
+                    # Only one replica on this device, use actual measurement.
+                    est_total = used_mem
+                else:
+                    # Wait for the second replica to get the marginal cost.
+                    est_total = None
+
+            elif info["count"] == 2:
+                used_mem, _, _ = self._check_device_memory(device)
+                # The first replica includes one-time context overhead.
+                # The marginal cost of subsequent replicas is the difference
+                # between the second and first.
+                first_cost = info["after_first"] - info["before"]
+                marginal_cost = used_mem - info["after_first"]
+                est_total = (
+                    info["before"] + first_cost + marginal_cost * (num_contexts - 1)
+                )
+                _logger.info(
+                    f"Memory per replica on device {device}: "
+                    f"first = {first_cost / (1024**2):.0f} MiB, "
+                    f"marginal = {marginal_cost / (1024**2):.0f} MiB"
+                )
+            else:
+                est_total = None
+
+            if est_total is not None:
+                total_mem = info["total"]
 
                 # If this exceeds the total memory, raise an error.
                 if est_total > total_mem:
+                    baseline = info["before"]
+                    replica_cost = first_cost + marginal_cost * (num_contexts - 1)
                     msg = (
                         f"Not enough memory on device {device} for all assigned replicas. "
-                        f"Estimated memory usage: {est_total / 1e9:.2f} GB, "
-                        f"Available memory: {total_mem / 1e9:.2f} GB."
+                        f"Baseline usage before simulation: {baseline / (1024**3):.2f} GB "
+                        f"Estimated replica memory: {replica_cost / (1024**3):.2f} GB, "
+                        f"Total estimated: {est_total / (1024**3):.2f} GB, "
+                        f"Available memory: {total_mem / (1024**3):.2f} GB."
                     )
                     _logger.error(msg)
                     raise MemoryError(msg)
@@ -366,8 +385,15 @@ class DynamicsCache:
                     _logger.warning(
                         f"Device {device} will have less than 20% free memory "
                         f"after creating all assigned replicas. "
-                        f"{est_total / 1e9:.2f} GB, "
-                        f"Available memory: {total_mem / 1e9:.2f} GB."
+                        f"{est_total / (1024**3):.2f} GB, "
+                        f"Available memory: {total_mem / (1024**3):.2f} GB."
+                    )
+
+                else:
+                    _logger.info(
+                        f"Estimated memory usage on device {device} after creating all replicas: "
+                        f"{est_total / (1024**3):.2f} GB, "
+                        f"Available memory: {total_mem / (1024**3):.2f} GB."
                     )
 
             _logger.info(
@@ -429,7 +455,6 @@ class DynamicsCache:
         index: int
             The index of the replica.
         """
-        from openmm.unit import angstrom
 
         # Get the current OpenMM state.
         state = (
@@ -438,8 +463,40 @@ class DynamicsCache:
             .getState(getPositions=True, getVelocities=True)
         )
 
-        # Store the state.
-        self._openmm_states[index] = state
+        # Store positions, velocities, and box vectors as compact numpy arrays
+        # rather than the OpenMM State object, which serialises to XML when
+        # pickled and is orders of magnitude larger.
+        self._openmm_states[index] = {
+            "positions": state.getPositions(asNumpy=True),
+            "velocities": state.getVelocities(asNumpy=True),
+            "box": state.getPeriodicBoxVectors(asNumpy=True),
+        }
+
+    @staticmethod
+    def _apply_openmm_state(context, state):
+        """
+        Apply a saved OpenMM state to a context.
+
+        Parameters
+        ----------
+
+        context: openmm.Context
+            The OpenMM context to update.
+
+        state: dict or openmm.State
+            The state to apply. Dicts (new format) contain "positions",
+            "velocities", and "box" numpy arrays. A bare openmm.State is
+            accepted for backwards compatibility with old checkpoint files.
+        """
+        if isinstance(state, dict):
+            context.setPositions(state["positions"])
+            context.setVelocities(state["velocities"])
+            if state["box"] is not None:
+                context.setPeriodicBoxVectors(*state["box"])
+        else:
+            # Legacy openmm.State from checkpoint files written before this
+            # format change.
+            context.setState(state)
 
     def save_gcmc_state(self, index):
         """
@@ -481,16 +538,23 @@ class DynamicsCache:
         """
         self._states = states
 
-    def mix_states(self):
+    def mix_states(self, old_states):
         """
         Mix the states of the dynamics objects.
+
+        Parameters
+        ----------
+        old_states : numpy.ndarray
+            The state indices from before the last replica mix.
         """
         # Mix the states.
         for i, state in enumerate(self._states):
             # The state has changed.
             if i != state:
                 _logger.debug(f"Replica {i} seeded from state {state}")
-                self._dynamics[i].context().setState(self._openmm_states[state])
+                self._apply_openmm_state(
+                    self._dynamics[i].context(), self._openmm_states[state]
+                )
 
                 # Swap the water state in the GCMCSamplers.
                 if self._gcmc_samplers[i] is not None:
@@ -501,19 +565,17 @@ class DynamicsCache:
 
                     # Update the water state in the GCMCSampler.
                     self._gcmc_samplers[i].push()
-                    self._gcmc_samplers[i]._set_water_state(
-                        self._dynamics[i].context(),
-                        indices=water_idxs,
-                        states=self._gcmc_states[state][water_idxs],
-                    )
-                    self._gcmc_samplers[i].pop()
+                    try:
+                        self._gcmc_samplers[i]._set_water_state(
+                            self._dynamics[i].context(),
+                            indices=water_idxs,
+                            states=self._gcmc_states[state][water_idxs],
+                        )
+                    finally:
+                        self._gcmc_samplers[i].pop()
 
             # Update the swap matrix.
-            old_state = self._old_states[i]
-            self._num_swaps[old_state, state] += 1
-
-        # Store the current states.
-        self._old_states = self._states.copy()
+            self._num_swaps[old_states[i], state] += 1
 
     def get_proposed(self):
         """
@@ -534,34 +596,83 @@ class DynamicsCache:
         return self._num_swaps
 
     @staticmethod
-    def _check_device_memory(index):
+    def _check_device_memory(device_index=0):
         """
-        Check the memory usage of the specified CUDA device.
+        Check the memory usage of the specified GPU device.
 
         Parameters
         ----------
 
         index: int
-            The index of the CUDA device.
+            The index of the GPU device.
         """
+
+        # Try to use pyopencl to detect the GPU vendor.
+        vendor = None
+        ocl_device = None
         try:
-            from pynvml import (
-                nvmlInit,
-                nvmlShutdown,
-                nvmlDeviceGetHandleByIndex,
-                nvmlDeviceGetMemoryInfo,
+            import pyopencl as cl
+
+            platforms = cl.get_platforms()
+            all_devices = []
+            for platform in platforms:
+                try:
+                    devices = platform.get_devices(device_type=cl.device_type.GPU)
+                    all_devices.extend(devices)
+                except Exception:
+                    continue
+
+            if device_index < len(all_devices):
+                ocl_device = all_devices[device_index]
+                vendor = ocl_device.vendor
+            else:
+                msg = f"Device index {device_index} out of range. Found {len(all_devices)} GPU(s)."
+                _logger.error(msg)
+                raise IndexError(msg)
+        except IndexError:
+            raise
+        except Exception:
+            _logger.warning(
+                "Could not query GPU platform via OpenCL; falling back to pynvml for NVIDIA detection."
             )
 
-            nvmlInit()
-            handle = nvmlDeviceGetHandleByIndex(index)
-            info = nvmlDeviceGetMemoryInfo(handle)
-            result = (info.used, info.free, info.total)
-            nvmlShutdown()
-        except Exception as e:
-            msg = f"Could not determine memory usage for device {index}: {e}"
-            _logger.error(msg)
+        # NVIDIA: Use pynvml (also used as fallback when OpenCL is unavailable).
+        if vendor is None or "NVIDIA" in vendor:
+            try:
+                import pynvml
 
-        return result
+                pynvml.nvmlInit()
+                handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
+                memory = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                pynvml.nvmlShutdown()
+                return (memory.used, memory.free, memory.total)
+            except Exception as e:
+                if vendor is None:
+                    msg = f"Could not get GPU memory info for device {device_index} via OpenCL or pynvml: {e}"
+                else:
+                    msg = f"Could not get NVIDIA GPU memory info for device {device_index}: {e}"
+                _logger.error(msg)
+                raise RuntimeError(msg) from e
+
+        # AMD: Use OpenCL extension.
+        elif "AMD" in vendor or "Advanced Micro Devices" in vendor:
+            try:
+                total = ocl_device.global_mem_size
+                free_memory_info = ocl_device.get_info(0x4038)
+                free_kb = (
+                    free_memory_info[0]
+                    if isinstance(free_memory_info, list)
+                    else free_memory_info
+                )
+                free = free_kb * 1024
+                used = total - free
+                return (used, free, total)
+            except Exception as e:
+                msg = (
+                    f"Could not get AMD GPU memory info for device {device_index}: {e}"
+                )
+                _logger.error(msg)
+                raise RuntimeError(msg) from e
 
 
 class RepexRunner(_RunnerBase):
@@ -601,9 +712,12 @@ class RepexRunner(_RunnerBase):
         # Call the base class constructor.
         super().__init__(system, config)
 
-        # Make sure we're using the CUDA platform.
-        if self._config.platform != "cuda":
-            msg = "Currently replica exchange simulations can only be run on the CUDA platform."
+        # Make sure we're using the CUDA or OpenCL platform.
+        if self._config.platform not in ["cuda", "opencl"]:
+            msg = (
+                "Currently replica exchange simulations can only be "
+                "run on the CUDA and OpenCL platforms."
+            )
             _logger.error(msg)
             raise ValueError(msg)
 
@@ -631,6 +745,11 @@ class RepexRunner(_RunnerBase):
 
         # Store the name of the replica exchange swap acceptance matrix.
         self._repex_matrix = self._config.output_directory / "repex_matrix.txt"
+
+        # Sentinel file written only after a fully successful run (dynamics +
+        # trajectory consolidation + backup cleanup). Used to distinguish
+        # "truly complete" from "complete dynamics but killed during cleanup".
+        self._done_file = self._config.output_directory / "simulation.done"
 
         # Flag that we haven't equilibrated.
         self._is_equilibration = False
@@ -672,8 +791,18 @@ class RepexRunner(_RunnerBase):
             }
         )
 
+        # On a fresh (non-restart) run, remove any leftover sentinel so that
+        # a repeated run with --overwrite doesn't immediately exit as complete.
+        if not self._is_restart and self._done_file.exists():
+            self._done_file.unlink()
+
         # Create the dynamics cache.
         if not self._is_restart:
+            xml_filenames = (
+                [self._filenames[i]["xml"] for i in range(len(self._lambda_values))]
+                if self._config.save_xml
+                else None
+            )
             self._dynamics_cache = DynamicsCache(
                 self._system,
                 self._lambda_values,
@@ -681,23 +810,17 @@ class RepexRunner(_RunnerBase):
                 self._num_gpus,
                 dynamics_kwargs,
                 gcmc_kwargs=self._gcmc_kwargs,
-                perturbed_positions=self._perturbed_positions,
-                perturbed_box=self._perturbed_box,
+                perturbed_system=self._perturbed_system,
                 output_directory=self._config.output_directory,
+                xml_filenames=xml_filenames,
             )
+
         else:
             _logger.debug("Restarting from file")
 
-            # Check to see if the simulation is already complete.
-            time = self._system[0].time()
-            if time > self._config.runtime - self._config.timestep:
-                _logger.success("Simulation already complete. Exiting.")
-                _sys.exit(0)
-            else:
-                _logger.info(
-                    f"Restarting at time {time}, time remaining = {self._config.runtime - time}"
-                )
-
+            # Load the dynamics cache first so we can read the simulation time
+            # from it (new format). Old-format restarts with .s3 files fall
+            # back to reading the time from the loaded Sire system.
             try:
                 with open(self._repex_state, "rb") as f:
                     self._dynamics_cache = _pickle.load(f)
@@ -707,12 +830,58 @@ class RepexRunner(_RunnerBase):
                 )
                 raise e
 
+            # Derive the simulation time: prefer the value stored in the
+            # pickle (_time is set by the new-format _write_checkpoint_system);
+            # fall back to the Sire system for old-format checkpoints.
+            if self._dynamics_cache._time is not None and not isinstance(
+                self._system, list
+            ):
+                time = self._dynamics_cache._time
+            else:
+                time = self._system[0].time()
+
+            # Check to see if the simulation is already complete.
+            if self._done_file.exists():
+                # The runtime may have been extended beyond the previous run.
+                # If so, clear the sentinel and continue.
+                if time < self._config.runtime - self._config.timestep:
+                    _logger.info(
+                        "Runtime has been extended. Clearing completion sentinel."
+                    )
+                    self._done_file.unlink()
+                else:
+                    _logger.success("Simulation already complete. Exiting.")
+                    _sys.exit(0)
+
+            if time > self._config.runtime - self._config.timestep:
+                # Dynamics finished but the process was killed before cleanup
+                # completed (e.g. during DCD consolidation or backup removal).
+                # Consolidate any remaining trajectory chunks and tidy up.
+                _logger.warning(
+                    "Simulation dynamics are complete but post-run cleanup was "
+                    "not finished. Completing cleanup now."
+                )
+                self._consolidate_trajectories()
+                self._cleanup()
+                self._done_file.touch()
+                _logger.success("Cleanup complete. Exiting.")
+                _sys.exit(0)
+            else:
+                _logger.info(
+                    f"Restarting at time {time}, time remaining = {self._config.runtime - time}"
+                )
+
             # Make sure the number of replicas is the same.
             if len(self._dynamics_cache._lambdas) != self._config.num_lambda:
                 _logger.error(
                     f"The number of replicas in the dynamics cache ({len(self._dynamics_cache._lambdas)}) "
                     f"does not match the number of replicas in the configuration ({self._config.num_lambda})."
                 )
+
+            # For new-format restarts, set the system time so that dynamics
+            # objects are initialised with the correct integrator step count.
+            if not isinstance(self._system, list):
+                self._system.set_time(time)
 
             # Create the dynamics objects.
             self._dynamics_cache._create_dynamics(
@@ -729,18 +898,43 @@ class RepexRunner(_RunnerBase):
             for i in range(len(self._lambda_values)):
                 dynamics, gcmc_sampler = self._dynamics_cache.get(i)
 
-                # Reset the OpenMM state.
-                dynamics.context().setState(self._dynamics_cache._openmm_states[i])
+                # Reset the OpenMM state, applying the last replica exchange
+                # mixing so the correct post-mix state is restored.
+                state = self._dynamics_cache._states[i]
+                DynamicsCache._apply_openmm_state(
+                    dynamics.context(), self._dynamics_cache._openmm_states[state]
+                )
 
-                # Reset the GCMC water state.
+                # Reset the GCMC water state and restore statistics.
                 if gcmc_sampler is not None:
                     gcmc_sampler.push()
-                    gcmc_sampler._set_water_state(
-                        dynamics.context(),
-                        states=self._dynamics_cache._gcmc_states[i],
-                        force=True,
-                    )
-                    gcmc_sampler.pop()
+                    try:
+                        gcmc_sampler._set_water_state(
+                            dynamics.context(),
+                            states=self._dynamics_cache._gcmc_states[state],
+                            force=True,
+                        )
+                    finally:
+                        gcmc_sampler.pop()
+                    if self._dynamics_cache._gcmc_stats[i] is not None:
+                        gcmc_sampler.restore_stats(self._dynamics_cache._gcmc_stats[i])
+
+        # Log the GCMC sphere centre for each replica using the actual context
+        # positions (accurate for both fresh runs and restarts).
+        import openmm.unit as _omm_unit
+
+        for i, lam in enumerate(self._lambda_values):
+            dynamics, gcmc_sampler = self._dynamics_cache.get(i)
+            if gcmc_sampler is not None and gcmc_sampler._reference is not None:
+                state = dynamics.context().getState(getPositions=True)
+                positions = state.getPositions(asNumpy=True).value_in_unit(
+                    _omm_unit.angstrom
+                )
+                target = gcmc_sampler._get_target_position(positions)
+                _logger.info(
+                    f"Initial GCMC sphere centre for lambda {lam:.5f}: "
+                    f"[{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}] A"
+                )
 
         # Conversion factor for reduced potential.
         kT = (_sr.units.k_boltz * self._config.temperature).to(_sr.units.kcal_per_mol)
@@ -748,7 +942,14 @@ class RepexRunner(_RunnerBase):
 
         # If restarting, subtract the time already run from the total runtime
         if self._config.restart:
-            time = self._system[0].time()
+            time = (
+                self._dynamics_cache._time
+                if (
+                    self._dynamics_cache._time is not None
+                    and not isinstance(self._system, list)
+                )
+                else self._system[0].time()
+            )
             self._config.runtime = str(self._config.runtime - time)
 
             # Work out the current block number.
@@ -760,6 +961,30 @@ class RepexRunner(_RunnerBase):
                 self._start_block = 0
         else:
             self._start_block = 0
+
+        # Create a terminal flip sampler per replica (if terminal groups were detected).
+        if self._terminal_groups:
+            from ._samplers import TerminalFlipSampler
+
+            self._terminal_flip_samplers = [
+                TerminalFlipSampler(
+                    self._terminal_groups,
+                    float(self._config.temperature.value()),
+                )
+                for _ in self._lambda_values
+            ]
+            _logger.info(
+                f"Terminal flip samplers ready ({len(self._terminal_groups)} group(s))"
+            )
+        else:
+            self._terminal_flip_samplers = None
+
+        # Restore terminal flip sampler statistics from checkpoint (deferred
+        # until here so that _terminal_flip_samplers is always initialised first).
+        if self._is_restart and self._terminal_flip_samplers is not None:
+            for i in range(len(self._lambda_values)):
+                attempted, accepted = self._dynamics_cache._terminal_flip_stats[i]
+                self._terminal_flip_samplers[i].reset(attempted, accepted)
 
         from threading import Lock
 
@@ -821,12 +1046,12 @@ class RepexRunner(_RunnerBase):
                 frac = 1.0
                 checkpoint_frequency = self._config.energy_frequency
 
-            # Store the number of repex cycles per block.
-            cycles_per_checkpoint = int(frac)
+            # Store the number of repex cycles per block (may be fractional).
+            cycles_per_checkpoint = frac
 
         # Otherwise, we don't checkpoint.
         else:
-            cycles_per_checkpoint = cycles
+            cycles_per_checkpoint = float(cycles)
             num_blocks = 1
             rem = 0
 
@@ -886,6 +1111,39 @@ class RepexRunner(_RunnerBase):
                         _logger.error("Equilibration cancelled. Exiting.")
                         _sys.exit(1)
 
+        # Write a checkpoint immediately after equilibration so that a restart
+        # after an early production crash doesn't need to re-equilibrate.
+        if self._is_equilibration and not self._is_restart:
+            lock = _FileLock(self._lock_file)
+            with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                for j in range(num_checkpoint_batches):
+                    replicas = replica_list[
+                        j * num_checkpoint_workers : (j + 1) * num_checkpoint_workers
+                    ]
+                    with ThreadPoolExecutor(
+                        max_workers=num_checkpoint_workers
+                    ) as executor:
+                        try:
+                            for index, error in executor.map(
+                                self._checkpoint,
+                                replicas,
+                                repeat(self._lambda_values),
+                                repeat(-1),
+                                repeat(cycles),
+                            ):
+                                if error is not None:
+                                    msg = (
+                                        f"Post-equilibration checkpoint failed for {_lam_sym} = "
+                                        f"{self._lambda_values[index]:.5f}:\n{error}"
+                                    )
+                                    _logger.error(msg)
+                                    raise error
+                        except KeyboardInterrupt:
+                            _logger.error(
+                                "Post-equilibration checkpoint cancelled. Exiting."
+                            )
+                            _sys.exit(1)
+
         # Current block number.
         block = self._start_block
 
@@ -908,9 +1166,30 @@ class RepexRunner(_RunnerBase):
         else:
             cycles_per_gcmc = cycles + 1
 
+        # Work out the number of cycles per terminal flip move.
+        if (
+            self._config.terminal_flip_frequency is not None
+            and self._terminal_flip_samplers is not None
+        ):
+            cycles_per_flip = max(
+                1,
+                round(
+                    (
+                        self._config.terminal_flip_frequency
+                        / self._config.energy_frequency
+                    ).value()
+                ),
+            )
+        else:
+            cycles_per_flip = cycles + 1
+
+        # Initialise the threshold for the next checkpoint cycle. This is a float
+        # to handle non-integer ratios between the checkpoint and energy frequencies.
+        next_checkpoint = cycles_per_checkpoint
+
         # Perform the replica exchange simulation.
         for i in range(cycles):
-            _logger.info(f"Running dynamics for cycle {i+1} of {cycles}")
+            _logger.info(f"Running dynamics for cycle {i + 1} of {cycles}")
 
             # Log the states. This is the replica index for the state (positions
             # and velocities) used to seed each replica for the current cycle.
@@ -924,14 +1203,28 @@ class RepexRunner(_RunnerBase):
             # Clear the results list.
             results = []
 
-            # Whether to checkpoint.
-            is_checkpoint = i > 0 and i % cycles_per_checkpoint == 0
+            # Whether to checkpoint. Use a float threshold to correctly handle
+            # non-integer ratios between the checkpoint and energy frequencies.
+            is_checkpoint = (i + 1) >= next_checkpoint - 1e-10
 
             # Whether to perform a GCMC move before the dynamics block.
-            is_gcmc = i % cycles_per_gcmc == 0
+            is_gcmc = (i + 1) % cycles_per_gcmc == 0
+
+            # Whether to perform a terminal flip move before the dynamics block.
+            is_terminal_flip = (i + 1) % cycles_per_flip == 0
 
             # Whether a frame is saved at the end of the cycle.
-            write_gcmc_ghosts = i > 0 and i % cycles_per_frame == 0
+            write_gcmc_ghosts = (i + 1) % cycles_per_frame == 0
+
+            # Current simulation time in ns for energy components saving.
+            time_ns = (
+                (
+                    self._start_block * checkpoint_frequency
+                    + (i + 1) * self._config.energy_frequency
+                ).to("ns")
+                if self._config.save_energy_components
+                else None
+            )
 
             # Run a dynamics block for each replica, making sure only each GPU is only
             # oversubscribed by a factor of self._config.oversubscription_factor.
@@ -945,6 +1238,8 @@ class RepexRunner(_RunnerBase):
                             repeat(self._lambda_values),
                             repeat(is_gcmc),
                             repeat(write_gcmc_ghosts),
+                            repeat(is_terminal_flip),
+                            repeat(time_ns),
                         ):
                             if not result:
                                 _logger.error(
@@ -968,8 +1263,7 @@ class RepexRunner(_RunnerBase):
                     for j in range(num_checkpoint_batches):
                         # Get the indices of the replicas in this batch.
                         replicas = replica_list[
-                            j
-                            * num_checkpoint_workers : (j + 1)
+                            j * num_checkpoint_workers : (j + 1)
                             * num_checkpoint_workers
                         ]
                         with ThreadPoolExecutor(max_workers=num_workers) as executor:
@@ -992,8 +1286,7 @@ class RepexRunner(_RunnerBase):
                     for j in range(num_checkpoint_batches):
                         # Get the indices of the replicas in this batch.
                         replicas = replica_list[
-                            j
-                            * num_checkpoint_workers : (j + 1)
+                            j * num_checkpoint_workers : (j + 1)
                             * num_checkpoint_workers
                         ]
                         with ThreadPoolExecutor(max_workers=num_workers) as executor:
@@ -1016,46 +1309,59 @@ class RepexRunner(_RunnerBase):
                                 _logger.error("Checkpoint cancelled. Exiting.")
                                 _sys.exit(1)
 
-            if i < cycles:
-                # Assemble and energy matrix from the results.
-                _logger.info("Assembling energy matrix")
-                energy_matrix = self._assemble_results(results)
+            # Assemble an energy matrix from the results.
+            _logger.info("Assembling energy matrix")
+            energy_matrix = self._assemble_results(results)
 
-                # Mix the replicas.
-                _logger.info("Mixing replicas")
-                self._dynamics_cache.set_states(
-                    self._mix_replicas(
-                        self._config.num_lambda,
-                        energy_matrix,
-                        self._dynamics_cache.get_proposed(),
-                        self._dynamics_cache.get_accepted(),
-                    )
+            # Mix the replicas.
+            _logger.info("Mixing replicas")
+            old_states = self._dynamics_cache.get_states()
+            self._dynamics_cache.set_states(
+                self._mix_replicas(
+                    self._config.num_lambda,
+                    energy_matrix,
+                    self._dynamics_cache.get_proposed(),
+                    self._dynamics_cache.get_accepted(),
                 )
-                self._dynamics_cache.mix_states()
+            )
+            self._dynamics_cache.mix_states(old_states)
 
-                # This is a checkpoint cycle.
-                if is_checkpoint:
-                    # Update the block number.
-                    block += 1
+            # Snapshot the pre-run state for crash recovery.
+            if self._config.auto_fix_minimise:
+                for i, state in enumerate(self._dynamics_cache.get_states()):
+                    self._dynamics_cache._dynamics[i]._d._pre_run_state = (
+                        self._dynamics_cache._dynamics[i]
+                        .context()
+                        .getState(getPositions=True, getVelocities=True)
+                    )
 
-                    # Guard the repex state and transition matrix saving with a file lock.
-                    lock = _FileLock(self._lock_file)
-                    with lock.acquire(timeout=self._config.timeout.to("seconds")):
-                        # Save the transition matrix.
-                        _logger.info("Saving replica exchange transition matrix")
-                        self._save_transition_matrix()
+            # This is a checkpoint cycle.
+            if is_checkpoint:
+                # Update the block number.
+                block += 1
 
-                        # Backup the dynamics cache pickle file, if it exists.
-                        if self._repex_state.exists():
-                            _copyfile(
-                                self._repex_state,
-                                self._repex_state.with_suffix(".pkl.bak"),
-                            )
+                # Advance the checkpoint threshold.
+                next_checkpoint += cycles_per_checkpoint
 
-                        # Pickle the dynamics cache.
-                        _logger.info("Saving replica exchange state")
-                        with open(self._repex_state, "wb") as f:
-                            _pickle.dump(self._dynamics_cache, f)
+                # Guard the repex state and transition matrix saving with a file lock.
+                lock = _FileLock(self._lock_file)
+                with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                    # Save the transition matrix.
+                    _logger.info("Saving replica exchange transition matrix")
+                    self._save_transition_matrix()
+
+                    # Backup the dynamics cache pickle file, if it exists.
+                    if self._repex_state.exists():
+                        _copyfile(
+                            self._repex_state,
+                            self._repex_state.with_suffix(".pkl.bak"),
+                        )
+
+                    # Pickle the dynamics cache.
+                    _logger.info("Saving replica exchange state")
+                    self._save_sampler_stats()
+                    with open(self._repex_state, "wb") as f:
+                        _pickle.dump(self._dynamics_cache, f)
 
         # Record the end time for the production block.
         prod_end = time()
@@ -1075,6 +1381,11 @@ class RepexRunner(_RunnerBase):
 
             # Pickle final state of the dynamics cache.
             _logger.info("Saving final replica exchange state")
+            if self._terminal_flip_samplers is not None:
+                self._dynamics_cache._terminal_flip_stats = [
+                    [s.num_attempted, s.num_accepted]
+                    for s in self._terminal_flip_samplers
+                ]
             with open(self._repex_state, "wb") as f:
                 _pickle.dump(self._dynamics_cache, f)
 
@@ -1098,12 +1409,18 @@ class RepexRunner(_RunnerBase):
         # Delete all backup files from the working directory.
         self._cleanup()
 
+        # Write the sentinel file to signal that the run completed fully,
+        # including trajectory consolidation and cleanup.
+        self._done_file.touch()
+
     def _run_block(
         self,
         index,
         lambdas,
         is_gcmc=False,
         write_gcmc_ghosts=False,
+        is_terminal_flip=False,
+        time_ns=None,
     ):
         """
         Run a dynamics block for a given replica.
@@ -1127,6 +1444,14 @@ class RepexRunner(_RunnerBase):
             Whether to write the indices of GCMC ghost residues to
             file.
 
+        is_terminal_flip: bool
+            Whether a terminal flip MC move should be performed before the
+            dynamics block.
+
+        time_ns: float or None
+            The current simulation time in nanoseconds, used when saving energy
+            components. If None, energy components are not saved.
+
         Returns
         -------
 
@@ -1148,24 +1473,50 @@ class RepexRunner(_RunnerBase):
             # Get the dynamics object (and GCMC sampler).
             dynamics, gcmc_sampler = self._dynamics_cache.get(index)
 
+            # Track whether any MC move changed the context positions so we
+            # can update _pre_run_state once at the end. Only needed when
+            # crash recovery is enabled.
+            needs_pre_run_snapshot = False
+            auto_fix_minimise = self._config.auto_fix_minimise
+
+            # Perform the GCMC move before dynamics so that the energies
+            # computed during dynamics are consistent with the state used
+            # for replica exchange mixing.
+            if gcmc_sampler is not None and is_gcmc:
+                gcmc_sampler.push()
+                try:
+                    _logger.info(f"Performing GCMC move at {_lam_sym} = {lam:.5f}")
+                    gcmc_sampler.move(dynamics.context())
+                finally:
+                    gcmc_sampler.pop()
+
+                if auto_fix_minimise:
+                    needs_pre_run_snapshot = True
+
+                # Write ghost residues immediately after the GCMC move so the
+                # ghost state and frame (saved during dynamics) are consistent.
+                if write_gcmc_ghosts:
+                    gcmc_sampler.write_ghost_residues()
+
+            # Perform a terminal flip move before dynamics if requested.
+            if self._terminal_flip_samplers is not None and is_terminal_flip:
+                _logger.info(f"Performing terminal flip move at {_lam_sym} = {lam:.5f}")
+                if self._terminal_flip_samplers[index].move(dynamics.context()):
+                    if auto_fix_minimise:
+                        needs_pre_run_snapshot = True
+
+            # Snapshot the context state for crash recovery if any MC move
+            # changed positions.
+            if needs_pre_run_snapshot:
+                dynamics._d._pre_run_state = dynamics.context().getState(
+                    getPositions=True, getVelocities=True
+                )
+
             _logger.info(f"Running dynamics at {_lam_sym} = {lam:.5f}")
 
             # Draw new velocities from the Maxwell-Boltzmann distribution.
-            dynamics.randomise_velocities()
-
-            # Perform a GCMC move. For repex this needs to be done before the
-            # dynamics block so that the final energies, which are used in the
-            # repex acceptance criteria, are correct.
-            if is_gcmc and gcmc_sampler is not None:
-                # Push the PyCUDA context on top of the stack.
-                gcmc_sampler.push()
-
-                # Perform the GCMC move.
-                _logger.info(f"Performing GCMC move at {_lam_sym} = {lam:.5f}")
-                gcmc_sampler.move(dynamics.context())
-
-                # Remove the PyCUDA context from the stack.
-                gcmc_sampler.pop()
+            if self._config.randomise_velocities:
+                dynamics.randomise_velocities()
 
             # Run the dynamics.
             dynamics.run(
@@ -1175,7 +1526,7 @@ class RepexRunner(_RunnerBase):
                 lambda_windows=lambdas,
                 rest2_scale_factors=self._rest2_scale_factors,
                 save_velocities=self._config.save_velocities,
-                auto_fix_minimise=True,
+                auto_fix_minimise=self._config.auto_fix_minimise,
                 num_energy_neighbours=self._config.num_energy_neighbours,
                 null_energy=self._config.null_energy,
                 save_crash_report=self._config.save_crash_report,
@@ -1190,31 +1541,21 @@ class RepexRunner(_RunnerBase):
                 ),
             )
 
-            # Set the state.
+            if gcmc_sampler is not None:
+                # Save the GCMC state.
+                self._dynamics_cache.save_gcmc_state(index)
+
+            # Save the OpenMM state.
             self._dynamics_cache.save_openmm_state(index)
 
-            # Save the GCMC state.
-            if gcmc_sampler is not None:
-                self._dynamics_cache.save_gcmc_state(index)
-                # The frame frequency was hit, so write the indices of the
-                # current ghost water residues to file.
-                if write_gcmc_ghosts:
-                    gcmc_sampler.write_ghost_residues()
+            # Save the energy contribution for each force.
+            if self._config.save_energy_components and time_ns is not None:
+                self._save_energy_components(index, dynamics.context(), time_ns)
 
             # Get the energy at each lambda value.
-            energies = (
-                dynamics._d.energy_trajectory()
-                .to_pandas(to_alchemlyb=True, energy_unit="kcal/mol")
-                .iloc[-1, :]
-                .to_numpy()
-            )
+            energies = dynamics._current_energy_array()
 
         except Exception as e:
-            try:
-                # Save the energy components for debugging purposes.
-                self._save_energy_components(index, dynamics.context())
-            except:
-                pass
             return False, index, e
 
         # Return the index and the energies.
@@ -1252,18 +1593,16 @@ class RepexRunner(_RunnerBase):
             # Get the dynamics object (and GCMC sampler).
             dynamics, gcmc_sampler = self._dynamics_cache.get(index)
 
-            if gcmc_sampler is not None:
-                # Push the PyCUDA context on top of the stack.
+            if gcmc_sampler is not None and not self._is_restart:
                 gcmc_sampler.push()
-
-                _logger.info(
-                    f"Pre-equilibrating with GCMC moves at {_lam_sym} = {self._lambda_values[index]:.5f}"
-                )
-                for i in range(100):
-                    gcmc_sampler.move(dynamics.context())
-
-                # Remove the PyCUDA context from the stack.
-                gcmc_sampler.pop()
+                try:
+                    _logger.info(
+                        f"Pre-equilibrating with GCMC moves at {_lam_sym} = {self._lambda_values[index]:.5f}"
+                    )
+                    for i in range(100):
+                        gcmc_sampler.move(dynamics.context())
+                finally:
+                    gcmc_sampler.pop()
 
             # Minimise.
             dynamics.minimise(timeout=self._config.timeout)
@@ -1346,17 +1685,15 @@ class RepexRunner(_RunnerBase):
             dynamics, gcmc_sampler = self._dynamics_cache.get(index)
 
             if gcmc_sampler is not None:
-                # Push the PyCUDA context on top of the stack.
                 gcmc_sampler.push()
-
-                _logger.info(
-                    f"Equilibrating with GCMC moves at {_lam_sym} = {self._lambda_values[index]:.5f}"
-                )
-                for i in range(100):
-                    gcmc_sampler.move(dynamics.context())
-
-                # Remove the PyCUDA context from the stack.
-                gcmc_sampler.pop()
+                try:
+                    _logger.info(
+                        f"Equilibrating with GCMC moves at {_lam_sym} = {self._lambda_values[index]:.5f}"
+                    )
+                    for i in range(100):
+                        gcmc_sampler.move(dynamics.context())
+                finally:
+                    gcmc_sampler.pop()
 
                 # Store the current water state.
                 water_state = gcmc_sampler.water_state()
@@ -1396,6 +1733,7 @@ class RepexRunner(_RunnerBase):
                     dynamics_kwargs["device"] = device
                     dynamics_kwargs["lambda_value"] = self._lambda_values[index]
                     dynamics_kwargs["rest2_scale"] = self._rest2_scale_factors[index]
+                    dynamics_kwargs["timestep"] = self._config._equilibration_timestep
                     dynamics_kwargs["constraint"] = constraint
                     dynamics_kwargs["perturbable_constraint"] = perturbable_constraint
 
@@ -1415,7 +1753,7 @@ class RepexRunner(_RunnerBase):
                 energy_frequency=0,
                 frame_frequency=0,
                 save_velocities=False,
-                auto_fix_minimise=True,
+                auto_fix_minimise=self._config.auto_fix_minimise,
                 save_crash_report=self._config.save_crash_report,
             )
 
@@ -1451,6 +1789,14 @@ class RepexRunner(_RunnerBase):
             if gcmc_sampler is not None:
                 self._reset_gcmc_sampler(gcmc_sampler, dynamics)
 
+                # Compute the current number of waters in the GCMC sampling
+                # volume after equilibration.
+                gcmc_sampler.push()
+                try:
+                    gcmc_sampler.num_waters(context=dynamics.context())
+                finally:
+                    gcmc_sampler.pop()
+
             # Set the new dynamics object.
             self._dynamics_cache.set(index, dynamics)
 
@@ -1459,11 +1805,6 @@ class RepexRunner(_RunnerBase):
             )
 
         except Exception as e:
-            try:
-                # Save the energy components for debugging purposes.
-                self._save_energy_components(index, dynamics.context())
-            except:
-                pass
             return False, index, e
 
         return True, index, None
@@ -1506,14 +1847,18 @@ class RepexRunner(_RunnerBase):
         # Loop over the states.
         for i in range(self._config.num_lambda):
             # Set the state.
-            dynamics.context().setState(self._dynamics_cache._openmm_states[i])
+            DynamicsCache._apply_openmm_state(
+                dynamics.context(), self._dynamics_cache._openmm_states[i]
+            )
             dynamics._d._clear_state()
 
             # Compute and store the energy for this state.
             energies[i] = dynamics.current_potential_energy().value()
 
         # Reset the state.
-        dynamics.context().setState(self._dynamics_cache._openmm_states[index])
+        DynamicsCache._apply_openmm_state(
+            dynamics.context(), self._dynamics_cache._openmm_states[index]
+        )
 
         return index, energies
 
@@ -1537,6 +1882,40 @@ class RepexRunner(_RunnerBase):
                 matrix[i, j] = self._beta * energy
 
         return matrix
+
+    def _check_restart(self):
+        """
+        Check the output directory for a valid restart state.
+
+        If per-replica checkpoint stream files (.s3) exist the base class is
+        used to load them (old format, backwards compatible). Otherwise the
+        repex state pickle is used and the original input system is returned
+        directly, since positions and velocities come from the OpenMM states
+        stored in the pickle.
+        """
+        from pathlib import Path as _Path_local
+
+        checkpoint_path = _Path_local(self._filenames[0]["checkpoint"])
+        if checkpoint_path.exists():
+            _logger.info("Restarting from legacy stream file checkpoint.")
+            return super()._check_restart()
+
+        repex_state = self._config.output_directory / "repex_state.pkl"
+        if not repex_state.exists():
+            return False, self._system
+
+        return True, self._system
+
+    def _write_checkpoint_system(self, system, index, context=None, gcmc_sampler=None):
+        """
+        Record the current simulation time in the dynamics cache.
+
+        For repex, per-replica stream files are not written. The simulation
+        time is stored in the dynamics cache pickle instead, and positions and
+        velocities are already stored as compact numpy arrays in the OpenMM
+        state dict.
+        """
+        self._dynamics_cache._time = system.time()
 
     def _checkpoint(self, index, lambdas, block, num_blocks, is_final_block=False):
         """
@@ -1579,10 +1958,6 @@ class RepexRunner(_RunnerBase):
             # Commit the current system.
             system = dynamics.commit()
 
-            # If performing GCMC, then we need to flag the ghost waters.
-            if gcmc_sampler is not None:
-                system = gcmc_sampler._flag_ghost_waters(system)
-
             # Get the simulation speed.
             speed = dynamics.time_speed()
 
@@ -1599,23 +1974,42 @@ class RepexRunner(_RunnerBase):
             # dynamics object.
             dynamics._d._sire_mols.delete_all_frames()
 
-            _logger.info(
-                f"Finished block {block+1} of {self._start_block + num_blocks} "
-                f"for {_lam_sym} = {lam:.5f}"
-            )
+            if block == -1:
+                _logger.info(
+                    f"Writing post-equilibration checkpoint for {_lam_sym} = {lam:.5f}"
+                )
+            else:
+                _logger.info(
+                    f"Finished block {block + 1} of {self._start_block + num_blocks} "
+                    f"for {_lam_sym} = {lam:.5f}"
+                )
 
             # Log the number of waters within the GCMC sampling volume.
             if gcmc_sampler is not None:
-                # Push the PyCUDA context on top of the stack.
                 gcmc_sampler.push()
+                try:
+                    n_moves = gcmc_sampler._num_moves
+                    acc_str = (
+                        f", acceptance rate = {gcmc_sampler.move_acceptance_probability():.3f}"
+                        f" (ins = {gcmc_sampler.num_insertions()}, del = {gcmc_sampler.num_deletions()})"
+                        if n_moves > 0
+                        else ""
+                    )
+                    _logger.info(
+                        f"Current number of waters in GCMC volume at {_lam_sym} = {lam:.5f} "
+                        f"is {gcmc_sampler.num_waters()}{acc_str}"
+                    )
+                finally:
+                    gcmc_sampler.pop()
 
+            # Log terminal flip acceptance rate for this replica.
+            if self._terminal_flip_samplers is not None:
+                sampler = self._terminal_flip_samplers[index]
                 _logger.info(
-                    f"Current number of waters in GCMC volume at {_lam_sym} = {lam:.5f} "
-                    f"is {gcmc_sampler.num_waters()}"
+                    f"Terminal flip acceptance rate at {_lam_sym} = {lam:.5f}: "
+                    f"{sampler.acceptance_rate:.3f} "
+                    f"({sampler.num_accepted}/{sampler.num_attempted})"
                 )
-
-                # Remove the PyCUDA context from the stack.
-                gcmc_sampler.pop()
 
             if is_final_block:
                 _logger.success(f"{_lam_sym} = {lam:.5f} complete")
@@ -1624,6 +2018,45 @@ class RepexRunner(_RunnerBase):
 
         except Exception as e:
             return index, e
+
+    def _consolidate_trajectories(self):
+        """
+        Consolidate any remaining trajectory chunk files into the final DCD.
+
+        Called when a restart detects that dynamics completed but the process
+        was killed before post-run cleanup finished. Safe to call when some
+        replicas are already fully consolidated (no chunks left) — those are
+        skipped automatically.
+        """
+        from glob import glob as _glob_local
+        from pathlib import Path as _Path_local
+        from shutil import copyfile as _copyfile_local
+
+        if not self._config.save_trajectories:
+            return
+
+        for i in range(len(self._lambda_values)):
+            traj_filename = self._filenames[i]["trajectory"]
+            chunk_pattern = f"{self._filenames[i]['trajectory_chunk']}*"
+            traj_chunks = sorted(_glob_local(chunk_pattern))
+
+            # On a restart, prepend an existing final DCD as .prev so frames
+            # from a previous (possibly partial) consolidation are preserved.
+            path = _Path_local(traj_filename)
+            if path.exists() and path.stat().st_size > 0:
+                prev = f"{traj_filename}.prev"
+                _copyfile_local(traj_filename, prev)
+                traj_chunks = [prev] + traj_chunks
+
+            if not traj_chunks:
+                continue
+
+            topology0 = self._filenames["topology0"]
+            mols = _sr.load([topology0] + traj_chunks)
+            _sr.save(mols.trajectory(), traj_filename, format=["DCD"])
+
+            for chunk in traj_chunks:
+                _Path_local(chunk).unlink()
 
     @staticmethod
     @_njit
@@ -1686,6 +2119,21 @@ class RepexRunner(_RunnerBase):
 
         return states
 
+    def _save_sampler_stats(self):
+        """
+        Save GCMC and terminal flip sampler statistics to the dynamics cache
+        prior to pickling.
+        """
+        for i in range(len(self._lambda_values)):
+            _, gcmc_sampler = self._dynamics_cache.get(i)
+            if gcmc_sampler is not None:
+                self._dynamics_cache._gcmc_stats[i] = gcmc_sampler.get_stats()
+
+        if self._terminal_flip_samplers is not None:
+            self._dynamics_cache._terminal_flip_stats = [
+                [s.num_attempted, s.num_accepted] for s in self._terminal_flip_samplers
+            ]
+
     def _save_transition_matrix(self):
         """
         Internal method to save the replica exchange transition matrix.
@@ -1736,14 +2184,12 @@ class RepexRunner(_RunnerBase):
         # clears the associated OpenMM forces.
         gcmc_sampler.reset()
 
-        # Push the PyCUDA context on top of the stack.
         gcmc_sampler.push()
-
-        # Set the water state.
-        gcmc_sampler._set_water_state(dynamics.context(), force=True)
-
-        # Remove the PyCUDA context from the stack.
-        gcmc_sampler.pop()
+        try:
+            # Set the water state.
+            gcmc_sampler._set_water_state(dynamics.context(), force=True)
+        finally:
+            gcmc_sampler.pop()
 
         # Re-bind the GCMC sampler to the dynamics object.
         gcmc_sampler.bind_dynamics(dynamics)

@@ -1,3 +1,9 @@
+<p align="center">
+    <picture align="center">
+        <img alt="SOMD" src="./.img/somd2.png" width="50%"/>
+    </picture>
+</p>
+
 # SOMD2
 
 [![GitHub Actions](https://github.com/openbiosim/somd2/actions/workflows/devel.yaml/badge.svg)](https://github.com/openbiosim/somd2/actions/workflows/devel.yaml)
@@ -9,25 +15,9 @@ simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and [Ope
 
 ## Installation
 
-First create a conda environment using the provided environment file:
+### Conda package
 
-```
-conda env create -f environment.yaml
-```
-
-(We recommend using [Miniforge](https://github.com/conda-forge/miniforge).)
-
-> [!NOTE]
-> On macOS, you will need to use the `environment_macos.yaml` file instead.
-
-Now install `somd2` into the environment:
-
-```
-conda activate somd2
-pip install --editable .
-```
-
-Alternatively, to install into an existing conda environment:
+Install `somd2` directly from the `openbiosim` channel:
 
 ```
 conda install -c conda-forge -c openbiosim somd2
@@ -39,10 +29,86 @@ Or, for the development version:
 conda install -c conda-forge -c openbiosim/label/dev somd2
 ```
 
+### Installing from source (standalone)
+
+To install from source using [pixi](https://pixi.sh), which will
+automatically create an environment with all required dependencies
+(including pre-built [Sire](https://github.com/OpenBioSim/sire),
+[BioSimSpace](https://github.com/OpenBioSim/biosimspace),
+[Ghostly](https://github.com/OpenBioSim/ghostly), and
+[Loch](https://github.com/OpenBioSim/loch)):
+
+```
+git clone https://github.com/openbiosim/somd2
+cd somd2
+pixi install
+pixi shell
+pip install -e .
+```
+
+### Installing from source (full OpenBioSim development)
+
+If you are developing across the full OpenBioSim stack, first install
+[Sire](https://github.com/OpenBioSim/sire) from source by following the
+instructions [here](https://github.com/OpenBioSim/sire#installation), then
+activate its pixi environment:
+
+```
+pixi shell --manifest-path /path/to/sire/pixi.toml -e dev
+```
+
+You may also need to install other packages from source, e.g.
+[BioSimSpace](https://github.com/OpenBioSim/biosimspace),
+[Ghostly](https://github.com/OpenBioSim/ghostly), and
+[Loch](https://github.com/OpenBioSim/loch):
+
+```
+pip install -e /path/to/biosimspace
+pip install -e /path/to/ghostly
+pip install -e /path/to/loch
+```
+
+Then install `somd2` into the environment:
+
+```
+pip install -e .
+```
+
+> [!Note]
+> Pixi does not run conda post-link scripts, so the `ocl-icd-system`
+> symlink needed for OpenCL won't be created automatically. After
+> creating the environment (or after a pixi update), run the following
+> to fix this:
+>
+> ```bash
+> pixi shell
+> ln -sfn /etc/OpenCL/vendors "${CONDA_PREFIX}/etc/OpenCL/vendors/ocl-icd-system"
+> ```
+
+### Testing
+
 You should now have a `somd2` executable in your path. To test, run:
 
 ```
 somd2 --help
+```
+
+## Development
+
+Pre-commit hooks are used to ensure consistent code formatting and linting.
+To set up pre-commit in your development environment:
+
+```
+pixi shell -e dev
+pre-commit install
+```
+
+This will run [ruff](https://docs.astral.sh/ruff/) formatting and linting
+checks automatically on each commit. To run the checks manually against all
+files:
+
+```
+pre-commit run --all-files
 ```
 
 ## Usage
@@ -145,13 +211,95 @@ somd2 --help | grep -A2 '  --gcmc'
 ```
 
 > [!NOTE]
-> GCMC is currently only supported when using the CUDA platform and isn't
-> available on macOS, where the `pycuda` package is not available.
+> GCMC is only supported when using the CUDA or OpenCL platforms.
 
-Make sure that `nvcc` is in your `PATH`. If you require a different `nvcc` to that
-provided by conda, you can set the `PYCUDA_NVCC` environment variable to point
-to the desired `nvcc` binary. Depending on your setup, you may also need to install
-the `cuda-nvvm` package from `conda-forge`.
+When using the CUDA platform, make sure that `nvcc` is in your `PATH`. If you
+require a different `nvcc` to that provided by conda, you can set the
+`PYCUDA_NVCC` environment variable to point to the desired `nvcc` binary.
+Depending on your setup, you may also need to install the `cuda-nvvm` package
+from `conda-forge`.
+
+## Terminal ring flip Monte Carlo
+
+SOMD2 supports terminal ring flip Monte Carlo (MC) moves to improve sampling
+of terminal aromatic rings in perturbable ligands, as described in
+[this paper](https://chemrxiv.org/doi/full/10.26434/chemrxiv-2025-2zkx5).
+Each move attempts a discrete rotation of a terminal ring around the bond
+connecting it to the rest of the molecule, accepted or rejected via the
+Metropolis criterion. Terminal ring groups are detected automatically from
+the molecular connectivity of perturbable molecules.
+
+To enable terminal flip MC, set the frequency at which moves are attempted:
+
+```
+somd2 perturbable_system.bss --terminal-flip-frequency "1 ps"
+```
+
+The flip angle for each group is determined automatically from the ring
+geometry. To override this for all groups:
+
+```
+somd2 perturbable_system.bss --terminal-flip-frequency "1 ps" --terminal-flip-angle "180 degrees"
+```
+
+## Debugging with energy components
+
+To help diagnose simulation instabilities, `SOMD2` can record the potential
+energy contribution from each OpenMM force group. This is enabled with the
+`--save-energy-components` flag:
+
+```
+somd2 perturbable_system.bss --save-energy-components
+```
+
+One Parquet file per λ window is written to the output directory, named
+`energy_components_<lambda>.parquet`. Times are in nanoseconds and energies in
+kcal/mol; both are stored as schema metadata in the file.
+
+The recording interval depends on the runner and active samplers:
+
+- **Replica exchange**: always `energy-frequency`
+- **Standard runner, no MC**: `energy-frequency`
+- **Standard runner, with MC**: the shortest active MC frequency, i.e.
+  `gcmc-frequency`, `terminal-flip-frequency`, or the smaller of the two
+  when both are active
+
+> [!NOTE]
+> Energy components are written more frequently than checkpoint files and are
+> not guarded by the file lock, so they may lead the checkpoint files by up
+> to one `checkpoint-frequency` interval when copying output mid-simulation.
+
+## Copying output files during a simulation
+
+When `SOMD2` writes checkpoint files it acquires an exclusive
+[file lock](https://py-filelock.readthedocs.io) on `somd2.lock` inside the output
+directory. This guarantees that checkpoint files are always in a consistent
+state on disk.
+
+If you want to copy the output directory while a simulation is running (for
+example, to create a backup or to inspect intermediate results), acquire the
+same lock first so that you do not copy files mid-write. On Linux/macOS this
+can be done with the `flock` command:
+
+```bash
+flock /path/to/output/somd2.lock cp -r /path/to/output /destination
+```
+
+Or from Python using the [filelock](https://pypi.org/project/filelock/) package
+(which `somd2` already depends on):
+
+```python
+from filelock import FileLock
+
+with FileLock("/path/to/output/somd2.lock"):
+    # copy files here
+    ...
+```
+
+> [!NOTE]
+> The `--timeout` option (default: `300 s`) controls how long `SOMD2` will
+> wait to re-acquire the lock after your copy completes. If you hold the lock
+> for longer than this, the simulation will raise a `Timeout` error.
 
 ## Analysis
 
