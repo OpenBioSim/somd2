@@ -16,7 +16,7 @@ Changelog
 * Remove redundant `s3` checkpoint files [#157](https://github.com/OpenBioSim/somd2/pull/157)
 * Unconditionally apply AMBER water topology conversion to ensure fully rigid water constraints [#163](https://github.com/OpenBioSim/somd2/pull/163)
 
-[2025.1.0](https://github.com/OpenBioSim/loch/releases/tag/2025.1.0) - Nov 2025
+[2025.1.0](https://github.com/OpenBioSim/somd2/releases/tag/2025.1.0) - Nov 2025
 -------------------------------------------------------------------------------
 
 * Initial public release.
