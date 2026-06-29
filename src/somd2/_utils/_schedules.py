@@ -232,6 +232,16 @@ def ring_break_morph():
     s.set_equation(stage="potential_swap", lever="angle_size", equation=s.initial())
     s.set_equation(stage="potential_swap", lever="torsion_k", equation=s.initial())
     s.set_equation(stage="potential_swap", lever="torsion_phase", equation=s.initial())
+    # Softcore off throughout potential_swap: explicit constants so the schedule
+    # visualises correctly regardless of the initial/final values passed by the caller.
+    s.set_equation(
+        stage="potential_swap", force="ring-break", lever="alpha", equation=1
+    )
+    s.set_equation(
+        stage="potential_swap", force="ring-break", lever="kappa", equation=0
+    )
+    s.set_equation(stage="potential_swap", force="ring-make", lever="alpha", equation=1)
+    s.set_equation(stage="potential_swap", force="ring-make", lever="kappa", equation=0)
 
     # morph [2/3, 1]: standard nonbonded morphing with ring-break/ring-make fixed
     # at fully open (kappa=1, alpha=0). ring-make mirrors ring-break so .reverse()
