@@ -1,6 +1,11 @@
 Changelog
 =========
 
+[2026.2.0](https://github.com/openbiosim/somd2/compare/2026.1.0...2026.2.0) - ********
+--------------------------------------------------------------------------------------
+
+* Please add an item to this CHANGELOG for any new features or bug fixes when creating a PR.
+
 [2026.1.0](https://github.com/openbiosim/somd2/compare/2025.1.0...2026.1.0) - Jun 2026
 --------------------------------------------------------------------------------------
 
