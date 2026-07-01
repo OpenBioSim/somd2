@@ -381,7 +381,8 @@ class Config:
         perturbed_system: str
             The path to a stream file containing a Sire system for the equilibrated perturbed
             end state (lambda = 1). This will be used as the starting conformation all lambda
-            windows > 0.5 when performing a replica exchange simulation.
+            windows > 0.5 when performing a replica exchange simulation. (Note that this assumes
+            that the "coordinates1" property specifies the coordinates for perturbable molecules.)
 
         terminal_flip_frequency: str
             Frequency at which to attempt terminal ring flip Monte Carlo moves. If None
