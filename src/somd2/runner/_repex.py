@@ -740,6 +740,20 @@ class RepexRunner(_RunnerBase):
         else:
             self._num_gpus = min(self._config.max_gpus, len(gpu_devices))
 
+        # Auto-generate a Boresch restraint for ABFE runs with no user-supplied
+        # restraint. This must happen before the dynamics cache is built below,
+        # since the per-replica OpenMM contexts it creates are fixed at
+        # construction time and won't pick up a restraint added afterwards.
+        if self._is_abfe_bound and self._config.restraints is None:
+            try:
+                restraints = self._generate_boresch_restraint(device=0)
+            except Exception as e:
+                msg = f"Unable to generate Boresch restraint for ABFE simulation: {e}"
+                _logger.error(msg)
+                raise RuntimeError(msg)
+            self._config.restraints = restraints
+            self._dynamics_kwargs["restraints"] = restraints
+
         # Store the name of the dynamics cache pickle file.
         self._repex_state = self._config.output_directory / "repex_state.pkl"
 
