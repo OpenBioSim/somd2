@@ -27,7 +27,44 @@ __all__ = [
 ]
 
 
-def annihilate(fix_epsilon=True):
+def _set_boresch_lever_equations(s, stage_dihedral, stage_distance_angle):
+    """
+    Set the equations for a "split" restraint_lever Boresch restraint (see
+    sire.restraints.boresch's restraint_lever parameter), reproducing the
+    RXRX protocol's staged restraint turn-on (Table S1 of the RXRX paper's
+    SI): within each of the two named stages, the corresponding restraint
+    group ramps from ~0 to 1 following a geometric progression, while the
+    other group is held fixed. 'stage_dihedral' is the stage over which
+    the dihedral restraint group ramps on (with the distance/angle group
+    held at 0); 'stage_distance_angle' is the stage over which the
+    distance/angle group ramps on (with the dihedral group held at 1,
+    already fully on).
+
+    Note: this aligns the restraint turn-on with SOMD2's own decharge/
+    annihilate(or decouple) stage boundaries, rather than reproducing the
+    RXRX paper's exact global 50/50 window split (which falls partway
+    through the annihilate/decouple stage, since the paper's own decharge
+    stage is only 21 of 64 total bound-leg windows) - the relative sizes of
+    SOMD2's stages are controlled by lambda_values weighting, not fixed.
+    """
+    from sire.legacy.CAS import Exp as _Exp
+    import math as _math
+
+    # Geometric progression from ~0.01 (fully off) to 1.0 (fully on), matching
+    # the ratio observed in the RXRX paper's published lambda schedule.
+    ramp_on = _Exp((1 - s.lam()) * _math.log(0.01))
+
+    s.set_equation(stage=stage_dihedral, lever="restraint_dihedral", equation=ramp_on)
+    s.set_equation(stage=stage_dihedral, lever="restraint_distance_angle", equation=0)
+    s.set_equation(stage=stage_distance_angle, lever="restraint_dihedral", equation=1)
+    s.set_equation(
+        stage=stage_distance_angle,
+        lever="restraint_distance_angle",
+        equation=ramp_on,
+    )
+
+
+def annihilate(fix_epsilon=True, restraint_lever="split"):
     """
     Build the ABFE lambda schedule using decharge → annihilate.
 
@@ -44,12 +81,28 @@ def annihilate(fix_epsilon=True):
         If False, epsilon is scaled normally from initial to final and the LRC
         follows naturally.
 
+    restraint_lever : str, optional
+        How the Boresch restraint is controlled by this schedule, matching
+        sire.restraints.boresch's restraint_lever parameter. Either "split"
+        (default), where the dihedral restraint terms are turned on during
+        decharge and the distance/angle terms are turned on during
+        annihilate, reproducing the RXRX protocol's staged restraint
+        turn-on, or "combined", where the whole restraint is turned on
+        together during the decharge stage. The Boresch restraint object
+        passed to the simulation must have a matching restraint_lever value.
+
     Returns
     -------
 
     schedule : sire.legacy.CAS.LambdaSchedule
         The lambda schedule.
     """
+    if restraint_lever not in ("combined", "split"):
+        raise ValueError(
+            "'restraint_lever' must be either 'combined' or 'split', "
+            f"got {restraint_lever!r}"
+        )
+
     from sire.cas import LambdaSchedule as _LambdaSchedule
 
     # Start with the standard decouple schedule and modify the stages and
@@ -65,14 +118,22 @@ def annihilate(fix_epsilon=True):
         lever="charge",
         equation=s.lam() * s.final() + s.initial() * (1 - s.lam()),
     )
-    s.set_equation(stage="decharge", force="restraint", equation=s.lam() * s.final())
 
     s.add_stage(
         "annihilate",
         equation=(-s.lam() + 1) * s.initial() + s.lam() * s.final(),
     )
     s.set_equation(stage="annihilate", lever="charge", equation=s.final())
-    s.set_equation(stage="annihilate", force="restraint", equation=s.final())
+
+    if restraint_lever == "split":
+        _set_boresch_lever_equations(
+            s, stage_dihedral="decharge", stage_distance_angle="annihilate"
+        )
+    else:
+        s.set_equation(
+            stage="decharge", lever="restraint", equation=s.lam() * s.final()
+        )
+        s.set_equation(stage="annihilate", lever="restraint", equation=s.final())
 
     if fix_epsilon:
         s.set_equation(stage="annihilate", lever="epsilon", equation=s.initial())
@@ -86,7 +147,7 @@ def annihilate(fix_epsilon=True):
     return s
 
 
-def decouple(fix_epsilon=True):
+def decouple(fix_epsilon=True, restraint_lever="split"):
     """
     Build the ABFE lambda schedule using decharge → decouple.
 
@@ -101,12 +162,28 @@ def decouple(fix_epsilon=True):
         ghost-LRC force is then explicitly scaled to zero over the stage.
         If False, epsilon is scaled normally and the LRC follows naturally.
 
+    restraint_lever : str, optional
+        How the Boresch restraint is controlled by this schedule, matching
+        sire.restraints.boresch's restraint_lever parameter. Either "split"
+        (default), where the dihedral restraint terms are turned on during
+        decharge and the distance/angle terms are turned on during decouple,
+        reproducing the RXRX protocol's staged restraint turn-on, or
+        "combined", where the whole restraint is turned on together during
+        the decharge stage. The Boresch restraint object passed to the
+        simulation must have a matching restraint_lever value.
+
     Returns
     -------
 
     schedule : sire.legacy.CAS.LambdaSchedule
         The lambda schedule.
     """
+    if restraint_lever not in ("combined", "split"):
+        raise ValueError(
+            "'restraint_lever' must be either 'combined' or 'split', "
+            f"got {restraint_lever!r}"
+        )
+
     from sire.cas import LambdaSchedule as _LambdaSchedule
 
     # Start with the standard decouple schedule and modify the stages and
@@ -114,7 +191,6 @@ def decouple(fix_epsilon=True):
     # we will use this approach for prototyping.
     s = _LambdaSchedule.standard_decouple()
 
-    s.set_equation(stage="decouple", lever="restraint", equation=s.final())
     s.set_equation(stage="decouple", lever="kappa", force="ghost/ghost", equation=0)
     s.set_equation(stage="decouple", lever="kappa", force="ghost-14", equation=0)
     s.set_equation(stage="decouple", lever="charge", equation=s.final())
@@ -142,7 +218,16 @@ def decouple(fix_epsilon=True):
     s.set_equation(
         stage="decharge", lever="kappa", force="ghost-14", equation=-s.lam() + 1
     )
-    s.set_equation(stage="decharge", lever="restraint", equation=s.initial() * s.lam())
+
+    if restraint_lever == "split":
+        _set_boresch_lever_equations(
+            s, stage_dihedral="decharge", stage_distance_angle="decouple"
+        )
+    else:
+        s.set_equation(stage="decouple", lever="restraint", equation=s.final())
+        s.set_equation(
+            stage="decharge", lever="restraint", equation=s.initial() * s.lam()
+        )
 
     return s
 
