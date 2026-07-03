@@ -6,6 +6,7 @@ Changelog
 
 * Please add an item to this CHANGELOG for any new features or bug fixes when creating a PR.
 * Add support for generating Boresch restraints for absolute binding free energy calculations [#166](https://github.com/OpenBioSim/somd2/pull/166).
+* Give alchemical ions their own plain morph lambda schedule so they interpolate correctly under non-standard lambda schedules [#169](https://github.com/OpenBioSim/somd2/pull/169).
 
 [2026.1.0](https://github.com/openbiosim/somd2/compare/2025.1.0...2026.1.0) - Jun 2026
 --------------------------------------------------------------------------------------

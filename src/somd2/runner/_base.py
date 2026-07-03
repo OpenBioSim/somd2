@@ -374,11 +374,14 @@ class RunnerBase:
                 )
 
         # Create alchemical ions.
+        ion_indices = []
         if charge_diff != 0:
-            self._system, coalchemical_restraints = self._create_alchemical_ions(
-                self._system,
-                charge_diff,
-                restraint_distance=self._config.coalchemical_restraint_dist,
+            self._system, coalchemical_restraints, ion_indices = (
+                self._create_alchemical_ions(
+                    self._system,
+                    charge_diff,
+                    restraint_distance=self._config.coalchemical_restraint_dist,
+                )
             )
 
             # Add the coalchemical restraints to the extra args.
@@ -401,24 +404,10 @@ class RunnerBase:
             self._config._extra_args["use_beutler_softening"] = True
             self._config._extra_args["beutler_alpha"] = self._config.beutler_alpha
 
-        # Build deferred schedules now that the softcore form is known. Epsilon is
-        # only held fixed (with LJ decay handled entirely by the Beutler soft-core
-        # prefactor) for molecules undergoing a ghost-atom decoupling/annihilation.
-        # An alchemical ion is a real (non-ghost) atom mutating identity (e.g. a
-        # water oxygen turning into Na+), so its LJ epsilon needs to interpolate
-        # normally; fixing it would leave the ion's persisting atom stuck at its
-        # initial LJ parameters for the whole stage. Disable fix_epsilon whenever
-        # an alchemical ion has been added, regardless of the configured value.
+        # Build deferred schedules now that the softcore form is known.
         fix_epsilon = (
             self._config.softcore_form == "beutler" and self._config.beutler_fix_epsilon
         )
-        if fix_epsilon and charge_diff != 0:
-            _logger.info(
-                "Disabling Beutler 'fix_epsilon' since an alchemical ion has been "
-                "added: the ion's persisting atom is a real (non-ghost) mutation "
-                "and needs its LJ epsilon to interpolate normally."
-            )
-            fix_epsilon = False
         if self._config._lambda_schedule_name == "annihilate":
             from .._utils._schedules import annihilate as _annihilate
 
@@ -427,6 +416,20 @@ class RunnerBase:
             from .._utils._schedules import decouple as _decouple
 
             self._config._lambda_schedule = _decouple(fix_epsilon=fix_epsilon)
+
+        # Alchemical ions are real (non-ghost) atoms mutating identity (e.g. a
+        # water oxygen turning into Na+), not ghost-atom decoupling/annihilation
+        # like the main perturbable molecule(s). Give each one its own plain
+        # morph schedule so it always interpolates smoothly across the whole
+        # lambda range, regardless of the ligand's schedule (e.g. so it isn't
+        # held fixed outside of a "decharge" stage, or subject to fix_epsilon).
+        if ion_indices:
+            from sire.cas import LambdaSchedule as _LambdaSchedule
+
+            for pert_idx in ion_indices:
+                self._config._lambda_schedule.set_molecule_schedule(
+                    pert_idx, _LambdaSchedule.standard_morph()
+                )
 
         # Set the lambda values.
         if self._config.lambda_values:
@@ -1203,6 +1206,15 @@ class RunnerBase:
 
         system: :class: `System <sire.system.System>`
             The perturbed system with alchemical ions added.
+
+        restraints: :class: `Restraints <sire.restraints.Restraints>`
+            The coalchemical restraints, or None if no restraint distance
+            was specified.
+
+        ion_indices: [int]
+            The perturbable-molecule index of each alchemical ion that was
+            added, suitable for use with
+            `LambdaSchedule.set_molecule_schedule <sire.cas.LambdaSchedule>`.
         """
 
         from sire.legacy.IO import createChlorineIon as _createChlorineIon
@@ -1267,6 +1279,9 @@ class RunnerBase:
 
         # Create a null set of coalchemical restraints.
         restraints = None
+
+        # Store the molecule numbers of the alchemical ions.
+        ion_numbers = []
 
         # Create the ions.
         for water in waters:
@@ -1383,6 +1398,9 @@ class RunnerBase:
             # Update the system.
             system.update(merged)
 
+            # Record the molecule number of the alchemical ion.
+            ion_numbers.append(water.number())
+
             # Get the index of the perturbed water.
             index = numbers.index(water.number())
 
@@ -1398,7 +1416,16 @@ class RunnerBase:
                     f"{ion_str} ion to keep charge constant."
                 )
 
-        return system, restraints
+        # Work out the perturbable-molecule index of each alchemical ion, now
+        # that the full system (existing perturbable molecule(s) plus all of
+        # the newly merged ions) is in its final state. This index is what
+        # Sire's LambdaSchedule.set_molecule_schedule() expects, and depends on
+        # the relative order of *all* perturbable molecules in the system, so
+        # it can only be computed once every ion has been added.
+        perturbable_mols = system.molecules()["perturbable"].molecules()
+        ion_indices = [perturbable_mols.find(system[number]) for number in ion_numbers]
+
+        return system, restraints, ion_indices
 
     @staticmethod
     def _create_filenames(lambda_array, lambda_value, output_directory, restart=False):
