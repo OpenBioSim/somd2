@@ -65,14 +65,14 @@ def annihilate(fix_epsilon=True):
         lever="charge",
         equation=s.lam() * s.final() + s.initial() * (1 - s.lam()),
     )
-    s.set_equation(stage="decharge", force="restraint", equation=s.lam() * s.final())
+    s.set_equation(stage="decharge", lever="restraint", equation=s.lam() * s.final())
 
     s.add_stage(
         "annihilate",
         equation=(-s.lam() + 1) * s.initial() + s.lam() * s.final(),
     )
     s.set_equation(stage="annihilate", lever="charge", equation=s.final())
-    s.set_equation(stage="annihilate", force="restraint", equation=s.final())
+    s.set_equation(stage="annihilate", lever="restraint", equation=s.final())
 
     if fix_epsilon:
         s.set_equation(stage="annihilate", lever="epsilon", equation=s.initial())
