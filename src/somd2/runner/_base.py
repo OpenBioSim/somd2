@@ -232,6 +232,11 @@ class RunnerBase:
         except:
             self._has_protein = False
 
+        # Set by _generate_boresch_restraint() when a Boresch restraint is
+        # auto-generated, then written into the energy trajectory parquet
+        # metadata (see _checkpoint).
+        self._standard_state_correction = None
+
         # Warn if dispersion correction is requested but can't be applied.
         if self._config.use_dispersion_correction and not self._has_water:
             msg = "Cannot use dispersion correction for vacuum simulations. Disabling!"
@@ -1008,7 +1013,18 @@ class RunnerBase:
         # On restart, load the restraint saved from the previous run.
         if _Path(restraint_file).exists():
             _logger.info(f"Loading existing Boresch restraint from {restraint_file}")
-            return _sr.stream.load(restraint_file)
+            restraints = _sr.stream.load(restraint_file)
+
+            from sire.restraints import get_standard_state_correction
+
+            correction = get_standard_state_correction(
+                restraints[0], temperature=self._config.temperature
+            )
+            self._standard_state_correction = float(
+                correction.to(_sr.units.kcal_per_mol)
+            )
+
+            return restraints
 
         _logger.info(
             "No restraint supplied for ABFE. Running Boresch restraint search."
@@ -1066,10 +1082,13 @@ class RunnerBase:
 
         restraints, correction = boresch_search(search_system, **search_kwargs)
 
-        correction_kcal_mol = float(correction.to(_sr.units.kcal_per_mol))
+        # Cache so it can be written into the energy trajectory parquet
+        # metadata (see _checkpoint), letting analysis code automatically
+        # apply the correction without needing to scan the logs.
+        self._standard_state_correction = float(correction.to(_sr.units.kcal_per_mol))
         _logger.info(
             f"Boresch restraint generated. Standard state correction: "
-            f"{correction_kcal_mol:.4f} kcal mol-1"
+            f"{self._standard_state_correction:.4f} kcal mol-1"
         )
 
         # Save so that restarts can reload without re-generating.
@@ -2069,6 +2088,13 @@ class RunnerBase:
                 # Add the lambda gradient if available.
                 if lambda_grad is not None:
                     metadata["lambda_grad"] = [f"{v:.5f}" for v in lambda_grad]
+
+                # Add the standard state correction, if a Boresch restraint
+                # was auto-generated for this ABFE run.
+                if self._standard_state_correction is not None:
+                    metadata["standard_state_correction"] = (
+                        f"{self._standard_state_correction:.6f}"
+                    )
 
             if is_final_block:
                 # Save the end-state GCMC topologies for trajectory analysis and visualisation.
