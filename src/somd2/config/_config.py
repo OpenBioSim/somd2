@@ -172,6 +172,9 @@ class Config:
         save_xml=False,
         page_size=None,
         timeout="300 s",
+        restraint_search_time="1 ns",
+        restraint_search_frequency="10 ps",
+        restraint_search_receptor_selection=None,
     ):
         """
         Constructor.
@@ -557,6 +560,21 @@ class Config:
         null_energy: str
             The energy value to use for lambda windows that are not
             being computed as part of the energy trajectory.
+
+        restraint_search_time: str
+            Length of the short pre-production trajectory used to auto-generate
+            a Boresch restraint when running an ABFE simulation without a
+            user-supplied restraint. Defaults to "1 ns".
+
+        restraint_search_frequency: str
+            Frame-saving frequency during the restraint-search trajectory.
+            Defaults to "10 ps". Should be small enough to yield at least 50
+            frames over ``restraint_search_time``.
+
+        restraint_search_receptor_selection: str
+            Sire selection string for receptor anchor atom candidates used
+            during automatic Boresch restraint generation. If None, the default
+            backbone selection is used (CA, C, N atoms in non-water molecules).
         """
 
         # Setup logger before doing anything else
@@ -645,9 +663,10 @@ class Config:
         self.num_energy_neighbours = num_energy_neighbours
         self.null_energy = null_energy
         self.page_size = page_size
-
+        self.restraint_search_time = restraint_search_time
+        self.restraint_search_frequency = restraint_search_frequency
+        self.restraint_search_receptor_selection = restraint_search_receptor_selection
         self.write_config = write_config
-
         self.overwrite = overwrite
 
     def __str__(self):
@@ -2468,6 +2487,34 @@ class Config:
 
         return obj
 
+    def __getstate__(self):
+        """
+        Hex-encode the same fields that to_yaml()/from_yaml() already
+        hex-encode (currently 'restraints' and 'lambda_schedule'), since
+        these legacy Sire objects are not guaranteed to have native pickle
+        support. This is needed so that a Config holding these can be sent
+        to a spawned worker process, e.g. via
+        concurrent.futures.ProcessPoolExecutor.
+        """
+        state = self.__dict__.copy()
+        if state.get("_restraints") is not None:
+            state["_restraints"] = [
+                self._to_hex(restraint) for restraint in state["_restraints"]
+            ]
+        if state.get("_lambda_schedule") is not None:
+            state["_lambda_schedule"] = self._to_hex(state["_lambda_schedule"])
+        return state
+
+    def __setstate__(self, state):
+        """Reverse the hex-encoding performed in __getstate__."""
+        if state.get("_restraints") is not None:
+            state["_restraints"] = [
+                self._from_hex(restraint) for restraint in state["_restraints"]
+            ]
+        if state.get("_lambda_schedule") is not None:
+            state["_lambda_schedule"] = self._from_hex(state["_lambda_schedule"])
+        self.__dict__.update(state)
+
     @classmethod
     def _create_parser(cls):
         """
@@ -2571,6 +2618,65 @@ class Config:
                     )
 
         return parser
+
+    @property
+    def restraint_search_time(self):
+        return self._restraint_search_time
+
+    @restraint_search_time.setter
+    def restraint_search_time(self, restraint_search_time):
+        if not isinstance(restraint_search_time, str):
+            raise TypeError("'restraint_search_time' must be of type 'str'")
+
+        from sire.units import picosecond
+
+        try:
+            t = _sr.u(restraint_search_time)
+        except:
+            raise ValueError(
+                f"Unable to parse 'restraint_search_time' as a Sire GeneralUnit: {restraint_search_time}"
+            )
+
+        if not t.has_same_units(picosecond):
+            raise ValueError("'restraint_search_time' units are invalid.")
+
+        self._restraint_search_time = t
+
+    @property
+    def restraint_search_frequency(self):
+        return self._restraint_search_frequency
+
+    @restraint_search_frequency.setter
+    def restraint_search_frequency(self, restraint_search_frequency):
+        if not isinstance(restraint_search_frequency, str):
+            raise TypeError("'restraint_search_frequency' must be of type 'str'")
+
+        from sire.units import picosecond
+
+        try:
+            t = _sr.u(restraint_search_frequency)
+        except:
+            raise ValueError(
+                f"Unable to parse 'restraint_search_frequency' as a Sire GeneralUnit: {restraint_search_frequency}"
+            )
+
+        if not t.has_same_units(picosecond):
+            raise ValueError("'restraint_search_frequency' units are invalid.")
+
+        self._restraint_search_frequency = t
+
+    @property
+    def restraint_search_receptor_selection(self):
+        return self._restraint_search_receptor_selection
+
+    @restraint_search_receptor_selection.setter
+    def restraint_search_receptor_selection(self, restraint_search_receptor_selection):
+        if restraint_search_receptor_selection is not None:
+            if not isinstance(restraint_search_receptor_selection, str):
+                raise TypeError(
+                    "'restraint_search_receptor_selection' must be of type 'str'"
+                )
+        self._restraint_search_receptor_selection = restraint_search_receptor_selection
 
     def _reset_logger(self, logger):
         """

@@ -217,6 +217,18 @@ class Runner(_RunnerBase):
         else:
             self._max_workers = 1
 
+        # Auto-generate a Boresch restraint for ABFE runs with no user-supplied restraint.
+        if self._is_abfe_bound and self._config.restraints is None:
+            device = self._gpu_pool[0] if self._is_gpu else None
+            try:
+                restraints = self._generate_boresch_restraint(device=device)
+            except Exception as e:
+                msg = f"Unable to generate Boresch restraint for ABFE simulation: {e}"
+                _logger.error(msg)
+                raise RuntimeError(msg)
+            self._config.restraints = restraints
+            self._dynamics_kwargs["restraints"] = restraints
+
         import concurrent.futures as _futures
         import multiprocessing as _mp
 

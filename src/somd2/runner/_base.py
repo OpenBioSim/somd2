@@ -223,6 +223,20 @@ class RunnerBase:
         except:
             self._has_water = False
 
+        # Check for protein (distinguishes ABFE from AHFE). A protein+ligand
+        # system has more than one non-water molecule with at least 3 atoms;
+        # a solvated ligand alone has only one.
+        try:
+            non_water_mols = self._system["(not water) and (atomidx > 1)"].molecules()
+            self._has_protein = non_water_mols.num_molecules() > 1
+        except:
+            self._has_protein = False
+
+        # Set by _generate_boresch_restraint() when a Boresch restraint is
+        # auto-generated, then written into the energy trajectory parquet
+        # metadata (see _checkpoint).
+        self._standard_state_correction = None
+
         # Warn if dispersion correction is requested but can't be applied.
         if self._config.use_dispersion_correction and not self._has_water:
             msg = "Cannot use dispersion correction for vacuum simulations. Disabling!"
@@ -274,7 +288,7 @@ class RunnerBase:
         elif self._config.ghost_modifications:
             from ghostly import modify
 
-            _logger.info("Applying modifications to ghost atom bonded terms")
+            _logger.info("Applying modifications to ghost atom bonded terms.")
             try:
                 self._system, self._modifications = modify(self._system)
             # Angle optimisation can sometimes fail.
@@ -954,6 +968,134 @@ class RunnerBase:
             # Update the maximum number of threads.
             _sr.legacy.Base.set_max_num_threads(sire_threads)
 
+    @property
+    def _is_abfe_bound(self):
+        """
+        Whether this is the bound leg of an ABFE simulation: annihilate/decouple
+        schedule with a solvated protein present. False for the free leg (ligand
+        in solvent, no protein), even though it may use the same lambda schedule.
+        """
+        return (
+            self._config._lambda_schedule_name in ("annihilate", "decouple")
+            and self._has_protein
+            and self._has_water
+        )
+
+    def _generate_boresch_restraint(self, device=None):
+        """
+        Return a Boresch restraint for the ABFE simulation, either by loading
+        one saved from a previous run or by running a short lambda=0 trajectory.
+        Called automatically before minimisation/equilibration of the production
+        windows/replicas when the simulation is ABFE and no restraint has been
+        supplied.
+
+        The input system is assumed to already be equilibrated (SOMD2 does not
+        run a separate equilibration stage for the restraint search); it is
+        minimised using the production minimisation settings, then a short
+        trajectory is run at lambda=0, matching the dynamics settings used for
+        production, to derive the restraint geometry and force constants.
+
+        Parameters
+        ----------
+
+        device : int, optional
+            GPU device number to use for the restraint-search run.
+
+        Returns
+        -------
+
+        restraints : sire.mm.BoreschRestraints
+        """
+        from sire.restraints import boresch_search
+
+        restraint_file = str(self._config.output_directory / "abfe_restraint.s3")
+
+        # On restart, load the restraint saved from the previous run.
+        if _Path(restraint_file).exists():
+            _logger.info(f"Loading existing Boresch restraint from {restraint_file}")
+            restraints = _sr.stream.load(restraint_file)
+
+            from sire.restraints import get_standard_state_correction
+
+            correction = get_standard_state_correction(
+                restraints[0], temperature=self._config.temperature
+            )
+            self._standard_state_correction = float(
+                correction.to(_sr.units.kcal_per_mol)
+            )
+
+            return restraints
+
+        _logger.info(
+            "No restraint supplied for ABFE. Running Boresch restraint search."
+        )
+
+        search_system = self._system
+
+        if self._config.minimise:
+            constraint = self._config.constraint
+            perturbable_constraint = self._config.perturbable_constraint
+
+            # Don't use constraints during minimisation.
+            if not self._config.minimisation_constraints:
+                constraint = "none"
+                perturbable_constraint = "none"
+
+            min_dynamics_kwargs = self._dynamics_kwargs.copy()
+            min_dynamics_kwargs.update(
+                {
+                    "device": device,
+                    "lambda_value": 0.0,
+                    "constraint": constraint,
+                    "perturbable_constraint": perturbable_constraint,
+                }
+            )
+
+            min_dynamics = search_system.dynamics(**min_dynamics_kwargs)
+            min_dynamics.minimise(timeout=self._config.timeout)
+            search_system = min_dynamics.commit()
+
+        dynamics_kwargs = self._dynamics_kwargs.copy()
+        dynamics_kwargs.update(
+            {
+                "device": device,
+                "lambda_value": 0.0,
+            }
+        )
+
+        dynamics = search_system.dynamics(**dynamics_kwargs)
+        dynamics.run(
+            self._config.restraint_search_time,
+            energy_frequency=0,
+            frame_frequency=self._config.restraint_search_frequency,
+            save_velocities=False,
+            auto_fix_minimise=self._config.auto_fix_minimise,
+            save_crash_report=self._config.save_crash_report,
+        )
+        search_system = dynamics.commit()
+
+        search_kwargs = {"temperature": self._config.temperature}
+        if self._config.restraint_search_receptor_selection is not None:
+            search_kwargs["receptor_selection"] = (
+                self._config.restraint_search_receptor_selection
+            )
+
+        restraints, correction = boresch_search(search_system, **search_kwargs)
+
+        # Cache so it can be written into the energy trajectory parquet
+        # metadata (see _checkpoint), letting analysis code automatically
+        # apply the correction without needing to scan the logs.
+        self._standard_state_correction = float(correction.to(_sr.units.kcal_per_mol))
+        _logger.info(
+            f"Boresch restraint generated. Standard state correction: "
+            f"{self._standard_state_correction:.4f} kcal mol-1"
+        )
+
+        # Save so that restarts can reload without re-generating.
+        _sr.stream.save(restraints, restraint_file)
+
+        return restraints
+
     def _check_space(self):
         """
         Check if the system has a periodic space.
@@ -1496,6 +1638,8 @@ class RunnerBase:
             "log_file",
             "overwrite",
             "timeout",
+            "restraint_search_time",
+            "restraint_search_frequency",
         ]
         for key in config1.keys():
             if key not in allowed_diffs:
@@ -1934,8 +2078,7 @@ class RunnerBase:
             if not is_post_equilibration:
                 metadata = {
                     "attrs": df.attrs,
-                    "somd2 version": versions["somd2"],
-                    "sire version": versions["sire"],
+                    "versions": versions,
                     "lambda": f"{lam:.5f}",
                     "speed": speed,
                     "temperature": str(self._config.temperature.value()),
@@ -1944,6 +2087,13 @@ class RunnerBase:
                 # Add the lambda gradient if available.
                 if lambda_grad is not None:
                     metadata["lambda_grad"] = [f"{v:.5f}" for v in lambda_grad]
+
+                # Add the standard state correction, if a Boresch restraint
+                # was auto-generated for this ABFE run.
+                if self._standard_state_correction is not None:
+                    metadata["standard_state_correction"] = (
+                        f"{self._standard_state_correction:.6f}"
+                    )
 
             if is_final_block:
                 # Save the end-state GCMC topologies for trajectory analysis and visualisation.
