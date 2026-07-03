@@ -2078,8 +2078,7 @@ class RunnerBase:
             if not is_post_equilibration:
                 metadata = {
                     "attrs": df.attrs,
-                    "somd2 version": versions["somd2"],
-                    "sire version": versions["sire"],
+                    "versions": versions,
                     "lambda": f"{lam:.5f}",
                     "speed": speed,
                     "temperature": str(self._config.temperature.value()),
