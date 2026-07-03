@@ -362,13 +362,26 @@ class RunnerBase:
         # Create alchemical ions.
         ion_indices = []
         if charge_diff != 0:
-            self._system, coalchemical_restraints, ion_indices = (
+            # On restart, reuse the exact molecule(s) chosen as alchemical ions
+            # in the original run, rather than re-running the "furthest waters"
+            # search. This makes ion selection independent of GCMC state (or
+            # anything else that might change between runs), since the search
+            # is otherwise only reproducible by assumption, not by construction.
+            mol_indices = None
+            if self._config.restart:
+                mol_indices = self._load_alchemical_ion_indices()
+
+            self._system, coalchemical_restraints, ion_indices, ion_mol_indices = (
                 self._create_alchemical_ions(
                     self._system,
                     charge_diff,
                     restraint_distance=self._config.coalchemical_restraint_dist,
+                    mol_indices=mol_indices,
                 )
             )
+
+            # Keep the stored indices in sync for any future restart.
+            self._save_alchemical_ion_indices(ion_mol_indices)
 
             # Add the coalchemical restraints to the extra args.
             if coalchemical_restraints is not None:
@@ -1045,8 +1058,49 @@ class RunnerBase:
 
         return perturbed - reference
 
+    def _save_alchemical_ion_indices(self, mol_indices):
+        """
+        Persist the absolute molecule index of each alchemical ion to a small,
+        dedicated file in the output directory, independent of the per-window
+        (regular runner) or shared (repex) checkpoint formats. This allows a
+        restart to reuse the exact same ion(s) chosen in the original run.
+
+        Parameters
+        ----------
+
+        mol_indices: [int]
+            The absolute molecule index of each alchemical ion.
+        """
+        import numpy as _np
+
+        path = self._config.output_directory / "alchemical_ions.npz"
+        _np.savez(path, mol_indices=_np.array(mol_indices, dtype=int))
+
+    def _load_alchemical_ion_indices(self):
+        """
+        Load the absolute molecule index of each alchemical ion previously
+        stored by `_save_alchemical_ion_indices`, if present.
+
+        Returns
+        -------
+
+        mol_indices: [int], None
+            The absolute molecule index of each alchemical ion, or None if no
+            stored indices are available (e.g. a fresh run, or a restart from
+            an output directory that predates this feature).
+        """
+        import numpy as _np
+
+        path = self._config.output_directory / "alchemical_ions.npz"
+        try:
+            return _np.load(path)["mol_indices"].tolist()
+        except Exception:
+            return None
+
     @staticmethod
-    def _create_alchemical_ions(system, charge_diff, restraint_distance=None):
+    def _create_alchemical_ions(
+        system, charge_diff, restraint_distance=None, mol_indices=None
+    ):
         """
         Internal function to create alchemical ions to maintain a constant charge.
 
@@ -1058,6 +1112,14 @@ class RunnerBase:
 
         charge_diff: int
             The charge difference between perturbed and reference states.
+
+        mol_indices: [int]
+            The absolute molecule index (position in `system.molecules()`) of
+            each water to convert into an alchemical ion. If provided, these
+            molecules are converted directly, bypassing the "furthest waters"
+            search. Used on restart to reproduce the exact same ion(s) chosen
+            in the original run, independent of any GCMC state or changes to
+            the search heuristic. Must have the same length as `abs(charge_diff)`.
 
         Returns
         -------
@@ -1073,6 +1135,11 @@ class RunnerBase:
             The perturbable-molecule index of each alchemical ion that was
             added, suitable for use with
             `LambdaSchedule.set_molecule_schedule <sire.cas.LambdaSchedule>`.
+
+        ion_mol_indices: [int]
+            The absolute molecule index (position in `system.molecules()`,
+            prior to any conversion) of each alchemical ion that was added.
+            Suitable for passing back in as `mol_indices` on a restart.
         """
 
         from sire.legacy.IO import createChlorineIon as _createChlorineIon
@@ -1116,12 +1183,28 @@ class RunnerBase:
                 f"{len(system['water'].molecules())} available."
             )
 
-        # Reference coordinates.
-        coords = system.molecules("property is_perturbable").coordinates()
-        coord_string = f"{coords[0].value()}, {coords[1].value()}, {coords[2].value()}"
+        if mol_indices is not None:
+            if len(mol_indices) != num_waters:
+                raise ValueError(
+                    f"Number of stored alchemical-ion molecule indices "
+                    f"({len(mol_indices)}) does not match the current charge "
+                    f"difference ({num_waters} waters required)."
+                )
 
-        # Find the furthest N waters from the perturbable molecule.
-        waters = system[f"furthest {num_waters} waters from {coord_string}"].molecules()
+            # Reuse the exact molecules chosen in the original run.
+            all_mols = system.molecules()
+            waters = [all_mols[idx] for idx in mol_indices]
+        else:
+            # Reference coordinates.
+            coords = system.molecules("property is_perturbable").coordinates()
+            coord_string = (
+                f"{coords[0].value()}, {coords[1].value()}, {coords[2].value()}"
+            )
+
+            # Find the furthest N waters from the perturbable molecule.
+            waters = system[
+                f"furthest {num_waters} waters from {coord_string}"
+            ].molecules()
 
         # Determine the water model.
         if waters[0].num_atoms() == 3:
@@ -1140,6 +1223,10 @@ class RunnerBase:
 
         # Store the molecule numbers of the alchemical ions.
         ion_numbers = []
+
+        # Store the absolute molecule index of each alchemical ion (prior to
+        # conversion), for persisting across restarts.
+        ion_mol_indices = []
 
         # Create the ions.
         for water in waters:
@@ -1261,6 +1348,7 @@ class RunnerBase:
 
             # Get the index of the perturbed water.
             index = numbers.index(water.number())
+            ion_mol_indices.append(index)
 
             # Log that we are adding an alchemical ion.
             if is_reverse:
@@ -1283,7 +1371,7 @@ class RunnerBase:
         perturbable_mols = system.molecules()["perturbable"].molecules()
         ion_indices = [perturbable_mols.find(system[number]) for number in ion_numbers]
 
-        return system, restraints, ion_indices
+        return system, restraints, ion_indices, ion_mol_indices
 
     @staticmethod
     def _create_filenames(lambda_array, lambda_value, output_directory, restart=False):
