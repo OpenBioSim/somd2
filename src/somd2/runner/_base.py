@@ -1021,13 +1021,45 @@ class RunnerBase:
         -------
 
         restraints : sire.mm.BoreschRestraints
+
+        Notes
+        -----
+
+        As a side effect, when the restraint is generated (rather than reused
+        from a checkpointed restart), ``self._system`` is re-seeded from the
+        least-strained trajectory frame returned by ``boresch_search``. The
+        restraint equilibrium values are trajectory averages, so the input
+        structure is generally not consistent with them; starting production
+        from it instead would leave the restraint badly strained at t=0 and can
+        blow the simulation up as the restraint is switched on.
+
+        The cached restraint is only reused on a genuine (checkpointed) restart,
+        where it must be kept identical to the one the accumulated free energy
+        was computed with. When there is no checkpoint (a fresh run, or a crash
+        before any progress was checkpointed) the restraint is regenerated. This
+        avoids getting pinned to a restraint that is itself the cause of the
+        crash: reusing it and re-seeding the same frame would just reproduce the
+        crash on every restart, whereas a fresh search may pick a different frame
+        or anchor, and re-seeds ``self._system`` naturally.
         """
         from sire.restraints import boresch_search
 
         restraint_file = str(self._config.output_directory / "abfe_restraint.s3")
 
-        # On restart, load the restraint saved from the previous run.
-        if _Path(restraint_file).exists():
+        # Only reuse a saved restraint when continuing an actual checkpointed
+        # restart: the restraint must match the one the accumulated free energy
+        # was computed with, and the coordinates come from the checkpoint (so no
+        # re-seeding is needed). Deliberately do NOT reuse it when there is no
+        # checkpoint - see the Notes above.
+        if self._is_restart:
+            if not _Path(restraint_file).exists():
+                raise FileNotFoundError(
+                    "Restarting an ABFE bound-leg simulation, but no saved "
+                    f"restraint was found at {restraint_file}. The restraint "
+                    "cannot be regenerated mid-simulation without invalidating "
+                    "the accumulated free energy."
+                )
+
             _logger.info(f"Loading existing Boresch restraint from {restraint_file}")
             restraints = _sr.stream.load(restraint_file)
 
@@ -1096,7 +1128,9 @@ class RunnerBase:
                 self._config.restraint_search_receptor_selection
             )
 
-        restraints, correction = boresch_search(search_system, **search_kwargs)
+        restraints, correction, starting_structure = boresch_search(
+            search_system, **search_kwargs
+        )
 
         # Cache so it can be written into the energy trajectory parquet
         # metadata (see _checkpoint), letting analysis code automatically
@@ -1107,7 +1141,18 @@ class RunnerBase:
             f"{self._standard_state_correction:.4f} kcal mol-1"
         )
 
-        # Save so that restarts can reload without re-generating.
+        # Re-seed production from the least-strained frame so the restraint is
+        # essentially relaxed at t=0 (see the docstring Notes). The frame comes
+        # from the perturbable search system, so link its properties back to the
+        # reference (lambda=0) end state, matching how the seed systems are
+        # handled elsewhere (see _perturbed_system), and drop the search
+        # trajectory frames so only the single starting snapshot is retained.
+        starting_structure = _sr.morph.link_to_reference(starting_structure)
+        starting_structure.delete_all_frames()
+        self._system = starting_structure
+
+        # Save so that a genuine (checkpointed) restart can reuse the exact same
+        # restraint without re-running the search.
         _sr.stream.save(restraints, restraint_file)
 
         return restraints
