@@ -1084,6 +1084,10 @@ class RepexRunner(_RunnerBase):
         num_batches = ceil(self._config.num_lambda / num_workers)
         num_checkpoint_batches = ceil(self._config.num_lambda / num_checkpoint_workers)
 
+        # Persistent thread pools, reused across every batch and cycle.
+        dynamics_executor = ThreadPoolExecutor(max_workers=num_workers)
+        checkpoint_executor = ThreadPoolExecutor(max_workers=num_checkpoint_workers)
+
         # Create the replica list.
         replica_list = list(range(self._config.num_lambda))
 
@@ -1134,29 +1138,27 @@ class RepexRunner(_RunnerBase):
                     replicas = replica_list[
                         j * num_checkpoint_workers : (j + 1) * num_checkpoint_workers
                     ]
-                    with ThreadPoolExecutor(
-                        max_workers=num_checkpoint_workers
-                    ) as executor:
-                        try:
-                            for index, error in executor.map(
-                                self._checkpoint,
-                                replicas,
-                                repeat(self._lambda_values),
-                                repeat(-1),
-                                repeat(cycles),
-                            ):
-                                if error is not None:
-                                    msg = (
-                                        f"Post-equilibration checkpoint failed for {_lam_sym} = "
-                                        f"{self._lambda_values[index]:.5f}:\n{error}"
-                                    )
-                                    _logger.error(msg)
-                                    raise error
-                        except KeyboardInterrupt:
-                            _logger.error(
-                                "Post-equilibration checkpoint cancelled. Exiting."
-                            )
-                            _sys.exit(1)
+                    try:
+                        for index, error in checkpoint_executor.map(
+                            self._checkpoint,
+                            replicas,
+                            repeat(self._lambda_values),
+                            repeat(-1),
+                            repeat(cycles),
+                        ):
+                            if error is not None:
+                                msg = (
+                                    f"Post-equilibration checkpoint failed for {_lam_sym} = "
+                                    f"{self._lambda_values[index]:.5f}:\n{error}"
+                                )
+                                _logger.error(msg)
+                                raise error
+                    except KeyboardInterrupt:
+                        checkpoint_executor.shutdown(wait=False, cancel_futures=True)
+                        _logger.error(
+                            "Post-equilibration checkpoint cancelled. Exiting."
+                        )
+                        _sys.exit(1)
 
         # Current block number.
         block = self._start_block
@@ -1244,26 +1246,26 @@ class RepexRunner(_RunnerBase):
             # oversubscribed by a factor of self._config.oversubscription_factor.
             for j in range(num_batches):
                 replicas = replica_list[j * num_workers : (j + 1) * num_workers]
-                with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                    try:
-                        for result, index, energies in executor.map(
-                            self._run_block,
-                            replicas,
-                            repeat(self._lambda_values),
-                            repeat(is_gcmc),
-                            repeat(write_gcmc_ghosts),
-                            repeat(is_terminal_flip),
-                            repeat(time_ns),
-                        ):
-                            if not result:
-                                _logger.error(
-                                    f"Dynamics failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {energies}"
-                                )
-                                raise energies
-                            results.append((index, energies))
-                    except KeyboardInterrupt:
-                        _logger.error("Dynamics cancelled. Exiting.")
-                        _sys.exit(1)
+                try:
+                    for result, index, energies in dynamics_executor.map(
+                        self._run_block,
+                        replicas,
+                        repeat(self._lambda_values),
+                        repeat(is_gcmc),
+                        repeat(write_gcmc_ghosts),
+                        repeat(is_terminal_flip),
+                        repeat(time_ns),
+                    ):
+                        if not result:
+                            _logger.error(
+                                f"Dynamics failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {energies}"
+                            )
+                            raise energies
+                        results.append((index, energies))
+                except KeyboardInterrupt:
+                    dynamics_executor.shutdown(wait=False, cancel_futures=True)
+                    _logger.error("Dynamics cancelled. Exiting.")
+                    _sys.exit(1)
 
             # Checkpoint.
             if is_checkpoint or i == cycles - 1:
@@ -1280,21 +1282,23 @@ class RepexRunner(_RunnerBase):
                             j * num_checkpoint_workers : (j + 1)
                             * num_checkpoint_workers
                         ]
-                        with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                            try:
-                                for index, error in executor.map(
-                                    self._backup_checkpoint,
-                                    replicas,
-                                ):
-                                    if not result:
-                                        _logger.error(
-                                            f"Backup failed for {_lam_sym} = "
-                                            f"{self._lambda_values[index]:.5f}: {error}"
-                                        )
-                                        raise error
-                            except KeyboardInterrupt:
-                                _logger.error("Backup cancelled. Exiting.")
-                                _sys.exit(1)
+                        try:
+                            for index, error in checkpoint_executor.map(
+                                self._backup_checkpoint,
+                                replicas,
+                            ):
+                                if not result:
+                                    _logger.error(
+                                        f"Backup failed for {_lam_sym} = "
+                                        f"{self._lambda_values[index]:.5f}: {error}"
+                                    )
+                                    raise error
+                        except KeyboardInterrupt:
+                            checkpoint_executor.shutdown(
+                                wait=False, cancel_futures=True
+                            )
+                            _logger.error("Backup cancelled. Exiting.")
+                            _sys.exit(1)
 
                     # Now write the new checkpoint files.
                     for j in range(num_checkpoint_batches):
@@ -1303,25 +1307,27 @@ class RepexRunner(_RunnerBase):
                             j * num_checkpoint_workers : (j + 1)
                             * num_checkpoint_workers
                         ]
-                        with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                            try:
-                                for index, error in executor.map(
-                                    self._checkpoint,
-                                    replicas,
-                                    repeat(self._lambda_values),
-                                    repeat(block),
-                                    repeat(num_blocks + int(rem > 0)),
-                                    repeat(i == cycles - 1),
-                                ):
-                                    if error:
-                                        _logger.error(
-                                            f"Checkpoint failed for {_lam_sym} = "
-                                            f"{self._lambda_values[index]:.5f}: {error}"
-                                        )
-                                        raise error
-                            except KeyboardInterrupt:
-                                _logger.error("Checkpoint cancelled. Exiting.")
-                                _sys.exit(1)
+                        try:
+                            for index, error in checkpoint_executor.map(
+                                self._checkpoint,
+                                replicas,
+                                repeat(self._lambda_values),
+                                repeat(block),
+                                repeat(num_blocks + int(rem > 0)),
+                                repeat(i == cycles - 1),
+                            ):
+                                if error:
+                                    _logger.error(
+                                        f"Checkpoint failed for {_lam_sym} = "
+                                        f"{self._lambda_values[index]:.5f}: {error}"
+                                    )
+                                    raise error
+                        except KeyboardInterrupt:
+                            checkpoint_executor.shutdown(
+                                wait=False, cancel_futures=True
+                            )
+                            _logger.error("Checkpoint cancelled. Exiting.")
+                            _sys.exit(1)
 
             # Assemble an energy matrix from the results.
             _logger.info("Assembling energy matrix")
@@ -1376,6 +1382,9 @@ class RepexRunner(_RunnerBase):
                     self._save_sampler_stats()
                     with open(self._repex_state, "wb") as f:
                         _pickle.dump(self._dynamics_cache, f)
+
+        dynamics_executor.shutdown(wait=True)
+        checkpoint_executor.shutdown(wait=True)
 
         # Record the end time for the production block.
         prod_end = time()
