@@ -1798,6 +1798,7 @@ class RunnerBase:
             "log_file",
             "overwrite",
             "timeout",
+            "oversubscription_factor",
             "restraint_search_time",
             "restraint_search_frequency",
         ]

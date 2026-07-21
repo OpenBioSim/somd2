@@ -9,6 +9,7 @@ Changelog
 * Give alchemical ions their own plain morph lambda schedule so they interpolate correctly under non-standard lambda schedules [#169](https://github.com/OpenBioSim/somd2/pull/169).
 * Persist alchemical ion identity across restarts so the same molecule is reused regardless of GCMC state [#172](https://github.com/OpenBioSim/somd2/pull/172).
 * Use perisistent `ThreadPoolExector` objects within the main replica exchange dynamics block [#175](https://github.com/OpenBioSim/somd2/pull/175).
+* Allow `oversubscription_factor` to change on restart [#177](https://github.com/OpenBioSim/somd2/pull/177).
 
 [2026.1.0](https://github.com/openbiosim/somd2/compare/2025.1.0...2026.1.0) - Jun 2026
 --------------------------------------------------------------------------------------
