@@ -615,6 +615,9 @@ class RunnerBase:
         # used to skip duplicate rows on restart.
         self._last_ec_time = {}
 
+        # Per-window cache of the integrator's integration force groups bitmask.
+        self._integration_groups = {}
+
         # Store the current system as a reference.
         self._reference_system = self._system.clone()
 
@@ -2514,10 +2517,19 @@ class RunnerBase:
         if time_ns <= self._last_ec_time[index]:
             return
 
+        if index not in self._integration_groups:
+            self._integration_groups[index] = (
+                context.getIntegrator().getIntegrationForceGroups()
+            )
+        integration_groups = self._integration_groups[index]
+
         # Use the named force groups already assigned by sire_to_openmm_system,
         # sorted alphabetically for a consistent column order across runs.
+        # Skip any group not actually used for integration.
         energies = {}
         for name, grp in sorted(context._force_group_map.items()):
+            if not integration_groups & (1 << grp):
+                continue
             state = context.getState(getEnergy=True, groups=(1 << grp))
             energies[name] = state.getPotentialEnergy().value_in_unit(
                 openmm.unit.kilocalories_per_mole
