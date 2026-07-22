@@ -538,7 +538,37 @@ class DynamicsCache:
         """
         self._states = states
 
-    def mix_states(self, old_states):
+    def _seed_replica(self, i):
+        """
+        Apply the (possibly new, post-mix) state to replica i's context,
+        including any GCMC water-state swap. Only touches replica i's own
+        context/sampler, so this is safe to run concurrently with other
+        replicas' calls from a thread pool.
+        """
+        state = self._states[i]
+
+        _logger.debug(f"Replica {i} seeded from state {state}")
+        self._apply_openmm_state(
+            self._dynamics[i].context(), self._openmm_states[state]
+        )
+
+        # Swap the water state in the GCMCSamplers.
+        if self._gcmc_samplers[i] is not None:
+            # Find the indices of the water states that differ.
+            water_idxs = _np.where(self._gcmc_states[i] != self._gcmc_states[state])[0]
+
+            # Update the water state in the GCMCSampler.
+            self._gcmc_samplers[i].push()
+            try:
+                self._gcmc_samplers[i]._set_water_state(
+                    self._dynamics[i].context(),
+                    indices=water_idxs,
+                    states=self._gcmc_states[state][water_idxs],
+                )
+            finally:
+                self._gcmc_samplers[i].pop()
+
+    def mix_states(self, old_states, executor=None):
         """
         Mix the states of the dynamics objects.
 
@@ -546,35 +576,29 @@ class DynamicsCache:
         ----------
         old_states : numpy.ndarray
             The state indices from before the last replica mix.
+
+        executor : concurrent.futures.ThreadPoolExecutor, optional
+            Executor used to apply the per-replica state changes (an
+            OpenMM setPositions/setVelocities/setPeriodicBoxVectors call
+            per changed replica, each against a different context) in
+            parallel. Each replica's context is independent of every
+            other, so this is safe. Falls back to a serial loop if not
+            provided.
         """
-        # Mix the states.
+        # Replicas whose state actually changed.
+        changed = [i for i, state in enumerate(self._states) if i != state]
+
+        if executor is not None and len(changed) > 1:
+            # Consume the map so we block until every replica is seeded
+            # and any exception raised in a worker thread propagates here.
+            list(executor.map(self._seed_replica, changed))
+        else:
+            for i in changed:
+                self._seed_replica(i)
+
+        # Update the swap matrix. Cheap, CPU-only bookkeeping - kept out of
+        # the parallel section above to avoid any shared-array races.
         for i, state in enumerate(self._states):
-            # The state has changed.
-            if i != state:
-                _logger.debug(f"Replica {i} seeded from state {state}")
-                self._apply_openmm_state(
-                    self._dynamics[i].context(), self._openmm_states[state]
-                )
-
-                # Swap the water state in the GCMCSamplers.
-                if self._gcmc_samplers[i] is not None:
-                    # Find the indices of the water states that differ.
-                    water_idxs = _np.where(
-                        self._gcmc_states[i] != self._gcmc_states[state]
-                    )[0]
-
-                    # Update the water state in the GCMCSampler.
-                    self._gcmc_samplers[i].push()
-                    try:
-                        self._gcmc_samplers[i]._set_water_state(
-                            self._dynamics[i].context(),
-                            indices=water_idxs,
-                            states=self._gcmc_states[state][water_idxs],
-                        )
-                    finally:
-                        self._gcmc_samplers[i].pop()
-
-            # Update the swap matrix.
             self._num_swaps[old_states[i], state] += 1
 
     def get_proposed(self):
@@ -1344,7 +1368,7 @@ class RepexRunner(_RunnerBase):
                     self._dynamics_cache.get_accepted(),
                 )
             )
-            self._dynamics_cache.mix_states(old_states)
+            self._dynamics_cache.mix_states(old_states, executor=dynamics_executor)
 
             # Snapshot the pre-run state for crash recovery.
             if self._config.auto_fix_minimise:
