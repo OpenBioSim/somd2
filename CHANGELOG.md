@@ -12,6 +12,7 @@ Changelog
 * Allow `oversubscription_factor` to change on restart [#177](https://github.com/OpenBioSim/somd2/pull/177).
 * Restrict energy component decomposition to force groups that are used for integration [#180](https://github.com/OpenBioSim/somd2/pull/180).
 * Parallelise replica mixing [#181](https://github.com/OpenBioSim/somd2/pull/181).
+* Fixed the replica exchange GPU memory check querying the wrong device when `CUDA_VISIBLE_DEVICES` does not start at zero, since OpenMM numbers devices relative to the visible set whereas `pynvml` enumerates all of them [#182](https://github.com/OpenBioSim/somd2/issues/182).
 
 [2026.1.0](https://github.com/openbiosim/somd2/compare/2025.1.0...2026.1.0) - Jun 2026
 --------------------------------------------------------------------------------------
