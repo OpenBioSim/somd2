@@ -1802,6 +1802,7 @@ class RunnerBase:
             "overwrite",
             "timeout",
             "oversubscription_factor",
+            "max_contexts",
             "restraint_search_time",
             "restraint_search_frequency",
         ]
