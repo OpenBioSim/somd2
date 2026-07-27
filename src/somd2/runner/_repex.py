@@ -54,6 +54,7 @@ class DynamicsCache:
         output_directory=None,
         perturbed_system=None,
         xml_filenames=None,
+        gpu_devices=None,
     ):
         """
         Constructor.
@@ -89,6 +90,11 @@ class DynamicsCache:
         xml_filenames: list of str
             A list of file paths for the OpenMM XML output, one per replica.
             If None, XML files are not written.
+
+        gpu_devices: list
+            The physical devices backing each OpenMM device index, i.e. the
+            entries of CUDA_VISIBLE_DEVICES. Used to query the memory of the
+            right device. If None, the OpenMM index is used directly.
         """
 
         # Warn if the number of replicas is not a multiple of the number of GPUs.
@@ -101,6 +107,7 @@ class DynamicsCache:
         # Initialise attributes.
         self._lambdas = lambdas
         self._rest2_scale_factors = rest2_scale_factors
+        self._gpu_devices = gpu_devices
         self._states = _np.array(range(len(lambdas)))
         self._time = None
         self._openmm_states = [None] * len(lambdas)
@@ -250,7 +257,9 @@ class DynamicsCache:
 
             # Record baseline memory before the first replica on this device.
             if device not in device_mem:
-                used_before, _, total_mem = self._check_device_memory(device)
+                used_before, _, total_mem = self._check_device_memory(
+                    self._physical_device(device)
+                )
                 device_mem[device] = {
                     "before": used_before,
                     "total": total_mem,
@@ -335,7 +344,9 @@ class DynamicsCache:
 
             # Estimate memory after the first or second replica.
             if info["count"] == 1:
-                used_mem, _, _ = self._check_device_memory(device)
+                used_mem, _, _ = self._check_device_memory(
+                    self._physical_device(device)
+                )
                 info["after_first"] = used_mem
 
                 if num_contexts == 1:
@@ -346,7 +357,9 @@ class DynamicsCache:
                     est_total = None
 
             elif info["count"] == 2:
-                used_mem, _, _ = self._check_device_memory(device)
+                used_mem, _, _ = self._check_device_memory(
+                    self._physical_device(device)
+                )
                 # The first replica includes one-time context overhead.
                 # The marginal cost of subsequent replicas is the difference
                 # between the second and first.
@@ -619,23 +632,64 @@ class DynamicsCache:
         """
         return self._num_swaps
 
+    def _physical_device(self, device):
+        """
+        Map an OpenMM device index to the physical device backing it.
+
+        Parameters
+        ----------
+
+        device: int
+            The OpenMM device index, which is relative to the visible set.
+
+        Returns
+        -------
+
+        int, str
+            The physical device, i.e. the matching entry from
+            CUDA_VISIBLE_DEVICES. Falls back to the OpenMM index if the visible
+            set is unknown, which is correct whenever it starts at zero and is
+            contiguous.
+        """
+        gpu_devices = getattr(self, "_gpu_devices", None)
+
+        if gpu_devices is None or device >= len(gpu_devices):
+            return device
+
+        return gpu_devices[device]
+
     @staticmethod
-    def _check_device_memory(device_index=0):
+    def _check_device_memory(device=0):
         """
         Check the memory usage of the specified GPU device.
 
         Parameters
         ----------
 
-        index: int
-            The index of the GPU device.
+        device: int, str
+            The device to query. This is the physical device, i.e. an entry
+            from CUDA_VISIBLE_DEVICES (or the equivalent for other platforms),
+            not the index used by OpenMM. OpenMM numbers devices relative to
+            the visible set, whereas pynvml and pyopencl enumerate all devices
+            on the machine, so the two only agree when the visible set starts
+            at zero and is contiguous. CUDA_VISIBLE_DEVICES entries may be
+            either an index or a UUID.
         """
+
+        device = str(device).strip()
+
+        # A UUID cannot be used to index into the OpenCL device list.
+        is_uuid = device.startswith("GPU-") or device.startswith("MIG-")
+        device_index = None if is_uuid else int(device)
 
         # Try to use pyopencl to detect the GPU vendor.
         vendor = None
         ocl_device = None
         try:
             import pyopencl as cl
+
+            if device_index is None:
+                raise ValueError("Cannot index OpenCL devices by UUID")
 
             platforms = cl.get_platforms()
             all_devices = []
@@ -666,15 +720,20 @@ class DynamicsCache:
                 import pynvml
 
                 pynvml.nvmlInit()
-                handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
+                if is_uuid:
+                    handle = pynvml.nvmlDeviceGetHandleByUUID(device.encode())
+                else:
+                    handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
                 memory = pynvml.nvmlDeviceGetMemoryInfo(handle)
                 pynvml.nvmlShutdown()
                 return (memory.used, memory.free, memory.total)
             except Exception as e:
                 if vendor is None:
-                    msg = f"Could not get GPU memory info for device {device_index} via OpenCL or pynvml: {e}"
+                    msg = f"Could not get GPU memory info for device {device} via OpenCL or pynvml: {e}"
                 else:
-                    msg = f"Could not get NVIDIA GPU memory info for device {device_index}: {e}"
+                    msg = (
+                        f"Could not get NVIDIA GPU memory info for device {device}: {e}"
+                    )
                 _logger.error(msg)
                 raise RuntimeError(msg) from e
 
@@ -692,9 +751,7 @@ class DynamicsCache:
                 used = total - free
                 return (used, free, total)
             except Exception as e:
-                msg = (
-                    f"Could not get AMD GPU memory info for device {device_index}: {e}"
-                )
+                msg = f"Could not get AMD GPU memory info for device {device}: {e}"
                 _logger.error(msg)
                 raise RuntimeError(msg) from e
 
@@ -763,6 +820,10 @@ class RepexRunner(_RunnerBase):
             self._num_gpus = len(gpu_devices)
         else:
             self._num_gpus = min(self._config.max_gpus, len(gpu_devices))
+
+        # The physical devices backing each OpenMM device index. OpenMM numbers
+        # devices relative to the visible set, so index i is gpu_devices[i].
+        self._gpu_devices = list(gpu_devices)[: self._num_gpus]
 
         # Auto-generate a Boresch restraint for ABFE runs with no user-supplied
         # restraint. This must happen before the dynamics cache is built below,
@@ -851,6 +912,7 @@ class RepexRunner(_RunnerBase):
                 perturbed_system=self._perturbed_system,
                 output_directory=self._config.output_directory,
                 xml_filenames=xml_filenames,
+                gpu_devices=self._gpu_devices,
             )
 
         else:
@@ -920,6 +982,10 @@ class RepexRunner(_RunnerBase):
             # objects are initialised with the correct integrator step count.
             if not isinstance(self._system, list):
                 self._system.set_time(time)
+
+            # The physical device list is not pickled, since the run may be
+            # restarted against a different set of GPUs.
+            self._dynamics_cache._gpu_devices = self._gpu_devices
 
             # Create the dynamics objects.
             self._dynamics_cache._create_dynamics(

@@ -148,3 +148,90 @@ def test_rest2_selection(ethane_methanol, rest2_selection, is_valid):
         else:
             with pytest.raises(ValueError):
                 runner = RunnerBase(ethane_methanol, Config(**config))
+
+
+@pytest.mark.parametrize(
+    "gpu_devices, expected",
+    [
+        # Visible set starts at zero and is contiguous, so the OpenMM index and
+        # the physical device agree.
+        (["0", "1", "2"], ["0", "1", "2"]),
+        # Offset visible set: OpenMM index 0 is physical device 1.
+        (["1", "2"], ["1", "2"]),
+        # A single device that is not device zero.
+        (["3"], ["3"]),
+        # CUDA_VISIBLE_DEVICES may hold UUIDs rather than indices.
+        (["GPU-abc123", "GPU-def456"], ["GPU-abc123", "GPU-def456"]),
+        # Unknown visible set falls back to the OpenMM index.
+        (None, [0, 1]),
+    ],
+)
+def test_physical_device_mapping(gpu_devices, expected):
+    """
+    Validate that an OpenMM device index is mapped to the physical device
+    backing it.
+
+    OpenMM numbers devices relative to the visible set, whereas pynvml and
+    pyopencl enumerate every device on the machine. Querying the memory of a
+    device by its OpenMM index therefore reports the wrong GPU whenever the
+    visible set does not start at zero.
+    """
+    from somd2.runner._repex import DynamicsCache
+
+    cache = object.__new__(DynamicsCache)
+    cache._gpu_devices = gpu_devices
+
+    assert [cache._physical_device(i) for i in range(len(expected))] == expected
+
+
+@pytest.mark.parametrize(
+    "device, key, value",
+    [
+        ("2", "index", 2),
+        (2, "index", 2),
+        ("GPU-abc123", "uuid", b"GPU-abc123"),
+    ],
+)
+def test_check_device_memory_queries_requested_device(monkeypatch, device, key, value):
+    """
+    Validate that the memory query is made against the device it was asked
+    for, by index or by UUID.
+    """
+    import sys
+    import types
+
+    from somd2.runner._repex import DynamicsCache
+
+    pynvml = pytest.importorskip("pynvml")
+
+    # Force the OpenCL branch to fail so that the pynvml path is always taken,
+    # regardless of what the machine running the tests has installed.
+    broken = types.SimpleNamespace()
+
+    def get_platforms():
+        raise RuntimeError("no OpenCL")
+
+    broken.get_platforms = get_platforms
+    monkeypatch.setitem(sys.modules, "pyopencl", broken)
+
+    requested = {}
+
+    class Memory:
+        used, free, total = 1, 2, 3
+
+    def by_index(index):
+        requested["index"] = index
+        return "handle"
+
+    def by_uuid(uuid):
+        requested["uuid"] = uuid
+        return "handle"
+
+    monkeypatch.setattr(pynvml, "nvmlInit", lambda: None)
+    monkeypatch.setattr(pynvml, "nvmlShutdown", lambda: None)
+    monkeypatch.setattr(pynvml, "nvmlDeviceGetHandleByIndex", by_index)
+    monkeypatch.setattr(pynvml, "nvmlDeviceGetHandleByUUID", by_uuid)
+    monkeypatch.setattr(pynvml, "nvmlDeviceGetMemoryInfo", lambda handle: Memory)
+
+    assert DynamicsCache._check_device_memory(device) == (1, 2, 3)
+    assert requested == {key: value}
