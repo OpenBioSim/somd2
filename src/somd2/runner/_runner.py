@@ -823,7 +823,12 @@ class Runner(_RunnerBase):
             stats = self._load_sampler_stats(index)
             if stats is not None:
                 if gcmc_sampler is not None and "gcmc" in stats:
-                    gcmc_sampler.restore_stats(stats["gcmc"])
+                    gcmc_stats = stats["gcmc"]
+                    if self._is_legacy_gcmc_stats(gcmc_stats):
+                        gcmc_stats = self._convert_legacy_gcmc_stats(
+                            gcmc_stats, self._lambda_values[index]
+                        )
+                    gcmc_sampler.restore_stats(gcmc_stats)
                 if terminal_flip_sampler is not None and "terminal_flip" in stats:
                     attempted, accepted = stats["terminal_flip"]
                     terminal_flip_sampler.reset(attempted, accepted)
