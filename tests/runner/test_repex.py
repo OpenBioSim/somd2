@@ -440,6 +440,10 @@ def test_repex_concurrent_slots(ethane_methanol):
     Validate that replicas sharing a slot are never propagated concurrently.
     Oversubscribing exercises this on a single GPU, since the worker count is
     the number of GPUs times the oversubscription factor.
+
+    This is also the only test that equilibrates, so it covers moving replicas
+    in and out of their slots during equilibration, the context rebuild when
+    the constraints change, and the post-equilibration checkpoint.
     """
     num_lambda = 4
 
@@ -451,6 +455,7 @@ def test_repex_concurrent_slots(ethane_methanol):
             "energy_frequency": "4fs",
             "checkpoint_frequency": "4fs",
             "frame_frequency": "4fs",
+            "equilibration_time": "4fs",
             "platform": "cuda",
             "max_threads": 1,
             "num_lambda": num_lambda,
@@ -460,6 +465,15 @@ def test_repex_concurrent_slots(ethane_methanol):
         }
 
         runner = RepexRunner(ethane_methanol, Config(**config))
+
+        # Guard against the equilibration coverage being lost silently.
+        assert runner._is_equilibration
+
+        # Minimising without constraints and equilibrating with them means the
+        # contexts are rebuilt part way through, which is the path being
+        # covered here.
+        assert not runner._config.minimisation_constraints
+        assert runner._config.equilibration_constraints
 
         # Every batch must contain at most one replica per slot.
         num_workers = runner._num_gpus * config["oversubscription_factor"]

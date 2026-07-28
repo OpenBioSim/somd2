@@ -56,6 +56,7 @@ class DynamicsCache:
         xml_filenames=None,
         num_slots=None,
         update_constraints=True,
+        constraint_lambda_index=None,
         gpu_devices=None,
     ):
         """
@@ -103,6 +104,15 @@ class DynamicsCache:
             Whether to update the constraints when changing the lambda value of
             a slot.
 
+        constraint_lambda_index: int
+            The index of the lambda value to create every context at, so that
+            constrained bond lengths are the same for every replica. If None,
+            each context is created at the lambda value of the first replica it
+            hosts, which is only consistent between replicas when there is a
+            context each. Only meaningful when 'update_constraints' is False,
+            since the constraints are otherwise updated whenever lambda
+            changes.
+
         gpu_devices: list
             The physical devices backing each OpenMM device index, i.e. the
             entries of CUDA_VISIBLE_DEVICES. Used to query the memory of the
@@ -127,6 +137,7 @@ class DynamicsCache:
         self._num_replicas = num_replicas
         self._num_slots = num_slots
         self._update_constraints = update_constraints
+        self._constraint_lambda_index = constraint_lambda_index
         self._gpu_devices = gpu_devices
         self._states = _np.array(range(num_replicas))
         self._time = None
@@ -373,6 +384,14 @@ class DynamicsCache:
             lam = lambdas[seed]
             scale = rest2_scale_factors[seed]
 
+            # Create the context at a common lambda value, so that constrained
+            # bond lengths are the same for every replica. Only set when the
+            # constraints aren't updated as the slot changes lambda.
+            if self._constraint_lambda_index is None:
+                build_lam = lam
+            else:
+                build_lam = lambdas[self._constraint_lambda_index]
+
             # Work out the device index.
             device = i % num_gpus
 
@@ -402,7 +421,7 @@ class DynamicsCache:
 
             # Overload the device and lambda value.
             dynamics_kwargs["device"] = device
-            dynamics_kwargs["lambda_value"] = lam
+            dynamics_kwargs["lambda_value"] = build_lam
             dynamics_kwargs["rest2_scale"] = scale
 
             if gcmc_kwargs is not None:
@@ -1212,6 +1231,7 @@ class RepexRunner(_RunnerBase):
                 xml_filenames=xml_filenames,
                 num_slots=self._num_slots,
                 update_constraints=self._config.update_constraints,
+                constraint_lambda_index=self._constraint_lambda_index,
                 gpu_devices=self._gpu_devices,
             )
 
@@ -1292,6 +1312,9 @@ class RepexRunner(_RunnerBase):
             # is per-replica, so it doesn't depend on the grouping.
             self._dynamics_cache._num_slots = self._num_slots
             self._dynamics_cache._update_constraints = self._config.update_constraints
+            self._dynamics_cache._constraint_lambda_index = (
+                self._constraint_lambda_index
+            )
             self._dynamics_cache._build_slot_layout()
 
             # Create the dynamics objects.
@@ -1394,6 +1417,32 @@ class RepexRunner(_RunnerBase):
         # keyed by replica index and emptied by _checkpoint().
         self._committed = {}
 
+    def _build_lambda(self, replica):
+        """
+        Return the lambda value to create a replica's context at.
+
+        This is the replica's own lambda value, unless the constraints are
+        fixed at a common one, in which case a rebuilt context has to use that
+        too or it would pick up the constrained bond lengths of its own lambda
+        value instead.
+
+        Parameters
+        ----------
+
+        replica: int
+            The index of the replica.
+
+        Returns
+        -------
+
+        float
+            The lambda value to create the context at.
+        """
+        if self._constraint_lambda_index is None:
+            return self._lambda_values[replica]
+
+        return self._lambda_values[self._constraint_lambda_index]
+
     def _replica_passes(self, cycle):
         """
         Work out which replicas to propagate in each pass of a cycle.
@@ -1485,8 +1534,11 @@ class RepexRunner(_RunnerBase):
             self._num_slots = min(self._config.max_contexts, num_replicas)
 
         # There is a context per replica, so nothing is re-used and all of the
-        # constraints below are irrelevant.
+        # constraints below are irrelevant. A context then keeps the lambda
+        # value it was created at, so there is no need to fix the constraints
+        # at a common one.
         self._is_cached = self._num_slots < num_replicas
+        self._constraint_lambda_index = None
 
         if not self._is_cached:
             if self._config.max_contexts is not None:
@@ -1526,11 +1578,31 @@ class RepexRunner(_RunnerBase):
                 "suboptimal performance."
             )
 
-        if not self._config.update_constraints:
+        # When the constraints aren't updated as a slot changes lambda, they stay
+        # as they were when its context was created. Create every context at the
+        # same lambda value, so that the constrained bond lengths are uniform
+        # across replicas rather than depending on which slot a replica happens
+        # to be assigned to. Only needed if they actually perturb.
+        if not self._config.update_constraints and self._end_state_constraints_differ:
+            # Which lambda value is used matters less than every replica using
+            # the same one, since where the bonds actually perturb depends on
+            # the lambda schedule.
+            if self._config.constraint_lambda_index >= num_replicas:
+                msg = (
+                    f"'constraint_lambda_index' "
+                    f"({self._config.constraint_lambda_index}) is out of range "
+                    f"for {num_replicas} {_lam_sym} values."
+                )
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            self._constraint_lambda_index = self._config.constraint_lambda_index
             _logger.warning(
-                "'update_constraints' is False. Constrained bond lengths will not "
-                "perturb with lambda, and are frozen at those of the lambda value "
-                "each context was created at."
+                f"'update_constraints' is False. Constrained bond lengths will not "
+                f"perturb with lambda, and are fixed at those of "
+                f"{_lam_sym} = "
+                f"{self._lambda_values[self._constraint_lambda_index]:.5f} "
+                f"for every replica."
             )
 
         from math import ceil
@@ -2264,7 +2336,7 @@ class RepexRunner(_RunnerBase):
 
                     # Overload the device and lambda value.
                     dynamics_kwargs["device"] = device
-                    dynamics_kwargs["lambda_value"] = self._lambda_values[index]
+                    dynamics_kwargs["lambda_value"] = self._build_lambda(index)
                     dynamics_kwargs["rest2_scale"] = self._rest2_scale_factors[index]
 
                     # Create the production dynamics object.
@@ -2374,7 +2446,7 @@ class RepexRunner(_RunnerBase):
 
                     # Overload the device and lambda value.
                     dynamics_kwargs["device"] = device
-                    dynamics_kwargs["lambda_value"] = self._lambda_values[index]
+                    dynamics_kwargs["lambda_value"] = self._build_lambda(index)
                     dynamics_kwargs["rest2_scale"] = self._rest2_scale_factors[index]
                     dynamics_kwargs["timestep"] = self._config._equilibration_timestep
                     dynamics_kwargs["constraint"] = constraint
@@ -2420,7 +2492,7 @@ class RepexRunner(_RunnerBase):
 
             # Overload the device and lambda value.
             dynamics_kwargs["device"] = device
-            dynamics_kwargs["lambda_value"] = self._lambda_values[index]
+            dynamics_kwargs["lambda_value"] = self._build_lambda(index)
             dynamics_kwargs["rest2_scale"] = self._rest2_scale_factors[index]
 
             # Create the production dynamics object.

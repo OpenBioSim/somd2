@@ -1188,7 +1188,12 @@ class RunnerBase:
         """
         Internal function to check whether the constraints are the same at the two
         end states.
+
+        Sets self._end_state_constraints_differ, which records whether any
+        constrained bond length changes with lambda.
         """
+
+        self._end_state_constraints_differ = False
 
         # Find all perturbable molecules in the system..
         pert_mols = self._system.molecules("property is_perturbable")
@@ -1214,12 +1219,14 @@ class RunnerBase:
 
             # Check for equivalence.
             if len(constraints0) != len(constraints1):
+                self._end_state_constraints_differ = True
                 _logger.info(
                     f"Constraints are at not the same at {_lam_sym} = 0 and {_lam_sym} = 1."
                 )
             else:
                 for c0, c1 in zip(constraints0, constraints1):
                     if c0 != c1:
+                        self._end_state_constraints_differ = True
                         _logger.info(
                             f"Constraints are at not the same at {_lam_sym} = 0 and {_lam_sym} = 1."
                         )

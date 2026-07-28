@@ -140,6 +140,7 @@ class Config:
         replica_exchange=False,
         max_contexts=None,
         update_constraints=True,
+        constraint_lambda_index=0,
         randomise_velocities=False,
         perturbed_system=None,
         terminal_flip_frequency=None,
@@ -396,9 +397,21 @@ class Config:
             constraints is correct, but requires the OpenMM context to be reinitialised
             whenever a constrained bond length actually changes, which is slow. Set this
             to False if that overhead is significant; the constrained bond lengths are
-            then frozen at those of the lambda value the context was created at. Note
-            that this is distinct from 'dynamic_constraints', which controls where the
-            constraint lengths are taken from rather than whether they track lambda.
+            then frozen at those of the lambda value given by
+            'constraint_lambda_index'. Note that this is distinct from
+            'dynamic_constraints', which controls where the constraint lengths are
+            taken from rather than whether they track lambda.
+
+        constraint_lambda_index: int
+            The index of the lambda value at which to fix the constrained bond lengths
+            when 'update_constraints' is False. Every context is created at this lambda
+            value, so that the constraints are the same for all replicas rather than
+            depending on which context a replica is assigned to. The default of zero is
+            arbitrary but consistent; a lambda schedule that perturbs bonds away from
+            the end states may warrant a different choice. This is only used for
+            replica exchange simulations, and only when 'max_contexts' is less than the
+            number of replicas, 'update_constraints' is False, and a constrained bond
+            length actually perturbs with lambda.
 
         randomise_velocities: bool
             Whether to randomise velocities at the start of each replica exchange cycle
@@ -655,6 +668,7 @@ class Config:
         self.replica_exchange = replica_exchange
         self.max_contexts = max_contexts
         self.update_constraints = update_constraints
+        self.constraint_lambda_index = constraint_lambda_index
         self.randomise_velocities = randomise_velocities
         self.perturbed_system = perturbed_system
         self.terminal_flip_frequency = terminal_flip_frequency
@@ -1834,6 +1848,23 @@ class Config:
         if not isinstance(update_constraints, bool):
             raise ValueError("'update_constraints' must be of type 'bool'")
         self._update_constraints = update_constraints
+
+    @property
+    def constraint_lambda_index(self):
+        return self._constraint_lambda_index
+
+    @constraint_lambda_index.setter
+    def constraint_lambda_index(self, constraint_lambda_index):
+        if not isinstance(constraint_lambda_index, int):
+            try:
+                constraint_lambda_index = int(constraint_lambda_index)
+            except Exception:
+                raise ValueError("'constraint_lambda_index' must be of type 'int'")
+        if constraint_lambda_index < 0:
+            raise ValueError(
+                "'constraint_lambda_index' must be greater than or equal to 0"
+            )
+        self._constraint_lambda_index = constraint_lambda_index
 
     @property
     def randomise_velocities(self):
