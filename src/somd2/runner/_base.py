@@ -2415,6 +2415,53 @@ class RunnerBase:
         system.delete_all_frames()
         _sr.stream.save(system, self._filenames[index]["checkpoint"])
 
+    @staticmethod
+    def _is_legacy_gcmc_stats(stats):
+        """
+        Whether GCMC statistics are in the format used before a sampler could
+        be re-used across lambda values.
+
+        Those were a flat dictionary of counters for a single lambda value,
+        rather than a dictionary of counters keyed by lambda value.
+
+        Parameters
+        ----------
+
+        stats: dict
+            The GCMC sampling statistics.
+
+        Returns
+        -------
+
+        bool
+            Whether the statistics are in the old format.
+        """
+        return isinstance(stats, dict) and "num_moves" in stats
+
+    @staticmethod
+    def _convert_legacy_gcmc_stats(stats, lambda_value):
+        """
+        Convert GCMC statistics from the old format to the current one.
+
+        Parameters
+        ----------
+
+        stats: dict
+            A flat dictionary of counters, for a single lambda value.
+
+        lambda_value: float
+            The lambda value that the statistics belong to.
+
+        Returns
+        -------
+
+        dict
+            The statistics, keyed by lambda value.
+        """
+        from loch import GCMCSampler as _GCMCSampler
+
+        return {_GCMCSampler.stats_key(lambda_value): dict(stats)}
+
     def _backup_checkpoint(self, index):
         """
         Create a backup of the previous checkpoint files.

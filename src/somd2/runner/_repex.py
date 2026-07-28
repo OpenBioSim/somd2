@@ -113,7 +113,8 @@ class DynamicsCache:
         self._openmm_states = [None] * len(lambdas)
         self._gcmc_samplers = [None] * len(lambdas)
         self._gcmc_states = [None] * len(lambdas)
-        self._gcmc_stats = [None] * len(lambdas)
+        # GCMC statistics for the whole simulation, keyed by lambda value.
+        self._gcmc_stats = None
         self._terminal_flip_stats = [[0, 0]] * len(lambdas)
         self._num_proposed = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
         self._num_accepted = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
@@ -143,13 +144,23 @@ class DynamicsCache:
         # so that old checkpoint files can still be loaded.
         n = len(self._lambdas)
         if not hasattr(self, "_gcmc_stats"):
-            self._gcmc_stats = [None] * n
+            self._gcmc_stats = None
         if not hasattr(self, "_gcmc_states"):
             self._gcmc_states = [None] * n
         if not hasattr(self, "_terminal_flip_stats"):
             self._terminal_flip_stats = [[0, 0]] * n
         if not hasattr(self, "_time"):
             self._time = None
+
+        # Checkpoints written before a sampler could be re-used across lambda
+        # values stored the GCMC statistics as a list of counters per replica.
+        # Convert these to a single dictionary keyed by lambda value.
+        if isinstance(self._gcmc_stats, list):
+            converted = {}
+            for lam, stats in zip(self._lambdas, self._gcmc_stats):
+                if _RunnerBase._is_legacy_gcmc_stats(stats):
+                    converted.update(_RunnerBase._convert_legacy_gcmc_stats(stats, lam))
+            self._gcmc_stats = converted if converted else None
 
     def __getstate__(self):
         """
@@ -1020,8 +1031,11 @@ class RepexRunner(_RunnerBase):
                         )
                     finally:
                         gcmc_sampler.pop()
-                    if self._dynamics_cache._gcmc_stats[i] is not None:
-                        gcmc_sampler.restore_stats(self._dynamics_cache._gcmc_stats[i])
+
+                    # Samplers keep only the lambda values they visit, so it's
+                    # safe to hand each of them the whole simulation's stats.
+                    if self._dynamics_cache._gcmc_stats is not None:
+                        gcmc_sampler.restore_stats(self._dynamics_cache._gcmc_stats)
 
         # Log the GCMC sphere centre for each replica using the actual context
         # positions (accurate for both fresh runs and restarts).
@@ -2232,15 +2246,36 @@ class RepexRunner(_RunnerBase):
 
         return states
 
+    def _merge_gcmc_stats(self):
+        """
+        Merge the GCMC sampling statistics from every sampler.
+
+        A sampler accumulates statistics for each lambda value it visits, so
+        the results are gathered into a single dictionary keyed by lambda
+        value. Samplers only report the lambda values they visit, so the keys
+        are disjoint and the merge order doesn't matter.
+
+        Returns
+        -------
+
+        dict
+            The statistics for each lambda value, or None if not using GCMC.
+        """
+        stats = {}
+
+        for i in range(len(self._lambda_values)):
+            _, gcmc_sampler = self._dynamics_cache.get(i)
+            if gcmc_sampler is not None:
+                stats.update(gcmc_sampler.get_stats())
+
+        return stats if stats else None
+
     def _save_sampler_stats(self):
         """
         Save GCMC and terminal flip sampler statistics to the dynamics cache
         prior to pickling.
         """
-        for i in range(len(self._lambda_values)):
-            _, gcmc_sampler = self._dynamics_cache.get(i)
-            if gcmc_sampler is not None:
-                self._dynamics_cache._gcmc_stats[i] = gcmc_sampler.get_stats()
+        self._dynamics_cache._gcmc_stats = self._merge_gcmc_stats()
 
         if self._terminal_flip_samplers is not None:
             self._dynamics_cache._terminal_flip_stats = [
