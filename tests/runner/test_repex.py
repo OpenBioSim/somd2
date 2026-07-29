@@ -296,8 +296,9 @@ def test_repex_bounded_contexts_output_equivalence(ethane_methanol):
 def test_repex_bounded_contexts_restart(ethane_methanol):
     """
     Validate that a replica exchange simulation using fewer contexts than
-    replicas can be restarted, and that the energy trajectory is extended
-    rather than restarted.
+    replicas can be restarted, that each replica resumes from the state it
+    stopped at, and that the energy trajectory is extended rather than
+    restarted.
     """
     import pandas as pd
 
@@ -326,11 +327,66 @@ def test_repex_bounded_contexts_restart(ethane_methanol):
             for i in range(num_lambda)
         ]
 
+        # The state each replica finished at, which the checkpoint holds.
+        import openmm.unit as omm_unit
+
+        stopped = [
+            {
+                "positions": state["positions"].value_in_unit(omm_unit.nanometer),
+                "velocities": state["velocities"].value_in_unit(
+                    omm_unit.nanometer / omm_unit.picosecond
+                ),
+                "box": state["box"].value_in_unit(omm_unit.nanometer),
+            }
+            for state in runner._dynamics_cache._openmm_states
+        ]
+
         # Restart, extending the runtime.
         config["runtime"] = "16fs"
         config["restart"] = True
 
         runner = RepexRunner(ethane_methanol, Config(**config))
+
+        # Every replica must resume from where it stopped. The contexts are
+        # created from the input system, so the only thing carrying the
+        # simulated state across a restart is the checkpoint.
+        for i in range(num_lambda):
+            state = runner._dynamics_cache._openmm_states[i]
+            for key, unit in (
+                ("positions", omm_unit.nanometer),
+                ("velocities", omm_unit.nanometer / omm_unit.picosecond),
+                ("box", omm_unit.nanometer),
+            ):
+                assert np.allclose(
+                    state[key].value_in_unit(unit), stopped[i][key], atol=1e-6
+                ), f"replica {i} {key} not restored"
+
+        # The input coordinates must not be what was restored, otherwise the
+        # checks above would pass even if the checkpoint were ignored.
+        import sire as sr
+
+        inputs = sr.io.get_coords_array(runner._system)
+        restored = runner._dynamics_cache._openmm_states[0]["positions"].value_in_unit(
+            omm_unit.angstrom
+        )
+        assert not np.allclose(restored, inputs, atol=1e-3)
+
+        # Restoring the checkpoint into the cache is not enough: the contexts
+        # are created from the input system, so the state has to reach them
+        # too. Loading a replica is what pushes it.
+        for i in range(num_lambda):
+            runner._dynamics_cache.load_replica(i)
+            dynamics, _ = runner._dynamics_cache.get(runner._dynamics_cache.slot_for(i))
+            positions = (
+                dynamics.context()
+                .getState(getPositions=True)
+                .getPositions(asNumpy=True)
+                .value_in_unit(omm_unit.nanometer)
+            )
+            assert np.allclose(positions, stopped[i]["positions"], atol=1e-5), (
+                f"replica {i} positions not pushed into its context"
+            )
+
         runner.run()
 
         for i in range(num_lambda):
