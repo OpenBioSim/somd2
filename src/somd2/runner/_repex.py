@@ -124,13 +124,6 @@ class DynamicsCache:
         if num_slots is None:
             num_slots = num_replicas
 
-        # Warn if the number of slots is not a multiple of the number of GPUs.
-        if num_slots > num_gpus and num_slots % num_gpus != 0:
-            _logger.warning(
-                "The number of contexts is not a multiple of the number of GPUs. "
-                "This may result in suboptimal performance."
-            )
-
         # Initialise attributes.
         self._lambdas = lambdas
         self._rest2_scale_factors = rest2_scale_factors
@@ -1589,6 +1582,22 @@ class RepexRunner(_RunnerBase):
         self._is_cached = self._num_slots < num_replicas
         self._constraint_lambda_index = None
 
+        # Contexts run concurrently, so it's the number of them that determines
+        # how evenly the GPUs are loaded, not the number of replicas.
+        num_workers = self._num_gpus * self._config.oversubscription_factor
+
+        if self._num_slots < num_workers:
+            _logger.warning(
+                f"The number of contexts ({self._num_slots}) is less than the "
+                f"number of workers ({num_workers}). Some GPUs will be left idle."
+            )
+        elif self._num_slots % self._num_gpus != 0:
+            _logger.warning(
+                f"The number of contexts ({self._num_slots}) is not a multiple "
+                f"of the number of GPUs ({self._num_gpus}). This may result in "
+                "suboptimal performance."
+            )
+
         if not self._is_cached:
             if self._config.max_contexts is not None:
                 _logger.info(
@@ -1612,20 +1621,6 @@ class RepexRunner(_RunnerBase):
             )
             _logger.error(msg)
             raise ValueError(msg)
-
-        num_workers = self._num_gpus * self._config.oversubscription_factor
-
-        if self._num_slots < num_workers:
-            _logger.warning(
-                f"'max_contexts' ({self._num_slots}) is less than the number of "
-                f"workers ({num_workers}). Some GPUs will be left idle."
-            )
-        elif self._num_slots % self._num_gpus != 0:
-            _logger.warning(
-                f"'max_contexts' ({self._num_slots}) is not a multiple of the "
-                f"number of GPUs ({self._num_gpus}). This may result in "
-                "suboptimal performance."
-            )
 
         # When the constraints aren't updated as a slot changes lambda, they stay
         # as they were when its context was created. Create every context at the
