@@ -692,6 +692,30 @@ class DynamicsCache:
         }
 
     @staticmethod
+    def _get_positions(state):
+        """
+        Return the positions from a saved OpenMM state.
+
+        Parameters
+        ----------
+
+        state: dict or openmm.State
+            The state to read. Dicts (new format) hold the positions directly.
+            A bare openmm.State is accepted for backwards compatibility with
+            old checkpoint files, as it is by _apply_openmm_state().
+
+        Returns
+        -------
+
+        openmm.unit.Quantity
+            The positions.
+        """
+        if isinstance(state, dict):
+            return state["positions"]
+
+        return state.getPositions(asNumpy=True)
+
+    @staticmethod
     def _apply_openmm_state(context, state):
         """
         Apply a saved OpenMM state to a context.
@@ -1356,7 +1380,9 @@ class RepexRunner(_RunnerBase):
         for i, lam in enumerate(self._lambda_values):
             _, gcmc_sampler = self._dynamics_cache.get(self._dynamics_cache.slot_for(i))
             if gcmc_sampler is not None and gcmc_sampler._reference is not None:
-                positions = self._dynamics_cache._openmm_states[i]["positions"]
+                positions = DynamicsCache._get_positions(
+                    self._dynamics_cache._openmm_states[i]
+                )
                 target = gcmc_sampler._get_target_position(
                     positions.value_in_unit(_omm_unit.angstrom)
                 )
