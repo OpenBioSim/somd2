@@ -381,6 +381,14 @@ class DynamicsCache:
             # The replica that seeds this slot.
             seed = self._groups[i][0]
 
+            # The replica in the middle of the group, used to choose which end
+            # state the starting coordinates come from. A slot's context is
+            # created from a single system and every replica it hosts starts
+            # from that context, so taking the middle rather than the first
+            # keeps any mismatch to at most half a group, next to the lambda
+            # value at which the end state switches.
+            middle = self._groups[i][len(self._groups[i]) // 2]
+
             lam = lambdas[seed]
             scale = rest2_scale_factors[seed]
 
@@ -411,7 +419,7 @@ class DynamicsCache:
                 mols = system[seed]
             # This is a new simulation. For lambda > 0.5, use the perturbed
             # system to seed the starting coordinates and periodic space.
-            elif perturbed_system is not None and lam > 0.5:
+            elif perturbed_system is not None and lambdas[middle] > 0.5:
                 mols = perturbed_system
             else:
                 mols = system

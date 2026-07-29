@@ -723,3 +723,85 @@ def test_repex_gcmc_lambda_cache_warm(ethane_methanol, monkeypatch):
 
         assert len(calls) == 2
         assert (uncached, sampler._rest2_scale) in sampler._lambda_params
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+def test_repex_perturbed_system_seeding(ethane_methanol):
+    """
+    Validate that the end states are seeded from the right coordinates when
+    contexts are shared.
+
+    A context is created from a single system and every replica it hosts starts
+    from that context, so the end state a replica starts from is chosen from
+    the middle of the group rather than its first replica. That keeps any
+    mismatch next to the lambda value at which the end state switches, instead
+    of it depending on where the groups happen to fall.
+    """
+    import sire as sr
+
+    # A perturbed end state, displaced so that its coordinates are distinct.
+    perturbed = ethane_methanol.clone()
+    perturbed.set_property("space", ethane_methanol.property("space"))
+    coords = sr.io.get_coords_array(ethane_methanol)
+    from sire.legacy.IO import setCoordinates
+
+    perturbed = sr.system.System(
+        setCoordinates(perturbed._system, (coords + 1.0).tolist())
+    )
+
+    # Ten replicas across three contexts, a layout in which the switch falls
+    # inside a group.
+    num_lambda = 10
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "4fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": num_lambda,
+            "replica_exchange": True,
+            "max_contexts": 3,
+            "perturbed_system": perturbed,
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+
+        reference = sr.io.get_coords_array(runner._system)
+        target = sr.io.get_coords_array(runner._perturbed_system)
+
+        import openmm.unit as omm_unit
+
+        seeded = []
+        for i in range(num_lambda):
+            positions = runner._dynamics_cache._openmm_states[i][
+                "positions"
+            ].value_in_unit(omm_unit.angstrom)
+            from_reference = np.allclose(positions, reference, atol=1e-3)
+            from_target = np.allclose(positions, target, atol=1e-3)
+            assert from_reference != from_target, f"replica {i} matches neither"
+            seeded.append("perturbed" if from_target else "reference")
+
+        # The end states themselves must always be right.
+        assert seeded[0] == "reference"
+        assert seeded[-1] == "perturbed"
+
+        # Both systems must be used, otherwise the option does nothing.
+        assert set(seeded) == {"reference", "perturbed"}
+
+        # Only the group containing the switch can be seeded from the wrong end
+        # state, and then for no more than half of it. Choosing the end state
+        # from the first replica of a group rather than its middle breaks this.
+        lambdas = runner._lambda_values
+        for group in runner._dynamics_cache._groups:
+            wrong = [
+                i for i in group if (seeded[i] == "perturbed") != (lambdas[i] > 0.5)
+            ]
+            assert len(wrong) <= len(group) // 2, (
+                f"group {group} has {len(wrong)} replicas seeded from the "
+                f"wrong end state: {wrong}"
+            )
