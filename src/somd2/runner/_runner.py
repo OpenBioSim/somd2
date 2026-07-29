@@ -730,12 +730,9 @@ class Runner(_RunnerBase):
             import openmm.unit as _omm_unit
 
             _npz_state = _np.load(self._filenames[index]["checkpoint_state"])
-            dynamics.context().setPositions(
-                _npz_state["positions"] * _omm_unit.nanometer
-            )
-            dynamics.context().setVelocities(
-                _npz_state["velocities"] * _omm_unit.nanometer / _omm_unit.picosecond
-            )
+
+            # Set the box before the positions, since a barostat may have
+            # changed it between the state being saved and restored.
             if "box" in _npz_state:
                 from openmm import Vec3 as _Vec3
 
@@ -745,6 +742,13 @@ class Runner(_RunnerBase):
                     _Vec3(*_box[1]) * _omm_unit.nanometer,
                     _Vec3(*_box[2]) * _omm_unit.nanometer,
                 )
+
+            dynamics.context().setPositions(
+                _npz_state["positions"] * _omm_unit.nanometer
+            )
+            dynamics.context().setVelocities(
+                _npz_state["velocities"] * _omm_unit.nanometer / _omm_unit.picosecond
+            )
 
         # Reset the GCMC sampler. This resets the sampling statistics and clears
         # the associated OpenMM forces.

@@ -730,12 +730,17 @@ class DynamicsCache:
             The state to apply. Dicts (new format) contain "positions",
             "velocities", and "box" numpy arrays. A bare openmm.State is
             accepted for backwards compatibility with old checkpoint files.
+
+        Note that the step count and simulation time carried by an openmm.State
+        are deliberately not restored for the dict format. They are held
+        separately and applied by Dynamics._set_clock().
         """
         if isinstance(state, dict):
+            # Set the box before the positions, since a barostat may have
+            # changed it between the state being saved and restored.
+            context.setPeriodicBoxVectors(*state["box"])
             context.setPositions(state["positions"])
             context.setVelocities(state["velocities"])
-            if state["box"] is not None:
-                context.setPeriodicBoxVectors(*state["box"])
         else:
             # Legacy openmm.State from checkpoint files written before this
             # format change.
