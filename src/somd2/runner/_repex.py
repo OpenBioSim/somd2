@@ -1219,7 +1219,11 @@ class RepexRunner(_RunnerBase):
         perturbable_constraint = self._config.perturbable_constraint
 
         # Don't use constraints during minimisation.
-        if self._config.minimise and not self._config.minimisation_constraints:
+        if (
+            self._config.minimise
+            and not self._is_restart
+            and not self._config.minimisation_constraints
+        ):
             constraint = "none"
             perturbable_constraint = "none"
 
@@ -1743,8 +1747,8 @@ class RepexRunner(_RunnerBase):
         # Create the replica list.
         replica_list = list(range(self._config.num_lambda))
 
-        # Minimise at each lambda value.
-        if self._config.minimise:
+        # Minimise at each lambda value. Don't minimise on restart.
+        if self._config.minimise and not self._is_restart:
             for batch in self._safe_batches(num_workers):
                 with ThreadPoolExecutor(max_workers=num_workers) as executor:
                     try:

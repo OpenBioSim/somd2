@@ -560,8 +560,8 @@ class Runner(_RunnerBase):
         else:
             terminal_flip_sampler = None
 
-        # Minimisation.
-        if self._config.minimise:
+        # Minimisation. Don't minimise on restart.
+        if self._config.minimise and not is_restart:
             constraint = self._config.constraint
             perturbable_constraint = self._config.perturbable_constraint
 
