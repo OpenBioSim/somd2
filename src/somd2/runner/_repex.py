@@ -955,8 +955,14 @@ class DynamicsCache:
         self._gcmc_states = [self._gcmc_states[state] for state in self._states]
 
         # Flag the replicas whose state moved, so that load_replica() knows it
-        # has to push new positions and velocities into the context.
-        self._state_moved = [bool(state != i) for i, state in enumerate(self._states)]
+        # has to push new positions and velocities into the context. The flags
+        # accumulate, and are only cleared once the state has been pushed, so
+        # that a replica mixed twice without being loaded in between isn't left
+        # starting from whatever its context happens to hold.
+        self._state_moved = [
+            moved or bool(state != i)
+            for i, (state, moved) in enumerate(zip(self._states, self._state_moved))
+        ]
 
         # Update the swap matrix.
         for i, state in enumerate(self._states):
