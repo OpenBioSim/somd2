@@ -624,8 +624,9 @@ class RunnerBase:
         # Create a clone of the fully-prepared reference system with the
         # perturbed end-state coordinates and periodic space. This is done
         # after all system preparation so that the clone inherits the same
-        # topology and properties. It is used to seed starting coordinates
-        # for lambda > 0.5 replicas.
+        # topology and properties. It is used to seed starting coordinates for
+        # the replicas closest to the perturbed end state, i.e. lambda > 0.5,
+        # or lambda < 0.5 when the end states are swapped.
         if self._config.replica_exchange and self._config.perturbed_system is not None:
             from sire.legacy.IO import setCoordinates as _setCoordinates
 

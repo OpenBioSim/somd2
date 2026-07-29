@@ -407,12 +407,19 @@ class DynamicsCache:
                     "count": 0,
                 }
 
+            # Whether to seed from the perturbed end state. Swapping the end
+            # states reverses the lambda schedule, so the perturbed end state
+            # is then at lambda = 0 rather than lambda = 1.
+            seed_perturbed = (lambdas[middle] > 0.5) != dynamics_kwargs[
+                "swap_end_states"
+            ]
+
             # This is a restart, get the system for the seeding replica.
             if isinstance(system, list):
                 mols = system[seed]
-            # This is a new simulation. For lambda > 0.5, use the perturbed
-            # system to seed the starting coordinates and periodic space.
-            elif perturbed_system is not None and lambdas[middle] > 0.5:
+            # This is a new simulation. Use the perturbed system to seed the
+            # starting coordinates and periodic space.
+            elif perturbed_system is not None and seed_perturbed:
                 mols = perturbed_system
             else:
                 mols = system

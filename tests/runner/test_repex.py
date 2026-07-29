@@ -782,7 +782,8 @@ def test_repex_gcmc_lambda_cache_warm(ethane_methanol, monkeypatch):
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
-def test_repex_perturbed_system_seeding(ethane_methanol):
+@pytest.mark.parametrize("swap_end_states", [False, True])
+def test_repex_perturbed_system_seeding(ethane_methanol, swap_end_states):
     """
     Validate that the end states are seeded from the right coordinates when
     contexts are shared.
@@ -792,6 +793,9 @@ def test_repex_perturbed_system_seeding(ethane_methanol):
     the middle of the group rather than its first replica. That keeps any
     mismatch next to the lambda value at which the end state switches, instead
     of it depending on where the groups happen to fall.
+
+    Swapping the end states reverses the lambda schedule, so the perturbed end
+    state moves to lambda = 0 and the seeding must mirror with it.
 
     Only the perturbable molecule is displaced, so the assertions also cover
     the property path that its coordinates travel along: read from
@@ -844,6 +848,7 @@ def test_repex_perturbed_system_seeding(ethane_methanol):
             "replica_exchange": True,
             "max_contexts": 3,
             "perturbed_system": perturbed,
+            "swap_end_states": swap_end_states,
         }
 
         runner = RepexRunner(ethane_methanol, Config(**config))
@@ -863,9 +868,14 @@ def test_repex_perturbed_system_seeding(ethane_methanol):
             assert from_reference != from_target, f"replica {i} matches neither"
             seeded.append("perturbed" if from_target else "reference")
 
-        # The end states themselves must always be right.
-        assert seeded[0] == "reference"
-        assert seeded[-1] == "perturbed"
+        # The end states themselves must always be right. Swapping the end
+        # states puts the perturbed one at lambda = 0.
+        if swap_end_states:
+            assert seeded[0] == "perturbed"
+            assert seeded[-1] == "reference"
+        else:
+            assert seeded[0] == "reference"
+            assert seeded[-1] == "perturbed"
 
         # Both systems must be used, otherwise the option does nothing.
         assert set(seeded) == {"reference", "perturbed"}
@@ -876,7 +886,9 @@ def test_repex_perturbed_system_seeding(ethane_methanol):
         lambdas = runner._lambda_values
         for group in runner._dynamics_cache._groups:
             wrong = [
-                i for i in group if (seeded[i] == "perturbed") != (lambdas[i] > 0.5)
+                i
+                for i in group
+                if (seeded[i] == "perturbed") != ((lambdas[i] > 0.5) != swap_end_states)
             ]
             assert len(wrong) <= len(group) // 2, (
                 f"group {group} has {len(wrong)} replicas seeded from the "
