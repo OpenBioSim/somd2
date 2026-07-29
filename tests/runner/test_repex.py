@@ -792,17 +792,38 @@ def test_repex_perturbed_system_seeding(ethane_methanol):
     the middle of the group rather than its first replica. That keeps any
     mismatch next to the lambda value at which the end state switches, instead
     of it depending on where the groups happen to fall.
+
+    Only the perturbable molecule is displaced, so the assertions also cover
+    the property path that its coordinates travel along: read from
+    'coordinates1' via link_to_perturbed, written to 'coordinates0', then read
+    back via link_to_reference.
     """
     import sire as sr
 
-    # A perturbed end state, displaced so that its coordinates are distinct.
+    # A perturbed end state, with the perturbable molecule displaced so that
+    # its coordinates are distinct.
     perturbed = ethane_methanol.clone()
     perturbed.set_property("space", ethane_methanol.property("space"))
     coords = sr.io.get_coords_array(ethane_methanol)
     from sire.legacy.IO import setCoordinates
 
+    # Flag the atoms of the perturbable molecules. get_coords_array returns the
+    # atoms in molecule order, so the offset tracks the array index.
+    is_perturbable = np.zeros(len(coords), dtype=bool)
+    offset = 0
+    for mol in ethane_methanol.molecules():
+        num_atoms = mol.num_atoms()
+        if mol.has_property("is_perturbable"):
+            is_perturbable[offset : offset + num_atoms] = True
+        offset += num_atoms
+    assert is_perturbable.any(), "no perturbable molecules in the test system"
+
+    coords[is_perturbable] += 1.0
+
+    # Write to 'coordinates1', which is the property that the runner reads via
+    # link_to_perturbed.
     perturbed = sr.system.System(
-        setCoordinates(perturbed._system, (coords + 1.0).tolist())
+        setCoordinates(perturbed._system, coords.tolist(), True)
     )
 
     # Ten replicas across three contexts, a layout in which the switch falls
