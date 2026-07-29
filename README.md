@@ -161,16 +161,37 @@ GPUs 0 and 1.
 ## Replica exchange
 
 `SOMD2` supports Hamiltonian replica exchange (HREX) simulations, which can be
-enabled using the `--replica-exchange` option. Note that dynamics contexts will
-be created up-front for all replicas, so this can be memory intensive. As such,
+enabled using the `--replica-exchange` option. By default, dynamics contexts are
+created up-front for all replicas, so this can be memory intensive. As such,
 replica exchange is intended for use on multi-GPU nodes with a large amount of
-memory. For optimal performance, it is recommended that the number of replicas
-be a multiple of the number of GPUs. It is also possible to oversubscribe the
-GPUs, i.e. have more than one replica running on a GPU at a time. This can be
-controlled via the `--oversubscription-factor` option, e.g. a value of 2 would
-allow 2 replicas to run on each GPU at a time.
+memory. It is also possible to oversubscribe the GPUs, i.e. have more than one
+replica running on a GPU at a time. This can be controlled via the
+`--oversubscription-factor` option, e.g. a value of 2 would allow 2 replicas to
+run on each GPU at a time.
 
-The swap frequency for replica exchange is controlled by the `energy-frequency`
+If the number of replicas you want doesn't fit in GPU memory, use the
+`--max-contexts` option to cap the number of contexts that are created. Each
+context is then re-used to propagate several replicas per cycle, changing its
+lambda value as it goes, so the number of replicas is no longer limited by
+memory. For example, `--num-lambda 24 --max-contexts 4` runs 24 replicas using
+the memory of 4. This costs some performance, since the replicas sharing a
+context run one after another rather than at the same time, so only use it when
+one context per replica won't fit. When contexts are re-used, `--frame-frequency`
+must equal `--checkpoint-frequency`.
+
+For optimal performance, it is recommended that the number of contexts, i.e. the
+number of replicas, or `--max-contexts` if it is set, be a multiple of the number
+of GPUs, and no smaller than the number of GPUs multiplied by the
+oversubscription factor. `SOMD2` will warn you if this isn't the case.
+
+Changing the lambda value of a context requires it to be reinitialised whenever a
+constrained bond length actually perturbs with lambda, which is slow. If this
+overhead is significant, set `--update-constraints=False` to freeze the
+constrained bond lengths at those of a single lambda value, chosen with
+`--constraint-lambda-index`. Both options are ignored unless contexts are being
+re-used.
+
+The swap frequency for replica exchange is controlled by the `--energy-frequency`
 option, i.e. we compute the energies for all replicas at this frequency, then
 attempt to mix the replicas. A larger value will improve performance, but may
 reduce the efficiency of the exchange.
