@@ -572,6 +572,24 @@ def test_physical_device_mapping(gpu_devices, expected):
     assert [cache._physical_device(i) for i in range(len(expected))] == expected
 
 
+def test_max_contexts_advice():
+    """
+    Validate the advice given when the replicas don't fit in GPU memory. It
+    must name a number that the user can pass to 'max_contexts', and mention
+    the frame frequency constraint that comes with it.
+    """
+    from somd2.runner._repex import DynamicsCache
+
+    advice = DynamicsCache._max_contexts_advice(6)
+    assert "'max_contexts' to 6 or fewer" in advice
+    assert "frame_frequency" in advice and "checkpoint_frequency" in advice
+
+    # Nothing fits, so there is no number to suggest.
+    advice = DynamicsCache._max_contexts_advice(0)
+    assert "max_contexts" not in advice
+    assert "does not fit" in advice
+
+
 @pytest.mark.parametrize(
     "device, key, value",
     [

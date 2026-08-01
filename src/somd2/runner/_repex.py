@@ -467,7 +467,19 @@ class DynamicsCache:
             try:
                 dynamics = mols.dynamics(**dynamics_kwargs)
             except Exception as e:
-                msg = f"Could not create dynamics object for lambda {lam:.5f} on device {device}: {e}"
+                # Contexts are appended as they are created, so this is the
+                # number that fit before the failure.
+                num_created = len(self._dynamics)
+                msg = (
+                    f"Could not create dynamics object for lambda {lam:.5f} on "
+                    f"device {device} after creating {num_created} of "
+                    f"{self._num_slots} contexts: {e}"
+                )
+                # Failing partway through points at exhausted resources.
+                # Failing on the first context does not, so don't advise on
+                # the number of contexts in that case.
+                if num_created > 0:
+                    msg += f". {self._max_contexts_advice(num_created)}"
                 _logger.error(msg)
                 raise RuntimeError(msg) from e
 
@@ -534,12 +546,25 @@ class DynamicsCache:
                 if est_total > total_mem:
                     baseline = info["before"]
                     replica_cost = first_cost + marginal_cost * (num_contexts - 1)
+
+                    # How many contexts fit on this device, given the measured
+                    # cost of the first and the marginal cost of the rest. The
+                    # slots are spread evenly over the devices, so the total is
+                    # capped by what the busiest device can hold.
+                    if marginal_cost > 0:
+                        per_device = 1 + floor(
+                            (total_mem - baseline - first_cost) / marginal_cost
+                        )
+                    else:
+                        per_device = info["count"]
+
                     msg = (
                         f"Not enough memory on device {device} for all assigned replicas. "
                         f"Baseline usage before simulation: {baseline / (1024**3):.2f} GB "
                         f"Estimated replica memory: {replica_cost / (1024**3):.2f} GB, "
                         f"Total estimated: {est_total / (1024**3):.2f} GB, "
-                        f"Available memory: {total_mem / (1024**3):.2f} GB."
+                        f"Available memory: {total_mem / (1024**3):.2f} GB. "
+                        f"{self._max_contexts_advice(per_device * num_gpus)}"
                     )
                     _logger.error(msg)
                     raise MemoryError(msg)
@@ -1011,6 +1036,31 @@ class DynamicsCache:
             return device
 
         return gpu_devices[device]
+
+    @staticmethod
+    def _max_contexts_advice(num_contexts):
+        """
+        Advice for a user whose replicas don't fit in GPU memory.
+
+        Parameters
+        ----------
+
+        num_contexts: int
+            The number of OpenMM contexts that are known to fit.
+        """
+
+        if num_contexts < 1:
+            return (
+                "A single OpenMM context does not fit on this device. Reduce "
+                "the size of the system, or use a device with more memory."
+            )
+
+        return (
+            f"Set 'max_contexts' to {num_contexts} or fewer to re-use contexts "
+            "across lambda values, which removes the memory limit on the "
+            "number of replicas. This also requires 'frame_frequency' to equal "
+            "'checkpoint_frequency'."
+        )
 
     @staticmethod
     def _check_device_memory(device=0):
