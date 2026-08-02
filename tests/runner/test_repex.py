@@ -491,6 +491,50 @@ def test_repex_gcmc_bounded_contexts(ethane_methanol, max_contexts):
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+def test_repex_gcmc_without_a_selection(ethane_methanol):
+    """
+    Validate GCMC sampling with no 'gcmc_selection', where moves are attempted
+    within the entire simulation box rather than a region around a selection.
+
+    The sampler then has no reference, so it cannot count the waters within a
+    region, and every move samples the whole box. Counting the waters on each
+    replica handover has to account for that.
+    """
+    pytest.importorskip("loch")
+
+    num_lambda = 4
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "8fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": num_lambda,
+            "replica_exchange": True,
+            "max_contexts": 2,
+            "gcmc": True,
+            "gcmc_frequency": "4fs",
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+
+        # The bulk-only path is the point of this test, so make sure it can't
+        # stop being exercised without the test failing.
+        assert runner._dynamics_cache._gcmc_samplers[0]._reference is None
+
+        runner.run()
+
+        assert (Path(tmpdir) / "repex_matrix.txt").exists()
+        for lam in runner._lambda_values:
+            assert (Path(tmpdir) / f"gcmc_ghosts_{lam:.5f}.txt").exists()
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
 def test_repex_concurrent_slots(ethane_methanol):
     """
     Validate that replicas sharing a slot are never propagated concurrently.

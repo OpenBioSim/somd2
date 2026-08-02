@@ -818,7 +818,6 @@ class Runner(_RunnerBase):
                         dynamics.context(),
                         force=True,
                     )
-                    gcmc_sampler.num_waters(context=dynamics.context())
                 finally:
                     gcmc_sampler.pop()
 
@@ -1156,9 +1155,14 @@ class Runner(_RunnerBase):
                                 if n_moves > 0
                                 else ""
                             )
+                            # Count against the context, since dynamics have
+                            # run since the last move.
+                            num_waters = gcmc_sampler.num_waters(
+                                context=dynamics.context()
+                            )
                             _logger.info(
                                 f"Current number of waters in GCMC volume at {_lam_sym} = {lambda_value:.5f} "
-                                f"is {gcmc_sampler.num_waters()}{acc_str}"
+                                f"is {num_waters}{acc_str}"
                             )
                         finally:
                             gcmc_sampler.pop()
