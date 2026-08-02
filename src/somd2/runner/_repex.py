@@ -2605,14 +2605,6 @@ class RepexRunner(_RunnerBase):
             if gcmc_sampler is not None:
                 self._reset_gcmc_sampler(gcmc_sampler, dynamics)
 
-                # Compute the current number of waters in the GCMC sampling
-                # volume after equilibration.
-                gcmc_sampler.push()
-                try:
-                    gcmc_sampler.num_waters(context=dynamics.context())
-                finally:
-                    gcmc_sampler.pop()
-
             # Set the new dynamics object.
             self._dynamics_cache.set(slot, dynamics)
 
