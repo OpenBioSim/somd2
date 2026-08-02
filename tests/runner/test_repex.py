@@ -590,6 +590,52 @@ def test_max_contexts_advice():
     assert "does not fit" in advice
 
 
+def test_gcmc_state_follows_replica():
+    """
+    Validate that the GCMC water occupancy travels with the configuration it
+    belongs to when replicas are mixed.
+
+    A slot holds one GCMC sampler but hosts several replicas, and load_replica()
+    installs a replica's water state by diffing it against whatever the last
+    resident left in the sampler. If the occupancy did not follow the positions
+    through a mix, a replica would run with another replica's waters, which
+    gives plausible numbers rather than an obviously wrong output file.
+
+    The ghost files and the sampling statistics belong to the lambda window
+    rather than the configuration, so they must not be permuted.
+    """
+    from somd2.runner._repex import DynamicsCache
+
+    num_replicas = 4
+
+    cache = object.__new__(DynamicsCache)
+
+    # Label both states with the replica they came from, so that a replica
+    # holding mismatched positions and waters is detectable.
+    cache._openmm_states = list(range(num_replicas))
+    cache._gcmc_states = list(range(num_replicas))
+    cache._ghost_files = [f"ghosts_{i}.txt" for i in range(num_replicas)]
+    cache._state_moved = [False] * num_replicas
+    cache._num_swaps = np.zeros((num_replicas, num_replicas))
+
+    # Mix twice, since a slot is re-used within a cycle.
+    for states in ([2, 0, 3, 1], [1, 3, 0, 2]):
+        old_states = list(range(num_replicas))
+        expected = [cache._gcmc_states[state] for state in states]
+
+        cache._states = states
+        cache.mix_states(old_states)
+
+        # The water occupancy follows the same permutation as the positions.
+        assert cache._gcmc_states == expected
+
+        # Every replica holds the positions and waters of the same origin.
+        assert cache._openmm_states == cache._gcmc_states
+
+    # The ghost files stay with the lambda window.
+    assert cache._ghost_files == [f"ghosts_{i}.txt" for i in range(num_replicas)]
+
+
 @pytest.mark.parametrize(
     "device, key, value",
     [
