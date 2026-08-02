@@ -584,6 +584,7 @@ class Runner(_RunnerBase):
                     device=device,
                     constraint=constraint,
                     perturbable_constraint=perturbable_constraint,
+                    gcmc_sampler=gcmc_sampler,
                 )
             except Exception as e:
                 msg = f"Minimisation failed for {_lam_sym} = {lambda_value:.5f}: {e}"
@@ -637,6 +638,15 @@ class Runner(_RunnerBase):
                 if gcmc_sampler is not None:
                     # Bind the GCMC sampler to the dynamics object.
                     gcmc_sampler.bind_dynamics(dynamics)
+
+                    # This context is built from the system as it was committed
+                    # by minimisation, so it doesn't carry the water state that
+                    # the moves performed there left behind.
+                    gcmc_sampler.push()
+                    try:
+                        gcmc_sampler._set_water_state(dynamics.context(), force=True)
+                    finally:
+                        gcmc_sampler.pop()
 
                     _logger.info(
                         f"Equilibrating with GCMC moves at {_lam_sym} = {lambda_value:.5f}"
@@ -808,9 +818,11 @@ class Runner(_RunnerBase):
                     finally:
                         gcmc_sampler.pop()
 
-            # Otherwise, if we've performed equilibration, then we need to reset
-            # the water state in the new context to match the equilibrated system.
-            elif is_equilibrated:
+            # Otherwise, reset the water state in the new context to match the
+            # system that the preparation stages left behind. Both minimisation
+            # and equilibration perform GCMC moves, so the state held by the
+            # sampler is ahead of the one the context was built with.
+            else:
                 # Reset the water state.
                 gcmc_sampler.push()
                 try:
@@ -1537,6 +1549,7 @@ class Runner(_RunnerBase):
         device=None,
         constraint="none",
         perturbable_constraint="none",
+        gcmc_sampler=None,
     ):
         """
         Minimise a system.
@@ -1561,6 +1574,10 @@ class Runner(_RunnerBase):
 
         perturbable_constraint: str
             The constraint for perturbable molecules.
+
+        gcmc_sampler: :class: `GCMCSampler <loch.GCMCSampler>`
+            A GCMC sampler to pre-equilibrate the water with before minimising.
+            If None, then no GCMC moves are performed.
 
         Returns
         -------
@@ -1588,6 +1605,24 @@ class Runner(_RunnerBase):
         try:
             # Create a dynamics object.
             dynamics = system.dynamics(**dynamics_kwargs)
+
+            # Pre-equilibrate the water before minimising, so that a dry pocket
+            # is filled before the geometry relaxes into it. The context is
+            # created from the sampler's own system, so its water state already
+            # matches and only needs binding.
+            if gcmc_sampler is not None:
+                gcmc_sampler.bind_dynamics(dynamics)
+
+                _logger.info(
+                    f"Pre-equilibrating with GCMC moves at {_lam_sym} = {lambda_value:.5f}"
+                )
+
+                gcmc_sampler.push()
+                try:
+                    for i in range(100):
+                        gcmc_sampler.move(dynamics.context())
+                finally:
+                    gcmc_sampler.pop()
 
             # Run the minimisation.
             dynamics.minimise(timeout=self._config.timeout)

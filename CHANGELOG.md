@@ -17,6 +17,7 @@ Changelog
 * Link restart systems to the reference end state rather than the perturbed one, since that is the coordinate set that dynamics maintains. Perturbable molecules were otherwise resumed from the coordinates they were built with [#189](https://github.com/OpenBioSim/somd2/pull/189).
 * Add `max_contexts` to cap the number of OpenMM contexts used for replica exchange, re-using each across lambda values so that GPU memory no longer limits the number of replicas.
 * Skip minimisation on restart.
+* Pre-equilibrate the water with GCMC moves before minimising in the regular `Runner`, making it consistent with the `RepexRunner`, which already did so to stop the geometry relaxing into a dry pocket.
 
 [2026.1.0](https://github.com/openbiosim/somd2/compare/2025.1.0...2026.1.0) - Jun 2026
 --------------------------------------------------------------------------------------
