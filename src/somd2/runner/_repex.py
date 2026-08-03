@@ -146,7 +146,7 @@ class DynamicsCache:
         # Whether the last mix moved a replica's state, and so whether it must
         # be pushed into the context before the next block.
         self._state_moved = [False] * num_replicas
-        self._terminal_flip_stats = [[0, 0]] * num_replicas
+        self._terminal_flip_stats = [[0, 0] for _ in range(num_replicas)]
         self._num_proposed = _np.matrix(_np.zeros((num_replicas, num_replicas)))
         self._num_accepted = _np.matrix(_np.zeros((num_replicas, num_replicas)))
         self._num_swaps = _np.matrix(_np.zeros((num_replicas, num_replicas)))
@@ -216,7 +216,7 @@ class DynamicsCache:
         if not hasattr(self, "_gcmc_states"):
             self._gcmc_states = [None] * n
         if not hasattr(self, "_terminal_flip_stats"):
-            self._terminal_flip_stats = [[0, 0]] * n
+            self._terminal_flip_stats = [[0, 0] for _ in range(n)]
         if not hasattr(self, "_time"):
             self._time = None
         if not hasattr(self, "_num_replicas"):
