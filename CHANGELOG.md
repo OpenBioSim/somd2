@@ -18,6 +18,7 @@ Changelog
 * Add `max_contexts` to cap the number of OpenMM contexts used for replica exchange, re-using each across lambda values so that GPU memory no longer limits the number of replicas [#191](https://github.com/OpenBioSim/somd2/pull/191).
 * Skip minimisation on restart [#191](https://github.com/OpenBioSim/somd2/pull/191).
 * Pre-equilibrate the water with GCMC moves before minimising in the regular `Runner`, making it consistent with the `RepexRunner`, which already did so to stop the geometry relaxing into a dry pocket [#191](https://github.com/OpenBioSim/somd2/pull/191).
+* Add a `precision` option for GPU platforms, defaulting to `mixed` [#191](https://github.com/OpenBioSim/somd2/pull/191).
 
 [2026.1.0](https://github.com/openbiosim/somd2/compare/2025.1.0...2026.1.0) - Jun 2026
 --------------------------------------------------------------------------------------

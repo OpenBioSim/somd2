@@ -893,6 +893,7 @@ class RunnerBase:
             "cutoff": self._config.cutoff,
             "cutoff_type": self._config.cutoff_type,
             "platform": self._config.platform,
+            "precision": self._config.precision,
             "rest2_selection": self._config.rest2_selection,
             "shift_coulomb": self._config.shift_coulomb,
             "shift_delta": self._config.shift_delta,

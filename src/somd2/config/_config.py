@@ -75,6 +75,7 @@ class Config:
         ],
         "log_level": [level.lower() for level in _logger._core.levels],
         "softcore_form": ["zacharias", "taylor", "beutler"],
+        "precision": ["single", "mixed", "double"],
     }
 
     # A dictionary of nargs for the various options.
@@ -132,6 +133,7 @@ class Config:
         num_energy_neighbours=None,
         null_energy="1e6 kcal/mol",
         platform="auto",
+        precision="mixed",
         max_threads=None,
         max_gpus=None,
         max_sire_threads=None,
@@ -355,6 +357,12 @@ class Config:
 
         platform: str
             Platform to run simulation on.
+
+        precision: str
+            The floating point precision to use on GPU platforms. 'single' is fastest,
+            'double' is slowest, and 'mixed' computes forces in single precision but
+            accumulates and integrates in double. Ignored by platforms that do not
+            support it, such as CPU.
 
         max_threads: int
             Maximum number of CPU threads to use for simulation. (Default None, uses all available)
@@ -663,6 +671,7 @@ class Config:
         self.checkpoint_frequency = checkpoint_frequency
         self.num_checkpoint_workers = num_checkpoint_workers
         self.platform = platform
+        self.precision = precision
         self.max_threads = max_threads
         self.max_gpus = max_gpus
         self.max_sire_threads = max_sire_threads
@@ -1708,6 +1717,21 @@ class Config:
             # CPU. (Fallback.)
             else:
                 self._platform = "cpu"
+
+    @property
+    def precision(self):
+        return self._precision
+
+    @precision.setter
+    def precision(self, precision):
+        if not isinstance(precision, str):
+            raise TypeError("'precision' must be of type 'str'")
+        precision = precision.lower().replace(" ", "")
+        if precision not in self._choices["precision"]:
+            raise ValueError(
+                f"'precision' not recognised. Valid options are: {', '.join(self._choices['precision'])}"
+            )
+        self._precision = precision
 
     @property
     def max_threads(self):
