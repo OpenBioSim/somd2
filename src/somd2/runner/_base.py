@@ -1533,7 +1533,7 @@ class RunnerBase:
                         raise ValueError(msg)
 
                 # Store the system to the list.
-                systems[i] = _sr.morph.link_to_perturbed(system)
+                systems[i] = _sr.morph.link_to_reference(system)
 
         # If this is a GCMC simulation, then remove all ghost waters from each of the systems.
         if self._config.gcmc:
