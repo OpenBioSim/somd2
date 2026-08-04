@@ -14,6 +14,7 @@ Changelog
 * Parallelise replica mixing [#181](https://github.com/OpenBioSim/somd2/pull/181).
 * Fixed the replica exchange GPU memory check querying the wrong device when `CUDA_VISIBLE_DEVICES` does not start at zero, since OpenMM numbers devices relative to the visible set whereas `pynvml` enumerates all of them [#183](https://github.com/OpenBioSim/somd2/issues/183).
 * Store GCMC sampling statistics per lambda value, converting those from earlier checkpoints on restart [#184](https://github.com/OpenBioSim/somd2/pull/184).
+* Link restart systems to the reference end state rather than the perturbed one, since that is the coordinate set that dynamics maintains. Perturbable molecules were otherwise resumed from the coordinates they were built with [#189](https://github.com/OpenBioSim/somd2/pull/189).
 
 [2026.1.0](https://github.com/openbiosim/somd2/compare/2025.1.0...2026.1.0) - Jun 2026
 --------------------------------------------------------------------------------------
