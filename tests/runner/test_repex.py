@@ -278,18 +278,30 @@ def test_repex_bounded_contexts_output_equivalence(ethane_methanol):
         return [
             pd.read_parquet(runner._filenames[i]["energy_traj"])
             for i in range(num_lambda)
-        ]
+        ], list(runner._lambda_values)
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        full = run(num_lambda, tmpdir)
+        full, lambdas = run(num_lambda, tmpdir)
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        cached = run(1, tmpdir)
+        cached, _ = run(1, tmpdir)
+
+    # One record per energy_frequency interval, starting at the first. Pinning
+    # the values rather than only comparing the two runs catches a clock that
+    # is wrong the same way in both.
+    expected_times = [0.004, 0.008, 0.012, 0.016]
 
     for i in range(num_lambda):
         assert len(cached[i]) == len(full[i])
         assert list(cached[i].columns) == list(full[i].columns)
         assert cached[i].index.equals(full[i].index)
+
+        for records in (full[i], cached[i]):
+            times = [round(t, 6) for t in records.index.get_level_values(0)]
+            assert times == expected_times, f"replica {i} recorded times {times}"
+
+            # Each replica records energies at every lambda value.
+            assert list(records.columns) == lambdas
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
@@ -389,9 +401,17 @@ def test_repex_bounded_contexts_restart(ethane_methanol):
 
         runner.run()
 
+        # 8 fs at 4 fs intervals, extended to 16 fs. The clock has to continue
+        # from where it stopped rather than restarting at zero, so the records
+        # must run to the new runtime with no repeats or gaps.
+        expected_times = [0.004, 0.008, 0.012, 0.016]
+
         for i in range(num_lambda):
             extended = pd.read_parquet(runner._filenames[i]["energy_traj"])
             assert len(extended) > num_rows[i]
+
+            times = [round(t, 6) for t in extended.index.get_level_values(0)]
+            assert times == expected_times, f"replica {i} recorded times {times}"
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
