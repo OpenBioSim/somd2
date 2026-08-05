@@ -75,6 +75,7 @@ class Config:
         ],
         "log_level": [level.lower() for level in _logger._core.levels],
         "softcore_form": ["zacharias", "taylor", "beutler"],
+        "precision": ["single", "mixed", "double"],
     }
 
     # A dictionary of nargs for the various options.
@@ -132,12 +133,16 @@ class Config:
         num_energy_neighbours=None,
         null_energy="1e6 kcal/mol",
         platform="auto",
+        precision="mixed",
         max_threads=None,
         max_gpus=None,
         max_sire_threads=None,
         opencl_platform_index=0,
         oversubscription_factor=1,
         replica_exchange=False,
+        max_contexts=None,
+        update_constraints=True,
+        constraint_lambda_index=0,
         randomise_velocities=False,
         perturbed_system=None,
         terminal_flip_frequency=None,
@@ -353,6 +358,12 @@ class Config:
         platform: str
             Platform to run simulation on.
 
+        precision: str
+            The floating point precision to use on GPU platforms. 'single' is fastest,
+            'double' is slowest, and 'mixed' computes forces in single precision but
+            accumulates and integrates in double. Ignored by platforms that do not
+            support it, such as CPU.
+
         max_threads: int
             Maximum number of CPU threads to use for simulation. (Default None, uses all available)
             Does nothing if platform is set to CUDA.
@@ -377,15 +388,51 @@ class Config:
             Whether to run replica exchange simulation. Currently this can only be used when
             GPU resources are available.
 
+        max_contexts: int
+            The maximum number of OpenMM contexts to create for a replica exchange
+            simulation. If None, then one context is created per replica, which is
+            fastest, but limits the number of replicas to those that fit in GPU memory.
+            If fewer contexts than replicas are requested, then each context is re-used
+            to propagate several replicas per cycle, changing its lambda value as it
+            goes. This lifts the memory limit at the cost of some performance. When
+            re-using contexts, 'frame_frequency' must equal 'checkpoint_frequency'.
+
+        update_constraints: bool
+            Whether the constraints are updated when the lambda value of a context is
+            changed, i.e. whether constrained bond lengths are allowed to perturb with
+            lambda. This is only used when contexts are re-used across lambda values,
+            i.e. when 'max_contexts' is less than the number of replicas. Updating the
+            constraints is correct, but requires the OpenMM context to be reinitialised
+            whenever a constrained bond length actually changes, which is slow. Set this
+            to False if that overhead is significant; the constrained bond lengths are
+            then frozen at those of the lambda value given by
+            'constraint_lambda_index'. Note that this is distinct from
+            'dynamic_constraints', which controls where the constraint lengths are
+            taken from rather than whether they track lambda.
+
+        constraint_lambda_index: int
+            The index of the lambda value at which to fix the constrained bond lengths
+            when 'update_constraints' is False. Every context is created at this lambda
+            value, so that the constraints are the same for all replicas rather than
+            depending on which context a replica is assigned to. The default of zero is
+            arbitrary but consistent; a lambda schedule that perturbs bonds away from
+            the end states may warrant a different choice. This is only used for
+            replica exchange simulations, and only when 'max_contexts' is less than the
+            number of replicas, 'update_constraints' is False, and a constrained bond
+            length actually perturbs with lambda.
+
         randomise_velocities: bool
             Whether to randomise velocities at the start of each replica exchange cycle
             or following a terminal flip Monte Carlo move.
 
         perturbed_system: str
             The path to a stream file containing a Sire system for the equilibrated perturbed
-            end state (lambda = 1). This will be used as the starting conformation all lambda
-            windows > 0.5 when performing a replica exchange simulation. (Note that this assumes
-            that the "coordinates1" property specifies the coordinates for perturbable molecules.)
+            end state (lambda = 1). This is the same system as the input, but with the
+            "coordinates1" property of any perturbable molecules holding the equilibrated
+            coordinates for the lambda = 1 state. It is used as the starting conformation for
+            the lambda windows closest to the perturbed end state when performing a replica
+            exchange simulation, i.e. those with lambda > 0.5, or lambda < 0.5 when
+            'swap_end_states' is True.
 
         terminal_flip_frequency: str
             Frequency at which to attempt terminal ring flip Monte Carlo moves. If None
@@ -624,12 +671,16 @@ class Config:
         self.checkpoint_frequency = checkpoint_frequency
         self.num_checkpoint_workers = num_checkpoint_workers
         self.platform = platform
+        self.precision = precision
         self.max_threads = max_threads
         self.max_gpus = max_gpus
         self.max_sire_threads = max_sire_threads
         self.opencl_platform_index = opencl_platform_index
         self.oversubscription_factor = oversubscription_factor
         self.replica_exchange = replica_exchange
+        self.max_contexts = max_contexts
+        self.update_constraints = update_constraints
+        self.constraint_lambda_index = constraint_lambda_index
         self.randomise_velocities = randomise_velocities
         self.perturbed_system = perturbed_system
         self.terminal_flip_frequency = terminal_flip_frequency
@@ -1668,6 +1719,21 @@ class Config:
                 self._platform = "cpu"
 
     @property
+    def precision(self):
+        return self._precision
+
+    @precision.setter
+    def precision(self, precision):
+        if not isinstance(precision, str):
+            raise TypeError("'precision' must be of type 'str'")
+        precision = precision.lower().replace(" ", "")
+        if precision not in self._choices["precision"]:
+            raise ValueError(
+                f"'precision' not recognised. Valid options are: {', '.join(self._choices['precision'])}"
+            )
+        self._precision = precision
+
+    @property
     def max_threads(self):
         return self._max_threads
 
@@ -1777,6 +1843,55 @@ class Config:
         if not isinstance(replica_exchange, bool):
             raise ValueError("'replica_exchange' must be of type 'bool'")
         self._replica_exchange = replica_exchange
+
+    @property
+    def max_contexts(self):
+        return self._max_contexts
+
+    @max_contexts.setter
+    def max_contexts(self, max_contexts):
+        if max_contexts is None or (
+            isinstance(max_contexts, str)
+            and max_contexts.lower().replace(" ", "") == "none"
+        ):
+            self._max_contexts = None
+            return
+
+        if not isinstance(max_contexts, int):
+            try:
+                max_contexts = int(max_contexts)
+            except Exception:
+                raise ValueError("'max_contexts' must be of type 'int'")
+        if max_contexts < 1:
+            raise ValueError("'max_contexts' must be greater than 0")
+        self._max_contexts = max_contexts
+
+    @property
+    def update_constraints(self):
+        return self._update_constraints
+
+    @update_constraints.setter
+    def update_constraints(self, update_constraints):
+        if not isinstance(update_constraints, bool):
+            raise ValueError("'update_constraints' must be of type 'bool'")
+        self._update_constraints = update_constraints
+
+    @property
+    def constraint_lambda_index(self):
+        return self._constraint_lambda_index
+
+    @constraint_lambda_index.setter
+    def constraint_lambda_index(self, constraint_lambda_index):
+        if not isinstance(constraint_lambda_index, int):
+            try:
+                constraint_lambda_index = int(constraint_lambda_index)
+            except Exception:
+                raise ValueError("'constraint_lambda_index' must be of type 'int'")
+        if constraint_lambda_index < 0:
+            raise ValueError(
+                "'constraint_lambda_index' must be greater than or equal to 0"
+            )
+        self._constraint_lambda_index = constraint_lambda_index
 
     @property
     def randomise_velocities(self):

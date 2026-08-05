@@ -624,8 +624,9 @@ class RunnerBase:
         # Create a clone of the fully-prepared reference system with the
         # perturbed end-state coordinates and periodic space. This is done
         # after all system preparation so that the clone inherits the same
-        # topology and properties. It is used to seed starting coordinates
-        # for lambda > 0.5 replicas.
+        # topology and properties. It is used to seed starting coordinates for
+        # the replicas closest to the perturbed end state, i.e. lambda > 0.5,
+        # or lambda < 0.5 when the end states are swapped.
         if self._config.replica_exchange and self._config.perturbed_system is not None:
             from sire.legacy.IO import setCoordinates as _setCoordinates
 
@@ -892,6 +893,7 @@ class RunnerBase:
             "cutoff": self._config.cutoff,
             "cutoff_type": self._config.cutoff_type,
             "platform": self._config.platform,
+            "precision": self._config.precision,
             "rest2_selection": self._config.rest2_selection,
             "shift_coulomb": self._config.shift_coulomb,
             "shift_delta": self._config.shift_delta,
@@ -1188,7 +1190,12 @@ class RunnerBase:
         """
         Internal function to check whether the constraints are the same at the two
         end states.
+
+        Sets self._end_state_constraints_differ, which records whether any
+        constrained bond length changes with lambda.
         """
+
+        self._end_state_constraints_differ = False
 
         # Find all perturbable molecules in the system..
         pert_mols = self._system.molecules("property is_perturbable")
@@ -1214,12 +1221,14 @@ class RunnerBase:
 
             # Check for equivalence.
             if len(constraints0) != len(constraints1):
+                self._end_state_constraints_differ = True
                 _logger.info(
                     f"Constraints are at not the same at {_lam_sym} = 0 and {_lam_sym} = 1."
                 )
             else:
                 for c0, c1 in zip(constraints0, constraints1):
                     if c0 != c1:
+                        self._end_state_constraints_differ = True
                         _logger.info(
                             f"Constraints are at not the same at {_lam_sym} = 0 and {_lam_sym} = 1."
                         )
@@ -1802,6 +1811,7 @@ class RunnerBase:
             "overwrite",
             "timeout",
             "oversubscription_factor",
+            "max_contexts",
             "restraint_search_time",
             "restraint_search_frequency",
         ]

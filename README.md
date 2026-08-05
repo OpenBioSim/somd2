@@ -74,7 +74,7 @@ Then install `somd2` into the environment:
 pip install -e .
 ```
 
-> [!Note]
+> [!NOTE]
 > Pixi does not run conda post-link scripts, so the `ocl-icd-system`
 > symlink needed for OpenCL won't be created automatically. After
 > creating the environment (or after a pixi update), run the following
@@ -117,7 +117,7 @@ In order to run an alchemical free-energy simulation you will need to
 first create a stream file containing the _perturbable_ system of interest.
 This can be created using [BioSimSpace](https://github.com/OpenBioSim/biosimspace).
 For example, following the tutorial
-[here](https://biosimspace.openbiosim.org/versions/2023.4.0/tutorials/hydration_freenrg.html).
+[here](https://biosimspace.openbiosim.org/tutorials/hydration_freenrg.html).
 Once the system is created, it can be streamed to file using, e.g.:
 
 ```python
@@ -129,23 +129,23 @@ BSS.Stream.save(system, "perturbable_system")
 You can then run a simulation with:
 
 ```
-somd2 perturtbable_system.bss
+somd2 perturbable_system.bss
 ```
 
 The help message provides information on all of the supported options, along
 with their default values. Options can be specified on the command line, or
 using a YAML configuration file, passed with the `--config` option. Any options
-explicity set on the command line will override those set via the config file.
+explicitly set on the command line will override those set via the config file.
 
 An example perturbable system for a methane to ethanol perturbation in solvent
 can be found [here](https://sire.openbiosim.org/m/merged_molecule.s3.bz2).
 This is a `bzip2` compressed file that will need to be extracted before use.
 
-#### Running SOMD2 using one or more GPUs
+### Running SOMD2 using one or more GPUs
 
 In order to run using GPUs you will first need to set the relevant environment
-variable. For example, to run using 4 CUDA enabled GPUS set `CUDA_VISIBLE_DEVICES=0,1,2,3`
-(for openCL and HIP use `OPENCL_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES` respectively).
+variable. For example, to run using 4 CUDA enabled GPUs set `CUDA_VISIBLE_DEVICES=0,1,2,3`
+(for OpenCL and HIP use `OPENCL_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES` respectively).
 
 By default `SOMD2` will run using the CPU platform, however if the relevant
 environment variable has been set (as above) the new platform will be detected
@@ -154,23 +154,45 @@ available, the `--platform` option can be set (for example `--platform cuda`).
 
 By default, `SOMD2` will automatically manage the distribution of lambda windows
 across all listed devices. In order to restrict the number of devices used
-the `--max_gpus` option can be set, for example setting `max_gpus=2` while
+the `--max-gpus` option can be set, for example setting `--max-gpus 2` while
 `CUDA_VISIBLE_DEVICES` are set as above would restrict `SOMD2` to using only
 GPUs 0 and 1.
 
 ## Replica exchange
 
 `SOMD2` supports Hamiltonian replica exchange (HREX) simulations, which can be
-enabled using the `--replica-exchange` option. Note that dynamics contexts will
-be created up-front for all replicas, so this can be memory intensive. As such,
+enabled using the `--replica-exchange` option. By default, dynamics contexts are
+created up-front for all replicas, so this can be memory intensive. As such,
 replica exchange is intended for use on multi-GPU nodes with a large amount of
-memory. For optimal performance, it is recommended that the number of replicas
-be a multiple of the number of GPUs. It is also possible to oversubscribe the
-GPUs, i.e. have more than one replica running on a GPU at a time. This can be
-controlled via the `--oversubscription-factor` option, e.g. a value of 2 would
-allow 2 replicas to run on each GPU at a time.
+memory. It is also possible to oversubscribe the GPUs, i.e. have more than one
+replica running on a GPU at a time. This can be controlled via the
+`--oversubscription-factor` option, e.g. a value of 2 would allow 2 replicas to
+run on each GPU at a time. This requires the NVIDIA multi-process service (MPS)
+to be enabled, see [GPU oversubscription](#gpu-oversubscription) below.
 
-The swap frequency for replica exchange is controlled by the `energy-frequency`
+If the number of replicas you want doesn't fit in GPU memory, use the
+`--max-contexts` option to cap the number of contexts that are created. Each
+context is then re-used to propagate several replicas per cycle, changing its
+lambda value as it goes, so the number of replicas is no longer limited by
+memory. For example, `--num-lambda 24 --max-contexts 4` runs 24 replicas using
+the memory of 4. This costs some performance, since the replicas sharing a
+context run one after another rather than at the same time, so only use it when
+one context per replica won't fit. When contexts are re-used, `--frame-frequency`
+must equal `--checkpoint-frequency`.
+
+For optimal performance, it is recommended that the number of contexts, i.e. the
+number of replicas, or `--max-contexts` if it is set, be a multiple of the number
+of GPUs, and no smaller than the number of GPUs multiplied by the
+oversubscription factor. `SOMD2` will warn you if this isn't the case.
+
+Changing the lambda value of a context requires it to be reinitialised whenever a
+constrained bond length actually perturbs with lambda, which is slow. If this
+overhead is significant, pass `--no-update-constraints` to freeze the
+constrained bond lengths at those of a single lambda value, chosen with
+`--constraint-lambda-index`. Both options are ignored unless contexts are being
+re-used.
+
+The swap frequency for replica exchange is controlled by the `--energy-frequency`
 option, i.e. we compute the energies for all replicas at this frequency, then
 attempt to mix the replicas. A larger value will improve performance, but may
 reduce the efficiency of the exchange.
@@ -179,7 +201,7 @@ reduce the efficiency of the exchange.
 
 We also support Replica Exchange with Solute Scaling
 ([REST2](https://pubs.acs.org/doi/10.1021/jp204407d)) simulations to facilitate sampling for perturbations
-involving conformational changes, e.g.  ring flips. This can be enabled
+involving conformational changes, e.g. ring flips. This can be enabled
 using the `--rest2-scale` option, which specifies the "temperature" of the
 REST2 region relative to the rest of the system. By default, the REST2 region
 comprises _all_ atoms in perturbable molecules, but can be controlled via the
@@ -223,7 +245,7 @@ from `conda-forge`.
 
 SOMD2 supports terminal ring flip Monte Carlo (MC) moves to improve sampling
 of terminal aromatic rings in perturbable ligands, as described in
-[this paper](https://chemrxiv.org/doi/full/10.26434/chemrxiv-2025-2zkx5).
+[this paper](https://doi.org/10.26434/chemrxiv-2025-2zkx5).
 Each move attempts a discrete rotation of a terminal ring around the bond
 connecting it to the rest of the molecule, accepted or rejected via the
 Metropolis criterion. Terminal ring groups are detected automatically from
@@ -330,7 +352,7 @@ free_nrg = BSS.FreeEnergy.Relative.difference(pmf1, pmf2)
 
 When running HREX with a large number of replicas it can become computationally
 expensive to compute energies. (We need the energies of each replica at each
-lamdba value.) As a shortcut, it's possible to truncate the neighbourhood of
+lambda value.) As a shortcut, it's possible to truncate the neighbourhood of
 windows for which we compute energies, then use a large null energy for the
 remaining windows. This can be controlled via the `--num-energy-neighbours` option.
 For example, setting this to 2 would compute energies for the current window and
@@ -345,7 +367,7 @@ We support modification of ghost atom bonded terms to avoid spurious coupling
 to the physical system using the approach described in
 [this](https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328) paper.
 These are enabled by default, but can be disabled using the ``--no-ghost-modifications``
-option. Modifications are implemented using the [ghostly](https://gitbub.com/OpenBioSim/ghostly)
+option. Modifications are implemented using the [ghostly](https://github.com/OpenBioSim/ghostly)
 package.
 
 ## Note for SOMD1 users
@@ -360,7 +382,7 @@ that the perturbation used is consistent with the approach from `somd1`, i.e.
 it uses the same modifications for bonded-terms involving dummy atoms as `somd1`.
 
 Finally, it is also possible to run `somd2` using an existing `somd1` perturbation
-file. To do so, you will also need to create a stream file representating the
+file. To do so, you will also need to create a stream file representing the
 λ = 0 state. For existing input generated by `prepareFEP.py`, this can be done as
 follows. (This assumes that the output has a prefix `somd1`.)
 
@@ -391,7 +413,7 @@ then simply omit the `--somd1-compatibility` option.
 ## GPU oversubscription
 
 If you have an NVIDIA GPU that supports the multi-process service (MPS), you can
-oversubscibe the GPU to run multiple OpenMM contexts on the same GPU at once,
+oversubscribe the GPU to run multiple OpenMM contexts on the same GPU at once,
 increasing the throughput of your simulation. To do this, you will need to first
 enable MPS by running the following command:
 
@@ -403,7 +425,7 @@ The number of contexts that can be run in parallel is then controlled by the
 `--oversubscription-factor` option, which defaults to 1.
 
 More details on MPS, including tuning options, can be found in the following
-[techical blog](https://developer.nvidia.com/blog/maximizing-openmm-molecular-dynamics-throughput-with-nvidia-multi-process-service/).
+[technical blog](https://developer.nvidia.com/blog/maximizing-openmm-molecular-dynamics-throughput-with-nvidia-multi-process-service/).
 
 ## Python API
 
@@ -425,5 +447,5 @@ frequently. (Frames are written to disk and cleared from memory at each
 checkpoint.)
 
 PyMBAR uses JAX by default for GPU acceleration, which can cause issues in
-some environments. If you encounter issues when analysing simlation output,
+some environments. If you encounter issues when analysing simulation output,
 try setting the `PYMBAR_DISABLE_JAX` environment variable to `1`.

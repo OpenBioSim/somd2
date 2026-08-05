@@ -54,6 +54,9 @@ class DynamicsCache:
         output_directory=None,
         perturbed_system=None,
         xml_filenames=None,
+        num_slots=None,
+        update_constraints=True,
+        constraint_lambda_index=None,
         gpu_devices=None,
     ):
         """
@@ -91,34 +94,65 @@ class DynamicsCache:
             A list of file paths for the OpenMM XML output, one per replica.
             If None, XML files are not written.
 
+        num_slots: int
+            The number of dynamics objects (slots) to create. If None, then one
+            is created per replica. If fewer, then each slot is re-used to
+            propagate several replicas per cycle, changing its lambda value as
+            it goes.
+
+        update_constraints: bool
+            Whether to update the constraints when changing the lambda value of
+            a slot.
+
+        constraint_lambda_index: int
+            The index of the lambda value to create every context at, so that
+            constrained bond lengths are the same for every replica. If None,
+            each context is created at the lambda value of the first replica it
+            hosts, which is only consistent between replicas when there is a
+            context each. Only meaningful when 'update_constraints' is False,
+            since the constraints are otherwise updated whenever lambda
+            changes.
+
         gpu_devices: list
             The physical devices backing each OpenMM device index, i.e. the
             entries of CUDA_VISIBLE_DEVICES. Used to query the memory of the
             right device. If None, the OpenMM index is used directly.
         """
 
-        # Warn if the number of replicas is not a multiple of the number of GPUs.
-        if len(lambdas) > num_gpus and len(lambdas) % num_gpus != 0:
-            _logger.warning(
-                "The number of replicas is not a multiple of the number of GPUs. "
-                "This may result in suboptimal performance."
-            )
+        num_replicas = len(lambdas)
+
+        if num_slots is None:
+            num_slots = num_replicas
 
         # Initialise attributes.
         self._lambdas = lambdas
         self._rest2_scale_factors = rest2_scale_factors
+        self._num_replicas = num_replicas
+        self._num_slots = num_slots
+        self._update_constraints = update_constraints
+        self._constraint_lambda_index = constraint_lambda_index
         self._gpu_devices = gpu_devices
-        self._states = _np.array(range(len(lambdas)))
+        self._states = _np.array(range(num_replicas))
         self._time = None
-        self._openmm_states = [None] * len(lambdas)
-        self._gcmc_samplers = [None] * len(lambdas)
-        self._gcmc_states = [None] * len(lambdas)
+        self._openmm_states = [None] * num_replicas
+        self._gcmc_states = [None] * num_replicas
         # GCMC statistics for the whole simulation, keyed by lambda value.
         self._gcmc_stats = None
-        self._terminal_flip_stats = [[0, 0]] * len(lambdas)
-        self._num_proposed = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
-        self._num_accepted = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
-        self._num_swaps = _np.matrix(_np.zeros((len(lambdas), len(lambdas))))
+        self._energy_trajectories = [None] * num_replicas
+        self._ghost_files = [None] * num_replicas
+        # Waters in the GCMC volume, recorded per replica while it is resident
+        # in its slot. Derived, so not stored in a checkpoint.
+        self._gcmc_num_waters = [None] * num_replicas
+        # Whether the last mix moved a replica's state, and so whether it must
+        # be pushed into the context before the next block.
+        self._state_moved = [False] * num_replicas
+        self._terminal_flip_stats = [[0, 0] for _ in range(num_replicas)]
+        self._num_proposed = _np.matrix(_np.zeros((num_replicas, num_replicas)))
+        self._num_accepted = _np.matrix(_np.zeros((num_replicas, num_replicas)))
+        self._num_swaps = _np.matrix(_np.zeros((num_replicas, num_replicas)))
+
+        # Build the slot layout and the per-slot attributes.
+        self._build_slot_layout()
 
         # Create the dynamics objects.
         self._create_dynamics(
@@ -133,10 +167,44 @@ class DynamicsCache:
             xml_filenames=xml_filenames,
         )
 
+    def _build_slot_layout(self):
+        """
+        Assign replicas to slots.
+
+        Each slot is given a contiguous group of replicas, so that it only ever
+        moves between neighbouring lambda values. That keeps the change in the
+        force field parameters, and hence the chance of a constraint update
+        forcing the context to be reinitialised, as small as possible.
+
+        The layout is derived from the number of replicas and slots, so it is
+        rebuilt rather than stored in a checkpoint.
+        """
+        self._gcmc_samplers = [None] * self._num_slots
+        self._slot_replica = [None] * self._num_slots
+
+        self._groups = [
+            [int(r) for r in group]
+            for group in _np.array_split(
+                _np.arange(self._num_replicas), self._num_slots
+            )
+        ]
+
+        # The slot that hosts each replica.
+        self._replica_slot = [None] * self._num_replicas
+        for slot, group in enumerate(self._groups):
+            for replica in group:
+                self._replica_slot[replica] = slot
+
     def __setstate__(self, state):
         """
         Set the state of the object.
         """
+
+        # Checkpoints written before slots were introduced stored the states
+        # unpermuted, with self._states holding the mapping to apply on
+        # restart. They are detected by the absence of "_num_slots".
+        is_legacy = "_num_slots" not in state
+
         for key, value in state.items():
             setattr(self, key, value)
 
@@ -148,9 +216,38 @@ class DynamicsCache:
         if not hasattr(self, "_gcmc_states"):
             self._gcmc_states = [None] * n
         if not hasattr(self, "_terminal_flip_stats"):
-            self._terminal_flip_stats = [[0, 0]] * n
+            self._terminal_flip_stats = [[0, 0] for _ in range(n)]
         if not hasattr(self, "_time"):
             self._time = None
+        if not hasattr(self, "_num_replicas"):
+            self._num_replicas = n
+        if not hasattr(self, "_energy_trajectories"):
+            self._energy_trajectories = [None] * n
+        if not hasattr(self, "_ghost_files"):
+            self._ghost_files = [None] * n
+        self._gcmc_num_waters = [None] * n
+
+        # The slot layout is not pickled, since it is rebuilt by
+        # _create_dynamics() when the run is restarted. Older checkpoints
+        # predate slots entirely, in which case there was one per replica.
+        if not hasattr(self, "_num_slots"):
+            self._num_slots = n
+        if not hasattr(self, "_update_constraints"):
+            self._update_constraints = True
+
+        # Convert a legacy checkpoint to the current convention, in which the
+        # stored state of a replica is its own, with the last mix already
+        # applied.
+        if is_legacy:
+            self._openmm_states = [self._openmm_states[s] for s in self._states]
+            self._gcmc_states = [self._gcmc_states[s] for s in self._states]
+
+        # Every replica is seeded from its stored state on a restart, since the
+        # contexts are created from the input system rather than the checkpoint.
+        self._state_moved = [True] * n
+
+        # Rebuild the slot layout, which is derived rather than stored.
+        self._build_slot_layout()
 
         # Checkpoints written before a sampler could be re-used across lambda
         # values stored the GCMC statistics as a list of counters per replica.
@@ -171,6 +268,9 @@ class DynamicsCache:
         d = {
             "_lambdas": self._lambdas,
             "_rest2_scale_factors": self._rest2_scale_factors,
+            "_num_replicas": self._num_replicas,
+            "_num_slots": self._num_slots,
+            "_update_constraints": self._update_constraints,
             "_states": self._states,
             "_time": self._time,
             "_openmm_states": self._openmm_states,
@@ -252,21 +352,51 @@ class DynamicsCache:
         # Per-device memory tracking for estimation.
         device_mem = {}
 
-        # Work out how many replicas are assigned to each device.
-        # Replicas are assigned round-robin, so the first (num_replicas % num_gpus)
-        # devices get one extra replica.
-        base = floor(num_replicas / num_gpus)
-        remainder = num_replicas % num_gpus
+        # Work out how many slots are assigned to each device.
+        # Slots are assigned round-robin, so the first (num_slots % num_gpus)
+        # devices get one extra slot.
+        base = floor(self._num_slots / num_gpus)
+        remainder = self._num_slots % num_gpus
         contexts_per_device = [
             base + (1 if i < remainder else 0) for i in range(num_gpus)
         ]
 
-        # Create the dynamics objects in serial.
-        for i, (lam, scale) in enumerate(zip(lambdas, rest2_scale_factors)):
+        # Record the ghost file for each replica. A slot writes to the file of
+        # whichever replica it currently hosts.
+        if gcmc_kwargs is not None:
+            self._ghost_files = [
+                str(output_directory / f"gcmc_ghosts_{lam:.5f}.txt") for lam in lambdas
+            ]
+
+        # Create the dynamics objects in serial. Each slot is created at the
+        # lambda value of the first replica that it hosts.
+        for i in range(self._num_slots):
+            # The replica that seeds this slot.
+            seed = self._groups[i][0]
+
+            # The replica in the middle of the group, used to choose which end
+            # state the starting coordinates come from. A slot's context is
+            # created from a single system and every replica it hosts starts
+            # from that context, so taking the middle rather than the first
+            # keeps any mismatch to at most half a group, next to the lambda
+            # value at which the end state switches.
+            middle = self._groups[i][len(self._groups[i]) // 2]
+
+            lam = lambdas[seed]
+            scale = rest2_scale_factors[seed]
+
+            # Create the context at a common lambda value, so that constrained
+            # bond lengths are the same for every replica. Only set when the
+            # constraints aren't updated as the slot changes lambda.
+            if self._constraint_lambda_index is None:
+                build_lam = lam
+            else:
+                build_lam = lambdas[self._constraint_lambda_index]
+
             # Work out the device index.
             device = i % num_gpus
 
-            # Record baseline memory before the first replica on this device.
+            # Record baseline memory before the first slot on this device.
             if device not in device_mem:
                 used_before, _, total_mem = self._check_device_memory(
                     self._physical_device(device)
@@ -277,12 +407,19 @@ class DynamicsCache:
                     "count": 0,
                 }
 
-            # This is a restart, get the system for this replica.
+            # Whether to seed from the perturbed end state. Swapping the end
+            # states reverses the lambda schedule, so the perturbed end state
+            # is then at lambda = 0 rather than lambda = 1.
+            seed_perturbed = (lambdas[middle] > 0.5) != dynamics_kwargs[
+                "swap_end_states"
+            ]
+
+            # This is a restart, get the system for the seeding replica.
             if isinstance(system, list):
-                mols = system[i]
-            # This is a new simulation. For lambda > 0.5, use the perturbed
-            # system to seed the starting coordinates and periodic space.
-            elif perturbed_system is not None and lam > 0.5:
+                mols = system[seed]
+            # This is a new simulation. Use the perturbed system to seed the
+            # starting coordinates and periodic space.
+            elif perturbed_system is not None and seed_perturbed:
                 mols = perturbed_system
             else:
                 mols = system
@@ -292,7 +429,7 @@ class DynamicsCache:
 
             # Overload the device and lambda value.
             dynamics_kwargs["device"] = device
-            dynamics_kwargs["lambda_value"] = lam
+            dynamics_kwargs["lambda_value"] = build_lam
             dynamics_kwargs["rest2_scale"] = scale
 
             if gcmc_kwargs is not None:
@@ -302,15 +439,17 @@ class DynamicsCache:
                     msg = "loch is not installed. GCMC sampling cannot be performed."
                     _logger.error(msg)
 
-                ghost_file = str(output_directory / f"gcmc_ghosts_{lam:.5f}.txt")
-
-                # Create the GCMC sampler.
+                # Create the GCMC sampler, telling it every lambda value that
+                # this slot will host so that switching between them doesn't
+                # need to build an OpenMM context.
                 gcmc_sampler = GCMCSampler(
                     mols,
                     device=device,
                     lambda_value=lam,
                     rest2_scale=scale,
-                    ghost_file=ghost_file,
+                    lambda_values=[lambdas[r] for r in self._groups[i]],
+                    rest2_scales=[rest2_scale_factors[r] for r in self._groups[i]],
+                    ghost_file=self._ghost_files[seed],
                     **gcmc_kwargs,
                 )
 
@@ -328,7 +467,19 @@ class DynamicsCache:
             try:
                 dynamics = mols.dynamics(**dynamics_kwargs)
             except Exception as e:
-                msg = f"Could not create dynamics object for lambda {lam:.5f} on device {device}: {e}"
+                # Contexts are appended as they are created, so this is the
+                # number that fit before the failure.
+                num_created = len(self._dynamics)
+                msg = (
+                    f"Could not create dynamics object for lambda {lam:.5f} on "
+                    f"device {device} after creating {num_created} of "
+                    f"{self._num_slots} contexts: {e}"
+                )
+                # Failing partway through points at exhausted resources.
+                # Failing on the first context does not, so don't advise on
+                # the number of contexts in that case.
+                if num_created > 0:
+                    msg += f". {self._max_contexts_advice(num_created)}"
                 _logger.error(msg)
                 raise RuntimeError(msg) from e
 
@@ -341,12 +492,13 @@ class DynamicsCache:
             # Append the dynamics object.
             self._dynamics.append(dynamics)
 
-            # Write the OpenMM XML file to the output directory.
+            # Write the OpenMM XML file to the output directory. This is
+            # indexed by replica, so use the replica that seeded the slot.
             if xml_filenames is not None:
                 _logger.info(
                     f"Writing OpenMM XML for lambda {lam:.5f} on device {device}"
                 )
-                dynamics.to_xml(xml_filenames[i])
+                dynamics.to_xml(xml_filenames[seed])
 
             # Track memory footprint for this device.
             info = device_mem[device]
@@ -394,12 +546,25 @@ class DynamicsCache:
                 if est_total > total_mem:
                     baseline = info["before"]
                     replica_cost = first_cost + marginal_cost * (num_contexts - 1)
+
+                    # How many contexts fit on this device, given the measured
+                    # cost of the first and the marginal cost of the rest. The
+                    # slots are spread evenly over the devices, so the total is
+                    # capped by what the busiest device can hold.
+                    if marginal_cost > 0:
+                        per_device = 1 + floor(
+                            (total_mem - baseline - first_cost) / marginal_cost
+                        )
+                    else:
+                        per_device = info["count"]
+
                     msg = (
                         f"Not enough memory on device {device} for all assigned replicas. "
                         f"Baseline usage before simulation: {baseline / (1024**3):.2f} GB "
                         f"Estimated replica memory: {replica_cost / (1024**3):.2f} GB, "
                         f"Total estimated: {est_total / (1024**3):.2f} GB, "
-                        f"Available memory: {total_mem / (1024**3):.2f} GB."
+                        f"Available memory: {total_mem / (1024**3):.2f} GB. "
+                        f"{self._max_contexts_advice(per_device * num_gpus)}"
                     )
                     _logger.error(msg)
                     raise MemoryError(msg)
@@ -424,65 +589,120 @@ class DynamicsCache:
                 f"Created dynamics object for lambda {lam:.5f} on device {device}"
             )
 
-    def get(self, index):
+            # Leave the slot marked as holding no replica, so that the first
+            # call to load_replica() does the full setup (lambda value, GCMC
+            # parameters, ghost file and sampling statistics) rather than
+            # assuming the seeding replica is already fully installed.
+            self._slot_replica[i] = None
+
+        # Give each replica its own energy trajectory. These are seeded from a
+        # slot's own so that the "ensemble" property is carried over. A slot
+        # accumulates into the trajectory of whichever replica it hosts.
+        for replica in range(self._num_replicas):
+            slot = self._replica_slot[replica]
+            self._energy_trajectories[replica] = self._dynamics[
+                slot
+            ]._d.energy_trajectory()
+
+        # Seed the starting state for every replica from the context of the
+        # slot that hosts it. The GCMC water state must be seeded too, since
+        # load_replica() diffs against it: a replica with no stored state would
+        # be skipped, leaving the sampler holding the water configuration of
+        # whichever replica used the slot last.
+        for replica in range(self._num_replicas):
+            slot = self._replica_slot[replica]
+
+            if self._openmm_states[replica] is None:
+                self.save_openmm_state(slot, replica)
+
+            if self._gcmc_samplers[slot] is not None and (
+                self._gcmc_states[replica] is None
+            ):
+                self.save_gcmc_state(slot, replica)
+
+    def slot_for(self, replica):
         """
-        Get the dynamics object (and GCMC sampler) for a given index.
+        Return the index of the slot that hosts a given replica.
 
         Parameters
         ----------
 
-        index: int
+        replica: int
             The index of the replica.
 
         Returns
         -------
 
-        tuple
-            The dynamics object for the replica and its GCMC sampler.
+        int
+            The index of the slot.
         """
-        return self._dynamics[index], self._gcmc_samplers[index]
+        return self._replica_slot[replica]
 
-    def set(self, index, dynamics):
+    def get(self, slot):
         """
-        Set the dynamics object for a given index.
+        Get the dynamics object (and GCMC sampler) for a given slot.
+
+        When there is one slot per replica the slot and replica indices are
+        the same. Otherwise use slot_for() to map a replica to its slot.
 
         Parameters
         ----------
 
-        index: int
-            The index of the replica.
+        slot: int
+            The index of the slot.
+
+        Returns
+        -------
+
+        tuple
+            The dynamics object for the slot and its GCMC sampler.
+        """
+        return self._dynamics[slot], self._gcmc_samplers[slot]
+
+    def set(self, slot, dynamics):
+        """
+        Set the dynamics object for a given slot.
+
+        Parameters
+        ----------
+
+        slot: int
+            The index of the slot.
 
         dynamics: sire.legacy.Convert.SOMMContext
             The dynamics object.
         """
-        self._dynamics[index] = dynamics
+        self._dynamics[slot] = dynamics
 
-    def delete(self, index):
+    def delete(self, slot):
         """
-        Delete the dynamics object for a given index.
+        Delete the dynamics object for a given slot.
 
         Parameters
         ----------
 
-        index: int
-            The index of the replica.
+        slot: int
+            The index of the slot.
         """
-        self._dynamics[index] = None
+        self._dynamics[slot] = None
 
-    def save_openmm_state(self, index):
+    def save_openmm_state(self, slot, replica):
         """
-        Save the state of the dynamics object.
+        Save the state of a slot's dynamics object as the state of a replica.
 
         Parameters
         ----------
 
-        index: int
-            The index of the replica.
+        slot: int
+            The index of the slot.
+
+        replica: int
+            The index of the replica whose state this is.
         """
 
         # Get the current OpenMM state.
         state = (
-            self._dynamics[index]
+            self._dynamics[slot]
             .context()
             .getState(getPositions=True, getVelocities=True)
         )
@@ -490,11 +710,35 @@ class DynamicsCache:
         # Store positions, velocities, and box vectors as compact numpy arrays
         # rather than the OpenMM State object, which serialises to XML when
         # pickled and is orders of magnitude larger.
-        self._openmm_states[index] = {
+        self._openmm_states[replica] = {
             "positions": state.getPositions(asNumpy=True),
             "velocities": state.getVelocities(asNumpy=True),
             "box": state.getPeriodicBoxVectors(asNumpy=True),
         }
+
+    @staticmethod
+    def _get_positions(state):
+        """
+        Return the positions from a saved OpenMM state.
+
+        Parameters
+        ----------
+
+        state: dict or openmm.State
+            The state to read. Dicts (new format) hold the positions directly.
+            A bare openmm.State is accepted for backwards compatibility with
+            old checkpoint files, as it is by _apply_openmm_state().
+
+        Returns
+        -------
+
+        openmm.unit.Quantity
+            The positions.
+        """
+        if isinstance(state, dict):
+            return state["positions"]
+
+        return state.getPositions(asNumpy=True)
 
     @staticmethod
     def _apply_openmm_state(context, state):
@@ -511,32 +755,55 @@ class DynamicsCache:
             The state to apply. Dicts (new format) contain "positions",
             "velocities", and "box" numpy arrays. A bare openmm.State is
             accepted for backwards compatibility with old checkpoint files.
+
+        Note that the step count and simulation time carried by an openmm.State
+        are deliberately not restored for the dict format. They are held
+        separately and applied by Dynamics._set_clock().
         """
         if isinstance(state, dict):
+            # Set the box before the positions, since a barostat may have
+            # changed it between the state being saved and restored.
+            context.setPeriodicBoxVectors(*state["box"])
             context.setPositions(state["positions"])
             context.setVelocities(state["velocities"])
-            if state["box"] is not None:
-                context.setPeriodicBoxVectors(*state["box"])
         else:
             # Legacy openmm.State from checkpoint files written before this
             # format change.
             context.setState(state)
 
-    def save_gcmc_state(self, index):
+    def save_gcmc_state(self, slot, replica):
         """
-        Save the current GCMC water state for the replica.
+        Save the current GCMC water state of a slot as that of a replica.
 
         Parameters
         ----------
 
-        index: int
-            The index of the replica.
+        slot: int
+            The index of the slot.
+
+        replica: int
+            The index of the replica whose state this is.
         """
         # Get the GCMC sampler.
-        gcmc_sampler = self._gcmc_samplers[index]
+        gcmc_sampler = self._gcmc_samplers[slot]
 
         # Store the state.
-        self._gcmc_states[index] = gcmc_sampler.water_state()
+        self._gcmc_states[replica] = gcmc_sampler.water_state()
+
+    def get_clock(self):
+        """
+        Get the simulation clock.
+
+        Every replica advances by the same amount each cycle, so the clock is
+        common to all of them and is read from the first slot.
+
+        Returns
+        -------
+
+        dict
+            The clock, as returned by Dynamics._get_clock().
+        """
+        return self._dynamics[0]._get_clock()
 
     def get_states(self):
         """
@@ -562,66 +829,167 @@ class DynamicsCache:
         """
         self._states = states
 
-    def _seed_replica(self, i):
+    def load_replica(self, replica, clock=None):
         """
-        Apply the (possibly new, post-mix) state to replica i's context,
-        including any GCMC water-state swap. Only touches replica i's own
-        context/sampler, so this is safe to run concurrently with other
-        replicas' calls from a thread pool.
-        """
-        state = self._states[i]
+        Make a replica resident in its slot, ready for a dynamics block.
 
-        _logger.debug(f"Replica {i} seeded from state {state}")
-        self._apply_openmm_state(
-            self._dynamics[i].context(), self._openmm_states[state]
-        )
+        This sets the slot's lambda value, pushes the replica's state into the
+        OpenMM context, and points the slot at the replica's clock, energy
+        trajectory, GCMC water state and ghost file.
 
-        # Swap the water state in the GCMCSamplers.
-        if self._gcmc_samplers[i] is not None:
-            # Find the indices of the water states that differ.
-            water_idxs = _np.where(self._gcmc_states[i] != self._gcmc_states[state])[0]
+        Work that isn't needed is skipped. When there is one slot per replica
+        and no swap has taken place, the slot already holds everything the
+        replica needs and this reduces to a handful of comparisons.
 
-            # Update the water state in the GCMCSampler.
-            self._gcmc_samplers[i].push()
-            try:
-                self._gcmc_samplers[i]._set_water_state(
-                    self._dynamics[i].context(),
-                    indices=water_idxs,
-                    states=self._gcmc_states[state][water_idxs],
-                )
-            finally:
-                self._gcmc_samplers[i].pop()
-
-    def mix_states(self, old_states, executor=None):
-        """
-        Mix the states of the dynamics objects.
+        Only touches the replica's own slot, so this is safe to call
+        concurrently for replicas in different slots.
 
         Parameters
         ----------
+
+        replica: int
+            The index of the replica.
+
+        clock: dict
+            The simulation clock to restore, as returned by
+            Dynamics._get_clock(). If None, the slot's clock is left alone.
+        """
+        slot = self._replica_slot[replica]
+        dynamics = self._dynamics[slot]
+        gcmc_sampler = self._gcmc_samplers[slot]
+
+        # The replica that the slot currently holds.
+        resident = self._slot_replica[slot]
+
+        # The slot needs new positions and velocities if it is being handed a
+        # different replica, or if the last mix moved this replica's state.
+        if resident != replica or self._state_moved[replica]:
+            self._apply_openmm_state(dynamics.context(), self._openmm_states[replica])
+
+            # Positions have changed underneath the context, so any cached
+            # energies are stale.
+            dynamics.clear_energy_cache()
+
+            self._state_moved[replica] = False
+
+        # Set the lambda value and REST2 scaling factor. This is a no-op if
+        # the slot is already at this lambda value.
+        if resident != replica:
+            dynamics.set_lambda(
+                self._lambdas[replica],
+                rest2_scale=self._rest2_scale_factors[replica],
+                update_constraints=self._update_constraints,
+            )
+
+        # Restore the clock and point the slot at this replica's energy
+        # trajectory, so that energies are accumulated against the replica
+        # rather than the slot.
+        if clock is not None:
+            dynamics._set_clock(clock)
+        dynamics.set_energy_trajectory(self._energy_trajectories[replica])
+
+        if gcmc_sampler is not None:
+            gcmc_sampler.push()
+            try:
+                # Swap the water state into the sampler. Diff against what the
+                # sampler currently holds, which is the state of whichever
+                # replica was last resident.
+                target = self._gcmc_states[replica]
+                if target is not None:
+                    current = gcmc_sampler.water_state()
+                    water_idxs = _np.where(current != target)[0]
+
+                    if len(water_idxs) > 0:
+                        gcmc_sampler._set_water_state(
+                            dynamics.context(),
+                            indices=water_idxs,
+                            states=target[water_idxs],
+                        )
+
+                if resident != replica:
+                    # Update the lambda dependent non-bonded parameters used to
+                    # evaluate insertion and deletion energies, and append ghost
+                    # residues to this replica's file. The sampler keeps its
+                    # statistics per lambda value, so switching also switches
+                    # to this replica's.
+                    gcmc_sampler.set_lambda(
+                        self._lambdas[replica], self._rest2_scale_factors[replica]
+                    )
+                    gcmc_sampler.set_ghost_file(self._ghost_files[replica])
+            finally:
+                gcmc_sampler.pop()
+
+        self._slot_replica[slot] = replica
+
+    def store_replica(self, replica):
+        """
+        Save the state of a replica back out of its slot, so that the slot can
+        be handed to another replica.
+
+        Parameters
+        ----------
+
+        replica: int
+            The index of the replica.
+        """
+        slot = self._replica_slot[replica]
+
+        self.save_openmm_state(slot, replica)
+
+        if self._gcmc_samplers[slot] is not None:
+            self.save_gcmc_state(slot, replica)
+
+            # Count the waters against the slot's context rather than whichever
+            # one the sampler happens to be bound to, which is unset after the
+            # sampler has been reset.
+            gcmc_sampler = self._gcmc_samplers[slot]
+            gcmc_sampler.push()
+            try:
+                self._gcmc_num_waters[replica] = gcmc_sampler.num_waters(
+                    context=self._dynamics[slot].context()
+                )
+            finally:
+                gcmc_sampler.pop()
+
+    def mix_states(self, old_states):
+        """
+        Apply the result of a replica mix.
+
+        The states are permuted here, but not pushed into the OpenMM contexts.
+        They are applied lazily by load_replica(), which is the only point at
+        which a slot is known to be free. This does the same amount of work as
+        applying them eagerly, since load_replica() pushes a state exactly when
+        the mix moved it.
+
+        The permutation must happen here rather than being resolved lazily
+        through self._states. A slot is re-used within a cycle, so a replica
+        may be loaded after another replica has already stored its post-run
+        state; reading through the indirection at that point would pick up the
+        new state rather than the pre-mix one.
+
+        Parameters
+        ----------
+
         old_states : numpy.ndarray
             The state indices from before the last replica mix.
-
-        executor : concurrent.futures.ThreadPoolExecutor, optional
-            Executor used to apply the per-replica state changes (an
-            OpenMM setPositions/setVelocities/setPeriodicBoxVectors call
-            per changed replica, each against a different context) in
-            parallel. Each replica's context is independent of every
-            other, so this is safe. Falls back to a serial loop if not
-            provided.
         """
-        # Replicas whose state actually changed.
-        changed = [i for i, state in enumerate(self._states) if i != state]
+        # Permute the travelling state. This is a reference shuffle, so it is
+        # cheap even for large systems. Statistics and output files stay with
+        # the lambda window, so are not permuted.
+        self._openmm_states = [self._openmm_states[state] for state in self._states]
+        self._gcmc_states = [self._gcmc_states[state] for state in self._states]
 
-        if executor is not None and len(changed) > 1:
-            # Consume the map so we block until every replica is seeded
-            # and any exception raised in a worker thread propagates here.
-            list(executor.map(self._seed_replica, changed))
-        else:
-            for i in changed:
-                self._seed_replica(i)
+        # Flag the replicas whose state moved, so that load_replica() knows it
+        # has to push new positions and velocities into the context. The flags
+        # accumulate, and are only cleared once the state has been pushed, so
+        # that a replica mixed twice without being loaded in between isn't left
+        # starting from whatever its context happens to hold.
+        self._state_moved = [
+            moved or bool(state != i)
+            for i, (state, moved) in enumerate(zip(self._states, self._state_moved))
+        ]
 
-        # Update the swap matrix. Cheap, CPU-only bookkeeping - kept out of
-        # the parallel section above to avoid any shared-array races.
+        # Update the swap matrix.
         for i, state in enumerate(self._states):
             self._num_swaps[old_states[i], state] += 1
 
@@ -668,6 +1036,31 @@ class DynamicsCache:
             return device
 
         return gpu_devices[device]
+
+    @staticmethod
+    def _max_contexts_advice(num_contexts):
+        """
+        Advice for a user whose replicas don't fit in GPU memory.
+
+        Parameters
+        ----------
+
+        num_contexts: int
+            The number of OpenMM contexts that are known to fit.
+        """
+
+        if num_contexts < 1:
+            return (
+                "A single OpenMM context does not fit on this device. Reduce "
+                "the size of the system, or use a device with more memory."
+            )
+
+        return (
+            f"Set 'max_contexts' to {num_contexts} or fewer to re-use contexts "
+            "across lambda values, which removes the memory limit on the "
+            "number of replicas. This also requires 'frame_frequency' to equal "
+            "'checkpoint_frequency'."
+        )
 
     @staticmethod
     def _check_device_memory(device=0):
@@ -836,6 +1229,12 @@ class RepexRunner(_RunnerBase):
         # devices relative to the visible set, so index i is gpu_devices[i].
         self._gpu_devices = list(gpu_devices)[: self._num_gpus]
 
+        # Work out how many OpenMM contexts (slots) to create. When there are
+        # fewer slots than replicas, each slot is re-used to propagate several
+        # replicas per cycle, changing its lambda value as it goes.
+        self._num_replicas = len(self._lambda_values)
+        self._set_num_slots()
+
         # Auto-generate a Boresch restraint for ABFE runs with no user-supplied
         # restraint. This must happen before the dynamics cache is built below,
         # since the per-replica OpenMM contexts it creates are fixed at
@@ -870,7 +1269,11 @@ class RepexRunner(_RunnerBase):
         perturbable_constraint = self._config.perturbable_constraint
 
         # Don't use constraints during minimisation.
-        if self._config.minimise and not self._config.minimisation_constraints:
+        if (
+            self._config.minimise
+            and not self._is_restart
+            and not self._config.minimisation_constraints
+        ):
             constraint = "none"
             perturbable_constraint = "none"
 
@@ -923,6 +1326,9 @@ class RepexRunner(_RunnerBase):
                 perturbed_system=self._perturbed_system,
                 output_directory=self._config.output_directory,
                 xml_filenames=xml_filenames,
+                num_slots=self._num_slots,
+                update_constraints=self._config.update_constraints,
+                constraint_lambda_index=self._constraint_lambda_index,
                 gpu_devices=self._gpu_devices,
             )
 
@@ -998,6 +1404,16 @@ class RepexRunner(_RunnerBase):
             # restarted against a different set of GPUs.
             self._dynamics_cache._gpu_devices = self._gpu_devices
 
+            # Rebuild the slot layout from the current config, so that
+            # 'max_contexts' can change on restart. Everything that is restored
+            # is per-replica, so it doesn't depend on the grouping.
+            self._dynamics_cache._num_slots = self._num_slots
+            self._dynamics_cache._update_constraints = self._config.update_constraints
+            self._dynamics_cache._constraint_lambda_index = (
+                self._constraint_lambda_index
+            )
+            self._dynamics_cache._build_slot_layout()
+
             # Create the dynamics objects.
             self._dynamics_cache._create_dynamics(
                 self._system,
@@ -1009,46 +1425,32 @@ class RepexRunner(_RunnerBase):
                 output_directory=self._config.output_directory,
             )
 
-            # Reset the state of the OpenMM contexts and GCMC samplers.
-            for i in range(len(self._lambda_values)):
-                dynamics, gcmc_sampler = self._dynamics_cache.get(i)
+            # The OpenMM contexts are not reset here. Each replica's state is
+            # pushed into its slot by load_replica() at the start of its first
+            # block, which is the only point at which the slot is known to be
+            # free.
 
-                # Reset the OpenMM state, applying the last replica exchange
-                # mixing so the correct post-mix state is restored.
-                state = self._dynamics_cache._states[i]
-                DynamicsCache._apply_openmm_state(
-                    dynamics.context(), self._dynamics_cache._openmm_states[state]
-                )
+            # Restore the sampling statistics. A sampler keeps only the lambda
+            # values it visits, so each can be handed the whole simulation's.
+            if self._dynamics_cache._gcmc_stats is not None:
+                for slot in range(self._dynamics_cache._num_slots):
+                    _, gcmc_sampler = self._dynamics_cache.get(slot)
+                    gcmc_sampler.restore_stats(self._dynamics_cache._gcmc_stats)
 
-                # Reset the GCMC water state and restore statistics.
-                if gcmc_sampler is not None:
-                    gcmc_sampler.push()
-                    try:
-                        gcmc_sampler._set_water_state(
-                            dynamics.context(),
-                            states=self._dynamics_cache._gcmc_states[state],
-                            force=True,
-                        )
-                    finally:
-                        gcmc_sampler.pop()
-
-                    # Samplers keep only the lambda values they visit, so it's
-                    # safe to hand each of them the whole simulation's stats.
-                    if self._dynamics_cache._gcmc_stats is not None:
-                        gcmc_sampler.restore_stats(self._dynamics_cache._gcmc_stats)
-
-        # Log the GCMC sphere centre for each replica using the actual context
-        # positions (accurate for both fresh runs and restarts).
+        # Log the GCMC sphere centre for each replica. This uses the stored
+        # state rather than the context, since a slot only holds the positions
+        # of the replica it last hosted.
         import openmm.unit as _omm_unit
 
         for i, lam in enumerate(self._lambda_values):
-            dynamics, gcmc_sampler = self._dynamics_cache.get(i)
+            _, gcmc_sampler = self._dynamics_cache.get(self._dynamics_cache.slot_for(i))
             if gcmc_sampler is not None and gcmc_sampler._reference is not None:
-                state = dynamics.context().getState(getPositions=True)
-                positions = state.getPositions(asNumpy=True).value_in_unit(
-                    _omm_unit.angstrom
+                positions = DynamicsCache._get_positions(
+                    self._dynamics_cache._openmm_states[i]
                 )
-                target = gcmc_sampler._get_target_position(positions)
+                target = gcmc_sampler._get_target_position(
+                    positions.value_in_unit(_omm_unit.angstrom)
+                )
                 _logger.info(
                     f"Initial GCMC sphere centre for lambda {lam:.5f}: "
                     f"[{target[0]:.3f}, {target[1]:.3f}, {target[2]:.3f}] A"
@@ -1108,6 +1510,209 @@ class RepexRunner(_RunnerBase):
 
         # Create a lock to guard the dynamics cache.
         self._lock = Lock()
+
+        # Systems committed while a replica was resident in its slot, awaiting
+        # the end of cycle checkpoint. Only used when contexts are shared,
+        # keyed by replica index and emptied by _checkpoint().
+        self._committed = {}
+
+    def _build_lambda(self, replica):
+        """
+        Return the lambda value to create a replica's context at.
+
+        This is the replica's own lambda value, unless the constraints are
+        fixed at a common one, in which case a rebuilt context has to use that
+        too or it would pick up the constrained bond lengths of its own lambda
+        value instead.
+
+        Parameters
+        ----------
+
+        replica: int
+            The index of the replica.
+
+        Returns
+        -------
+
+        float
+            The lambda value to create the context at.
+        """
+        if self._constraint_lambda_index is None:
+            return self._lambda_values[replica]
+
+        return self._lambda_values[self._constraint_lambda_index]
+
+    def _replica_passes(self, cycle):
+        """
+        Work out which replicas to propagate in each pass of a cycle.
+
+        A slot can only host one replica at a time, so each pass takes at most
+        one replica from each slot. Groups are traversed in alternating
+        directions on successive cycles, so that a slot always moves to a
+        neighbouring lambda window, including across the cycle boundary. That
+        keeps the change in force field parameters as small as possible.
+
+        When there is one slot per replica there is a single pass containing
+        every replica, which is the same as propagating them all together.
+
+        Parameters
+        ----------
+
+        cycle: int
+            The index of the current cycle.
+
+        Returns
+        -------
+
+        list of list of int
+            The replicas to propagate in each pass.
+        """
+        groups = self._dynamics_cache._groups
+
+        # Traverse the groups backwards on odd cycles.
+        is_reversed = cycle % 2 == 1
+
+        passes = []
+        for i in range(max(len(group) for group in groups)):
+            batch = []
+            for group in groups:
+                if i < len(group):
+                    batch.append(group[len(group) - 1 - i] if is_reversed else group[i])
+            passes.append(batch)
+
+        return passes
+
+    def _safe_batches(self, num_workers, cycle=0):
+        """
+        Yield batches of replicas that can be processed concurrently.
+
+        Two replicas that share a slot must never be processed at the same
+        time, since they would be using the same dynamics object and OpenMM
+        context. Batches are therefore taken from within a single pass, which
+        holds at most one replica per slot, and then split by the number of
+        workers.
+
+        With one slot per replica there is a single pass containing every
+        replica, so this is just a split by the number of workers.
+
+        Parameters
+        ----------
+
+        num_workers: int
+            The maximum number of replicas in a batch.
+
+        cycle: int
+            The index of the current cycle, which sets the traversal order.
+
+        Yields
+        ------
+
+        list of int
+            A batch of replicas that is safe to process concurrently.
+        """
+        from math import ceil
+
+        for batch in self._replica_passes(cycle):
+            for i in range(ceil(len(batch) / num_workers)):
+                yield batch[i * num_workers : (i + 1) * num_workers]
+
+    def _set_num_slots(self):
+        """
+        Work out the number of OpenMM contexts (slots) to create, validating
+        the configuration options that only apply when contexts are re-used
+        across lambda values.
+
+        Sets self._num_slots and self._is_cached.
+        """
+
+        num_replicas = self._num_replicas
+
+        if self._config.max_contexts is None:
+            self._num_slots = num_replicas
+        else:
+            self._num_slots = min(self._config.max_contexts, num_replicas)
+
+        # There is a context per replica, so nothing is re-used and all of the
+        # constraints below are irrelevant. A context then keeps the lambda
+        # value it was created at, so there is no need to fix the constraints
+        # at a common one.
+        self._is_cached = self._num_slots < num_replicas
+        self._constraint_lambda_index = None
+
+        # Contexts run concurrently, so it's the number of them that determines
+        # how evenly the GPUs are loaded, not the number of replicas.
+        num_workers = self._num_gpus * self._config.oversubscription_factor
+
+        if self._num_slots < num_workers:
+            _logger.warning(
+                f"The number of contexts ({self._num_slots}) is less than the "
+                f"number of workers ({num_workers}). Some GPUs will be left idle."
+            )
+        elif self._num_slots % self._num_gpus != 0:
+            _logger.warning(
+                f"The number of contexts ({self._num_slots}) is not a multiple "
+                f"of the number of GPUs ({self._num_gpus}). This may result in "
+                "suboptimal performance."
+            )
+
+        if not self._is_cached:
+            if self._config.max_contexts is not None:
+                _logger.info(
+                    f"Creating one OpenMM context per replica ({num_replicas})"
+                )
+            return
+
+        # Frames can only be saved on checkpoint cycles when contexts are
+        # re-used. Within a cycle a context propagates several replicas in
+        # turn, so frames from different replicas would otherwise accumulate
+        # in the same internal trajectory. Tying frames to checkpoints means
+        # each one is written out and cleared before the context is handed to
+        # the next replica.
+        if (
+            self._save_frames
+            and self._config.frame_frequency != self._config.checkpoint_frequency
+        ):
+            msg = (
+                "'frame_frequency' must equal 'checkpoint_frequency' when "
+                "'max_contexts' is less than the number of replicas."
+            )
+            _logger.error(msg)
+            raise ValueError(msg)
+
+        # When the constraints aren't updated as a slot changes lambda, they stay
+        # as they were when its context was created. Create every context at the
+        # same lambda value, so that the constrained bond lengths are uniform
+        # across replicas rather than depending on which slot a replica happens
+        # to be assigned to. Only needed if they actually perturb.
+        if not self._config.update_constraints and self._end_state_constraints_differ:
+            # Which lambda value is used matters less than every replica using
+            # the same one, since where the bonds actually perturb depends on
+            # the lambda schedule.
+            if self._config.constraint_lambda_index >= num_replicas:
+                msg = (
+                    f"'constraint_lambda_index' "
+                    f"({self._config.constraint_lambda_index}) is out of range "
+                    f"for {num_replicas} {_lam_sym} values."
+                )
+                _logger.error(msg)
+                raise ValueError(msg)
+
+            self._constraint_lambda_index = self._config.constraint_lambda_index
+            _logger.warning(
+                f"'update_constraints' is False. Constrained bond lengths will not "
+                f"perturb with lambda, and are fixed at those of "
+                f"{_lam_sym} = "
+                f"{self._lambda_values[self._constraint_lambda_index]:.5f} "
+                f"for every replica."
+            )
+
+        from math import ceil
+
+        _logger.info(
+            f"Re-using {self._num_slots} OpenMM context(s) across "
+            f"{num_replicas} replicas: {ceil(num_replicas / self._num_slots)} "
+            "pass(es) per cycle"
+        )
 
     def __str__(self):
         """Return a string representation of the object."""
@@ -1185,7 +1790,6 @@ class RepexRunner(_RunnerBase):
             )
 
         # Work out the required number of batches.
-        num_batches = ceil(self._config.num_lambda / num_workers)
         num_checkpoint_batches = ceil(self._config.num_lambda / num_checkpoint_workers)
 
         # Persistent thread pools, reused across every batch and cycle.
@@ -1195,14 +1799,14 @@ class RepexRunner(_RunnerBase):
         # Create the replica list.
         replica_list = list(range(self._config.num_lambda))
 
-        # Minimise at each lambda value.
-        if self._config.minimise:
-            for i in range(num_batches):
+        # Minimise at each lambda value. Don't minimise on restart.
+        if self._config.minimise and not self._is_restart:
+            for batch in self._safe_batches(num_workers):
                 with ThreadPoolExecutor(max_workers=num_workers) as executor:
                     try:
                         for success, index, e in executor.map(
                             self._minimise,
-                            replica_list[i * num_workers : (i + 1) * num_workers],
+                            batch,
                         ):
                             if not success:
                                 msg = f"Minimisation failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
@@ -1217,12 +1821,12 @@ class RepexRunner(_RunnerBase):
 
         # Equilibrate the system.
         if self._is_equilibration and not self._is_restart:
-            for i in range(num_batches):
+            for batch in self._safe_batches(num_workers):
                 with ThreadPoolExecutor(max_workers=num_workers) as executor:
                     try:
                         for success, index, e in executor.map(
                             self._equilibrate,
-                            replica_list[i * num_workers : (i + 1) * num_workers],
+                            batch,
                         ):
                             if not success:
                                 _logger.error(
@@ -1236,6 +1840,28 @@ class RepexRunner(_RunnerBase):
         # Write a checkpoint immediately after equilibration so that a restart
         # after an early production crash doesn't need to re-equilibrate.
         if self._is_equilibration and not self._is_restart:
+            # When contexts are shared, commit each replica while it is
+            # resident so that every checkpoint file can still be written
+            # under a single lock below.
+            if self._is_cached:
+                for batch in self._safe_batches(num_checkpoint_workers):
+                    try:
+                        for index, error in checkpoint_executor.map(
+                            self._load_and_commit,
+                            batch,
+                        ):
+                            if error is not None:
+                                msg = (
+                                    f"Post-equilibration commit failed for {_lam_sym} = "
+                                    f"{self._lambda_values[index]:.5f}:\n{error}"
+                                )
+                                _logger.error(msg)
+                                raise error
+                    except KeyboardInterrupt:
+                        checkpoint_executor.shutdown(wait=False, cancel_futures=True)
+                        _logger.error("Post-equilibration commit cancelled. Exiting.")
+                        _sys.exit(1)
+
             lock = _FileLock(self._lock_file)
             with lock.acquire(timeout=self._config.timeout.to("seconds")):
                 for j in range(num_checkpoint_batches):
@@ -1346,33 +1972,80 @@ class RepexRunner(_RunnerBase):
                 else None
             )
 
-            # Run a dynamics block for each replica, making sure only each GPU is only
-            # oversubscribed by a factor of self._config.oversubscription_factor.
-            for j in range(num_batches):
-                replicas = replica_list[j * num_workers : (j + 1) * num_workers]
-                try:
-                    for result, index, energies in dynamics_executor.map(
-                        self._run_block,
-                        replicas,
-                        repeat(self._lambda_values),
-                        repeat(is_gcmc),
-                        repeat(write_gcmc_ghosts),
-                        repeat(is_terminal_flip),
-                        repeat(time_ns),
-                    ):
-                        if not result:
-                            _logger.error(
-                                f"Dynamics failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {energies}"
-                            )
-                            raise energies
-                        results.append((index, energies))
-                except KeyboardInterrupt:
-                    dynamics_executor.shutdown(wait=False, cancel_futures=True)
-                    _logger.error("Dynamics cancelled. Exiting.")
-                    _sys.exit(1)
+            # Whether the checkpoint files are written at the end of this cycle.
+            do_checkpoint = is_checkpoint or i == cycles - 1
 
-            # Checkpoint.
-            if is_checkpoint or i == cycles - 1:
+            # Capture the simulation clock at the start of the cycle. Every
+            # replica advances by the same amount each cycle, so a slot has to
+            # be rewound to this point before it propagates the next replica.
+            clock = self._dynamics_cache.get_clock()
+
+            # Propagate the replicas, one pass at a time. Each pass takes at
+            # most one replica from each slot, and there is a single pass when
+            # there is a slot per replica.
+            for batch in self._replica_passes(i):
+                # Run a dynamics block for each replica in the pass, making sure
+                # each GPU is only oversubscribed by a factor of
+                # self._config.oversubscription_factor.
+                for j in range(ceil(len(batch) / num_workers)):
+                    replicas = batch[j * num_workers : (j + 1) * num_workers]
+                    try:
+                        for result, index, energies in dynamics_executor.map(
+                            self._run_block,
+                            replicas,
+                            repeat(self._lambda_values),
+                            repeat(is_gcmc),
+                            repeat(write_gcmc_ghosts),
+                            repeat(is_terminal_flip),
+                            repeat(time_ns),
+                            repeat(clock),
+                        ):
+                            if not result:
+                                _logger.error(
+                                    f"Dynamics failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {energies}"
+                                )
+                                raise energies
+                            results.append((index, energies))
+                    except KeyboardInterrupt:
+                        dynamics_executor.shutdown(wait=False, cancel_futures=True)
+                        _logger.error("Dynamics cancelled. Exiting.")
+                        _sys.exit(1)
+
+                # When contexts are shared, commit the replicas of this pass
+                # while they are still resident in their slots. The committed
+                # systems are held until the end of the cycle, so that every
+                # checkpoint file is still written under a single lock. With a
+                # context per replica everything is still resident once the
+                # cycle finishes, so committing is left to _checkpoint().
+                if do_checkpoint and self._is_cached:
+                    for j in range(ceil(len(batch) / num_checkpoint_workers)):
+                        replicas = batch[
+                            j * num_checkpoint_workers : (j + 1)
+                            * num_checkpoint_workers
+                        ]
+                        try:
+                            for index, error in checkpoint_executor.map(
+                                self._commit_replica,
+                                replicas,
+                            ):
+                                if error:
+                                    _logger.error(
+                                        f"Commit failed for {_lam_sym} = "
+                                        f"{self._lambda_values[index]:.5f}: {error}"
+                                    )
+                                    raise error
+                        except KeyboardInterrupt:
+                            checkpoint_executor.shutdown(
+                                wait=False, cancel_futures=True
+                            )
+                            _logger.error("Commit cancelled. Exiting.")
+                            _sys.exit(1)
+
+            # Checkpoint. This happens once the whole cycle is complete, with
+            # every checkpoint file written under a single lock, so that an
+            # external process reading the output directory always sees a
+            # coherent set rather than a mixture of new and old files.
+            if do_checkpoint:
                 # Create the lock.
                 lock = _FileLock(self._lock_file)
 
@@ -1391,7 +2064,7 @@ class RepexRunner(_RunnerBase):
                                 self._backup_checkpoint,
                                 replicas,
                             ):
-                                if not result:
+                                if error:
                                     _logger.error(
                                         f"Backup failed for {_lam_sym} = "
                                         f"{self._lambda_values[index]:.5f}: {error}"
@@ -1448,16 +2121,11 @@ class RepexRunner(_RunnerBase):
                     self._dynamics_cache.get_accepted(),
                 )
             )
-            self._dynamics_cache.mix_states(old_states, executor=dynamics_executor)
 
-            # Snapshot the pre-run state for crash recovery.
-            if self._config.auto_fix_minimise:
-                for i, state in enumerate(self._dynamics_cache.get_states()):
-                    self._dynamics_cache._dynamics[i]._d._pre_run_state = (
-                        self._dynamics_cache._dynamics[i]
-                        .context()
-                        .getState(getPositions=True, getVelocities=True)
-                    )
+            # This only permutes the stored states. They are pushed into the
+            # contexts by load_replica() at the start of the next block, which
+            # is also where the pre-run state for crash recovery is captured.
+            self._dynamics_cache.mix_states(old_states)
 
             # This is a checkpoint cycle.
             if is_checkpoint:
@@ -1548,9 +2216,15 @@ class RepexRunner(_RunnerBase):
         write_gcmc_ghosts=False,
         is_terminal_flip=False,
         time_ns=None,
+        clock=None,
     ):
         """
         Run a dynamics block for a given replica.
+
+        The replica is made resident in its slot, propagated, then stored back
+        out again so that the slot can be handed to the next replica. When
+        there is one slot per replica, loading and storing reduce to the state
+        bookkeeping that replica exchange does anyway.
 
         Parameters
         ----------
@@ -1579,6 +2253,12 @@ class RepexRunner(_RunnerBase):
             The current simulation time in nanoseconds, used when saving energy
             components. If None, energy components are not saved.
 
+        clock: dict
+            The simulation clock at the start of the cycle, as returned by
+            Dynamics._get_clock(). Every replica advances by the same amount
+            each cycle, so a slot must be rewound to the start of the cycle
+            before propagating the next replica.
+
         Returns
         -------
 
@@ -1597,13 +2277,14 @@ class RepexRunner(_RunnerBase):
         lam = lambdas[index]
 
         try:
-            # Get the dynamics object (and GCMC sampler).
-            dynamics, gcmc_sampler = self._dynamics_cache.get(index)
+            # Make the replica resident in its slot.
+            self._dynamics_cache.load_replica(index, clock=clock)
 
-            # Track whether any MC move changed the context positions so we
-            # can update _pre_run_state once at the end. Only needed when
-            # crash recovery is enabled.
-            needs_pre_run_snapshot = False
+            # Get the dynamics object (and GCMC sampler).
+            dynamics, gcmc_sampler = self._dynamics_cache.get(
+                self._dynamics_cache.slot_for(index)
+            )
+
             auto_fix_minimise = self._config.auto_fix_minimise
 
             # Perform the GCMC move before dynamics so that the energies
@@ -1617,9 +2298,6 @@ class RepexRunner(_RunnerBase):
                 finally:
                     gcmc_sampler.pop()
 
-                if auto_fix_minimise:
-                    needs_pre_run_snapshot = True
-
                 # Write ghost residues immediately after the GCMC move so the
                 # ghost state and frame (saved during dynamics) are consistent.
                 if write_gcmc_ghosts:
@@ -1628,13 +2306,12 @@ class RepexRunner(_RunnerBase):
             # Perform a terminal flip move before dynamics if requested.
             if self._terminal_flip_samplers is not None and is_terminal_flip:
                 _logger.info(f"Performing terminal flip move at {_lam_sym} = {lam:.5f}")
-                if self._terminal_flip_samplers[index].move(dynamics.context()):
-                    if auto_fix_minimise:
-                        needs_pre_run_snapshot = True
+                self._terminal_flip_samplers[index].move(dynamics.context())
 
-            # Snapshot the context state for crash recovery if any MC move
-            # changed positions.
-            if needs_pre_run_snapshot:
+            # Snapshot the context state for crash recovery. The slot was just
+            # seeded with this replica's state, and any MC move above may have
+            # changed it again, so this is always required.
+            if auto_fix_minimise:
                 dynamics._d._pre_run_state = dynamics.context().getState(
                     getPositions=True, getVelocities=True
                 )
@@ -1668,12 +2345,9 @@ class RepexRunner(_RunnerBase):
                 ),
             )
 
-            if gcmc_sampler is not None:
-                # Save the GCMC state.
-                self._dynamics_cache.save_gcmc_state(index)
-
-            # Save the OpenMM state.
-            self._dynamics_cache.save_openmm_state(index)
+            # Save the replica's state back out of the slot, so that the slot
+            # can be handed to the next replica.
+            self._dynamics_cache.store_replica(index)
 
             # Save the energy contribution for each force.
             if self._config.save_energy_components and time_ns is not None:
@@ -1717,8 +2391,12 @@ class RepexRunner(_RunnerBase):
         _logger.info(f"Minimising at {_lam_sym} = {self._lambda_values[index]:.5f}")
 
         try:
+            # Make the replica resident in its slot.
+            self._dynamics_cache.load_replica(index)
+
             # Get the dynamics object (and GCMC sampler).
-            dynamics, gcmc_sampler = self._dynamics_cache.get(index)
+            slot = self._dynamics_cache.slot_for(index)
+            dynamics, gcmc_sampler = self._dynamics_cache.get(slot)
 
             if gcmc_sampler is not None and not self._is_restart:
                 gcmc_sampler.push()
@@ -1749,17 +2427,17 @@ class RepexRunner(_RunnerBase):
                     system = dynamics.commit()
 
                     # Delete the dynamics object.
-                    self._dynamics_cache.delete(index)
+                    self._dynamics_cache.delete(slot)
 
                     # Work out the device index.
-                    device = index % self._num_gpus
+                    device = slot % self._num_gpus
 
                     # Copy the dynamics keyword arguments.
                     dynamics_kwargs = self._dynamics_kwargs.copy()
 
                     # Overload the device and lambda value.
                     dynamics_kwargs["device"] = device
-                    dynamics_kwargs["lambda_value"] = self._lambda_values[index]
+                    dynamics_kwargs["lambda_value"] = self._build_lambda(index)
                     dynamics_kwargs["rest2_scale"] = self._rest2_scale_factors[index]
 
                     # Create the production dynamics object.
@@ -1771,12 +2449,19 @@ class RepexRunner(_RunnerBase):
                     if gcmc_sampler is not None:
                         self._reset_gcmc_sampler(gcmc_sampler, dynamics)
 
-                    # Set the new dynamics object.
-                    self._dynamics_cache.set(index, dynamics)
+                    # Set the new dynamics object. The rebuilt object has a
+                    # fresh, empty energy trajectory, but no energies are
+                    # recorded during minimisation or equilibration, and
+                    # load_replica() re-attaches the replica's trajectory
+                    # before the first production block.
+                    self._dynamics_cache.set(slot, dynamics)
 
                     _logger.info(
                         f"Created dynamics object for {_lam_sym} = {self._lambda_values[index]:.5f}"
                     )
+
+            # Save the minimised state back out of the slot.
+            self._dynamics_cache.store_replica(index)
 
         except Exception as e:
             return False, index, e
@@ -1808,8 +2493,12 @@ class RepexRunner(_RunnerBase):
         _logger.info(f"Equilibrating at {_lam_sym} = {self._lambda_values[index]:.5f}")
 
         try:
+            # Make the replica resident in its slot.
+            self._dynamics_cache.load_replica(index)
+
             # Get the dynamics object (and GCMC sampler).
-            dynamics, gcmc_sampler = self._dynamics_cache.get(index)
+            slot = self._dynamics_cache.slot_for(index)
+            dynamics, gcmc_sampler = self._dynamics_cache.get(slot)
 
             if gcmc_sampler is not None:
                 gcmc_sampler.push()
@@ -1848,17 +2537,17 @@ class RepexRunner(_RunnerBase):
                     system = dynamics.commit()
 
                     # Delete the current dynamics object.
-                    self._dynamics_cache.delete(index)
+                    self._dynamics_cache.delete(slot)
 
                     # Work out the device index.
-                    device = index % self._num_gpus
+                    device = slot % self._num_gpus
 
                     # Copy the dynamics keyword arguments.
                     dynamics_kwargs = self._dynamics_kwargs.copy()
 
                     # Overload the device and lambda value.
                     dynamics_kwargs["device"] = device
-                    dynamics_kwargs["lambda_value"] = self._lambda_values[index]
+                    dynamics_kwargs["lambda_value"] = self._build_lambda(index)
                     dynamics_kwargs["rest2_scale"] = self._rest2_scale_factors[index]
                     dynamics_kwargs["timestep"] = self._config._equilibration_timestep
                     dynamics_kwargs["constraint"] = constraint
@@ -1872,7 +2561,7 @@ class RepexRunner(_RunnerBase):
                         self._reset_gcmc_sampler(gcmc_sampler, dynamics)
 
                     # Update the dynamics object in the cache.
-                    self._dynamics_cache.set(index, dynamics)
+                    self._dynamics_cache.set(slot, dynamics)
 
             # Equilibrate.
             dynamics.run(
@@ -1894,17 +2583,17 @@ class RepexRunner(_RunnerBase):
                 system.set_time(_sr.u("0ps"))
 
             # Delete the dynamics object.
-            self._dynamics_cache.delete(index)
+            self._dynamics_cache.delete(slot)
 
             # Work out the device index.
-            device = index % self._num_gpus
+            device = slot % self._num_gpus
 
             # Copy the dynamics keyword arguments.
             dynamics_kwargs = self._dynamics_kwargs.copy()
 
             # Overload the device and lambda value.
             dynamics_kwargs["device"] = device
-            dynamics_kwargs["lambda_value"] = self._lambda_values[index]
+            dynamics_kwargs["lambda_value"] = self._build_lambda(index)
             dynamics_kwargs["rest2_scale"] = self._rest2_scale_factors[index]
 
             # Create the production dynamics object.
@@ -1916,20 +2605,15 @@ class RepexRunner(_RunnerBase):
             if gcmc_sampler is not None:
                 self._reset_gcmc_sampler(gcmc_sampler, dynamics)
 
-                # Compute the current number of waters in the GCMC sampling
-                # volume after equilibration.
-                gcmc_sampler.push()
-                try:
-                    gcmc_sampler.num_waters(context=dynamics.context())
-                finally:
-                    gcmc_sampler.pop()
-
             # Set the new dynamics object.
-            self._dynamics_cache.set(index, dynamics)
+            self._dynamics_cache.set(slot, dynamics)
 
             _logger.info(
                 f"Created dynamics object for {_lam_sym} = {self._lambda_values[index]:.5f}"
             )
+
+            # Save the equilibrated state back out of the slot.
+            self._dynamics_cache.store_replica(index)
 
         except Exception as e:
             return False, index, e
@@ -1966,7 +2650,7 @@ class RepexRunner(_RunnerBase):
         )
 
         # Get the dynamics object.
-        dynamics, _ = self._dynamics_cache.get(index)
+        dynamics, _ = self._dynamics_cache.get(self._dynamics_cache.slot_for(index))
 
         # Create an array to hold the energies.
         energies = _np.zeros(self._config.num_lambda)
@@ -2044,6 +2728,80 @@ class RepexRunner(_RunnerBase):
         """
         self._dynamics_cache._time = system.time()
 
+    def _load_and_commit(self, index):
+        """
+        Make a replica resident in its slot and commit it, for the
+        post-equilibration checkpoint.
+
+        Equilibration stores every replica's state back out of its slot, so a
+        replica has to be loaded again before it can be committed.
+
+        Parameters
+        ----------
+
+        index: int
+            The index of the replica.
+
+        Returns
+        -------
+
+        index: int
+            The index of the replica.
+
+        exception: Exception
+            The exception if the commit failed.
+        """
+        try:
+            self._dynamics_cache.load_replica(index)
+        except Exception as e:
+            return index, e
+
+        return self._commit_replica(index)
+
+    def _commit_replica(self, index):
+        """
+        Commit a replica while it is still resident in its slot, holding the
+        result until the checkpoint files are written at the end of the cycle.
+
+        This is only used when contexts are shared between replicas. A slot
+        holds the positions and trajectory frames of the replica it last
+        hosted, so a replica has to be committed before its slot is handed on.
+        Deferring only the file writes keeps every checkpoint file within a
+        single lock, so that an external reader never sees a partial set.
+
+        Parameters
+        ----------
+
+        index: int
+            The index of the replica.
+
+        Returns
+        -------
+
+        index: int
+            The index of the replica.
+
+        exception: Exception
+            The exception if the commit failed.
+        """
+        try:
+            slot = self._dynamics_cache.slot_for(index)
+            dynamics, _ = self._dynamics_cache.get(slot)
+
+            # commit() returns a clone, so the frames can be cleared straight
+            # away, ready for the next replica to use the slot.
+            system = dynamics.commit()
+            speed = dynamics.time_speed()
+            dynamics._d._sire_mols.delete_all_frames()
+
+            with self._lock:
+                self._committed[index] = (system, speed)
+
+        except Exception as e:
+            return index, e
+
+        return index, None
+
     def _checkpoint(self, index, lambdas, block, num_blocks, is_final_block=False):
         """
         Checkpoint the simulation.
@@ -2080,13 +2838,23 @@ class RepexRunner(_RunnerBase):
             lam = lambdas[index]
 
             # Get the dynamics object (and GCMC sampler).
-            dynamics, gcmc_sampler = self._dynamics_cache.get(index)
+            slot = self._dynamics_cache.slot_for(index)
+            dynamics, gcmc_sampler = self._dynamics_cache.get(slot)
 
-            # Commit the current system.
-            system = dynamics.commit()
+            # Use the system committed by _commit_replica() if there is one.
+            # When contexts are shared the replica is no longer resident in its
+            # slot by the time the cycle finishes, so it was committed earlier,
+            # while it still was.
+            committed = self._committed.pop(index, None)
 
-            # Get the simulation speed.
-            speed = dynamics.time_speed()
+            if committed is None:
+                # Commit the current system.
+                system = dynamics.commit()
+
+                # Get the simulation speed.
+                speed = dynamics.time_speed()
+            else:
+                system, speed = committed
 
             # Call the base class checkpoint method to save the system state.
             with self._lock:
@@ -2098,7 +2866,8 @@ class RepexRunner(_RunnerBase):
                     return index, error
 
             # Delete all trajectory frames from the Sire system within the
-            # dynamics object.
+            # dynamics object. This is a no-op when the replica was committed
+            # earlier, since the frames were cleared then to free the slot.
             dynamics._d._sire_mols.delete_all_frames()
 
             if block == -1:
@@ -2111,23 +2880,24 @@ class RepexRunner(_RunnerBase):
                     f"for {_lam_sym} = {lam:.5f}"
                 )
 
-            # Log the number of waters within the GCMC sampling volume.
-            if gcmc_sampler is not None:
-                gcmc_sampler.push()
-                try:
-                    n_moves = gcmc_sampler._num_moves
-                    acc_str = (
-                        f", acceptance rate = {gcmc_sampler.move_acceptance_probability():.3f}"
-                        f" (ins = {gcmc_sampler.num_insertions()}, del = {gcmc_sampler.num_deletions()})"
-                        if n_moves > 0
-                        else ""
-                    )
-                    _logger.info(
-                        f"Current number of waters in GCMC volume at {_lam_sym} = {lam:.5f} "
-                        f"is {gcmc_sampler.num_waters()}{acc_str}"
-                    )
-                finally:
-                    gcmc_sampler.pop()
+            # Log the number of waters within the GCMC sampling volume. Both
+            # the water count and the statistics are read from what was
+            # recorded while this replica was resident in its slot, since by
+            # the time the cycle finishes the slot may hold another one.
+            num_waters = self._dynamics_cache._gcmc_num_waters[index]
+            if gcmc_sampler is not None and num_waters is not None:
+                stats = gcmc_sampler.get_stats().get(gcmc_sampler.stats_key(lam))
+                n_moves = stats["num_moves"] if stats is not None else 0
+                acc_str = (
+                    f", acceptance rate = {stats['num_accepted'] / n_moves:.3f}"
+                    f" (ins = {stats['num_insertions']}, del = {stats['num_deletions']})"
+                    if n_moves > 0
+                    else ""
+                )
+                _logger.info(
+                    f"Current number of waters in GCMC volume at {_lam_sym} = {lam:.5f} "
+                    f"is {num_waters}{acc_str}"
+                )
 
             # Log terminal flip acceptance rate for this replica.
             if self._terminal_flip_samplers is not None:
@@ -2263,8 +3033,8 @@ class RepexRunner(_RunnerBase):
         """
         stats = {}
 
-        for i in range(len(self._lambda_values)):
-            _, gcmc_sampler = self._dynamics_cache.get(i)
+        for slot in range(self._dynamics_cache._num_slots):
+            _, gcmc_sampler = self._dynamics_cache.get(slot)
             if gcmc_sampler is not None:
                 stats.update(gcmc_sampler.get_stats())
 
