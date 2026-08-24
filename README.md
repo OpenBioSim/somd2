@@ -289,6 +289,87 @@ geometry. To override this for all groups:
 somd2 perturbable_system.bss --terminal-flip-frequency "1 ps" --terminal-flip-angle "180 degrees"
 ```
 
+## Lambda schedules
+
+The way that the perturbation is applied across the lambda coordinate is
+controlled by the `--lambda-schedule` option, which defaults to
+`standard_morph`. The available schedules are:
+
+| Schedule | Description |
+| --- | --- |
+| `standard_morph` | Linear interpolation between the two end states. |
+| `charge_scaled_morph` | As above, but with charges scaled at intermediate lambda values. |
+| `annihilate` | Absolute binding free energies, removing all non-bonded interactions. |
+| `decouple` | Absolute binding free energies, removing only intermolecular interactions. |
+| `ring_break_morph` | Ring-breaking perturbations. |
+| `reverse_ring_break_morph` | Ring-making perturbations, i.e. the reverse of the above. |
+
+For the `annihilate`, `decouple`, and ring-breaking schedules, appropriate
+restraints can be generated automatically. See the sections below.
+
+## Absolute binding free energies
+
+Absolute binding free energy (ABFE) calculations are supported using the
+`annihilate` and `decouple` lambda schedules. Both first discharge the ligand,
+then remove its Lennard-Jones interactions: `annihilate` removes all non-bonded
+interactions, including those within the ligand, whereas `decouple` retains the
+intramolecular terms.
+
+```
+somd2 perturbable_system.bss --lambda-schedule decouple
+```
+
+The ligand must be restrained within the binding site. If no restraints are
+passed, a Boresch restraint is generated automatically for the bound leg, i.e.
+when the system contains both a protein and water. This is done by minimising
+the system, running a short trajectory at lambda = 0, then choosing the anchor
+atoms and force constants from it. The length of this trajectory and the
+frequency at which frames are saved can be controlled with the
+`--restraint-search-time` and `--restraint-search-frequency` options. By
+default the receptor anchor atoms are chosen from the protein backbone; use
+`--restraint-search-receptor-selection` to pass a `Sire` selection string
+instead.
+
+The restraint is written to `abfe_restraint.s3` in the output directory and is
+reloaded on restart, since the accumulated free energy corresponds to that
+particular restraint. The standard state correction is logged and written to
+the metadata of the energy trajectory, so analysis code can apply it without
+needing to scan the log.
+
+> [!NOTE]
+> The Beutler soft-core form, enabled with `--softcore-form beutler`, is only
+> supported with the ABFE schedules, or a custom schedule.
+
+## Ring-breaking perturbations
+
+Perturbations that break (or form) a ring are supported using the
+`ring_break_morph` schedule, or `reverse_ring_break_morph` for the ring-making
+direction.
+
+```
+somd2 perturbable_system.bss --lambda-schedule ring_break_morph
+```
+
+These perturbations require a pair of Morse restraints on the atoms of the bond
+that is broken. If no restraints are passed, both are generated automatically.
+A "hard" Morse potential replaces the harmonic bond, inheriting its force
+constant and equilibrium length, and is switched off as a weaker "soft" Morse
+restraint holds the fragment in place. Their well depths and the force constant
+of the soft restraint can be controlled with the `--morse-hard-well-depth`,
+`--morse-soft-well-depth`, and `--morse-soft-force-constant` options.
+
+Unlike the ABFE restraints, these are regenerated on each run rather than being
+cached, since they are derived from the bond parameters alone and are therefore
+identical every time.
+
+> [!NOTE]
+> The defaults are a reasonable starting point, but ring-breaking
+> perturbations are demanding. A non-uniform spacing of lambda values, set with
+> `--lambda-values`, is typically needed to obtain good overlap around the point
+> at which the bond is broken. The
+> [alchemate](https://github.com/akalpokas/alchemate) package provides
+> workflows for iteratively optimising the lambda schedule.
+
 ## Debugging with energy components
 
 To help diagnose simulation instabilities, `SOMD2` can record the potential
