@@ -139,7 +139,7 @@ pre-commit run --all-files
 ## Usage
 
 In order to run an alchemical free-energy simulation you will need to
-first create a stream file containing the _perturbable_ system of interest.
+first create a stream file containing the *perturbable* system of interest.
 This can be created using [BioSimSpace](https://github.com/OpenBioSim/biosimspace).
 For example, following the tutorial
 [here](https://biosimspace.openbiosim.org/tutorials/hydration_freenrg.html).
@@ -229,7 +229,7 @@ We also support Replica Exchange with Solute Scaling
 involving conformational changes, e.g. ring flips. This can be enabled
 using the `--rest2-scale` option, which specifies the "temperature" of the
 REST2 region relative to the rest of the system. By default, the REST2 region
-comprises _all_ atoms in perturbable molecules, but can be controlled via the
+comprises *all* atoms in perturbable molecules, but can be controlled via the
 `--rest2-selection` option. This should be a `Sire` selection string that specifies
 additional atoms of interest, i.e. those in regular, non-perturbable molecules.
 If the selection does contain atoms within perturbable molecules, then only
@@ -293,7 +293,8 @@ somd2 perturbable_system.bss --terminal-flip-frequency "1 ps" --terminal-flip-an
 
 The way that the perturbation is applied across the lambda coordinate is
 controlled by the `--lambda-schedule` option, which defaults to
-`standard_morph`. The available schedules are:
+`standard_morph`, which is intended for use with relative binding free
+energy (RBFE) simulations. The available schedules are:
 
 | Schedule | Description |
 | --- | --- |
@@ -482,7 +483,7 @@ For existing users of `somd1`, it's possible to generate input for `somd2` by pa
 `--somd2 True` to the `prepareFEP.py` setup script. This will write a `somd2` compatible
 stream file.
 
-Additionally, `somd2` can be run in `somd1` _compatibility_ mode by passing the
+Additionally, `somd2` can be run in `somd1` *compatibility* mode by passing the
 ``--somd1-compatibility`` command-line option to the `somd2` executable. This ensures
 that the perturbation used is consistent with the approach from `somd1`, i.e.
 it uses the same modifications for bonded-terms involving dummy atoms as `somd1`.
