@@ -83,3 +83,43 @@ def test_logfile_creation():
         assert Path.exists(runner._config.output_directory / runner._config.log_file)
 
         somd2._logger.remove()
+
+
+def test_morse_restraint_options():
+    """Validate that the Morse restraint options are parsed correctly."""
+    import math
+
+    import pytest
+
+    # The defaults are parsed as Sire units.
+    config = Config()
+    assert config.morse_hard_well_depth == sr.u("150 kcal mol-1")
+    assert config.morse_soft_well_depth == sr.u("50 kcal mol-1")
+    assert config.morse_soft_force_constant == sr.u("125 kcal mol-1 A-2")
+
+    # Equivalent units are accepted, and converted.
+    config = Config(morse_hard_well_depth="418.4 kJ mol-1")
+    assert math.isclose(
+        config.morse_hard_well_depth.to(sr.units.kcal_per_mol), 100.0, rel_tol=1e-6
+    )
+
+    # Well depths must be energies.
+    for option in ("morse_hard_well_depth", "morse_soft_well_depth"):
+        with pytest.raises(TypeError):
+            Config(**{option: 150})
+
+        with pytest.raises(ValueError, match="Unable to parse"):
+            Config(**{option: "not a unit"})
+
+        with pytest.raises(ValueError, match="units are invalid"):
+            Config(**{option: "150 kcal mol-1 A-2"})
+
+    # The force constant must be an energy per unit area.
+    with pytest.raises(TypeError):
+        Config(morse_soft_force_constant=125)
+
+    with pytest.raises(ValueError, match="Unable to parse"):
+        Config(morse_soft_force_constant="not a unit")
+
+    with pytest.raises(ValueError, match="units are invalid"):
+        Config(morse_soft_force_constant="125 kcal mol-1")
