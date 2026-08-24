@@ -180,6 +180,9 @@ class Config:
         restraint_search_time="1 ns",
         restraint_search_frequency="10 ps",
         restraint_search_receptor_selection=None,
+        morse_hard_well_depth="150 kcal mol-1",
+        morse_soft_well_depth="50 kcal mol-1",
+        morse_soft_force_constant="125 kcal mol-1 A-2",
     ):
         """
         Constructor.
@@ -622,6 +625,20 @@ class Config:
             Sire selection string for receptor anchor atom candidates used
             during automatic Boresch restraint generation. If None, the default
             backbone selection is used (CA, C, N atoms in non-water molecules).
+
+        morse_hard_well_depth: str
+            The well depth of the "hard" Morse potential that replaces the
+            broken bond when auto-generating restraints for a ring-breaking
+            simulation.
+
+        morse_soft_well_depth: str
+            The well depth of the "soft" Morse restraint that holds the broken
+            fragment in place when auto-generating restraints for a
+            ring-breaking simulation.
+
+        morse_soft_force_constant: str
+            The force constant of the "soft" Morse restraint used when
+            auto-generating restraints for a ring-breaking simulation.
         """
 
         # Setup logger before doing anything else
@@ -717,6 +734,9 @@ class Config:
         self.restraint_search_time = restraint_search_time
         self.restraint_search_frequency = restraint_search_frequency
         self.restraint_search_receptor_selection = restraint_search_receptor_selection
+        self.morse_hard_well_depth = morse_hard_well_depth
+        self.morse_soft_well_depth = morse_soft_well_depth
+        self.morse_soft_force_constant = morse_soft_force_constant
         self.write_config = write_config
         self.overwrite = overwrite
 
@@ -2792,6 +2812,85 @@ class Config:
                     "'restraint_search_receptor_selection' must be of type 'str'"
                 )
         self._restraint_search_receptor_selection = restraint_search_receptor_selection
+
+    @property
+    def morse_hard_well_depth(self):
+        return self._morse_hard_well_depth
+
+    @morse_hard_well_depth.setter
+    def morse_hard_well_depth(self, morse_hard_well_depth):
+        self._morse_hard_well_depth = self._parse_well_depth(
+            morse_hard_well_depth, "morse_hard_well_depth"
+        )
+
+    @property
+    def morse_soft_well_depth(self):
+        return self._morse_soft_well_depth
+
+    @morse_soft_well_depth.setter
+    def morse_soft_well_depth(self, morse_soft_well_depth):
+        self._morse_soft_well_depth = self._parse_well_depth(
+            morse_soft_well_depth, "morse_soft_well_depth"
+        )
+
+    @property
+    def morse_soft_force_constant(self):
+        return self._morse_soft_force_constant
+
+    @morse_soft_force_constant.setter
+    def morse_soft_force_constant(self, morse_soft_force_constant):
+        if not isinstance(morse_soft_force_constant, str):
+            raise TypeError("'morse_soft_force_constant' must be of type 'str'")
+
+        from sire.units import angstrom, kcal_per_mol
+
+        try:
+            k = _sr.u(morse_soft_force_constant)
+        except:
+            raise ValueError(
+                "Unable to parse 'morse_soft_force_constant' as a Sire "
+                f"GeneralUnit: {morse_soft_force_constant}"
+            )
+
+        if not k.has_same_units(kcal_per_mol / (angstrom * angstrom)):
+            raise ValueError("'morse_soft_force_constant' units are invalid.")
+
+        self._morse_soft_force_constant = k
+
+    @staticmethod
+    def _parse_well_depth(value, name):
+        """
+        Internal helper to validate a Morse potential well depth.
+
+        Parameters
+        ----------
+
+        value: str
+            The well depth as a string, e.g. "150 kcal mol-1".
+
+        name: str
+            The name of the option, used in error messages.
+
+        Returns
+        -------
+
+        well_depth: sire.units.GeneralUnit
+            The parsed well depth.
+        """
+        if not isinstance(value, str):
+            raise TypeError(f"'{name}' must be of type 'str'")
+
+        from sire.units import kcal_per_mol
+
+        try:
+            de = _sr.u(value)
+        except:
+            raise ValueError(f"Unable to parse '{name}' as a Sire GeneralUnit: {value}")
+
+        if not de.has_same_units(kcal_per_mol):
+            raise ValueError(f"'{name}' units are invalid.")
+
+        return de
 
     def _reset_logger(self, logger):
         """

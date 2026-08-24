@@ -267,6 +267,24 @@ class RunnerBase:
             self._config._extra_args["use_gcmc_lrc"] = True
             self._config._extra_args["num_gcmc_waters"] = self._config.gcmc_num_waters
 
+        # Auto-generate Morse restraints for ring-breaking perturbations with no
+        # user-supplied restraint. This is done before any modification of the
+        # bonded terms, and before the reference system is stored and the restart
+        # checks are performed, since the hard restraint replaces a bond in the
+        # system, which must match the checkpoints.
+        if self._is_ring_break and self._config.restraints is None:
+            try:
+                self._config.restraints = self._generate_morse_restraints()
+            except Exception as e:
+                msg = (
+                    "Unable to generate Morse restraints for ring-breaking "
+                    f"perturbation: {e}. If the Morse potential has already been "
+                    "applied to the input system, then pass the corresponding "
+                    "restraints using the 'restraints' option."
+                )
+                _logger.error(msg)
+                raise RuntimeError(msg)
+
         # We're running in SOMD1 compatibility mode.
         if self._config.somd1_compatibility:
             from .._utils._somd1 import make_compatible
@@ -1001,6 +1019,76 @@ class RunnerBase:
             and self._has_protein
             and self._has_water
         )
+
+    @property
+    def _is_ring_break(self):
+        """
+        Whether this is a ring-breaking (or ring-making) simulation, i.e. one
+        using the 'ring_break_morph' lambda schedule, or its reverse.
+        """
+        return self._config._lambda_schedule_name in (
+            "ring_break_morph",
+            "reverse_ring_break_morph",
+        )
+
+    def _generate_morse_restraints(self):
+        """
+        Return the pair of Morse restraints required by the 'ring_break_morph'
+        lambda schedule, or its reverse. Called automatically when running a
+        ring-breaking simulation with no user-supplied restraint.
+
+        The "hard" restraint directly replaces the harmonic bond that is broken
+        (or formed) by the perturbation, inheriting its force constant and
+        equilibrium length. The "soft" restraint acts on the same pair of atoms
+        and holds the broken fragment in place while the hard restraint is
+        switched off.
+
+        Returns
+        -------
+
+        restraints: [sire.mm.MorsePotentialRestraints]
+            The hard and soft Morse restraints, in the order expected by the
+            schedule's 'morse_hard' and 'morse_soft' levers.
+
+        Notes
+        -----
+
+        As a side effect, ``self._system`` is updated with the replacement of
+        the broken bond by the hard Morse potential.
+        """
+        from sire.restraints import morse_potential as _morse_potential
+
+        _logger.info(
+            "No restraints supplied for ring-breaking perturbation. "
+            "Generating default Morse restraints."
+        )
+
+        hard_restraints, self._system = _morse_potential(
+            self._system,
+            de=self._config.morse_hard_well_depth,
+            auto_parametrise=True,
+            direct_morse_replacement=True,
+            name="morse_hard",
+        )
+
+        # Restrain the same pair of atoms as the hard restraint, at the same
+        # equilibrium distance.
+        soft_restraints, _ = _morse_potential(
+            self._system,
+            atoms0=hard_restraints[0].atom0(),
+            atoms1=hard_restraints[0].atom1(),
+            r0=hard_restraints[0].r0(),
+            k=self._config.morse_soft_force_constant,
+            de=self._config.morse_soft_well_depth,
+            auto_parametrise=False,
+            direct_morse_replacement=False,
+            name="morse_soft",
+        )
+
+        _logger.info(f"Hard Morse restraint: {hard_restraints[0]}")
+        _logger.info(f"Soft Morse restraint: {soft_restraints[0]}")
+
+        return [hard_restraints, soft_restraints]
 
     def _generate_boresch_restraint(self, device=None):
         """
