@@ -479,11 +479,7 @@ package.
 
 ## Note for SOMD1 users
 
-For existing users of `somd1`, it's possible to generate input for `somd2` by passing
-`--somd2 True` to the `prepareFEP.py` setup script. This will write a `somd2` compatible
-stream file.
-
-Additionally, `somd2` can be run in `somd1` *compatibility* mode by passing the
+`somd2` can be run in `somd1` *compatibility* mode by passing the
 ``--somd1-compatibility`` command-line option to the `somd2` executable. This ensures
 that the perturbation used is consistent with the approach from `somd1`, i.e.
 it uses the same modifications for bonded-terms involving dummy atoms as `somd1`.
