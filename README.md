@@ -93,6 +93,31 @@ You should now have a `somd2` executable in your path. To test, run:
 somd2 --help
 ```
 
+### Keeping up to date
+
+During a development cycle the OpenBioSim packages are pinned only to a
+`X.X.X.dev` version, not to a specific build. `somd2` and its dependencies
+therefore need to be kept in sync, so always update the whole stack together
+rather than `somd2` alone.
+
+For a conda install, update everything in one go:
+
+```
+conda update -c conda-forge -c openbiosim/label/dev sire biosimspace ghostly loch somd2
+```
+
+For a standalone pixi install, pull the latest `somd2` and refresh the
+pre-built dependencies:
+
+```
+git pull
+pixi update
+```
+
+For a full source install, `git pull` in *every* repository you have installed
+(`sire`, `biosimspace`, `ghostly`, `loch` and `somd2`), not just `somd2`. Since
+`sire` is compiled, you will also need to rebuild it.
+
 ## Development
 
 Pre-commit hooks are used to ensure consistent code formatting and linting.
