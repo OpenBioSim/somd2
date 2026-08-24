@@ -96,7 +96,7 @@ somd2 --help
 ### Keeping up to date
 
 During a development cycle the OpenBioSim packages are pinned only to a
-`X.X.X.dev` version, not to a specific build. `somd2` and its dependencies
+`YYYY.N.0.dev` version, not to a specific build. `somd2` and its dependencies
 therefore need to be kept in sync, so always update the whole stack together
 rather than `somd2` alone.
 
