@@ -1,6 +1,6 @@
 <p align="center">
     <picture align="center">
-        <img alt="SOMD" src="./.img/somd2.png" width="50%"/>
+        <img alt="SOMD2" src="./.img/somd2.png" width="50%"/>
     </picture>
 </p>
 
@@ -172,20 +172,20 @@ In order to run using GPUs you will first need to set the relevant environment
 variable. For example, to run using 4 CUDA enabled GPUs set `CUDA_VISIBLE_DEVICES=0,1,2,3`
 (for OpenCL and HIP use `OPENCL_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES` respectively).
 
-By default `SOMD2` will run using the CPU platform, however if the relevant
+By default SOMD2 will run using the CPU platform, however if the relevant
 environment variable has been set (as above) the new platform will be detected
 and set. In the case that this detection fails, or if there are multiple platforms
 available, the `--platform` option can be set (for example `--platform cuda`).
 
-By default, `SOMD2` will automatically manage the distribution of lambda windows
+By default, SOMD2 will automatically manage the distribution of lambda windows
 across all listed devices. In order to restrict the number of devices used
 the `--max-gpus` option can be set, for example setting `--max-gpus 2` while
-`CUDA_VISIBLE_DEVICES` are set as above would restrict `SOMD2` to using only
+`CUDA_VISIBLE_DEVICES` are set as above would restrict SOMD2 to using only
 GPUs 0 and 1.
 
 ## Replica exchange
 
-`SOMD2` supports Hamiltonian replica exchange (HREX) simulations, which can be
+SOMD2 supports Hamiltonian replica exchange (HREX) simulations, which can be
 enabled using the `--replica-exchange` option. By default, dynamics contexts are
 created up-front for all replicas, so this can be memory intensive. As such,
 replica exchange is intended for use on multi-GPU nodes with a large amount of
@@ -208,7 +208,7 @@ must equal `--checkpoint-frequency`.
 For optimal performance, it is recommended that the number of contexts, i.e. the
 number of replicas, or `--max-contexts` if it is set, be a multiple of the number
 of GPUs, and no smaller than the number of GPUs multiplied by the
-oversubscription factor. `SOMD2` will warn you if this isn't the case.
+oversubscription factor. SOMD2 will warn you if this isn't the case.
 
 Changing the lambda value of a context requires it to be reinitialised whenever a
 constrained bond length actually perturbs with lambda, which is slow. If this
@@ -373,7 +373,7 @@ identical every time.
 
 ## Debugging with energy components
 
-To help diagnose simulation instabilities, `SOMD2` can record the potential
+To help diagnose simulation instabilities, SOMD2 can record the potential
 energy contribution from each OpenMM force group. This is enabled with the
 `--save-energy-components` flag:
 
@@ -400,7 +400,7 @@ The recording interval depends on the runner and active samplers:
 
 ## Copying output files during a simulation
 
-When `SOMD2` writes checkpoint files it acquires an exclusive
+When SOMD2 writes checkpoint files it acquires an exclusive
 [file lock](https://py-filelock.readthedocs.io) on `somd2.lock` inside the output
 directory. This guarantees that checkpoint files are always in a consistent
 state on disk.
@@ -426,7 +426,7 @@ with FileLock("/path/to/output/somd2.lock"):
 ```
 
 > [!NOTE]
-> The `--timeout` option (default: `300 s`) controls how long `SOMD2` will
+> The `--timeout` option (default: `300 s`) controls how long SOMD2 will
 > wait to re-acquire the lock after your copy completes. If you hold the lock
 > for longer than this, the simulation will raise a `Timeout` error.
 
@@ -473,18 +473,18 @@ be chosen as a trade off between accuracy and computational cost. A value of aro
 We support modification of ghost atom bonded terms to avoid spurious coupling
 to the physical system using the approach described in
 [this](https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328) paper.
-These are enabled by default, but can be disabled using the ``--no-ghost-modifications``
+These are enabled by default, but can be disabled using the `--no-ghost-modifications`
 option. Modifications are implemented using the [ghostly](https://github.com/OpenBioSim/ghostly)
 package.
 
 ## Note for SOMD1 users
 
-`somd2` can be run in `somd1` *compatibility* mode by passing the
-``--somd1-compatibility`` command-line option to the `somd2` executable. This ensures
-that the perturbation used is consistent with the approach from `somd1`, i.e.
-it uses the same modifications for bonded-terms involving dummy atoms as `somd1`.
+SOMD2 can be run in SOMD1 *compatibility* mode by passing the
+`--somd1-compatibility` command-line option to the `somd2` executable. This ensures
+that the perturbation used is consistent with the approach from SOMD1, i.e.
+it uses the same modifications for bonded-terms involving dummy atoms as SOMD1.
 
-Finally, it is also possible to run `somd2` using an existing `somd1` perturbation
+Finally, it is also possible to run SOMD2 using an existing SOMD1 perturbation
 file. To do so, you will also need to create a stream file representing the
 λ = 0 state. For existing input generated by `prepareFEP.py`, this can be done as
 follows. (This assumes that the output has a prefix `somd1`.)
@@ -501,7 +501,7 @@ BSS.Stream.save(system, "somd1")
 
 (This will write a stream file called `somd1.bss`.)
 
-This can then be run with `somd2` using the following:
+This can then be run with SOMD2 using the following:
 
 ```
 somd2 somd1.bss --pert-file somd1.pert --somd1-compatibility
@@ -510,7 +510,7 @@ somd2 somd1.bss --pert-file somd1.pert --somd1-compatibility
 (This only shows the limited options required. Others will take default values and can be set accordingly.)
 
 If you want to load an existing system from a perturbation file and use the
-new `somd2` [ghost atom bonded-term modifications](https://github.com/OpenBioSim/ghostly),
+new SOMD2 [ghost atom bonded-term modifications](https://github.com/OpenBioSim/ghostly),
 then simply omit the `--somd1-compatibility` option.
 
 ## GPU oversubscription
@@ -532,7 +532,7 @@ More details on MPS, including tuning options, can be found in the following
 
 ## Python API
 
-`SOMD2` can also be used as a Python API, allowing it to be embedded
+SOMD2 can also be used as a Python API, allowing it to be embedded
 within other Python scripts.
 
 ## Known issues
