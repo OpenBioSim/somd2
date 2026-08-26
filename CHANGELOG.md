@@ -20,6 +20,7 @@ Changelog
 * Pre-equilibrate the water with GCMC moves before minimising in the regular `Runner`, making it consistent with the `RepexRunner`, which already did so to stop the geometry relaxing into a dry pocket [#191](https://github.com/OpenBioSim/somd2/pull/191).
 * Add a `precision` option for GPU platforms, defaulting to `mixed` [#191](https://github.com/OpenBioSim/somd2/pull/191).
 * Add support for generating Morse restraints for ring-breaking perturbations.
+* Remove the unused `kappa` lever equations from the ring-breaking/making lambda schedules.
 
 [2026.1.0](https://github.com/openbiosim/somd2/compare/2025.1.0...2026.1.0) - Jun 2026
 --------------------------------------------------------------------------------------
