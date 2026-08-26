@@ -239,13 +239,19 @@ def ring_break_morph():
     Three stages: potential_swap → restraints_off → morph.
 
     During restraints_off the Morse restraint ramps off (morse_soft: 1→0) while
-    the ring-break softcore simultaneously ramps on (alpha: 1→0, kappa: 0→1),
-    equations mirror ring-break so that ``ring_break_morph().reverse()`` is the
-    providing a smooth handover with no gap between the two forces. The ring-make
-    correct schedule for the ring-making direction (used by
-    :func:`reverse_ring_break_morph`). Because ring_break_morph is only used for
-    ring-breaking perturbations (no ring-make force present), the ring-make
-    equations have no effect on forward simulations.
+    the ring-break softcore LJ simultaneously ramps on (alpha: 1→0), providing a
+    smooth handover with no gap between the two forces.
+
+    Coulomb is decoupled from the LJ and driven by its own coul_kappa lever,
+    which is held at zero through both bonded stages and ramps 0→1 during morph
+    only, once the softcore LJ has already separated the pair.
+
+    The ring-make equations mirror ring-break so that
+    ``ring_break_morph().reverse()`` is the correct schedule for the ring-making
+    direction (used by :func:`reverse_ring_break_morph`). Because
+    ring_break_morph is only used for ring-breaking perturbations (no ring-make
+    force present), the ring-make equations have no effect on forward
+    simulations.
 
     Returns
     -------
@@ -257,8 +263,8 @@ def ring_break_morph():
 
     s = _LambdaSchedule.standard_morph()
 
-    # restraints_off [1/3, 2/3): Morse ramps off while ring-break softcore ramps
-    # on simultaneously (alpha: 1→0, kappa: 0→1). Bonded terms (angles, torsions)
+    # restraints_off [1/3, 2/3): Morse ramps off while the ring-break softcore LJ
+    # ramps on simultaneously (alpha: 1→0). Bonded terms (angles, torsions)
     # interpolate initial→final over the same stage. ring-make mirrors ring-break
     # so that after .reverse(), the ring-make softcore ramps off as morse_soft ramps
     # on in the reversed restraints_off stage, correct for ring-making perturbations.
@@ -291,13 +297,7 @@ def ring_break_morph():
         stage="restraints_off", force="ring-break", lever="alpha", equation=1 - s.lam()
     )
     s.set_equation(
-        stage="restraints_off", force="ring-break", lever="kappa", equation=s.lam()
-    )
-    s.set_equation(
         stage="restraints_off", force="ring-make", lever="alpha", equation=1 - s.lam()
-    )
-    s.set_equation(
-        stage="restraints_off", force="ring-make", lever="kappa", equation=s.lam()
     )
 
     s.prepend_stage("potential_swap", s.initial())
@@ -322,15 +322,11 @@ def ring_break_morph():
     s.set_equation(
         stage="potential_swap", force="ring-break", lever="alpha", equation=1
     )
-    s.set_equation(
-        stage="potential_swap", force="ring-break", lever="kappa", equation=0
-    )
     s.set_equation(stage="potential_swap", force="ring-make", lever="alpha", equation=1)
-    s.set_equation(stage="potential_swap", force="ring-make", lever="kappa", equation=0)
 
     # morph [2/3, 1]: standard nonbonded morphing with ring-break/ring-make fixed
-    # at fully open (kappa=1, alpha=0). ring-make mirrors ring-break so .reverse()
-    # gives kappa=1 at lam=0 of the reversed morph stage (ring-making start).
+    # at fully open (alpha=0). ring-make mirrors ring-break so .reverse() gives
+    # alpha=0 at lam=0 of the reversed morph stage (ring-making start).
     s.set_equation(stage="morph", lever="morse_hard", equation=0)
     s.set_equation(stage="morph", lever="morse_soft", equation=0)
     s.set_equation(stage="morph", lever="bond_k", equation=s.final())
@@ -340,9 +336,7 @@ def ring_break_morph():
     s.set_equation(stage="morph", lever="torsion_k", equation=s.final())
     s.set_equation(stage="morph", lever="torsion_phase", equation=s.final())
     s.set_equation(stage="morph", force="ring-break", lever="alpha", equation=0)
-    s.set_equation(stage="morph", force="ring-break", lever="kappa", equation=1)
     s.set_equation(stage="morph", force="ring-make", lever="alpha", equation=0)
-    s.set_equation(stage="morph", force="ring-make", lever="kappa", equation=1)
 
     # coul_kappa: zero through both bonded stages so the CLJ exception carries no
     # charge while atoms are at covalent distances; ramps 0→1 in morph only once
@@ -381,7 +375,7 @@ def reverse_ring_break_morph():
     This schedule is correct for two equivalent use-cases:
 
     1. A ring-making perturbation run with ``swap_end_states=False``: the
-       ring-make softcore force (kappa=1 at λ=0, ramping to 0) is controlled
+       ring-make softcore force (alpha=0 at λ=0, ramping to 1) is controlled
        directly by the ring-make lever equations.
     2. A ring-breaking perturbation run with ``swap_end_states=True`` (the
        runner reverses the schedule automatically, yielding the same effective
