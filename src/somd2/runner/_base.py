@@ -1622,10 +1622,10 @@ class RunnerBase:
                     restraint_distance,
                 )
 
-                try:
-                    restraints.add(restraint)
-                except:
+                if restraints is None:
                     restraints = restraint
+                else:
+                    restraints.add(restraint)
 
             # Update the system.
             system.update(merged)
