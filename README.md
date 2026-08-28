@@ -184,6 +184,10 @@ An example perturbable system for a methane to ethanol perturbation in solvent
 can be found [here](https://sire.openbiosim.org/m/merged_molecule.s3.bz2).
 This is a `bzip2` compressed file that will need to be extracted before use.
 
+A larger collection of input files and end-to-end tutorials, covering everything
+from a simple charge-change validation system to full case studies, can be found
+in the [somd2_examples](https://github.com/OpenBioSim/somd2_examples) repository.
+
 ### Running SOMD2 using one or more GPUs
 
 In order to run using GPUs you will first need to set the relevant environment
