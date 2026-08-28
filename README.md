@@ -371,6 +371,46 @@ identical every time.
 > [alchemate](https://github.com/akalpokas/alchemate) package provides
 > workflows for iteratively optimising the lambda schedule.
 
+## Charge-change perturbations
+
+Perturbations that change the net charge of the system are handled
+automatically using the co-alchemical ion method. The charge difference between
+the two end states is computed when the system is loaded, and, if it is
+non-zero, a number of water molecules equal to the absolute charge difference
+are perturbed into counter-ions alongside the main perturbation, keeping the
+total charge constant at every lambda value. The waters furthest from the
+perturbable molecule are chosen, and the ion type is picked to offset the
+charge change, re-using the parameters of a free ion already present in the
+system where possible.
+
+No options are needed to enable this. The automatically detected value can be
+overridden with `--charge-difference`, which takes the perturbed charge minus
+the reference charge:
+
+```
+somd2 perturbable_system.bss --charge-difference -1
+```
+
+The molecules chosen as alchemical ions are written to `alchemical_ions.npz` in
+the output directory and reused on restart, so that ion selection does not
+depend on anything that might have changed between runs.
+
+Since a co-alchemical ion is only meaningful in the bulk, SOMD2 can restrain it
+away from the perturbable region. Passing a distance to
+`--coalchemical-restraint-dist` adds an inverse-distance restraint between each
+ion and the atom closest to the centre of geometry of the perturbable molecule,
+preventing the ion from drifting into the binding site and interacting with the
+protein or ligand:
+
+```
+somd2 perturbable_system.bss --coalchemical-restraint-dist "10 A"
+```
+
+> [!NOTE]
+> These restraints are *added* to any others in use. Restraints passed via the
+> Python API, and those generated automatically for the ABFE and ring-breaking
+> schedules described above, are all retained.
+
 ## Debugging with energy components
 
 To help diagnose simulation instabilities, SOMD2 can record the potential
