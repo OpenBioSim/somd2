@@ -13,6 +13,24 @@
 Open-source GPU accelerated molecular dynamics engine for alchemical free-energy
 simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and [OpenMM](https://github.com/openmm/openmm).
 
+## Features
+
+- **Perturbations**: relative binding free energies,
+  [absolute binding free energies](#absolute-binding-free-energies),
+  [ring-breaking](#ring-breaking-perturbations),
+  [charge-change](#charge-change-perturbations), and protein mutations.
+- **[GCMC](#gcmc)**: grand canonical Monte Carlo water sampling.
+- **[Replica exchange](#replica-exchange)**: Hamiltonian replica exchange
+  between lambda windows.
+- **[REST2](#rest2)**: replica exchange with solute scaling.
+- **[Terminal ring flips](#terminal-ring-flip-monte-carlo)**: Monte Carlo moves
+  to improve sampling of terminal aromatic rings.
+- **[Ghost atom modifications](#ghost-atom-modifications)**: modification of
+  ghost atom bonded terms to avoid spurious coupling to the physical system.
+- **[Multiple GPUs](#running-somd2-using-one-or-more-gpus)**: lambda windows are
+  distributed across the available devices, with optional
+  [oversubscription](#gpu-oversubscription).
+
 ## Installation
 
 ### Conda package
