@@ -205,6 +205,48 @@ the `--max-gpus` option can be set, for example setting `--max-gpus 2` while
 `CUDA_VISIBLE_DEVICES` are set as above would restrict SOMD2 to using only
 GPUs 0 and 1.
 
+## Restarting
+
+A simulation can be continued from the files in its output directory using the
+`--restart` option:
+
+```
+somd2 perturbable_system.bss --restart --output-directory output
+```
+
+Each λ window (or replica) resumes from its most recent checkpoint. The
+configuration used for the original run is written to `config.yaml` in the
+output directory, controlled by `--write-config`, which is enabled by default.
+This file is required in order to restart, since the current configuration is
+validated against it.
+
+Only a limited set of options may be changed on restart. Broadly, anything that
+would change the perturbation or the Hamiltonian is fixed, whereas options
+controlling how long to run for, what to write out, and which hardware to use
+can be varied. The most useful of these is `--runtime`, which allows a completed
+simulation to be extended. SOMD2 will tell you which option is at fault if you
+change one that isn't allowed.
+
+> [!NOTE]
+> If the most recent checkpoint files are incomplete or corrupt, for example
+> when recovering from a crash, pass `--use-backup` to restart from the last
+> but one checkpoint instead.
+
+## Hydrogen mass repartitioning
+
+By default SOMD2 applies hydrogen mass repartitioning (HMR), scaling hydrogen
+masses by the factor given by `--h-mass-factor` (default 1.5). This is what
+allows the default `--timestep` of 4 fs.
+
+If the masses of your input system have already been repartitioned, or you want
+to use a different repartitioning scheme, pass `--no-hmr` so that the masses of
+the input system are used as they are.
+
+> [!NOTE]
+> A 4 fs timestep is not stable without repartitioning, so if you disable HMR
+> you will need to reduce `--timestep` accordingly, or supply a system that has
+> already been repartitioned.
+
 ## Replica exchange
 
 SOMD2 supports Hamiltonian replica exchange (HREX) simulations, which can be
@@ -596,6 +638,24 @@ More details on MPS, including tuning options, can be found in the following
 
 SOMD2 can also be used as a Python API, allowing it to be embedded
 within other Python scripts.
+
+A few options take objects rather than values, so cannot be set directly on the
+command line. A custom lambda schedule can be passed to `lambda_schedule` as a
+`sire.cas.LambdaSchedule`, rather than one of the named schedules, and
+user-defined restraints can be passed to `restraints`.
+
+Both options can also be set via a YAML configuration file, where they are
+stored as a hex string of the serialised object. This is the form written to
+`config.yaml`, so the simplest way to obtain one is to configure the option in
+Python, run a simulation, and re-use the value from the resulting file.
+
+Alternatively, both accept a path to a [Sire](https://github.com/OpenBioSim/sire)
+stream file containing the serialised object, which can be written with
+`sire.stream.save`:
+
+```
+somd2 perturbable_system.bss --lambda-schedule my_schedule.s3 --restraints my_restraints.s3
+```
 
 ## Known issues
 

@@ -123,3 +123,106 @@ def test_morse_restraint_options():
 
     with pytest.raises(ValueError, match="units are invalid"):
         Config(morse_soft_force_constant="125 kcal mol-1")
+
+
+def test_lambda_schedule_input_forms():
+    """Validate that all supported lambda schedule input forms are accepted."""
+    import os
+
+    import pytest
+
+    schedule = sr.cas.LambdaSchedule.standard_morph()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "schedule.s3")
+        sr.stream.save(schedule, path)
+
+        # A named schedule, which is case insensitive.
+        config = Config(lambda_schedule="DECOUPLE")
+        assert config._lambda_schedule_name == "decouple"
+
+        # The path to a stream file.
+        config = Config(lambda_schedule=path)
+        assert isinstance(config.lambda_schedule, sr.cas.LambdaSchedule)
+        assert config._lambda_schedule_name is None
+
+        # A hex string of the serialised object.
+        config = Config(lambda_schedule=Config._to_hex(schedule))
+        assert isinstance(config.lambda_schedule, sr.cas.LambdaSchedule)
+
+        # The object itself.
+        config = Config(lambda_schedule=schedule)
+        assert isinstance(config.lambda_schedule, sr.cas.LambdaSchedule)
+
+        # Anything else is rejected.
+        with pytest.raises(ValueError, match="Unable to interpret"):
+            Config(lambda_schedule="not_a_schedule")
+
+        # A stream file holding the wrong type of object.
+        wrong_path = os.path.join(tmpdir, "wrong.s3")
+        sr.stream.save(sr.cas.Symbol("x"), wrong_path)
+        with pytest.raises(ValueError, match="not a 'LambdaSchedule'"):
+            Config(lambda_schedule=wrong_path)
+
+
+def test_restraints_input_forms():
+    """Validate that all supported restraint input forms are accepted."""
+    import os
+
+    import pytest
+
+    mols = sr.load_test_files("ala.top", "ala.crd")
+    restraint0 = sr.restraints.positional(mols, atoms="atomidx 0")
+    restraint1 = sr.restraints.positional(mols, atoms="atomidx 1")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path0 = os.path.join(tmpdir, "restraint0.s3")
+        both_path = os.path.join(tmpdir, "both.s3")
+        sr.stream.save(restraint0, path0)
+        sr.stream.save([restraint0, restraint1], both_path)
+
+        # A single object, or a list of objects.
+        assert len(Config(restraints=restraint0).restraints) == 1
+        assert len(Config(restraints=[restraint0, restraint1]).restraints) == 2
+
+        # The path to a stream file, or a list of paths.
+        assert len(Config(restraints=path0).restraints) == 1
+        assert len(Config(restraints=[path0, path0]).restraints) == 2
+
+        # A stream file holding a list of sets of restraints.
+        assert len(Config(restraints=both_path).restraints) == 2
+
+        # A hex string of the serialised object.
+        assert len(Config(restraints=Config._to_hex(restraint0)).restraints) == 1
+
+        # Objects and paths can be mixed, and all are retained.
+        config = Config(restraints=[restraint0, path0])
+        assert len(config.restraints) == 2
+        assert all(
+            isinstance(restraint, sr.mm._MM.Restraints)
+            for restraint in config.restraints
+        )
+
+        # Anything else is rejected.
+        with pytest.raises(ValueError, match="Unable to interpret"):
+            Config(restraints="not_a_restraint")
+
+        # A stream file holding the wrong type of object.
+        wrong_path = os.path.join(tmpdir, "wrong.s3")
+        sr.stream.save(sr.cas.LambdaSchedule.standard_morph(), wrong_path)
+        with pytest.raises(ValueError, match="must be a sire.mm._MM.Restraints"):
+            Config(restraints=wrong_path)
+
+
+def test_help_text_scraping():
+    """Validate that help text isn't truncated by the parameter name."""
+    parser = Config._create_parser()
+
+    for action in parser._actions:
+        if action.dest == "restraints":
+            break
+
+    # The description wraps onto a line starting with the parameter name, which
+    # must not be mistaken for the start of the next parameter.
+    assert "applied to the atoms" in action.help
+    assert "a list of sets" in action.help

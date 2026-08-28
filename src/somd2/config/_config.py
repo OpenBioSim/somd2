@@ -78,11 +78,17 @@ class Config:
         "precision": ["single", "mixed", "double"],
     }
 
+    # Options that advertise a set of choices, but which also accept other
+    # forms, e.g. the path to a stream file. These are validated by the setter,
+    # rather than by argparse.
+    _open_choices = ["lambda_schedule"]
+
     # A dictionary of nargs for the various options.
     _nargs = {
         "lambda_values": "+",
         "lambda_energy": "+",
         "rest2_scale": "+",
+        "restraints": "+",
     }
 
     def __init__(
@@ -239,8 +245,10 @@ class Config:
             then this will be set to the same as 'lambda_values', or the values
             defined by 'num_lambda' if 'lambda_values' is not set.
 
-        lambda_schedule: str
-            Lambda schedule to use for alchemical free energy simulations.
+        lambda_schedule: str, sire.cas.LambdaSchedule
+            Lambda schedule to use for alchemical free energy simulations. This
+            can be the name of one of the standard schedules, or the path to a
+            Sire stream file containing a custom LambdaSchedule.
 
         charge_scale_factor: float
             Factor by which to scale charges for charge scaled morph.
@@ -256,9 +264,10 @@ class Config:
             The soft-core shift-delta parameter. This is used to soften the
             Lennard-Jones interaction.
 
-        restraints: sire.mm._MM.Restraints
-            A single set of restraints, or a list of sets of restraints that
-            will be applied to the atoms during the simulation.
+        restraints: str, sire.mm._MM.Restraints
+            One or more paths to Sire stream files containing the sets of
+            restraints that will be applied to the atoms during the simulation.
+            A stream file may hold a single set, or a list of sets.
 
         constraint: str
             Constraint type to use for non-perturbable molecules.
@@ -1180,44 +1189,51 @@ class Config:
                     "'lambda_schedule' must be of type 'str' or 'LambdaSchedule' object"
                 )
             if isinstance(lambda_schedule, str):
-                # Strip whitespace and convert to lower case.
-                lambda_schedule = lambda_schedule.strip().lower()
-                if lambda_schedule == "standard_morph":
+                # Strip whitespace. The keyword comparison is made against a
+                # lower case copy, since the string may also be a path, which
+                # is case sensitive.
+                lambda_schedule = lambda_schedule.strip()
+                keyword = lambda_schedule.lower()
+                if keyword == "standard_morph":
                     self._lambda_schedule = _LambdaSchedule.standard_morph()
                     self._lambda_schedule_name = "standard_morph"
-                elif lambda_schedule == "charge_scaled_morph":
+                elif keyword == "charge_scaled_morph":
                     self._lambda_schedule = _LambdaSchedule.charge_scaled_morph(0.2)
                     self._lambda_schedule_name = "charge_scaled_morph"
-                elif lambda_schedule == "ring_break_morph":
+                elif keyword == "ring_break_morph":
                     from .._utils._schedules import (
                         ring_break_morph as _ring_break_morph,
                     )
 
                     self._lambda_schedule = _ring_break_morph()
                     self._lambda_schedule_name = "ring_break_morph"
-                elif lambda_schedule == "reverse_ring_break_morph":
+                elif keyword == "reverse_ring_break_morph":
                     from .._utils._schedules import (
                         reverse_ring_break_morph as _reverse_ring_break_morph,
                     )
 
                     self._lambda_schedule = _reverse_ring_break_morph()
                     self._lambda_schedule_name = "reverse_ring_break_morph"
-                elif lambda_schedule == "annihilate":
+                elif keyword == "annihilate":
                     self._lambda_schedule = None
                     self._lambda_schedule_name = "annihilate"
-                elif lambda_schedule == "decouple":
+                elif keyword == "decouple":
                     self._lambda_schedule = None
                     self._lambda_schedule_name = "decouple"
                 else:
-                    try:
-                        self._lambda_schedule = self._from_hex(lambda_schedule)
-                        self._lambda_schedule_name = None
-                    except Exception:
+                    schedule = self._from_string(
+                        lambda_schedule,
+                        "lambda_schedule",
+                        hint=", or one of the following strings: "
+                        f"{', '.join(self._choices['lambda_schedule'])}",
+                    )
+                    if not isinstance(schedule, _LambdaSchedule):
                         raise ValueError(
-                            "Unable to deserialise 'lambda_schedule'. Ensure that this is a "
-                            "hex string representation of a valid LambdaSchedule object, or "
-                            f"one of the following strings: {', '.join(self._choices['lambda_schedule'])}"
+                            f"'lambda_schedule' deserialised to a "
+                            f"'{type(schedule).__name__}', not a 'LambdaSchedule'."
                         )
+                    self._lambda_schedule = schedule
+                    self._lambda_schedule_name = None
             else:
                 self._lambda_schedule = lambda_schedule
                 self._lambda_schedule_name = None
@@ -1303,32 +1319,34 @@ class Config:
 
     @restraints.setter
     def restraints(self, restraints):
-        # If not supplied as a list, convert to a list.
+        # If not supplied as a list, convert to a list. Note that a string is
+        # itself iterable, so must be wrapped explicitly.
         if restraints is not None:
-            if not isinstance(restraints, _Iterable):
+            if isinstance(restraints, str) or not isinstance(restraints, _Iterable):
                 restraints = [restraints]
 
-            # Check that all restraints are of the correct type.
-            deserialised_restraints = []
+            # Resolve each entry, keeping objects and deserialised strings in
+            # the order they were given.
+            resolved_restraints = []
             for restraint in restraints:
-                if isinstance(restraint, _sr.mm._MM.Restraints):
-                    continue
-                elif isinstance(restraint, str):
-                    try:
-                        restraint = self._from_hex(restraint)
-                    except Exception:
-                        raise ValueError(
-                            "Unable to deserialise restraint. Ensure that this "
-                            "is a hex string representation of a valid sire.mm._MM.Restraints object."
-                        )
-                    deserialised_restraints.append(restraint)
+                if isinstance(restraint, str):
+                    restraint = self._from_string(restraint.strip(), "restraints")
+
+                # A stream file may hold a list of sets of restraints, e.g. the
+                # pair used for a ring-breaking perturbation.
+                if isinstance(restraint, _Iterable):
+                    resolved_restraints.extend(restraint)
                 else:
+                    resolved_restraints.append(restraint)
+
+            # Check that all restraints are of the correct type.
+            for restraint in resolved_restraints:
+                if not isinstance(restraint, _sr.mm._MM.Restraints):
                     raise ValueError(
                         "'restraints' must be a sire.mm._MM.Restraints object, or a list of these objects."
                     )
 
-            if len(deserialised_restraints) > 0:
-                restraints = deserialised_restraints
+            restraints = resolved_restraints
 
         self._restraints = restraints
 
@@ -2622,6 +2640,61 @@ class Config:
 
         return obj
 
+    @classmethod
+    def _from_string(cls, string, name, hint=""):
+        """
+        Internal method to deserialise a Sire object from a string, which can
+        either be the path to a stream file, or the hex string representation
+        of the serialised object.
+
+        Parameters
+        ----------
+
+        string: str
+            The path to a stream file, or a hex string representation of the
+            Sire object.
+
+        name: str
+            The name of the option being set, used for error messages.
+
+        hint: str
+            An additional clause appended to the error message, e.g. listing
+            the keywords that the option also accepts.
+
+        Returns
+        -------
+
+        obj:
+            The deserialised Sire object.
+        """
+        from pathlib import Path as _Path
+
+        # Work out whether this is a path to an existing file. A hex string can
+        # exceed the maximum filename length, which raises rather than simply
+        # returning False on some platforms.
+        try:
+            is_file = _Path(string).is_file()
+        except Exception:
+            is_file = False
+
+        if is_file:
+            from sire.stream import load
+
+            try:
+                return load(string)
+            except Exception as e:
+                raise ValueError(
+                    f"Unable to load '{name}' from stream file '{string}': {e}"
+                )
+        else:
+            try:
+                return cls._from_hex(string)
+            except Exception:
+                raise ValueError(
+                    f"Unable to interpret '{name}'. Expected the path to a Sire "
+                    f"stream file, or a hex string of a serialised object{hint}."
+                )
+
     def __getstate__(self):
         """
         Hex-encode the same fields that to_yaml()/from_yaml() already
@@ -2658,6 +2731,7 @@ class Config:
 
         import argparse
         import inspect
+        import re
 
         # Inspect the signature to get the parameters.
         sig = inspect.signature(Config.__init__)
@@ -2665,7 +2739,7 @@ class Config:
         params = {
             key: value
             for key, value in params.items()
-            if key not in ["self", "args", "kwargs", "restraints"]
+            if key not in ["self", "args", "kwargs"]
         }
 
         # Get the docstring.
@@ -2682,7 +2756,7 @@ class Config:
             # Loop over all lines in the docstring until we find the parameter.
             for line in doc:
                 line = line.strip()
-                if line.startswith(param):
+                if re.match(rf"{re.escape(param)}\s*:", line):
                     found_param = True
                 elif found_param:
                     if line == "":
@@ -2724,14 +2798,26 @@ class Config:
 
             # This parameter has choices.
             if param in cls._choices:
-                parser.add_argument(
-                    f"--{cli_param}",
-                    type=typ,
-                    default=params[param].default,
-                    choices=cls._choices[param],
-                    help=help[param],
-                    required=False,
-                )
+                # Other forms are also accepted, so advertise the choices in the
+                # help text, but leave the validation to the setter.
+                if param in cls._open_choices:
+                    parser.add_argument(
+                        f"--{cli_param}",
+                        type=typ,
+                        default=params[param].default,
+                        metavar="{" + ",".join(cls._choices[param]) + "}",
+                        help=help[param],
+                        required=False,
+                    )
+                else:
+                    parser.add_argument(
+                        f"--{cli_param}",
+                        type=typ,
+                        default=params[param].default,
+                        choices=cls._choices[param],
+                        help=help[param],
+                        required=False,
+                    )
             # This is a standard parameter.
             else:
                 if typ == bool:
