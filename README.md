@@ -194,10 +194,13 @@ In order to run using GPUs you will first need to set the relevant environment
 variable. For example, to run using 4 CUDA enabled GPUs set `CUDA_VISIBLE_DEVICES=0,1,2,3`
 (for OpenCL and HIP use `OPENCL_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES` respectively).
 
-By default SOMD2 will run using the CPU platform, however if the relevant
-environment variable has been set (as above) the new platform will be detected
-and set. In the case that this detection fails, or if there are multiple platforms
-available, the `--platform` option can be set (for example `--platform cuda`).
+This is required in all cases, since SOMD2 enumerates the devices to run on from
+the environment variable itself.
+
+By default SOMD2 uses `--platform auto`, which selects the first platform
+registered by OpenMM in order of preference: CUDA, OpenCL, HIP, Metal, Reference,
+then CPU. If detection fails, or if you want a specific platform, use the
+`--platform` option (for example `--platform cuda`).
 
 By default, SOMD2 will automatically manage the distribution of lambda windows
 across all listed devices. In order to restrict the number of devices used
