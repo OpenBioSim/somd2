@@ -175,3 +175,25 @@ def test_alchemical_ion_abfe_schedule(schedule_name, ethane_methanol_ions):
         ion_schedule = schedule.get_molecule_schedule(ion_idx)
         assert ion_schedule.get_stages() == ["morph"]
         assert ion_schedule.to_string() == LambdaSchedule.standard_morph().to_string()
+
+
+def test_charge_difference_with_virtual_sites(ethane_methanol):
+    """
+    Off-site charges are held as a molecule property rather than on the atoms,
+    so they are invisible to charge() and must be added separately.
+    """
+
+    mols = ethane_methanol.clone()
+
+    # No virtual sites, so the end states have the same charge.
+    assert math.isclose(Runner._get_charge_difference(mols), 0.0, abs_tol=1e-6)
+
+    # Give the perturbable molecule off-site charges that differ by one unit
+    # between the end states.
+    mol = mols.molecules("property is_perturbable")[0]
+    cursor = mol.cursor()
+    cursor.set("vs_charges0", [0.5, 0.5])
+    cursor.set("vs_charges1", [1.0, 1.0])
+    mols.update(cursor.commit())
+
+    assert math.isclose(Runner._get_charge_difference(mols), 1.0, abs_tol=1e-6)

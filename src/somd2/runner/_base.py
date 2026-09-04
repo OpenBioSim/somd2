@@ -1056,6 +1056,17 @@ class RunnerBase:
         reference = _sr.morph.link_to_reference(system).charge().value()
         perturbed = _sr.morph.link_to_perturbed(system).charge().value()
 
+        # Off-site charges are held as a molecule property, not on the atoms,
+        # so they are invisible to charge() above.
+        try:
+            vsite_mols = system.molecules("property vs_charges0")
+        except KeyError:
+            vsite_mols = []
+
+        for mol in vsite_mols:
+            reference += sum(float(x) for x in mol.property("vs_charges0"))
+            perturbed += sum(float(x) for x in mol.property("vs_charges1"))
+
         return perturbed - reference
 
     def _save_alchemical_ion_indices(self, mol_indices):
