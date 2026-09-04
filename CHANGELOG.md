@@ -21,6 +21,7 @@ Changelog
 * Add a `precision` option for GPU platforms, defaulting to `mixed` [#191](https://github.com/OpenBioSim/somd2/pull/191).
 * Add support for generating Morse restraints for ring-breaking perturbations.
 * Remove the unused `kappa` lever equations from the ring-breaking/making lambda schedules.
+* Account for off-site charges (virtual sites) when computing the charge difference between the end states. They are held as a molecule property rather than on the atoms, so a charge-preserving perturbation could appear to change charge and be given spurious alchemical ions.
 
 [2026.1.0](https://github.com/openbiosim/somd2/compare/2025.1.0...2026.1.0) - Jun 2026
 --------------------------------------------------------------------------------------
