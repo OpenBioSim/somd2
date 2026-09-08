@@ -19,9 +19,11 @@ Changelog
 * Skip minimisation on restart [#191](https://github.com/OpenBioSim/somd2/pull/191).
 * Pre-equilibrate the water with GCMC moves before minimising in the regular `Runner`, making it consistent with the `RepexRunner`, which already did so to stop the geometry relaxing into a dry pocket [#191](https://github.com/OpenBioSim/somd2/pull/191).
 * Add a `precision` option for GPU platforms, defaulting to `mixed` [#191](https://github.com/OpenBioSim/somd2/pull/191).
-* Add support for generating Morse restraints for ring-breaking perturbations.
-* Remove the unused `kappa` lever equations from the ring-breaking/making lambda schedules.
-* Account for off-site charges (virtual sites) when computing the charge difference between the end states. They are held as a molecule property rather than on the atoms, so a charge-preserving perturbation could appear to change charge and be given spurious alchemical ions.
+* Add support for generating Morse restraints for ring-breaking perturbations [#194](https://github.com/OpenBioSim/somd2/pull/194).
+* Remove the unused `kappa` lever equations from the ring-breaking/making lambda schedules [#195](https://github.com/OpenBioSim/somd2/pull/195).
+* Accept stream file paths for the `restraints` and `lambda_schedule` configuration options, so they can be set from the command line [#198](https://github.com/OpenBioSim/somd2/pull/198).
+* Account for off-site charges (virtual sites) when computing the charge difference between the end states. They are held as a molecule property rather than on the atoms, so a charge-preserving perturbation could appear to change charge and be given spurious alchemical ions [#200](https://github.com/OpenBioSim/somd2/pull/200).
+* Handle `num_lambda=1`, which previously raised a `ZeroDivisionError` when generating the lambda values. The `RepexRunner` now rejects a single lambda window, since there is nothing to exchange with and the regular `Runner` is faster [#203](https://github.com/OpenBioSim/somd2/pull/203).
 
 [2026.1.0](https://github.com/openbiosim/somd2/compare/2025.1.0...2026.1.0) - Jun 2026
 --------------------------------------------------------------------------------------
