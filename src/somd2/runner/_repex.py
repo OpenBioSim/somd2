@@ -1233,6 +1233,16 @@ class RepexRunner(_RunnerBase):
         # fewer slots than replicas, each slot is re-used to propagate several
         # replicas per cycle, changing its lambda value as it goes.
         self._num_replicas = len(self._lambda_values)
+
+        # There is nothing to exchange with a single replica.
+        if self._num_replicas < 2:
+            msg = (
+                "Replica exchange requires at least two "
+                f"{_lam_sym} values. Please use the Runner class instead."
+            )
+            _logger.error(msg)
+            raise ValueError(msg)
+
         self._set_num_slots()
 
         # Auto-generate a Boresch restraint for ABFE runs with no user-supplied
@@ -3068,7 +3078,7 @@ class RepexRunner(_RunnerBase):
                         swaps[i_state, j_state] + swaps[j_state, i_state]
                     ) / denom
             else:
-                t[i_state, i_state] = 1.0
+                t_ij[i_state, i_state] = 1.0
 
         # Backup the existing transition matrix, if it exists.
         if self._repex_matrix.exists():

@@ -466,6 +466,8 @@ class RunnerBase:
         # Set the lambda values.
         if self._config.lambda_values:
             self._lambda_values = self._config.lambda_values
+        elif self._config.num_lambda == 1:
+            self._lambda_values = [0.0]
         else:
             self._lambda_values = [
                 round(i / (self._config.num_lambda - 1), 5)
