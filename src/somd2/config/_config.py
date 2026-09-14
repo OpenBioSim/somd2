@@ -139,7 +139,7 @@ class Config:
         num_energy_neighbours=None,
         null_energy="1e6 kcal/mol",
         platform="auto",
-        precision="mixed",
+        precision="single",
         max_threads=None,
         max_gpus=None,
         max_sire_threads=None,

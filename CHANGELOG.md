@@ -18,7 +18,7 @@ Changelog
 * Add `max_contexts` to cap the number of OpenMM contexts used for replica exchange, re-using each across lambda values so that GPU memory no longer limits the number of replicas [#191](https://github.com/OpenBioSim/somd2/pull/191).
 * Skip minimisation on restart [#191](https://github.com/OpenBioSim/somd2/pull/191).
 * Pre-equilibrate the water with GCMC moves before minimising in the regular `Runner`, making it consistent with the `RepexRunner`, which already did so to stop the geometry relaxing into a dry pocket [#191](https://github.com/OpenBioSim/somd2/pull/191).
-* Add a `precision` option for GPU platforms, defaulting to `mixed` [#191](https://github.com/OpenBioSim/somd2/pull/191).
+* Add a `precision` option for GPU platforms, defaulting to `single` [#191](https://github.com/OpenBioSim/somd2/pull/191).
 * Add support for generating Morse restraints for ring-breaking perturbations [#194](https://github.com/OpenBioSim/somd2/pull/194).
 * Remove the unused `kappa` lever equations from the ring-breaking/making lambda schedules [#195](https://github.com/OpenBioSim/somd2/pull/195).
 * Accept stream file paths for the `restraints` and `lambda_schedule` configuration options, so they can be set from the command line [#198](https://github.com/OpenBioSim/somd2/pull/198).
