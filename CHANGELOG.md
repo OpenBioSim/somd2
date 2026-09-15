@@ -1,6 +1,31 @@
 Changelog
 =========
 
+[2026.2.0](https://github.com/openbiosim/somd2/compare/2026.1.0...2026.2.0) - Sep 2026
+--------------------------------------------------------------------------------------
+
+* Add support for generating Boresch restraints for absolute binding free energy calculations [#166](https://github.com/OpenBioSim/somd2/pull/166).
+* Give alchemical ions their own plain morph lambda schedule so they interpolate correctly under non-standard lambda schedules [#169](https://github.com/OpenBioSim/somd2/pull/169).
+* Persist alchemical ion identity across restarts so the same molecule is reused regardless of GCMC state [#172](https://github.com/OpenBioSim/somd2/pull/172).
+* Use perisistent `ThreadPoolExector` objects within the main replica exchange dynamics block [#175](https://github.com/OpenBioSim/somd2/pull/175).
+* Allow `oversubscription_factor` to change on restart [#177](https://github.com/OpenBioSim/somd2/pull/177).
+* Restrict energy component decomposition to force groups that are used for integration [#180](https://github.com/OpenBioSim/somd2/pull/180).
+* Parallelise replica mixing [#181](https://github.com/OpenBioSim/somd2/pull/181).
+* Fixed the replica exchange GPU memory check querying the wrong device when `CUDA_VISIBLE_DEVICES` does not start at zero, since OpenMM numbers devices relative to the visible set whereas `pynvml` enumerates all of them [#183](https://github.com/OpenBioSim/somd2/issues/183).
+* Store GCMC sampling statistics per lambda value, converting those from earlier checkpoints on restart [#184](https://github.com/OpenBioSim/somd2/pull/184).
+* Link restart systems to the reference end state rather than the perturbed one, since that is the coordinate set that dynamics maintains. Perturbable molecules were otherwise resumed from the coordinates they were built with [#189](https://github.com/OpenBioSim/somd2/pull/189).
+* Add `max_contexts` to cap the number of OpenMM contexts used for replica exchange, re-using each across lambda values so that GPU memory no longer limits the number of replicas [#191](https://github.com/OpenBioSim/somd2/pull/191).
+* Skip minimisation on restart [#191](https://github.com/OpenBioSim/somd2/pull/191).
+* Pre-equilibrate the water with GCMC moves before minimising in the regular `Runner`, making it consistent with the `RepexRunner`, which already did so to stop the geometry relaxing into a dry pocket [#191](https://github.com/OpenBioSim/somd2/pull/191).
+* Add a `precision` option for GPU platforms, defaulting to `single` [#191](https://github.com/OpenBioSim/somd2/pull/191).
+* Add support for generating Morse restraints for ring-breaking perturbations [#194](https://github.com/OpenBioSim/somd2/pull/194).
+* Remove the unused `kappa` lever equations from the ring-breaking/making lambda schedules [#195](https://github.com/OpenBioSim/somd2/pull/195).
+* Accept stream file paths for the `restraints` and `lambda_schedule` configuration options, so they can be set from the command line [#198](https://github.com/OpenBioSim/somd2/pull/198).
+* Account for off-site charges (virtual sites) when computing the charge difference between the end states. They are held as a molecule property rather than on the atoms, so a charge-preserving perturbation could appear to change charge and be given spurious alchemical ions [#200](https://github.com/OpenBioSim/somd2/pull/200).
+* Handle `num_lambda=1`, which previously raised a `ZeroDivisionError` when generating the lambda values. The `RepexRunner` now rejects a single lambda window, since there is nothing to exchange with and the regular `Runner` is faster [#203](https://github.com/OpenBioSim/somd2/pull/203).
+* Detect the available GPUs once in the base runner and re-use the list, rather than the `RepexRunner` querying `CUDA_VISIBLE_DEVICES` regardless of the chosen platform. Replica exchange is now also permitted on the HIP platform [#206](https://github.com/OpenBioSim/somd2/pull/206).
+* Query the free memory of AMD GPUs with `CL_DEVICE_GLOBAL_FREE_MEMORY_AMD` rather than `CL_DEVICE_BOARD_NAME_AMD`, which returns the device name [#206](https://github.com/OpenBioSim/somd2/pull/206).
+
 [2026.1.0](https://github.com/openbiosim/somd2/compare/2025.1.0...2026.1.0) - Jun 2026
 --------------------------------------------------------------------------------------
 

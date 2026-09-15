@@ -215,6 +215,18 @@ class Runner(_RunnerBase):
         else:
             self._max_workers = 1
 
+        # Auto-generate a Boresch restraint for ABFE runs with no user-supplied restraint.
+        if self._is_abfe_bound and self._config.restraints is None:
+            device = self._gpu_pool[0] if self._is_gpu else None
+            try:
+                restraints = self._generate_boresch_restraint(device=device)
+            except Exception as e:
+                msg = f"Unable to generate Boresch restraint for ABFE simulation: {e}"
+                _logger.error(msg)
+                raise RuntimeError(msg)
+            self._config.restraints = restraints
+            self._dynamics_kwargs["restraints"] = restraints
+
         import concurrent.futures as _futures
         import multiprocessing as _mp
 
@@ -546,8 +558,8 @@ class Runner(_RunnerBase):
         else:
             terminal_flip_sampler = None
 
-        # Minimisation.
-        if self._config.minimise:
+        # Minimisation. Don't minimise on restart.
+        if self._config.minimise and not is_restart:
             constraint = self._config.constraint
             perturbable_constraint = self._config.perturbable_constraint
 
@@ -570,6 +582,7 @@ class Runner(_RunnerBase):
                     device=device,
                     constraint=constraint,
                     perturbable_constraint=perturbable_constraint,
+                    gcmc_sampler=gcmc_sampler,
                 )
             except Exception as e:
                 msg = f"Minimisation failed for {_lam_sym} = {lambda_value:.5f}: {e}"
@@ -623,6 +636,15 @@ class Runner(_RunnerBase):
                 if gcmc_sampler is not None:
                     # Bind the GCMC sampler to the dynamics object.
                     gcmc_sampler.bind_dynamics(dynamics)
+
+                    # This context is built from the system as it was committed
+                    # by minimisation, so it doesn't carry the water state that
+                    # the moves performed there left behind.
+                    gcmc_sampler.push()
+                    try:
+                        gcmc_sampler._set_water_state(dynamics.context(), force=True)
+                    finally:
+                        gcmc_sampler.pop()
 
                     _logger.info(
                         f"Equilibrating with GCMC moves at {_lam_sym} = {lambda_value:.5f}"
@@ -716,12 +738,9 @@ class Runner(_RunnerBase):
             import openmm.unit as _omm_unit
 
             _npz_state = _np.load(self._filenames[index]["checkpoint_state"])
-            dynamics.context().setPositions(
-                _npz_state["positions"] * _omm_unit.nanometer
-            )
-            dynamics.context().setVelocities(
-                _npz_state["velocities"] * _omm_unit.nanometer / _omm_unit.picosecond
-            )
+
+            # Set the box before the positions, since a barostat may have
+            # changed it between the state being saved and restored.
             if "box" in _npz_state:
                 from openmm import Vec3 as _Vec3
 
@@ -731,6 +750,13 @@ class Runner(_RunnerBase):
                     _Vec3(*_box[1]) * _omm_unit.nanometer,
                     _Vec3(*_box[2]) * _omm_unit.nanometer,
                 )
+
+            dynamics.context().setPositions(
+                _npz_state["positions"] * _omm_unit.nanometer
+            )
+            dynamics.context().setVelocities(
+                _npz_state["velocities"] * _omm_unit.nanometer / _omm_unit.picosecond
+            )
 
         # Reset the GCMC sampler. This resets the sampling statistics and clears
         # the associated OpenMM forces.
@@ -790,9 +816,11 @@ class Runner(_RunnerBase):
                     finally:
                         gcmc_sampler.pop()
 
-            # Otherwise, if we've performed equilibration, then we need to reset
-            # the water state in the new context to match the equilibrated system.
-            elif is_equilibrated:
+            # Otherwise, reset the water state in the new context to match the
+            # system that the preparation stages left behind. Both minimisation
+            # and equilibration perform GCMC moves, so the state held by the
+            # sampler is ahead of the one the context was built with.
+            else:
                 # Reset the water state.
                 gcmc_sampler.push()
                 try:
@@ -800,7 +828,6 @@ class Runner(_RunnerBase):
                         dynamics.context(),
                         force=True,
                     )
-                    gcmc_sampler.num_waters(context=dynamics.context())
                 finally:
                     gcmc_sampler.pop()
 
@@ -809,7 +836,12 @@ class Runner(_RunnerBase):
             stats = self._load_sampler_stats(index)
             if stats is not None:
                 if gcmc_sampler is not None and "gcmc" in stats:
-                    gcmc_sampler.restore_stats(stats["gcmc"])
+                    gcmc_stats = stats["gcmc"]
+                    if self._is_legacy_gcmc_stats(gcmc_stats):
+                        gcmc_stats = self._convert_legacy_gcmc_stats(
+                            gcmc_stats, self._lambda_values[index]
+                        )
+                    gcmc_sampler.restore_stats(gcmc_stats)
                 if terminal_flip_sampler is not None and "terminal_flip" in stats:
                     attempted, accepted = stats["terminal_flip"]
                     terminal_flip_sampler.reset(attempted, accepted)
@@ -1133,9 +1165,14 @@ class Runner(_RunnerBase):
                                 if n_moves > 0
                                 else ""
                             )
+                            # Count against the context, since dynamics have
+                            # run since the last move.
+                            num_waters = gcmc_sampler.num_waters(
+                                context=dynamics.context()
+                            )
                             _logger.info(
                                 f"Current number of waters in GCMC volume at {_lam_sym} = {lambda_value:.5f} "
-                                f"is {gcmc_sampler.num_waters()}{acc_str}"
+                                f"is {num_waters}{acc_str}"
                             )
                         finally:
                             gcmc_sampler.pop()
@@ -1510,6 +1547,7 @@ class Runner(_RunnerBase):
         device=None,
         constraint="none",
         perturbable_constraint="none",
+        gcmc_sampler=None,
     ):
         """
         Minimise a system.
@@ -1534,6 +1572,10 @@ class Runner(_RunnerBase):
 
         perturbable_constraint: str
             The constraint for perturbable molecules.
+
+        gcmc_sampler: :class: `GCMCSampler <loch.GCMCSampler>`
+            A GCMC sampler to pre-equilibrate the water with before minimising.
+            If None, then no GCMC moves are performed.
 
         Returns
         -------
@@ -1561,6 +1603,24 @@ class Runner(_RunnerBase):
         try:
             # Create a dynamics object.
             dynamics = system.dynamics(**dynamics_kwargs)
+
+            # Pre-equilibrate the water before minimising, so that a dry pocket
+            # is filled before the geometry relaxes into it. The context is
+            # created from the sampler's own system, so its water state already
+            # matches and only needs binding.
+            if gcmc_sampler is not None:
+                gcmc_sampler.bind_dynamics(dynamics)
+
+                _logger.info(
+                    f"Pre-equilibrating with GCMC moves at {_lam_sym} = {lambda_value:.5f}"
+                )
+
+                gcmc_sampler.push()
+                try:
+                    for i in range(100):
+                        gcmc_sampler.move(dynamics.context())
+                finally:
+                    gcmc_sampler.pop()
 
             # Run the minimisation.
             dynamics.minimise(timeout=self._config.timeout)

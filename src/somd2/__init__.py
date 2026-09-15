@@ -34,9 +34,19 @@ from . import runner
 # Store the somd2 version.
 from ._version import __version__
 
-# Store the sire version.
+# Store the sire version. Unlike somd2/BioSimSpace/ghostly/loch (which use
+# versioningit and only append a "+g<revisionid>" local version segment
+# for non-release (".dev") builds, omitting it entirely for a clean tagged
+# release), sire exposes its version and revision id as separate attributes,
+# with __revisionid__ always set regardless of release status. Build a
+# composite string using the same "+g<revisionid>" convention as the other
+# packages, only appending it for non-release (".dev") builds, so that all
+# five version strings are formatted consistently.
 from sire import __version__ as _sire_version
 from sire import __revisionid__ as _sire_revisionid
+
+if ".dev" in _sire_version:
+    _sire_version = f"{_sire_version}+g{_sire_revisionid}"
 
 # Store the BioSimSpace version.
 from BioSimSpace import __version__ as _biosimspace_version
@@ -61,7 +71,7 @@ def get_versions():
     """
     return {
         "somd2": __version__,
-        "sire": f"{_sire_version}+{_sire_revisionid}",
+        "sire": _sire_version,
         "biosimspace": _biosimspace_version,
         "ghostly": _ghostly_version,
         "loch": _loch_version,

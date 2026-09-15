@@ -207,7 +207,8 @@ class RunnerBase:
                     if c0 != c1:
                         msg = (
                             "End-state connectivities are different. If this is a ring-breaking "
-                            "perturbation, please set 'lambda_schedule_name' to 'ring_breaking'."
+                            "perturbation, please set 'lambda_schedule_name' to 'ring_break_morph' "
+                            "(or 'reverse_ring_break_morph' for the reverse perturbation)."
                         )
                         _logger.warning(msg)
                         break
@@ -222,6 +223,20 @@ class RunnerBase:
             self._has_water = True
         except:
             self._has_water = False
+
+        # Check for protein (distinguishes ABFE from AHFE). A protein+ligand
+        # system has more than one non-water molecule with at least 3 atoms;
+        # a solvated ligand alone has only one.
+        try:
+            non_water_mols = self._system["(not water) and (atomidx > 1)"].molecules()
+            self._has_protein = non_water_mols.num_molecules() > 1
+        except:
+            self._has_protein = False
+
+        # Set by _generate_boresch_restraint() when a Boresch restraint is
+        # auto-generated, then written into the energy trajectory parquet
+        # metadata (see _checkpoint).
+        self._standard_state_correction = None
 
         # Warn if dispersion correction is requested but can't be applied.
         if self._config.use_dispersion_correction and not self._has_water:
@@ -253,6 +268,24 @@ class RunnerBase:
             self._config._extra_args["use_gcmc_lrc"] = True
             self._config._extra_args["num_gcmc_waters"] = self._config.gcmc_num_waters
 
+        # Auto-generate Morse restraints for ring-breaking perturbations with no
+        # user-supplied restraint. This is done before any modification of the
+        # bonded terms, and before the reference system is stored and the restart
+        # checks are performed, since the hard restraint replaces a bond in the
+        # system, which must match the checkpoints.
+        if self._is_ring_break and self._config.restraints is None:
+            try:
+                self._config.restraints = self._generate_morse_restraints()
+            except Exception as e:
+                msg = (
+                    "Unable to generate Morse restraints for ring-breaking "
+                    f"perturbation: {e}. If the Morse potential has already been "
+                    "applied to the input system, then pass the corresponding "
+                    "restraints using the 'restraints' option."
+                )
+                _logger.error(msg)
+                raise RuntimeError(msg)
+
         # We're running in SOMD1 compatibility mode.
         if self._config.somd1_compatibility:
             from .._utils._somd1 import make_compatible
@@ -274,7 +307,7 @@ class RunnerBase:
         elif self._config.ghost_modifications:
             from ghostly import modify
 
-            _logger.info("Applying modifications to ghost atom bonded terms")
+            _logger.info("Applying modifications to ghost atom bonded terms.")
             try:
                 self._system, self._modifications = modify(self._system)
             # Angle optimisation can sometimes fail.
@@ -433,6 +466,8 @@ class RunnerBase:
         # Set the lambda values.
         if self._config.lambda_values:
             self._lambda_values = self._config.lambda_values
+        elif self._config.num_lambda == 1:
+            self._lambda_values = [0.0]
         else:
             self._lambda_values = [
                 round(i / (self._config.num_lambda - 1), 5)
@@ -601,14 +636,18 @@ class RunnerBase:
         # used to skip duplicate rows on restart.
         self._last_ec_time = {}
 
+        # Per-window cache of the integrator's integration force groups bitmask.
+        self._integration_groups = {}
+
         # Store the current system as a reference.
         self._reference_system = self._system.clone()
 
         # Create a clone of the fully-prepared reference system with the
         # perturbed end-state coordinates and periodic space. This is done
         # after all system preparation so that the clone inherits the same
-        # topology and properties. It is used to seed starting coordinates
-        # for lambda > 0.5 replicas.
+        # topology and properties. It is used to seed starting coordinates for
+        # the replicas closest to the perturbed end state, i.e. lambda > 0.5,
+        # or lambda < 0.5 when the end states are swapped.
         if self._config.replica_exchange and self._config.perturbed_system is not None:
             from sire.legacy.IO import setCoordinates as _setCoordinates
 
@@ -875,6 +914,7 @@ class RunnerBase:
             "cutoff": self._config.cutoff,
             "cutoff_type": self._config.cutoff_type,
             "platform": self._config.platform,
+            "precision": self._config.precision,
             "rest2_selection": self._config.rest2_selection,
             "shift_coulomb": self._config.shift_coulomb,
             "shift_delta": self._config.shift_delta,
@@ -977,6 +1017,249 @@ class RunnerBase:
             # Update the maximum number of threads.
             _sr.legacy.Base.set_max_num_threads(sire_threads)
 
+    @property
+    def _is_abfe_bound(self):
+        """
+        Whether this is the bound leg of an ABFE simulation: annihilate/decouple
+        schedule with a solvated protein present. False for the free leg (ligand
+        in solvent, no protein), even though it may use the same lambda schedule.
+        """
+        return (
+            self._config._lambda_schedule_name in ("annihilate", "decouple")
+            and self._has_protein
+            and self._has_water
+        )
+
+    @property
+    def _is_ring_break(self):
+        """
+        Whether this is a ring-breaking (or ring-making) simulation, i.e. one
+        using the 'ring_break_morph' lambda schedule, or its reverse.
+        """
+        return self._config._lambda_schedule_name in (
+            "ring_break_morph",
+            "reverse_ring_break_morph",
+        )
+
+    def _generate_morse_restraints(self):
+        """
+        Return the pair of Morse restraints required by the 'ring_break_morph'
+        lambda schedule, or its reverse. Called automatically when running a
+        ring-breaking simulation with no user-supplied restraint.
+
+        The "hard" restraint directly replaces the harmonic bond that is broken
+        (or formed) by the perturbation, inheriting its force constant and
+        equilibrium length. The "soft" restraint acts on the same pair of atoms
+        and holds the broken fragment in place while the hard restraint is
+        switched off.
+
+        Returns
+        -------
+
+        restraints: [sire.mm.MorsePotentialRestraints]
+            The hard and soft Morse restraints, in the order expected by the
+            schedule's 'morse_hard' and 'morse_soft' levers.
+
+        Notes
+        -----
+
+        As a side effect, ``self._system`` is updated with the replacement of
+        the broken bond by the hard Morse potential.
+        """
+        from sire.restraints import morse_potential as _morse_potential
+
+        _logger.info(
+            "No restraints supplied for ring-breaking perturbation. "
+            "Generating default Morse restraints."
+        )
+
+        hard_restraints, self._system = _morse_potential(
+            self._system,
+            de=self._config.morse_hard_well_depth,
+            auto_parametrise=True,
+            direct_morse_replacement=True,
+            name="morse_hard",
+        )
+
+        # Restrain the same pair of atoms as the hard restraint, at the same
+        # equilibrium distance.
+        soft_restraints, _ = _morse_potential(
+            self._system,
+            atoms0=hard_restraints[0].atom0(),
+            atoms1=hard_restraints[0].atom1(),
+            r0=hard_restraints[0].r0(),
+            k=self._config.morse_soft_force_constant,
+            de=self._config.morse_soft_well_depth,
+            auto_parametrise=False,
+            direct_morse_replacement=False,
+            name="morse_soft",
+        )
+
+        _logger.info(f"Hard Morse restraint: {hard_restraints[0]}")
+        _logger.info(f"Soft Morse restraint: {soft_restraints[0]}")
+
+        return [hard_restraints, soft_restraints]
+
+    def _generate_boresch_restraint(self, device=None):
+        """
+        Return a Boresch restraint for the ABFE simulation, either by loading
+        one saved from a previous run or by running a short lambda=0 trajectory.
+        Called automatically before minimisation/equilibration of the production
+        windows/replicas when the simulation is ABFE and no restraint has been
+        supplied.
+
+        The input system is assumed to already be equilibrated (SOMD2 does not
+        run a separate equilibration stage for the restraint search); it is
+        minimised using the production minimisation settings, then a short
+        trajectory is run at lambda=0, matching the dynamics settings used for
+        production, to derive the restraint geometry and force constants.
+
+        Parameters
+        ----------
+
+        device : int, optional
+            GPU device number to use for the restraint-search run.
+
+        Returns
+        -------
+
+        restraints : sire.mm.BoreschRestraints
+
+        Notes
+        -----
+
+        As a side effect, when the restraint is generated (rather than reused
+        from a checkpointed restart), ``self._system`` is re-seeded from the
+        least-strained trajectory frame returned by ``boresch_search``. The
+        restraint equilibrium values are trajectory averages, so the input
+        structure is generally not consistent with them; starting production
+        from it instead would leave the restraint badly strained at t=0 and can
+        blow the simulation up as the restraint is switched on.
+
+        The cached restraint is only reused on a genuine (checkpointed) restart,
+        where it must be kept identical to the one the accumulated free energy
+        was computed with. When there is no checkpoint (a fresh run, or a crash
+        before any progress was checkpointed) the restraint is regenerated. This
+        avoids getting pinned to a restraint that is itself the cause of the
+        crash: reusing it and re-seeding the same frame would just reproduce the
+        crash on every restart, whereas a fresh search may pick a different frame
+        or anchor, and re-seeds ``self._system`` naturally.
+        """
+        from sire.restraints import boresch_search
+
+        restraint_file = str(self._config.output_directory / "abfe_restraint.s3")
+
+        # Only reuse a saved restraint when continuing an actual checkpointed
+        # restart: the restraint must match the one the accumulated free energy
+        # was computed with, and the coordinates come from the checkpoint (so no
+        # re-seeding is needed). Deliberately do NOT reuse it when there is no
+        # checkpoint - see the Notes above.
+        if self._is_restart:
+            if not _Path(restraint_file).exists():
+                raise FileNotFoundError(
+                    "Restarting an ABFE bound-leg simulation, but no saved "
+                    f"restraint was found at {restraint_file}. The restraint "
+                    "cannot be regenerated mid-simulation without invalidating "
+                    "the accumulated free energy."
+                )
+
+            _logger.info(f"Loading existing Boresch restraint from {restraint_file}")
+            restraints = _sr.stream.load(restraint_file)
+
+            from sire.restraints import get_standard_state_correction
+
+            correction = get_standard_state_correction(
+                restraints[0], temperature=self._config.temperature
+            )
+            self._standard_state_correction = float(
+                correction.to(_sr.units.kcal_per_mol)
+            )
+
+            return restraints
+
+        _logger.info(
+            "No restraint supplied for ABFE. Running Boresch restraint search."
+        )
+
+        search_system = self._system
+
+        if self._config.minimise:
+            constraint = self._config.constraint
+            perturbable_constraint = self._config.perturbable_constraint
+
+            # Don't use constraints during minimisation.
+            if not self._config.minimisation_constraints:
+                constraint = "none"
+                perturbable_constraint = "none"
+
+            min_dynamics_kwargs = self._dynamics_kwargs.copy()
+            min_dynamics_kwargs.update(
+                {
+                    "device": device,
+                    "lambda_value": 0.0,
+                    "constraint": constraint,
+                    "perturbable_constraint": perturbable_constraint,
+                }
+            )
+
+            min_dynamics = search_system.dynamics(**min_dynamics_kwargs)
+            min_dynamics.minimise(timeout=self._config.timeout)
+            search_system = min_dynamics.commit()
+
+        dynamics_kwargs = self._dynamics_kwargs.copy()
+        dynamics_kwargs.update(
+            {
+                "device": device,
+                "lambda_value": 0.0,
+            }
+        )
+
+        dynamics = search_system.dynamics(**dynamics_kwargs)
+        dynamics.run(
+            self._config.restraint_search_time,
+            energy_frequency=0,
+            frame_frequency=self._config.restraint_search_frequency,
+            save_velocities=False,
+            auto_fix_minimise=self._config.auto_fix_minimise,
+            save_crash_report=self._config.save_crash_report,
+        )
+        search_system = dynamics.commit()
+
+        search_kwargs = {"temperature": self._config.temperature}
+        if self._config.restraint_search_receptor_selection is not None:
+            search_kwargs["receptor_selection"] = (
+                self._config.restraint_search_receptor_selection
+            )
+
+        restraints, correction, starting_structure = boresch_search(
+            search_system, **search_kwargs
+        )
+
+        # Cache so it can be written into the energy trajectory parquet
+        # metadata (see _checkpoint), letting analysis code automatically
+        # apply the correction without needing to scan the logs.
+        self._standard_state_correction = float(correction.to(_sr.units.kcal_per_mol))
+        _logger.info(
+            f"Boresch restraint generated. Standard state correction: "
+            f"{self._standard_state_correction:.4f} kcal mol-1"
+        )
+
+        # Re-seed production from the least-strained frame so the restraint is
+        # essentially relaxed at t=0 (see the docstring Notes). The frame comes
+        # from the perturbable search system, so link its properties back to the
+        # reference (lambda=0) end state, matching how the seed systems are
+        # handled elsewhere (see _perturbed_system), and drop the search
+        # trajectory frames so only the single starting snapshot is retained.
+        starting_structure = _sr.morph.link_to_reference(starting_structure)
+        starting_structure.delete_all_frames()
+        self._system = starting_structure
+
+        # Save so that a genuine (checkpointed) restart can reuse the exact same
+        # restraint without re-running the search.
+        _sr.stream.save(restraints, restraint_file)
+
+        return restraints
+
     def _check_space(self):
         """
         Check if the system has a periodic space.
@@ -1005,7 +1288,12 @@ class RunnerBase:
         """
         Internal function to check whether the constraints are the same at the two
         end states.
+
+        Sets self._end_state_constraints_differ, which records whether any
+        constrained bond length changes with lambda.
         """
+
+        self._end_state_constraints_differ = False
 
         # Find all perturbable molecules in the system..
         pert_mols = self._system.molecules("property is_perturbable")
@@ -1031,12 +1319,14 @@ class RunnerBase:
 
             # Check for equivalence.
             if len(constraints0) != len(constraints1):
+                self._end_state_constraints_differ = True
                 _logger.info(
                     f"Constraints are at not the same at {_lam_sym} = 0 and {_lam_sym} = 1."
                 )
             else:
                 for c0, c1 in zip(constraints0, constraints1):
                     if c0 != c1:
+                        self._end_state_constraints_differ = True
                         _logger.info(
                             f"Constraints are at not the same at {_lam_sym} = 0 and {_lam_sym} = 1."
                         )
@@ -1353,10 +1643,10 @@ class RunnerBase:
                     restraint_distance,
                 )
 
-                try:
-                    restraints.add(restraint)
-                except:
+                if restraints is None:
                     restraints = restraint
+                else:
+                    restraints.add(restraint)
 
             # Update the system.
             system.update(merged)
@@ -1629,6 +1919,10 @@ class RunnerBase:
             "log_file",
             "overwrite",
             "timeout",
+            "oversubscription_factor",
+            "max_contexts",
+            "restraint_search_time",
+            "restraint_search_frequency",
         ]
         for key in config1.keys():
             if key not in allowed_diffs:
@@ -2067,8 +2361,7 @@ class RunnerBase:
             if not is_post_equilibration:
                 metadata = {
                     "attrs": df.attrs,
-                    "somd2 version": versions["somd2"],
-                    "sire version": versions["sire"],
+                    "versions": versions,
                     "lambda": f"{lam:.5f}",
                     "speed": speed,
                     "temperature": str(self._config.temperature.value()),
@@ -2077,6 +2370,13 @@ class RunnerBase:
                 # Add the lambda gradient if available.
                 if lambda_grad is not None:
                     metadata["lambda_grad"] = [f"{v:.5f}" for v in lambda_grad]
+
+                # Add the standard state correction, if a Boresch restraint
+                # was auto-generated for this ABFE run.
+                if self._standard_state_correction is not None:
+                    metadata["standard_state_correction"] = (
+                        f"{self._standard_state_correction:.6f}"
+                    )
 
             if is_final_block:
                 # Save the end-state GCMC topologies for trajectory analysis and visualisation.
@@ -2234,6 +2534,53 @@ class RunnerBase:
         system.delete_all_frames()
         _sr.stream.save(system, self._filenames[index]["checkpoint"])
 
+    @staticmethod
+    def _is_legacy_gcmc_stats(stats):
+        """
+        Whether GCMC statistics are in the format used before a sampler could
+        be re-used across lambda values.
+
+        Those were a flat dictionary of counters for a single lambda value,
+        rather than a dictionary of counters keyed by lambda value.
+
+        Parameters
+        ----------
+
+        stats: dict
+            The GCMC sampling statistics.
+
+        Returns
+        -------
+
+        bool
+            Whether the statistics are in the old format.
+        """
+        return isinstance(stats, dict) and "num_moves" in stats
+
+    @staticmethod
+    def _convert_legacy_gcmc_stats(stats, lambda_value):
+        """
+        Convert GCMC statistics from the old format to the current one.
+
+        Parameters
+        ----------
+
+        stats: dict
+            A flat dictionary of counters, for a single lambda value.
+
+        lambda_value: float
+            The lambda value that the statistics belong to.
+
+        Returns
+        -------
+
+        dict
+            The statistics, keyed by lambda value.
+        """
+        from loch import GCMCSampler as _GCMCSampler
+
+        return {_GCMCSampler.stats_key(lambda_value): dict(stats)}
+
     def _backup_checkpoint(self, index):
         """
         Create a backup of the previous checkpoint files.
@@ -2336,10 +2683,19 @@ class RunnerBase:
         if time_ns <= self._last_ec_time[index]:
             return
 
+        if index not in self._integration_groups:
+            self._integration_groups[index] = (
+                context.getIntegrator().getIntegrationForceGroups()
+            )
+        integration_groups = self._integration_groups[index]
+
         # Use the named force groups already assigned by sire_to_openmm_system,
         # sorted alphabetically for a consistent column order across runs.
+        # Skip any group not actually used for integration.
         energies = {}
         for name, grp in sorted(context._force_group_map.items()):
+            if not integration_groups & (1 << grp):
+                continue
             state = context.getState(getEnergy=True, groups=(1 << grp))
             energies[name] = state.getPotentialEnergy().value_in_unit(
                 openmm.unit.kilocalories_per_mole

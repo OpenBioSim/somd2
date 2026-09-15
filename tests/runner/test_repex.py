@@ -150,6 +150,462 @@ def test_rest2_selection(ethane_methanol, rest2_selection, is_valid):
                 runner = RunnerBase(ethane_methanol, Config(**config))
 
 
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+@pytest.mark.parametrize("max_contexts", [1, 2, 3, 4])
+def test_repex_bounded_contexts(ethane_methanol, max_contexts):
+    """
+    Validate that a replica exchange simulation runs when there are fewer
+    OpenMM contexts than replicas, so that each context is re-used to
+    propagate several replicas per cycle.
+    """
+    num_lambda = 4
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "12fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": num_lambda,
+            "replica_exchange": True,
+            "max_contexts": max_contexts,
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+
+        # Only the requested number of contexts should have been created.
+        assert len(runner._dynamics_cache._dynamics) == max_contexts
+
+        # Every replica must be assigned to exactly one slot.
+        groups = runner._dynamics_cache._groups
+        assert sorted(r for group in groups for r in group) == list(range(num_lambda))
+
+        runner.run()
+
+        # Output is per replica, regardless of how many contexts were used.
+        assert (Path(tmpdir) / "repex_matrix.txt").exists()
+        for i in range(num_lambda):
+            assert Path(runner._filenames[i]["energy_traj"]).exists()
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+def test_repex_frame_frequency_constraint(ethane_methanol):
+    """
+    Validate that frames can only be saved on checkpoint cycles when contexts
+    are re-used across lambda values.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "12fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "8fs",
+            "frame_frequency": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": 4,
+            "replica_exchange": True,
+            "max_contexts": 2,
+        }
+
+        with pytest.raises(ValueError, match="frame_frequency"):
+            RepexRunner(ethane_methanol, Config(**config))
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+@pytest.mark.parametrize("update_constraints", [True, False])
+def test_repex_update_constraints(ethane_methanol, update_constraints):
+    """
+    Validate both constraint modes. Ethane to methanol does perturb a
+    constrained bond length, so update_constraints=True forces the context to
+    be reinitialised on every lambda change.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "12fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": 4,
+            "replica_exchange": True,
+            "max_contexts": 2,
+            "update_constraints": update_constraints,
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+        runner.run()
+
+        assert (Path(tmpdir) / "repex_matrix.txt").exists()
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+def test_repex_bounded_contexts_output_equivalence(ethane_methanol):
+    """
+    Validate that re-using contexts produces the same output structure as one
+    context per replica. Energies are not compared: a shared context consumes
+    the integrator's random number stream in a different order, so the
+    trajectories legitimately differ.
+    """
+    import pandas as pd
+
+    num_lambda = 4
+
+    def run(max_contexts, tmpdir):
+        config = {
+            "runtime": "16fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": num_lambda,
+            "replica_exchange": True,
+            "max_contexts": max_contexts,
+        }
+        runner = RepexRunner(ethane_methanol, Config(**config))
+        runner.run()
+        return [
+            pd.read_parquet(runner._filenames[i]["energy_traj"])
+            for i in range(num_lambda)
+        ], list(runner._lambda_values)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        full, lambdas = run(num_lambda, tmpdir)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cached, _ = run(1, tmpdir)
+
+    # One record per energy_frequency interval, starting at the first. Pinning
+    # the values rather than only comparing the two runs catches a clock that
+    # is wrong the same way in both.
+    expected_times = [0.004, 0.008, 0.012, 0.016]
+
+    for i in range(num_lambda):
+        assert len(cached[i]) == len(full[i])
+        assert list(cached[i].columns) == list(full[i].columns)
+        assert cached[i].index.equals(full[i].index)
+
+        for records in (full[i], cached[i]):
+            times = [round(t, 6) for t in records.index.get_level_values(0)]
+            assert times == expected_times, f"replica {i} recorded times {times}"
+
+            # Each replica records energies at every lambda value.
+            assert list(records.columns) == lambdas
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+def test_repex_bounded_contexts_restart(ethane_methanol):
+    """
+    Validate that a replica exchange simulation using fewer contexts than
+    replicas can be restarted, that each replica resumes from the state it
+    stopped at, and that the energy trajectory is extended rather than
+    restarted.
+    """
+    import pandas as pd
+
+    num_lambda = 4
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "8fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": num_lambda,
+            "replica_exchange": True,
+            "max_contexts": 2,
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+        runner.run()
+
+        num_rows = [
+            len(pd.read_parquet(runner._filenames[i]["energy_traj"]))
+            for i in range(num_lambda)
+        ]
+
+        # The state each replica finished at, which the checkpoint holds.
+        import openmm.unit as omm_unit
+
+        stopped = [
+            {
+                "positions": state["positions"].value_in_unit(omm_unit.nanometer),
+                "velocities": state["velocities"].value_in_unit(
+                    omm_unit.nanometer / omm_unit.picosecond
+                ),
+                "box": state["box"].value_in_unit(omm_unit.nanometer),
+            }
+            for state in runner._dynamics_cache._openmm_states
+        ]
+
+        # Restart, extending the runtime.
+        config["runtime"] = "16fs"
+        config["restart"] = True
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+
+        # Every replica must resume from where it stopped. The contexts are
+        # created from the input system, so the only thing carrying the
+        # simulated state across a restart is the checkpoint.
+        for i in range(num_lambda):
+            state = runner._dynamics_cache._openmm_states[i]
+            for key, unit in (
+                ("positions", omm_unit.nanometer),
+                ("velocities", omm_unit.nanometer / omm_unit.picosecond),
+                ("box", omm_unit.nanometer),
+            ):
+                assert np.allclose(
+                    state[key].value_in_unit(unit), stopped[i][key], atol=1e-6
+                ), f"replica {i} {key} not restored"
+
+        # The input coordinates must not be what was restored, otherwise the
+        # checks above would pass even if the checkpoint were ignored.
+        import sire as sr
+
+        inputs = sr.io.get_coords_array(runner._system)
+        restored = runner._dynamics_cache._openmm_states[0]["positions"].value_in_unit(
+            omm_unit.angstrom
+        )
+        assert not np.allclose(restored, inputs, atol=1e-3)
+
+        # Restoring the checkpoint into the cache is not enough: the contexts
+        # are created from the input system, so the state has to reach them
+        # too. Loading a replica is what pushes it.
+        for i in range(num_lambda):
+            runner._dynamics_cache.load_replica(i)
+            dynamics, _ = runner._dynamics_cache.get(runner._dynamics_cache.slot_for(i))
+            positions = (
+                dynamics.context()
+                .getState(getPositions=True)
+                .getPositions(asNumpy=True)
+                .value_in_unit(omm_unit.nanometer)
+            )
+            assert np.allclose(positions, stopped[i]["positions"], atol=1e-5), (
+                f"replica {i} positions not pushed into its context"
+            )
+
+        runner.run()
+
+        # 8 fs at 4 fs intervals, extended to 16 fs. The clock has to continue
+        # from where it stopped rather than restarting at zero, so the records
+        # must run to the new runtime with no repeats or gaps.
+        expected_times = [0.004, 0.008, 0.012, 0.016]
+
+        for i in range(num_lambda):
+            extended = pd.read_parquet(runner._filenames[i]["energy_traj"])
+            assert len(extended) > num_rows[i]
+
+            times = [round(t, 6) for t in extended.index.get_level_values(0)]
+            assert times == expected_times, f"replica {i} recorded times {times}"
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+@pytest.mark.parametrize("max_contexts", [1, 4])
+def test_repex_checkpoint_single_lock(ethane_methanol, max_contexts):
+    """
+    Validate that every checkpoint file is written within a single acquisition
+    of the file lock, so that a process streaming the output off the machine
+    always sees a coherent set rather than a mixture of new and old files.
+    """
+    import somd2.runner._repex as repex_module
+
+    num_lambda = 4
+    acquisitions = []
+
+    real_filelock = repex_module._FileLock
+
+    class CountingFileLock(real_filelock):
+        def acquire(self, *args, **kwargs):
+            acquisitions.append(1)
+            return super().acquire(*args, **kwargs)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "8fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": num_lambda,
+            "replica_exchange": True,
+            "max_contexts": max_contexts,
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+
+        repex_module._FileLock = CountingFileLock
+        try:
+            runner.run()
+        finally:
+            repex_module._FileLock = real_filelock
+
+    # Two cycles, each taking the lock once for the checkpoint files and once
+    # for the repex state, plus a final acquisition. This must not scale with
+    # the number of passes.
+    assert len(acquisitions) == 5
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+@pytest.mark.parametrize("max_contexts", [1, 4])
+def test_repex_gcmc_bounded_contexts(ethane_methanol, max_contexts):
+    """
+    Validate that GCMC sampling works when contexts are re-used across lambda
+    values, so a slot's single sampler is re-parameterised and re-pointed at
+    the ghost file of whichever replica it hosts.
+    """
+    pytest.importorskip("loch")
+
+    num_lambda = 4
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "8fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": num_lambda,
+            "replica_exchange": True,
+            "max_contexts": max_contexts,
+            "gcmc": True,
+            "gcmc_selection": "resname LIG",
+            "gcmc_frequency": "4fs",
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+        runner.run()
+
+        assert (Path(tmpdir) / "repex_matrix.txt").exists()
+
+        # One ghost file per lambda, each with a line per saved frame. A slot
+        # writing to the wrong file would leave these unbalanced.
+        counts = []
+        for lam in runner._lambda_values:
+            ghost_file = Path(tmpdir) / f"gcmc_ghosts_{lam:.5f}.txt"
+            assert ghost_file.exists()
+            counts.append(len(ghost_file.read_text().strip().splitlines()))
+
+        assert len(set(counts)) == 1, f"unbalanced ghost files: {counts}"
+        assert counts[0] > 0
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+def test_repex_gcmc_without_a_selection(ethane_methanol):
+    """
+    Validate GCMC sampling with no 'gcmc_selection', where moves are attempted
+    within the entire simulation box rather than a region around a selection.
+
+    The sampler then has no reference, so it cannot count the waters within a
+    region, and every move samples the whole box. Counting the waters on each
+    replica handover has to account for that.
+    """
+    pytest.importorskip("loch")
+
+    num_lambda = 4
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "8fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": num_lambda,
+            "replica_exchange": True,
+            "max_contexts": 2,
+            "gcmc": True,
+            "gcmc_frequency": "4fs",
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+
+        # The bulk-only path is the point of this test, so make sure it can't
+        # stop being exercised without the test failing.
+        assert runner._dynamics_cache._gcmc_samplers[0]._reference is None
+
+        runner.run()
+
+        assert (Path(tmpdir) / "repex_matrix.txt").exists()
+        for lam in runner._lambda_values:
+            assert (Path(tmpdir) / f"gcmc_ghosts_{lam:.5f}.txt").exists()
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+def test_repex_concurrent_slots(ethane_methanol):
+    """
+    Validate that replicas sharing a slot are never propagated concurrently.
+    Oversubscribing exercises this on a single GPU, since the worker count is
+    the number of GPUs times the oversubscription factor.
+
+    This is also the only test that equilibrates, so it covers moving replicas
+    in and out of their slots during equilibration, the context rebuild when
+    the constraints change, and the post-equilibration checkpoint.
+    """
+    num_lambda = 4
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "12fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "equilibration_time": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": num_lambda,
+            "replica_exchange": True,
+            "max_contexts": 2,
+            "oversubscription_factor": 2,
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+
+        # Guard against the equilibration coverage being lost silently.
+        assert runner._is_equilibration
+
+        # Minimising without constraints and equilibrating with them means the
+        # contexts are rebuilt part way through, which is the path being
+        # covered here.
+        assert not runner._config.minimisation_constraints
+        assert runner._config.equilibration_constraints
+
+        # Every batch must contain at most one replica per slot.
+        num_workers = runner._num_gpus * config["oversubscription_factor"]
+        for batch in runner._safe_batches(num_workers):
+            slots = [runner._dynamics_cache.slot_for(r) for r in batch]
+            assert len(slots) == len(set(slots)), f"batch {batch} shares a slot"
+
+        runner.run()
+
+        assert (Path(tmpdir) / "repex_matrix.txt").exists()
+
+
 @pytest.mark.parametrize(
     "gpu_devices, expected",
     [
@@ -169,12 +625,8 @@ def test_rest2_selection(ethane_methanol, rest2_selection, is_valid):
 def test_physical_device_mapping(gpu_devices, expected):
     """
     Validate that an OpenMM device index is mapped to the physical device
-    backing it.
-
-    OpenMM numbers devices relative to the visible set, whereas pynvml and
-    pyopencl enumerate every device on the machine. Querying the memory of a
-    device by its OpenMM index therefore reports the wrong GPU whenever the
-    visible set does not start at zero.
+    backing it, since OpenMM numbers devices relative to the visible set
+    whereas pynvml and pyopencl enumerate all of them.
     """
     from somd2.runner._repex import DynamicsCache
 
@@ -182,6 +634,70 @@ def test_physical_device_mapping(gpu_devices, expected):
     cache._gpu_devices = gpu_devices
 
     assert [cache._physical_device(i) for i in range(len(expected))] == expected
+
+
+def test_max_contexts_advice():
+    """
+    Validate the advice given when the replicas don't fit in GPU memory. It
+    must name a number that the user can pass to 'max_contexts', and mention
+    the frame frequency constraint that comes with it.
+    """
+    from somd2.runner._repex import DynamicsCache
+
+    advice = DynamicsCache._max_contexts_advice(6)
+    assert "'max_contexts' to 6 or fewer" in advice
+    assert "frame_frequency" in advice and "checkpoint_frequency" in advice
+
+    # Nothing fits, so there is no number to suggest.
+    advice = DynamicsCache._max_contexts_advice(0)
+    assert "max_contexts" not in advice
+    assert "does not fit" in advice
+
+
+def test_gcmc_state_follows_replica():
+    """
+    Validate that the GCMC water occupancy travels with the configuration it
+    belongs to when replicas are mixed.
+
+    A slot holds one GCMC sampler but hosts several replicas, and load_replica()
+    installs a replica's water state by diffing it against whatever the last
+    resident left in the sampler. If the occupancy did not follow the positions
+    through a mix, a replica would run with another replica's waters, which
+    gives plausible numbers rather than an obviously wrong output file.
+
+    The ghost files and the sampling statistics belong to the lambda window
+    rather than the configuration, so they must not be permuted.
+    """
+    from somd2.runner._repex import DynamicsCache
+
+    num_replicas = 4
+
+    cache = object.__new__(DynamicsCache)
+
+    # Label both states with the replica they came from, so that a replica
+    # holding mismatched positions and waters is detectable.
+    cache._openmm_states = list(range(num_replicas))
+    cache._gcmc_states = list(range(num_replicas))
+    cache._ghost_files = [f"ghosts_{i}.txt" for i in range(num_replicas)]
+    cache._state_moved = [False] * num_replicas
+    cache._num_swaps = np.zeros((num_replicas, num_replicas))
+
+    # Mix twice, since a slot is re-used within a cycle.
+    for states in ([2, 0, 3, 1], [1, 3, 0, 2]):
+        old_states = list(range(num_replicas))
+        expected = [cache._gcmc_states[state] for state in states]
+
+        cache._states = states
+        cache.mix_states(old_states)
+
+        # The water occupancy follows the same permutation as the positions.
+        assert cache._gcmc_states == expected
+
+        # Every replica holds the positions and waters of the same origin.
+        assert cache._openmm_states == cache._gcmc_states
+
+    # The ghost files stay with the lambda window.
+    assert cache._ghost_files == [f"ghosts_{i}.txt" for i in range(num_replicas)]
 
 
 @pytest.mark.parametrize(
@@ -204,8 +720,7 @@ def test_check_device_memory_queries_requested_device(monkeypatch, device, key, 
 
     pynvml = pytest.importorskip("pynvml")
 
-    # Force the OpenCL branch to fail so that the pynvml path is always taken,
-    # regardless of what the machine running the tests has installed.
+    # Force the OpenCL branch to fail so the pynvml path is always taken.
     broken = types.SimpleNamespace()
 
     def get_platforms():
@@ -235,3 +750,275 @@ def test_check_device_memory_queries_requested_device(monkeypatch, device, key, 
 
     assert DynamicsCache._check_device_memory(device) == (1, 2, 3)
     assert requested == {key: value}
+
+
+def test_legacy_checkpoint_restore():
+    """
+    Validate that a checkpoint written before slots existed can still be
+    loaded. These stored the replica states unpermuted, with the states array
+    holding the mapping to apply on restart.
+    """
+    from somd2.runner._repex import DynamicsCache
+
+    n = 4
+    legacy = {
+        "_lambdas": [0.0, 0.33, 0.67, 1.0],
+        "_rest2_scale_factors": [1.0] * n,
+        "_states": np.array([2, 0, 1, 3]),
+        "_time": None,
+        "_openmm_states": [f"state{i}" for i in range(n)],
+        "_gcmc_samplers": [None] * n,
+        "_gcmc_states": [f"water{i}" for i in range(n)],
+        "_gcmc_stats": [None] * n,
+        "_terminal_flip_stats": [[0, 0]] * n,
+        "_num_proposed": np.zeros((n, n)),
+        "_num_accepted": np.zeros((n, n)),
+        "_num_swaps": np.zeros((n, n)),
+    }
+
+    cache = object.__new__(DynamicsCache)
+    cache.__setstate__(dict(legacy))
+
+    # Converted to the current convention: each replica's own state, with the
+    # last mix applied.
+    assert cache._openmm_states == ["state2", "state0", "state1", "state3"]
+    assert cache._gcmc_states == ["water2", "water0", "water1", "water3"]
+
+    # Every replica is seeded from its stored state on a restart.
+    assert cache._state_moved == [True] * n
+
+    # Attributes postdating the checkpoint are defaulted, one slot per replica.
+    assert cache._num_slots == n
+    assert cache._groups == [[0], [1], [2], [3]]
+    assert cache._energy_trajectories == [None] * n
+    assert cache._ghost_files == [None] * n
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+def test_repex_max_contexts_change_on_restart(ethane_methanol):
+    """
+    Validate that the number of contexts can change on restart. The slot
+    layout is rebuilt from the configuration rather than restored.
+    """
+    num_lambda = 4
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "8fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": num_lambda,
+            "replica_exchange": True,
+            "max_contexts": 2,
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+        assert len(runner._dynamics_cache._dynamics) == 2
+        runner.run()
+
+        # Restart with a different number of contexts.
+        config["runtime"] = "16fs"
+        config["restart"] = True
+        config["max_contexts"] = 4
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+        assert len(runner._dynamics_cache._dynamics) == 4
+        assert runner._dynamics_cache._groups == [[0], [1], [2], [3]]
+        runner.run()
+
+        assert (Path(tmpdir) / "repex_matrix.txt").exists()
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+def test_repex_gcmc_lambda_cache_warm(ethane_methanol, monkeypatch):
+    """
+    Validate that a GCMC sampler builds exactly one OpenMM context, scanning
+    it over every lambda it will host, and none once running. A mismatch
+    between the cached lambdas and those passed to set_lambda would show up
+    here as an extra build.
+    """
+    loch = pytest.importorskip("loch")
+
+    num_lambda = 4
+    calls = []
+
+    real_precompute = loch.GCMCSampler._precompute_lambdas
+
+    def counting_precompute(self, lambda_values, rest2_scales):
+        # Only record calls with work to do. Deduplicated, since the caller
+        # may name the same lambda twice but the scan extracts it once.
+        missing = sorted(
+            {
+                (float(lam), float(scale))
+                for lam, scale in zip(lambda_values, rest2_scales)
+                if (float(lam), float(scale)) not in self._lambda_params
+            }
+        )
+        if missing:
+            calls.append(missing)
+        return real_precompute(self, lambda_values, rest2_scales)
+
+    monkeypatch.setattr(loch.GCMCSampler, "_precompute_lambdas", counting_precompute)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "8fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": num_lambda,
+            "replica_exchange": True,
+            "max_contexts": 1,
+            "gcmc": True,
+            "gcmc_selection": "resname LIG",
+            "gcmc_frequency": "4fs",
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+
+        # A single context build, covering every lambda value in one scan.
+        assert len(calls) == 1
+        assert sorted(lam for lam, _ in calls[0]) == sorted(runner._lambda_values)
+
+        runner.run()
+
+        # No further context may be built once the simulation is running.
+        assert len(calls) == 1
+
+        # An uncached lambda still works, building and caching on demand.
+        _, sampler = runner._dynamics_cache.get(0)
+        uncached = 0.123456
+        assert uncached not in runner._lambda_values
+
+        sampler.push()
+        try:
+            sampler.set_lambda(uncached)
+        finally:
+            sampler.pop()
+
+        assert len(calls) == 2
+        assert (uncached, sampler._rest2_scale) in sampler._lambda_params
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+@pytest.mark.parametrize("swap_end_states", [False, True])
+def test_repex_perturbed_system_seeding(ethane_methanol, swap_end_states):
+    """
+    Validate that the end states are seeded from the right coordinates when
+    contexts are shared.
+
+    A context is created from a single system and every replica it hosts starts
+    from that context, so the end state a replica starts from is chosen from
+    the middle of the group rather than its first replica. That keeps any
+    mismatch next to the lambda value at which the end state switches, instead
+    of it depending on where the groups happen to fall.
+
+    Swapping the end states reverses the lambda schedule, so the perturbed end
+    state moves to lambda = 0 and the seeding must mirror with it.
+
+    Only the perturbable molecule is displaced, so the assertions also cover
+    the property path that its coordinates travel along: read from
+    'coordinates1' via link_to_perturbed, written to 'coordinates0', then read
+    back via link_to_reference.
+    """
+    import sire as sr
+
+    # A perturbed end state, with the perturbable molecule displaced so that
+    # its coordinates are distinct.
+    perturbed = ethane_methanol.clone()
+    perturbed.set_property("space", ethane_methanol.property("space"))
+    coords = sr.io.get_coords_array(ethane_methanol)
+    from sire.legacy.IO import setCoordinates
+
+    # Flag the atoms of the perturbable molecules. get_coords_array returns the
+    # atoms in molecule order, so the offset tracks the array index.
+    is_perturbable = np.zeros(len(coords), dtype=bool)
+    offset = 0
+    for mol in ethane_methanol.molecules():
+        num_atoms = mol.num_atoms()
+        if mol.has_property("is_perturbable"):
+            is_perturbable[offset : offset + num_atoms] = True
+        offset += num_atoms
+    assert is_perturbable.any(), "no perturbable molecules in the test system"
+
+    coords[is_perturbable] += 1.0
+
+    # Write to 'coordinates1', which is the property that the runner reads via
+    # link_to_perturbed.
+    perturbed = sr.system.System(
+        setCoordinates(perturbed._system, coords.tolist(), True)
+    )
+
+    # Ten replicas across three contexts, a layout in which the switch falls
+    # inside a group.
+    num_lambda = 10
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "4fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": num_lambda,
+            "replica_exchange": True,
+            "max_contexts": 3,
+            "perturbed_system": perturbed,
+            "swap_end_states": swap_end_states,
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+
+        reference = sr.io.get_coords_array(runner._system)
+        target = sr.io.get_coords_array(runner._perturbed_system)
+
+        import openmm.unit as omm_unit
+
+        seeded = []
+        for i in range(num_lambda):
+            positions = runner._dynamics_cache._openmm_states[i][
+                "positions"
+            ].value_in_unit(omm_unit.angstrom)
+            from_reference = np.allclose(positions, reference, atol=1e-3)
+            from_target = np.allclose(positions, target, atol=1e-3)
+            assert from_reference != from_target, f"replica {i} matches neither"
+            seeded.append("perturbed" if from_target else "reference")
+
+        # The end states themselves must always be right. Swapping the end
+        # states puts the perturbed one at lambda = 0.
+        if swap_end_states:
+            assert seeded[0] == "perturbed"
+            assert seeded[-1] == "reference"
+        else:
+            assert seeded[0] == "reference"
+            assert seeded[-1] == "perturbed"
+
+        # Both systems must be used, otherwise the option does nothing.
+        assert set(seeded) == {"reference", "perturbed"}
+
+        # Only the group containing the switch can be seeded from the wrong end
+        # state, and then for no more than half of it. Choosing the end state
+        # from the first replica of a group rather than its middle breaks this.
+        lambdas = runner._lambda_values
+        for group in runner._dynamics_cache._groups:
+            wrong = [
+                i
+                for i in group
+                if (seeded[i] == "perturbed") != ((lambdas[i] > 0.5) != swap_end_states)
+            ]
+            assert len(wrong) <= len(group) // 2, (
+                f"group {group} has {len(wrong)} replicas seeded from the "
+                f"wrong end state: {wrong}"
+            )

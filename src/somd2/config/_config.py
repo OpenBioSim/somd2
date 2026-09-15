@@ -75,13 +75,20 @@ class Config:
         ],
         "log_level": [level.lower() for level in _logger._core.levels],
         "softcore_form": ["zacharias", "taylor", "beutler"],
+        "precision": ["single", "mixed", "double"],
     }
+
+    # Options that advertise a set of choices, but which also accept other
+    # forms, e.g. the path to a stream file. These are validated by the setter,
+    # rather than by argparse.
+    _open_choices = ["lambda_schedule"]
 
     # A dictionary of nargs for the various options.
     _nargs = {
         "lambda_values": "+",
         "lambda_energy": "+",
         "rest2_scale": "+",
+        "restraints": "+",
     }
 
     def __init__(
@@ -132,12 +139,16 @@ class Config:
         num_energy_neighbours=None,
         null_energy="1e6 kcal/mol",
         platform="auto",
+        precision="single",
         max_threads=None,
         max_gpus=None,
         max_sire_threads=None,
         opencl_platform_index=0,
         oversubscription_factor=1,
         replica_exchange=False,
+        max_contexts=None,
+        update_constraints=True,
+        constraint_lambda_index=0,
         randomise_velocities=False,
         perturbed_system=None,
         terminal_flip_frequency=None,
@@ -172,6 +183,12 @@ class Config:
         save_xml=False,
         page_size=None,
         timeout="300 s",
+        restraint_search_time="1 ns",
+        restraint_search_frequency="10 ps",
+        restraint_search_receptor_selection=None,
+        morse_hard_well_depth="150 kcal mol-1",
+        morse_soft_well_depth="50 kcal mol-1",
+        morse_soft_force_constant="125 kcal mol-1 A-2",
     ):
         """
         Constructor.
@@ -228,8 +245,10 @@ class Config:
             then this will be set to the same as 'lambda_values', or the values
             defined by 'num_lambda' if 'lambda_values' is not set.
 
-        lambda_schedule: str
-            Lambda schedule to use for alchemical free energy simulations.
+        lambda_schedule: str, sire.cas.LambdaSchedule
+            Lambda schedule to use for alchemical free energy simulations. This
+            can be the name of one of the standard schedules, or the path to a
+            Sire stream file containing a custom LambdaSchedule.
 
         charge_scale_factor: float
             Factor by which to scale charges for charge scaled morph.
@@ -245,9 +264,10 @@ class Config:
             The soft-core shift-delta parameter. This is used to soften the
             Lennard-Jones interaction.
 
-        restraints: sire.mm._MM.Restraints
-            A single set of restraints, or a list of sets of restraints that
-            will be applied to the atoms during the simulation.
+        restraints: str, sire.mm._MM.Restraints
+            One or more paths to Sire stream files containing the sets of
+            restraints that will be applied to the atoms during the simulation.
+            A stream file may hold a single set, or a list of sets.
 
         constraint: str
             Constraint type to use for non-perturbable molecules.
@@ -350,6 +370,12 @@ class Config:
         platform: str
             Platform to run simulation on.
 
+        precision: str
+            The floating point precision to use on GPU platforms. 'single' is fastest,
+            'double' is slowest, and 'mixed' computes forces in single precision but
+            accumulates and integrates in double. Ignored by platforms that do not
+            support it, such as CPU.
+
         max_threads: int
             Maximum number of CPU threads to use for simulation. (Default None, uses all available)
             Does nothing if platform is set to CUDA.
@@ -374,14 +400,51 @@ class Config:
             Whether to run replica exchange simulation. Currently this can only be used when
             GPU resources are available.
 
+        max_contexts: int
+            The maximum number of OpenMM contexts to create for a replica exchange
+            simulation. If None, then one context is created per replica, which is
+            fastest, but limits the number of replicas to those that fit in GPU memory.
+            If fewer contexts than replicas are requested, then each context is re-used
+            to propagate several replicas per cycle, changing its lambda value as it
+            goes. This lifts the memory limit at the cost of some performance. When
+            re-using contexts, 'frame_frequency' must equal 'checkpoint_frequency'.
+
+        update_constraints: bool
+            Whether the constraints are updated when the lambda value of a context is
+            changed, i.e. whether constrained bond lengths are allowed to perturb with
+            lambda. This is only used when contexts are re-used across lambda values,
+            i.e. when 'max_contexts' is less than the number of replicas. Updating the
+            constraints is correct, but requires the OpenMM context to be reinitialised
+            whenever a constrained bond length actually changes, which is slow. Set this
+            to False if that overhead is significant; the constrained bond lengths are
+            then frozen at those of the lambda value given by
+            'constraint_lambda_index'. Note that this is distinct from
+            'dynamic_constraints', which controls where the constraint lengths are
+            taken from rather than whether they track lambda.
+
+        constraint_lambda_index: int
+            The index of the lambda value at which to fix the constrained bond lengths
+            when 'update_constraints' is False. Every context is created at this lambda
+            value, so that the constraints are the same for all replicas rather than
+            depending on which context a replica is assigned to. The default of zero is
+            arbitrary but consistent; a lambda schedule that perturbs bonds away from
+            the end states may warrant a different choice. This is only used for
+            replica exchange simulations, and only when 'max_contexts' is less than the
+            number of replicas, 'update_constraints' is False, and a constrained bond
+            length actually perturbs with lambda.
+
         randomise_velocities: bool
             Whether to randomise velocities at the start of each replica exchange cycle
             or following a terminal flip Monte Carlo move.
 
         perturbed_system: str
             The path to a stream file containing a Sire system for the equilibrated perturbed
-            end state (lambda = 1). This will be used as the starting conformation all lambda
-            windows > 0.5 when performing a replica exchange simulation.
+            end state (lambda = 1). This is the same system as the input, but with the
+            "coordinates1" property of any perturbable molecules holding the equilibrated
+            coordinates for the lambda = 1 state. It is used as the starting conformation for
+            the lambda windows closest to the perturbed end state when performing a replica
+            exchange simulation, i.e. those with lambda > 0.5, or lambda < 0.5 when
+            'swap_end_states' is True.
 
         terminal_flip_frequency: str
             Frequency at which to attempt terminal ring flip Monte Carlo moves. If None
@@ -556,6 +619,35 @@ class Config:
         null_energy: str
             The energy value to use for lambda windows that are not
             being computed as part of the energy trajectory.
+
+        restraint_search_time: str
+            Length of the short pre-production trajectory used to auto-generate
+            a Boresch restraint when running an ABFE simulation without a
+            user-supplied restraint. Defaults to "1 ns".
+
+        restraint_search_frequency: str
+            Frame-saving frequency during the restraint-search trajectory.
+            Defaults to "10 ps". Should be small enough to yield at least 50
+            frames over ``restraint_search_time``.
+
+        restraint_search_receptor_selection: str
+            Sire selection string for receptor anchor atom candidates used
+            during automatic Boresch restraint generation. If None, the default
+            backbone selection is used (CA, C, N atoms in non-water molecules).
+
+        morse_hard_well_depth: str
+            The well depth of the "hard" Morse potential that replaces the
+            broken bond when auto-generating restraints for a ring-breaking
+            simulation.
+
+        morse_soft_well_depth: str
+            The well depth of the "soft" Morse restraint that holds the broken
+            fragment in place when auto-generating restraints for a
+            ring-breaking simulation.
+
+        morse_soft_force_constant: str
+            The force constant of the "soft" Morse restraint used when
+            auto-generating restraints for a ring-breaking simulation.
         """
 
         # Setup logger before doing anything else
@@ -605,12 +697,16 @@ class Config:
         self.checkpoint_frequency = checkpoint_frequency
         self.num_checkpoint_workers = num_checkpoint_workers
         self.platform = platform
+        self.precision = precision
         self.max_threads = max_threads
         self.max_gpus = max_gpus
         self.max_sire_threads = max_sire_threads
         self.opencl_platform_index = opencl_platform_index
         self.oversubscription_factor = oversubscription_factor
         self.replica_exchange = replica_exchange
+        self.max_contexts = max_contexts
+        self.update_constraints = update_constraints
+        self.constraint_lambda_index = constraint_lambda_index
         self.randomise_velocities = randomise_velocities
         self.perturbed_system = perturbed_system
         self.terminal_flip_frequency = terminal_flip_frequency
@@ -644,9 +740,13 @@ class Config:
         self.num_energy_neighbours = num_energy_neighbours
         self.null_energy = null_energy
         self.page_size = page_size
-
+        self.restraint_search_time = restraint_search_time
+        self.restraint_search_frequency = restraint_search_frequency
+        self.restraint_search_receptor_selection = restraint_search_receptor_selection
+        self.morse_hard_well_depth = morse_hard_well_depth
+        self.morse_soft_well_depth = morse_soft_well_depth
+        self.morse_soft_force_constant = morse_soft_force_constant
         self.write_config = write_config
-
         self.overwrite = overwrite
 
     def __str__(self):
@@ -1089,44 +1189,51 @@ class Config:
                     "'lambda_schedule' must be of type 'str' or 'LambdaSchedule' object"
                 )
             if isinstance(lambda_schedule, str):
-                # Strip whitespace and convert to lower case.
-                lambda_schedule = lambda_schedule.strip().lower()
-                if lambda_schedule == "standard_morph":
+                # Strip whitespace. The keyword comparison is made against a
+                # lower case copy, since the string may also be a path, which
+                # is case sensitive.
+                lambda_schedule = lambda_schedule.strip()
+                keyword = lambda_schedule.lower()
+                if keyword == "standard_morph":
                     self._lambda_schedule = _LambdaSchedule.standard_morph()
                     self._lambda_schedule_name = "standard_morph"
-                elif lambda_schedule == "charge_scaled_morph":
+                elif keyword == "charge_scaled_morph":
                     self._lambda_schedule = _LambdaSchedule.charge_scaled_morph(0.2)
                     self._lambda_schedule_name = "charge_scaled_morph"
-                elif lambda_schedule == "ring_break_morph":
+                elif keyword == "ring_break_morph":
                     from .._utils._schedules import (
                         ring_break_morph as _ring_break_morph,
                     )
 
                     self._lambda_schedule = _ring_break_morph()
                     self._lambda_schedule_name = "ring_break_morph"
-                elif lambda_schedule == "reverse_ring_break_morph":
+                elif keyword == "reverse_ring_break_morph":
                     from .._utils._schedules import (
                         reverse_ring_break_morph as _reverse_ring_break_morph,
                     )
 
                     self._lambda_schedule = _reverse_ring_break_morph()
                     self._lambda_schedule_name = "reverse_ring_break_morph"
-                elif lambda_schedule == "annihilate":
+                elif keyword == "annihilate":
                     self._lambda_schedule = None
                     self._lambda_schedule_name = "annihilate"
-                elif lambda_schedule == "decouple":
+                elif keyword == "decouple":
                     self._lambda_schedule = None
                     self._lambda_schedule_name = "decouple"
                 else:
-                    try:
-                        self._lambda_schedule = self._from_hex(lambda_schedule)
-                        self._lambda_schedule_name = None
-                    except Exception:
+                    schedule = self._from_string(
+                        lambda_schedule,
+                        "lambda_schedule",
+                        hint=", or one of the following strings: "
+                        f"{', '.join(self._choices['lambda_schedule'])}",
+                    )
+                    if not isinstance(schedule, _LambdaSchedule):
                         raise ValueError(
-                            "Unable to deserialise 'lambda_schedule'. Ensure that this is a "
-                            "hex string representation of a valid LambdaSchedule object, or "
-                            f"one of the following strings: {', '.join(self._choices['lambda_schedule'])}"
+                            f"'lambda_schedule' deserialised to a "
+                            f"'{type(schedule).__name__}', not a 'LambdaSchedule'."
                         )
+                    self._lambda_schedule = schedule
+                    self._lambda_schedule_name = None
             else:
                 self._lambda_schedule = lambda_schedule
                 self._lambda_schedule_name = None
@@ -1212,32 +1319,34 @@ class Config:
 
     @restraints.setter
     def restraints(self, restraints):
-        # If not supplied as a list, convert to a list.
+        # If not supplied as a list, convert to a list. Note that a string is
+        # itself iterable, so must be wrapped explicitly.
         if restraints is not None:
-            if not isinstance(restraints, _Iterable):
+            if isinstance(restraints, str) or not isinstance(restraints, _Iterable):
                 restraints = [restraints]
 
-            # Check that all restraints are of the correct type.
-            deserialised_restraints = []
+            # Resolve each entry, keeping objects and deserialised strings in
+            # the order they were given.
+            resolved_restraints = []
             for restraint in restraints:
-                if isinstance(restraint, _sr.mm._MM.Restraints):
-                    continue
-                elif isinstance(restraint, str):
-                    try:
-                        restraint = self._from_hex(restraint)
-                    except Exception:
-                        raise ValueError(
-                            "Unable to deserialise restraint. Ensure that this "
-                            "is a hex string representation of a valid sire.mm._MM.Restraints object."
-                        )
-                    deserialised_restraints.append(restraint)
+                if isinstance(restraint, str):
+                    restraint = self._from_string(restraint.strip(), "restraints")
+
+                # A stream file may hold a list of sets of restraints, e.g. the
+                # pair used for a ring-breaking perturbation.
+                if isinstance(restraint, _Iterable):
+                    resolved_restraints.extend(restraint)
                 else:
+                    resolved_restraints.append(restraint)
+
+            # Check that all restraints are of the correct type.
+            for restraint in resolved_restraints:
+                if not isinstance(restraint, _sr.mm._MM.Restraints):
                     raise ValueError(
                         "'restraints' must be a sire.mm._MM.Restraints object, or a list of these objects."
                     )
 
-            if len(deserialised_restraints) > 0:
-                restraints = deserialised_restraints
+            restraints = resolved_restraints
 
         self._restraints = restraints
 
@@ -1648,6 +1757,21 @@ class Config:
                 self._platform = "cpu"
 
     @property
+    def precision(self):
+        return self._precision
+
+    @precision.setter
+    def precision(self, precision):
+        if not isinstance(precision, str):
+            raise TypeError("'precision' must be of type 'str'")
+        precision = precision.lower().replace(" ", "")
+        if precision not in self._choices["precision"]:
+            raise ValueError(
+                f"'precision' not recognised. Valid options are: {', '.join(self._choices['precision'])}"
+            )
+        self._precision = precision
+
+    @property
     def max_threads(self):
         return self._max_threads
 
@@ -1757,6 +1881,55 @@ class Config:
         if not isinstance(replica_exchange, bool):
             raise ValueError("'replica_exchange' must be of type 'bool'")
         self._replica_exchange = replica_exchange
+
+    @property
+    def max_contexts(self):
+        return self._max_contexts
+
+    @max_contexts.setter
+    def max_contexts(self, max_contexts):
+        if max_contexts is None or (
+            isinstance(max_contexts, str)
+            and max_contexts.lower().replace(" ", "") == "none"
+        ):
+            self._max_contexts = None
+            return
+
+        if not isinstance(max_contexts, int):
+            try:
+                max_contexts = int(max_contexts)
+            except Exception:
+                raise ValueError("'max_contexts' must be of type 'int'")
+        if max_contexts < 1:
+            raise ValueError("'max_contexts' must be greater than 0")
+        self._max_contexts = max_contexts
+
+    @property
+    def update_constraints(self):
+        return self._update_constraints
+
+    @update_constraints.setter
+    def update_constraints(self, update_constraints):
+        if not isinstance(update_constraints, bool):
+            raise ValueError("'update_constraints' must be of type 'bool'")
+        self._update_constraints = update_constraints
+
+    @property
+    def constraint_lambda_index(self):
+        return self._constraint_lambda_index
+
+    @constraint_lambda_index.setter
+    def constraint_lambda_index(self, constraint_lambda_index):
+        if not isinstance(constraint_lambda_index, int):
+            try:
+                constraint_lambda_index = int(constraint_lambda_index)
+            except Exception:
+                raise ValueError("'constraint_lambda_index' must be of type 'int'")
+        if constraint_lambda_index < 0:
+            raise ValueError(
+                "'constraint_lambda_index' must be greater than or equal to 0"
+            )
+        self._constraint_lambda_index = constraint_lambda_index
 
     @property
     def randomise_velocities(self):
@@ -2468,6 +2641,89 @@ class Config:
         return obj
 
     @classmethod
+    def _from_string(cls, string, name, hint=""):
+        """
+        Internal method to deserialise a Sire object from a string, which can
+        either be the path to a stream file, or the hex string representation
+        of the serialised object.
+
+        Parameters
+        ----------
+
+        string: str
+            The path to a stream file, or a hex string representation of the
+            Sire object.
+
+        name: str
+            The name of the option being set, used for error messages.
+
+        hint: str
+            An additional clause appended to the error message, e.g. listing
+            the keywords that the option also accepts.
+
+        Returns
+        -------
+
+        obj:
+            The deserialised Sire object.
+        """
+        from pathlib import Path as _Path
+
+        # Work out whether this is a path to an existing file. A hex string can
+        # exceed the maximum filename length, which raises rather than simply
+        # returning False on some platforms.
+        try:
+            is_file = _Path(string).is_file()
+        except Exception:
+            is_file = False
+
+        if is_file:
+            from sire.stream import load
+
+            try:
+                return load(string)
+            except Exception as e:
+                raise ValueError(
+                    f"Unable to load '{name}' from stream file '{string}': {e}"
+                )
+        else:
+            try:
+                return cls._from_hex(string)
+            except Exception:
+                raise ValueError(
+                    f"Unable to interpret '{name}'. Expected the path to a Sire "
+                    f"stream file, or a hex string of a serialised object{hint}."
+                )
+
+    def __getstate__(self):
+        """
+        Hex-encode the same fields that to_yaml()/from_yaml() already
+        hex-encode (currently 'restraints' and 'lambda_schedule'), since
+        these legacy Sire objects are not guaranteed to have native pickle
+        support. This is needed so that a Config holding these can be sent
+        to a spawned worker process, e.g. via
+        concurrent.futures.ProcessPoolExecutor.
+        """
+        state = self.__dict__.copy()
+        if state.get("_restraints") is not None:
+            state["_restraints"] = [
+                self._to_hex(restraint) for restraint in state["_restraints"]
+            ]
+        if state.get("_lambda_schedule") is not None:
+            state["_lambda_schedule"] = self._to_hex(state["_lambda_schedule"])
+        return state
+
+    def __setstate__(self, state):
+        """Reverse the hex-encoding performed in __getstate__."""
+        if state.get("_restraints") is not None:
+            state["_restraints"] = [
+                self._from_hex(restraint) for restraint in state["_restraints"]
+            ]
+        if state.get("_lambda_schedule") is not None:
+            state["_lambda_schedule"] = self._from_hex(state["_lambda_schedule"])
+        self.__dict__.update(state)
+
+    @classmethod
     def _create_parser(cls):
         """
         Internal method to create a argparse parser for the config object.
@@ -2475,6 +2731,7 @@ class Config:
 
         import argparse
         import inspect
+        import re
 
         # Inspect the signature to get the parameters.
         sig = inspect.signature(Config.__init__)
@@ -2482,7 +2739,7 @@ class Config:
         params = {
             key: value
             for key, value in params.items()
-            if key not in ["self", "args", "kwargs", "restraints"]
+            if key not in ["self", "args", "kwargs"]
         }
 
         # Get the docstring.
@@ -2499,7 +2756,7 @@ class Config:
             # Loop over all lines in the docstring until we find the parameter.
             for line in doc:
                 line = line.strip()
-                if line.startswith(param):
+                if re.match(rf"{re.escape(param)}\s*:", line):
                     found_param = True
                 elif found_param:
                     if line == "":
@@ -2541,14 +2798,26 @@ class Config:
 
             # This parameter has choices.
             if param in cls._choices:
-                parser.add_argument(
-                    f"--{cli_param}",
-                    type=typ,
-                    default=params[param].default,
-                    choices=cls._choices[param],
-                    help=help[param],
-                    required=False,
-                )
+                # Other forms are also accepted, so advertise the choices in the
+                # help text, but leave the validation to the setter.
+                if param in cls._open_choices:
+                    parser.add_argument(
+                        f"--{cli_param}",
+                        type=typ,
+                        default=params[param].default,
+                        metavar="{" + ",".join(cls._choices[param]) + "}",
+                        help=help[param],
+                        required=False,
+                    )
+                else:
+                    parser.add_argument(
+                        f"--{cli_param}",
+                        type=typ,
+                        default=params[param].default,
+                        choices=cls._choices[param],
+                        help=help[param],
+                        required=False,
+                    )
             # This is a standard parameter.
             else:
                 if typ == bool:
@@ -2570,6 +2839,144 @@ class Config:
                     )
 
         return parser
+
+    @property
+    def restraint_search_time(self):
+        return self._restraint_search_time
+
+    @restraint_search_time.setter
+    def restraint_search_time(self, restraint_search_time):
+        if not isinstance(restraint_search_time, str):
+            raise TypeError("'restraint_search_time' must be of type 'str'")
+
+        from sire.units import picosecond
+
+        try:
+            t = _sr.u(restraint_search_time)
+        except:
+            raise ValueError(
+                f"Unable to parse 'restraint_search_time' as a Sire GeneralUnit: {restraint_search_time}"
+            )
+
+        if not t.has_same_units(picosecond):
+            raise ValueError("'restraint_search_time' units are invalid.")
+
+        self._restraint_search_time = t
+
+    @property
+    def restraint_search_frequency(self):
+        return self._restraint_search_frequency
+
+    @restraint_search_frequency.setter
+    def restraint_search_frequency(self, restraint_search_frequency):
+        if not isinstance(restraint_search_frequency, str):
+            raise TypeError("'restraint_search_frequency' must be of type 'str'")
+
+        from sire.units import picosecond
+
+        try:
+            t = _sr.u(restraint_search_frequency)
+        except:
+            raise ValueError(
+                f"Unable to parse 'restraint_search_frequency' as a Sire GeneralUnit: {restraint_search_frequency}"
+            )
+
+        if not t.has_same_units(picosecond):
+            raise ValueError("'restraint_search_frequency' units are invalid.")
+
+        self._restraint_search_frequency = t
+
+    @property
+    def restraint_search_receptor_selection(self):
+        return self._restraint_search_receptor_selection
+
+    @restraint_search_receptor_selection.setter
+    def restraint_search_receptor_selection(self, restraint_search_receptor_selection):
+        if restraint_search_receptor_selection is not None:
+            if not isinstance(restraint_search_receptor_selection, str):
+                raise TypeError(
+                    "'restraint_search_receptor_selection' must be of type 'str'"
+                )
+        self._restraint_search_receptor_selection = restraint_search_receptor_selection
+
+    @property
+    def morse_hard_well_depth(self):
+        return self._morse_hard_well_depth
+
+    @morse_hard_well_depth.setter
+    def morse_hard_well_depth(self, morse_hard_well_depth):
+        self._morse_hard_well_depth = self._parse_well_depth(
+            morse_hard_well_depth, "morse_hard_well_depth"
+        )
+
+    @property
+    def morse_soft_well_depth(self):
+        return self._morse_soft_well_depth
+
+    @morse_soft_well_depth.setter
+    def morse_soft_well_depth(self, morse_soft_well_depth):
+        self._morse_soft_well_depth = self._parse_well_depth(
+            morse_soft_well_depth, "morse_soft_well_depth"
+        )
+
+    @property
+    def morse_soft_force_constant(self):
+        return self._morse_soft_force_constant
+
+    @morse_soft_force_constant.setter
+    def morse_soft_force_constant(self, morse_soft_force_constant):
+        if not isinstance(morse_soft_force_constant, str):
+            raise TypeError("'morse_soft_force_constant' must be of type 'str'")
+
+        from sire.units import angstrom, kcal_per_mol
+
+        try:
+            k = _sr.u(morse_soft_force_constant)
+        except:
+            raise ValueError(
+                "Unable to parse 'morse_soft_force_constant' as a Sire "
+                f"GeneralUnit: {morse_soft_force_constant}"
+            )
+
+        if not k.has_same_units(kcal_per_mol / (angstrom * angstrom)):
+            raise ValueError("'morse_soft_force_constant' units are invalid.")
+
+        self._morse_soft_force_constant = k
+
+    @staticmethod
+    def _parse_well_depth(value, name):
+        """
+        Internal helper to validate a Morse potential well depth.
+
+        Parameters
+        ----------
+
+        value: str
+            The well depth as a string, e.g. "150 kcal mol-1".
+
+        name: str
+            The name of the option, used in error messages.
+
+        Returns
+        -------
+
+        well_depth: sire.units.GeneralUnit
+            The parsed well depth.
+        """
+        if not isinstance(value, str):
+            raise TypeError(f"'{name}' must be of type 'str'")
+
+        from sire.units import kcal_per_mol
+
+        try:
+            de = _sr.u(value)
+        except:
+            raise ValueError(f"Unable to parse '{name}' as a Sire GeneralUnit: {value}")
+
+        if not de.has_same_units(kcal_per_mol):
+            raise ValueError(f"'{name}' units are invalid.")
+
+        return de
 
     def _reset_logger(self, logger):
         """
