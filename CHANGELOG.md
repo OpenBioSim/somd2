@@ -25,6 +25,7 @@ Changelog
 * Account for off-site charges (virtual sites) when computing the charge difference between the end states. They are held as a molecule property rather than on the atoms, so a charge-preserving perturbation could appear to change charge and be given spurious alchemical ions [#200](https://github.com/OpenBioSim/somd2/pull/200).
 * Handle `num_lambda=1`, which previously raised a `ZeroDivisionError` when generating the lambda values. The `RepexRunner` now rejects a single lambda window, since there is nothing to exchange with and the regular `Runner` is faster [#203](https://github.com/OpenBioSim/somd2/pull/203).
 * Detect the available GPUs once in the base runner and re-use the list, rather than the `RepexRunner` querying `CUDA_VISIBLE_DEVICES` regardless of the chosen platform. Replica exchange is now also permitted on the HIP platform [#206](https://github.com/OpenBioSim/somd2/pull/206).
+* Query the free memory of AMD GPUs with `CL_DEVICE_GLOBAL_FREE_MEMORY_AMD` rather than `CL_DEVICE_BOARD_NAME_AMD`, which returns the device name [#206](https://github.com/OpenBioSim/somd2/pull/206).
 
 [2026.1.0](https://github.com/openbiosim/somd2/compare/2025.1.0...2026.1.0) - Jun 2026
 --------------------------------------------------------------------------------------
