@@ -1197,23 +1197,17 @@ class RepexRunner(_RunnerBase):
         # Call the base class constructor.
         super().__init__(system, config)
 
-        # Make sure we're using the CUDA or OpenCL platform.
-        if self._config.platform not in ["cuda", "opencl"]:
+        # Make sure we're using a GPU platform.
+        if not self._is_gpu:
             msg = (
                 "Currently replica exchange simulations can only be "
-                "run on the CUDA and OpenCL platforms."
+                "run on the CUDA, OpenCL, and HIP platforms."
             )
             _logger.error(msg)
             raise ValueError(msg)
 
-        # Get the number of available GPUs.
-        try:
-            gpu_devices = self._get_gpu_devices(
-                "cuda", self._config.oversubscription_factor
-            )
-        except Exception as e:
-            _logger.error(f"Could not determine available GPU devices: {e}")
-            raise e
+        # The available devices were detected by the base class constructor.
+        gpu_devices = self._gpu_devices
 
         # We can only use replica exchange if we have a GPU.
         if len(gpu_devices) == 0:

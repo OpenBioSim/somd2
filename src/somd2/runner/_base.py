@@ -973,19 +973,26 @@ class RunnerBase:
                 "schedule"
             ].reverse()
 
+        # The physical GPU devices available to this run, as listed by the
+        # visible-devices environment variable for the chosen platform.
+        self._gpu_devices = []
+
         # Limit the number of CPU threads available to Sire when running in parallel.
         if self._is_gpu:
             # First get the total number of threads that are available to Sire.
             total_threads = _sr.legacy.Base.get_max_num_threads()
 
-            # Get the number of GPU devices.
-            devices = self._get_gpu_devices(
+            # Get the available GPU devices. Subclasses re-use this list rather
+            # than querying the environment again.
+            self._gpu_devices = self._get_gpu_devices(
                 self._config.platform,
-                log=False,
+                self._config.oversubscription_factor,
             )
 
             # Work out the number of GPU workers.
-            num_gpu_workers = len(devices) * self._config.oversubscription_factor
+            num_gpu_workers = (
+                len(self._gpu_devices) * self._config.oversubscription_factor
+            )
 
             # Adjust based on the maximum number of GPUs.
             if self._config.max_gpus is not None:
