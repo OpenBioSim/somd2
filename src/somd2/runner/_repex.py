@@ -1144,11 +1144,18 @@ class DynamicsCache:
         # AMD: Use OpenCL extension.
         elif "AMD" in vendor or "Advanced Micro Devices" in vendor:
             try:
+                import pyopencl as cl
+
                 total = ocl_device.global_mem_size
-                free_memory_info = ocl_device.get_info(0x4038)
+
+                # cl_amd_device_attribute_query reports the free memory in
+                # KBytes, as a list with the whole heap first.
+                free_memory_info = ocl_device.get_info(
+                    cl.device_info.GLOBAL_FREE_MEMORY_AMD
+                )
                 free_kb = (
                     free_memory_info[0]
-                    if isinstance(free_memory_info, list)
+                    if isinstance(free_memory_info, (list, tuple))
                     else free_memory_info
                 )
                 free = free_kb * 1024
@@ -1158,6 +1165,15 @@ class DynamicsCache:
                 msg = f"Could not get AMD GPU memory info for device {device}: {e}"
                 _logger.error(msg)
                 raise RuntimeError(msg) from e
+
+        # Any other vendor: we have no way of querying the free memory.
+        else:
+            msg = (
+                f"Unable to query the memory of device {device}: "
+                f"unsupported GPU vendor '{vendor}'."
+            )
+            _logger.error(msg)
+            raise RuntimeError(msg)
 
 
 class RepexRunner(_RunnerBase):
@@ -1197,23 +1213,17 @@ class RepexRunner(_RunnerBase):
         # Call the base class constructor.
         super().__init__(system, config)
 
-        # Make sure we're using the CUDA or OpenCL platform.
-        if self._config.platform not in ["cuda", "opencl"]:
+        # Make sure we're using a GPU platform.
+        if not self._is_gpu:
             msg = (
                 "Currently replica exchange simulations can only be "
-                "run on the CUDA and OpenCL platforms."
+                "run on the CUDA, OpenCL, and HIP platforms."
             )
             _logger.error(msg)
             raise ValueError(msg)
 
-        # Get the number of available GPUs.
-        try:
-            gpu_devices = self._get_gpu_devices(
-                "cuda", self._config.oversubscription_factor
-            )
-        except Exception as e:
-            _logger.error(f"Could not determine available GPU devices: {e}")
-            raise e
+        # The available devices were detected by the base class constructor.
+        gpu_devices = self._gpu_devices
 
         # We can only use replica exchange if we have a GPU.
         if len(gpu_devices) == 0:
