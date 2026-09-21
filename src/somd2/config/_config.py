@@ -103,7 +103,7 @@ class Config:
         barostat_frequency=25,
         integrator="langevin_middle",
         cutoff_type="pme",
-        cutoff="7.5 A",
+        cutoff="9 A",
         h_mass_factor=1.5,
         hmr=True,
         num_lambda=11,
