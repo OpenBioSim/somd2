@@ -85,6 +85,11 @@ class RunnerBase:
         # user's final choice of output directory is known.
         self._config._setup_output_directory()
 
+        # Progress is reported through the logger, so silence Sire's progress
+        # bars. This also lets Sire run dynamics in longer blocks, since the
+        # blocks only exist to update the bar.
+        _sr.base.ProgressBar.set_silent()
+
         if self._config.replica_exchange and self._config.perturbed_system is not None:
             # Make sure the number of positions is correct.
             num_atoms = self._system.num_atoms()

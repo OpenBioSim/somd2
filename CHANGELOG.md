@@ -7,6 +7,7 @@ Changelog
 * Please add an item to this CHANGELOG for any new features or bug fixes when creating a PR.
 * Increase the default `cutoff` from 7.5 Å to 9 Å, matching common practice and giving faster PME on current GPUs, since the shorter cutoff shifts too much work onto the reciprocal space grid [#209](https://github.com/OpenBioSim/somd2/pull/209).
 * Buffer energy components and write them at checkpoint time, rather than rewriting the parquet file on every energy save, which cost a few milliseconds per replica per cycle and grew with the length of the run [#212](https://github.com/OpenBioSim/somd2/pull/212).
+* Silence Sire's progress bars when a runner is constructed rather than when `somd2` is imported, so that importing `somd2` as a library no longer changes how Sire reports progress [#215](https://github.com/OpenBioSim/somd2/pull/215).
 
 [2026.2.0](https://github.com/openbiosim/somd2/compare/2026.1.0...2026.2.0) - Sep 2026
 --------------------------------------------------------------------------------------
