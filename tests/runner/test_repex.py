@@ -458,9 +458,51 @@ def test_repex_checkpoint_single_lock(ethane_methanol, max_contexts):
             repex_module._FileLock = real_filelock
 
     # Two cycles, each taking the lock once for the checkpoint files and once
-    # for the repex state, plus a final acquisition. This must not scale with
-    # the number of passes.
-    assert len(acquisitions) == 5
+    # for the repex state. The last cycle is a checkpoint cycle, so there is no
+    # separate final save. This must not scale with the number of passes.
+    assert len(acquisitions) == 4
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+@pytest.mark.parametrize(
+    "runtime, checkpoint_frequency, expected",
+    [("8fs", "4fs", [False, False]), ("12fs", "8fs", [False, True])],
+)
+def test_repex_state_saved_once(
+    ethane_methanol, runtime, checkpoint_frequency, expected
+):
+    """
+    Validate that the replica exchange state is saved once per checkpoint
+    cycle, with a separate final save only when the last cycle is not a
+    checkpoint cycle.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": runtime,
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": checkpoint_frequency,
+            "frame_frequency": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": 2,
+            "replica_exchange": True,
+        }
+        runner = RepexRunner(ethane_methanol, Config(**config))
+
+        saves = []
+        save = runner._save_repex_state
+
+        def counting_save(final=False):
+            saves.append(final)
+            return save(final=final)
+
+        runner._save_repex_state = counting_save
+        runner.run()
+
+        assert saves == expected
+        assert (Path(tmpdir) / "repex_state.pkl").exists()
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
