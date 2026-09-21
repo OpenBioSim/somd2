@@ -636,6 +636,11 @@ class RunnerBase:
         # used to skip duplicate rows on restart.
         self._last_ec_time = {}
 
+        # Per-window energy-components rows collected since the last checkpoint,
+        # and the number of rows at which they are written out regardless.
+        self._ec_rows = {}
+        self._max_ec_rows = 10000
+
         # Per-window cache of the integrator's integration force groups bitmask.
         self._integration_groups = {}
 
@@ -2500,6 +2505,9 @@ class RunnerBase:
                             df.iloc[-self._energy_per_block :],
                         )
 
+            if not is_post_equilibration:
+                self._flush_energy_components(index)
+
         except Exception as e:
             return index, e
 
@@ -2644,8 +2652,11 @@ class RunnerBase:
 
     def _save_energy_components(self, index, context, time_ns):
         """
-        Internal function to save the energy components for each force group to a
-        Parquet file.
+        Internal function to record the energy components for each force group.
+        Rows are buffered and written to the Parquet file by
+        _flush_energy_components() at checkpoint time, so that the file is only
+        rewritten once per checkpoint and stays consistent with the other
+        checkpoint files.
 
         Parameters
         ----------
@@ -2660,10 +2671,7 @@ class RunnerBase:
             The current simulation time in nanoseconds.
         """
 
-        import json as _json
         import openmm
-        import pandas as _pd
-        import pyarrow as _pa
         import pyarrow.parquet as _pq_local
 
         filepath = self._filenames[index]["energy_components"]
@@ -2701,8 +2709,37 @@ class RunnerBase:
                 openmm.unit.kilocalories_per_mole
             )
 
-        row = {"time": round(time_ns, 6)} | energies
-        df = _pd.DataFrame([row])
+        rows = self._ec_rows.setdefault(index, [])
+        rows.append({"time": round(time_ns, 6)} | energies)
+        self._last_ec_time[index] = time_ns
+
+        # Bound the memory used when checkpoints are rare or disabled.
+        if len(rows) >= self._max_ec_rows:
+            self._flush_energy_components(index)
+
+    def _flush_energy_components(self, index):
+        """
+        Write the energy components buffered by _save_energy_components() to
+        the Parquet file for a window.
+
+        Parameters
+        ----------
+
+        index : int
+            The index of the window or replica.
+        """
+
+        import json as _json
+        import pandas as _pd
+        import pyarrow as _pa
+        import pyarrow.parquet as _pq_local
+
+        rows = self._ec_rows.pop(index, [])
+        if not rows:
+            return
+
+        filepath = self._filenames[index]["energy_components"]
+        df = _pd.DataFrame(rows)
 
         path = _Path(filepath)
         if path.exists() and path.stat().st_size > 0:
@@ -2718,8 +2755,6 @@ class RunnerBase:
                 {b"somd2": meta, **table.schema.metadata}
             )
             _pq_local.write_table(table, filepath)
-
-        self._last_ec_time[index] = time_ns
 
     def _restore_backup_files(self):
         """
