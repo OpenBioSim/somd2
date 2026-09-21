@@ -1953,6 +1953,9 @@ class RepexRunner(_RunnerBase):
         # to handle non-integer ratios between the checkpoint and energy frequencies.
         next_checkpoint = cycles_per_checkpoint
 
+        # Whether the most recent cycle saved the replica exchange state.
+        is_checkpoint = False
+
         # Perform the replica exchange simulation.
         for i in range(cycles):
             _logger.info(f"Running dynamics for cycle {i + 1} of {cycles}")
@@ -2155,25 +2158,7 @@ class RepexRunner(_RunnerBase):
                 # Advance the checkpoint threshold.
                 next_checkpoint += cycles_per_checkpoint
 
-                # Guard the repex state and transition matrix saving with a file lock.
-                lock = _FileLock(self._lock_file)
-                with lock.acquire(timeout=self._config.timeout.to("seconds")):
-                    # Save the transition matrix.
-                    _logger.info("Saving replica exchange transition matrix")
-                    self._save_transition_matrix()
-
-                    # Backup the dynamics cache pickle file, if it exists.
-                    if self._repex_state.exists():
-                        _copyfile(
-                            self._repex_state,
-                            self._repex_state.with_suffix(".pkl.bak"),
-                        )
-
-                    # Pickle the dynamics cache.
-                    _logger.info("Saving replica exchange state")
-                    self._save_sampler_stats()
-                    with open(self._repex_state, "wb") as f:
-                        _pickle.dump(self._dynamics_cache, f)
+                self._save_repex_state()
 
         dynamics_executor.shutdown(wait=True)
         checkpoint_executor.shutdown(wait=True)
@@ -2181,28 +2166,10 @@ class RepexRunner(_RunnerBase):
         # Record the end time for the production block.
         prod_end = time()
 
-        lock = _FileLock(self._lock_file)
-        with lock.acquire(timeout=self._config.timeout.to("seconds")):
-            # Save the final transition matrix.
-            _logger.info("Saving final replica exchange transition matrix")
-            self._save_transition_matrix()
-
-            # Backup the dynamics cache pickle file, if it exists.
-            if self._repex_state.exists():
-                _copyfile(
-                    self._repex_state,
-                    self._repex_state.with_suffix(".pkl.bak"),
-                )
-
-            # Pickle final state of the dynamics cache.
-            _logger.info("Saving final replica exchange state")
-            if self._terminal_flip_samplers is not None:
-                self._dynamics_cache._terminal_flip_stats = [
-                    [s.num_attempted, s.num_accepted]
-                    for s in self._terminal_flip_samplers
-                ]
-            with open(self._repex_state, "wb") as f:
-                _pickle.dump(self._dynamics_cache, f)
+        # Save the final state, unless the last cycle was a checkpoint cycle
+        # and has just done so.
+        if not is_checkpoint:
+            self._save_repex_state(final=True)
 
         # Record the end time.
         end = time()
@@ -3059,6 +3026,35 @@ class RepexRunner(_RunnerBase):
                 stats.update(gcmc_sampler.get_stats())
 
         return stats if stats else None
+
+    def _save_repex_state(self, final=False):
+        """
+        Save the transition matrix and pickle the dynamics cache, backing up
+        the previous pickle, under the file lock.
+
+        Parameters
+        ----------
+
+        final: bool
+            Whether this is the final save of the run, for logging.
+        """
+        label = "final replica exchange" if final else "replica exchange"
+
+        lock = _FileLock(self._lock_file)
+        with lock.acquire(timeout=self._config.timeout.to("seconds")):
+            _logger.info(f"Saving {label} transition matrix")
+            self._save_transition_matrix()
+
+            if self._repex_state.exists():
+                _copyfile(
+                    self._repex_state,
+                    self._repex_state.with_suffix(".pkl.bak"),
+                )
+
+            _logger.info(f"Saving {label} state")
+            self._save_sampler_stats()
+            with open(self._repex_state, "wb") as f:
+                _pickle.dump(self._dynamics_cache, f)
 
     def _save_sampler_stats(self):
         """
