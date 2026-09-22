@@ -15,6 +15,7 @@ loch = "*"
 loguru = "*"
 numba = "*"
 nvidia-ml-py = "*"
+pyarrow = "*"
 
 [feature.test.dependencies]
 pytest = "*"
