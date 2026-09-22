@@ -29,6 +29,7 @@ requirements:
     - loguru
     - numba
     - nvidia-ml-py
+    - pyarrow
     - python
 
 tests:
