@@ -1155,7 +1155,7 @@ class RunnerBase:
         crash on every restart, whereas a fresh search may pick a different frame
         or anchor, and re-seeds ``self._system`` naturally.
         """
-        from sire.restraints import boresch_search
+        from sire.restraints import boresch_search, check_boresch_search
 
         restraint_file = str(self._config.output_directory / "abfe_restraint.s3")
 
@@ -1190,6 +1190,16 @@ class RunnerBase:
         _logger.info(
             "No restraint supplied for ABFE. Running Boresch restraint search."
         )
+
+        protocol = "rxrx"
+        try:
+            check_boresch_search(self._system, protocol=protocol)
+        except ValueError as e:
+            _logger.warning(
+                f"RXRX Boresch restraint search cannot be used for this system: {e} "
+                "Falling back to the Aldeghi protocol."
+            )
+            protocol = "aldeghi"
 
         search_system = self._system
 
@@ -1235,22 +1245,39 @@ class RunnerBase:
         )
         search_system = dynamics.commit()
 
-        search_kwargs = {"temperature": self._config.temperature}
+        # The restraint lever must match the one used by the ABFE schedules.
+        search_kwargs = {
+            "temperature": self._config.temperature,
+            "restraint_lever": "split",
+        }
         if self._config.restraint_search_receptor_selection is not None:
             search_kwargs["receptor_selection"] = (
                 self._config.restraint_search_receptor_selection
             )
 
-        restraints, correction, starting_structure = boresch_search(
-            search_system, **search_kwargs
-        )
+        try:
+            restraints, correction, starting_structure = boresch_search(
+                search_system, protocol=protocol, **search_kwargs
+            )
+        except ValueError as e:
+            if protocol != "rxrx":
+                raise
+            _logger.warning(
+                f"RXRX Boresch restraint search failed: {e} "
+                "Falling back to the Aldeghi protocol."
+            )
+            protocol = "aldeghi"
+            restraints, correction, starting_structure = boresch_search(
+                search_system, protocol=protocol, **search_kwargs
+            )
 
         # Cache so it can be written into the energy trajectory parquet
         # metadata (see _checkpoint), letting analysis code automatically
         # apply the correction without needing to scan the logs.
         self._standard_state_correction = float(correction.to(_sr.units.kcal_per_mol))
         _logger.info(
-            f"Boresch restraint generated. Standard state correction: "
+            f"Boresch restraint generated using the {protocol} protocol. "
+            "Standard state correction: "
             f"{self._standard_state_correction:.4f} kcal mol-1"
         )
 
