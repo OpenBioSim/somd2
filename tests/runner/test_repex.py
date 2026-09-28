@@ -457,10 +457,9 @@ def test_repex_checkpoint_single_lock(ethane_methanol, max_contexts):
         finally:
             repex_module._FileLock = real_filelock
 
-    # Two cycles, each taking the lock once for the checkpoint files and once
-    # for the repex state. The last cycle is a checkpoint cycle, so there is no
-    # separate final save. This must not scale with the number of passes.
-    assert len(acquisitions) == 4
+    # Two checkpoint cycles, each taking the lock once for the checkpoint files
+    # and the repex state together. This must not scale with the number of passes.
+    assert len(acquisitions) == 2
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")

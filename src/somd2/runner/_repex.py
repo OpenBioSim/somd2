@@ -2064,6 +2064,27 @@ class RepexRunner(_RunnerBase):
                             _logger.error("Commit cancelled. Exiting.")
                             _sys.exit(1)
 
+            # Assemble an energy matrix from the results.
+            _logger.info("Assembling energy matrix")
+            energy_matrix = self._assemble_results(results)
+
+            # Mix the replicas.
+            _logger.info("Mixing replicas")
+            old_states = self._dynamics_cache.get_states()
+            self._dynamics_cache.set_states(
+                self._mix_replicas(
+                    self._config.num_lambda,
+                    energy_matrix,
+                    self._dynamics_cache.get_proposed(),
+                    self._dynamics_cache.get_accepted(),
+                )
+            )
+
+            # This only permutes the stored states. They are pushed into the
+            # contexts by load_replica() at the start of the next block, which
+            # is also where the pre-run state for crash recovery is captured.
+            self._dynamics_cache.mix_states(old_states)
+
             # Checkpoint. This happens once the whole cycle is complete, with
             # every checkpoint file written under a single lock, so that an
             # external process reading the output directory always sees a
@@ -2129,26 +2150,7 @@ class RepexRunner(_RunnerBase):
                             _logger.error("Checkpoint cancelled. Exiting.")
                             _sys.exit(1)
 
-            # Assemble an energy matrix from the results.
-            _logger.info("Assembling energy matrix")
-            energy_matrix = self._assemble_results(results)
-
-            # Mix the replicas.
-            _logger.info("Mixing replicas")
-            old_states = self._dynamics_cache.get_states()
-            self._dynamics_cache.set_states(
-                self._mix_replicas(
-                    self._config.num_lambda,
-                    energy_matrix,
-                    self._dynamics_cache.get_proposed(),
-                    self._dynamics_cache.get_accepted(),
-                )
-            )
-
-            # This only permutes the stored states. They are pushed into the
-            # contexts by load_replica() at the start of the next block, which
-            # is also where the pre-run state for crash recovery is captured.
-            self._dynamics_cache.mix_states(old_states)
+                    self._save_repex_state(final=not is_checkpoint)
 
             # This is a checkpoint cycle.
             if is_checkpoint:
@@ -2158,18 +2160,11 @@ class RepexRunner(_RunnerBase):
                 # Advance the checkpoint threshold.
                 next_checkpoint += cycles_per_checkpoint
 
-                self._save_repex_state()
-
         dynamics_executor.shutdown(wait=True)
         checkpoint_executor.shutdown(wait=True)
 
         # Record the end time for the production block.
         prod_end = time()
-
-        # Save the final state, unless the last cycle was a checkpoint cycle
-        # and has just done so.
-        if not is_checkpoint:
-            self._save_repex_state(final=True)
 
         # Record the end time.
         end = time()
@@ -3030,7 +3025,8 @@ class RepexRunner(_RunnerBase):
     def _save_repex_state(self, final=False):
         """
         Save the transition matrix and pickle the dynamics cache, backing up
-        the previous pickle, under the file lock.
+        the previous pickle. Must be called with the file lock held, alongside
+        the checkpoint files.
 
         Parameters
         ----------
@@ -3040,21 +3036,19 @@ class RepexRunner(_RunnerBase):
         """
         label = "final replica exchange" if final else "replica exchange"
 
-        lock = _FileLock(self._lock_file)
-        with lock.acquire(timeout=self._config.timeout.to("seconds")):
-            _logger.info(f"Saving {label} transition matrix")
-            self._save_transition_matrix()
+        _logger.info(f"Saving {label} transition matrix")
+        self._save_transition_matrix()
 
-            if self._repex_state.exists():
-                _copyfile(
-                    self._repex_state,
-                    self._repex_state.with_suffix(".pkl.bak"),
-                )
+        if self._repex_state.exists():
+            _copyfile(
+                self._repex_state,
+                self._repex_state.with_suffix(".pkl.bak"),
+            )
 
-            _logger.info(f"Saving {label} state")
-            self._save_sampler_stats()
-            with open(self._repex_state, "wb") as f:
-                _pickle.dump(self._dynamics_cache, f)
+        _logger.info(f"Saving {label} state")
+        self._save_sampler_stats()
+        with open(self._repex_state, "wb") as f:
+            _pickle.dump(self._dynamics_cache, f)
 
     def _save_sampler_stats(self):
         """
