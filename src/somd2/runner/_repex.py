@@ -2280,10 +2280,10 @@ class RepexRunner(_RunnerBase):
                 finally:
                     gcmc_sampler.pop()
 
-                # Write ghost residues immediately after the GCMC move so the
+                # Record ghost residues immediately after the GCMC move so the
                 # ghost state and frame (saved during dynamics) are consistent.
                 if write_gcmc_ghosts:
-                    gcmc_sampler.write_ghost_residues()
+                    self._save_ghost_residues(index, gcmc_sampler)
 
             # Perform a terminal flip move before dynamics if requested.
             if self._terminal_flip_samplers is not None and is_terminal_flip:

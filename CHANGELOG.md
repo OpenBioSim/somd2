@@ -10,7 +10,7 @@ Changelog
 * Silence Sire's progress bars when a runner is constructed rather than when `somd2` is imported, so that importing `somd2` as a library no longer changes how Sire reports progress [#215](https://github.com/OpenBioSim/somd2/pull/215).
 * Save the replica exchange state once at the end of a run rather than twice when the last cycle is a checkpoint cycle, and include the GCMC statistics in the final save [#218](https://github.com/OpenBioSim/somd2/pull/218).
 * Fall back to the Aldeghi Boresch restraint search protocol when the default RXRX protocol can't be used, e.g. for ligands with no N/O atoms to act as hydrogen-bond partners. Topology failures are now detected before the restraint search trajectory is run [#223](https://github.com/OpenBioSim/somd2/pull/223).
-* Write the replica exchange state under the same file lock as the checkpoint files, so that a process reading the output directory can't see checkpoint files and replica exchange state from different cycles [#225](https://github.com/OpenBioSim/somd2/pull/225).
+* Write the replica exchange state and GCMC ghost residues under the same file lock as the checkpoint files, so that a process reading the output directory can't see files from different cycles. The regular runner's final remainder block now backs up its checkpoint and saves sampler statistics, matching the other blocks [#225](https://github.com/OpenBioSim/somd2/pull/225).
 
 [2026.2.0](https://github.com/openbiosim/somd2/compare/2026.1.0...2026.2.0) - Sep 2026
 --------------------------------------------------------------------------------------
