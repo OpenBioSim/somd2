@@ -634,6 +634,8 @@ class Config:
             Sire selection string for receptor anchor atom candidates used
             during automatic Boresch restraint generation. If None, the default
             backbone selection is used (CA, C, N atoms in non-water molecules).
+            Only used by the Aldeghi protocol, which is the fallback when the
+            default RXRX protocol fails.
 
         morse_hard_well_depth: str
             The well depth of the "hard" Morse potential that replaces the
