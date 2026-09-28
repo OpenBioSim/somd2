@@ -1033,10 +1033,10 @@ class Runner(_RunnerBase):
                                     )
                                 )
 
-                            # Write ghost residues immediately before the dynamics
+                            # Record ghost residues immediately before the dynamics
                             # block if a frame will be saved within it.
                             if save_frames and runtime + block_size >= next_frame:
-                                gcmc_sampler.write_ghost_residues()
+                                self._save_ghost_residues(index, gcmc_sampler)
                                 next_frame += self._config.frame_frequency
 
                             # Run the dynamics block.
@@ -1250,7 +1250,14 @@ class Runner(_RunnerBase):
                     # Acquire the file lock to ensure that the checkpoint files are
                     # in a consistent state if read by another process.
                     with lock.acquire(timeout=self._config.timeout.to("seconds")):
-                        self._checkpoint(
+                        # Backup any existing checkpoint files.
+                        index, error = self._backup_checkpoint(index)
+
+                        if error is not None:
+                            raise error
+
+                        # Write the checkpoint files.
+                        index, error = self._checkpoint(
                             system,
                             index,
                             block,
@@ -1260,6 +1267,14 @@ class Runner(_RunnerBase):
                             is_final_block=True,
                             context=dynamics.context(),
                             gcmc_sampler=gcmc_sampler,
+                        )
+
+                        if error is not None:
+                            raise error
+
+                        # Save sampler statistics alongside the checkpoint.
+                        self._save_sampler_stats(
+                            index, gcmc_sampler, terminal_flip_sampler
                         )
 
                     # Delete all trajectory frames from the Sire system within the
@@ -1370,10 +1385,10 @@ class Runner(_RunnerBase):
                                 getPositions=True, getVelocities=True
                             )
 
-                        # Write ghost residues immediately before the dynamics
+                        # Record ghost residues immediately before the dynamics
                         # block if a frame will be saved within it.
                         if save_frames and runtime + block_size >= next_frame:
-                            gcmc_sampler.write_ghost_residues()
+                            self._save_ghost_residues(index, gcmc_sampler)
                             next_frame += self._config.frame_frequency
 
                         # Run the dynamics block.

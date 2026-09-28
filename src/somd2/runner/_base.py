@@ -646,6 +646,9 @@ class RunnerBase:
         self._ec_rows = {}
         self._max_ec_rows = 10000
 
+        # Per-window GCMC ghost residue lines collected since the last checkpoint.
+        self._ghost_rows = {}
+
         # Per-window cache of the integrator's integration force groups bitmask.
         self._integration_groups = {}
 
@@ -2540,6 +2543,8 @@ class RunnerBase:
             if not is_post_equilibration:
                 self._flush_energy_components(index)
 
+            self._flush_ghost_residues(index)
+
         except Exception as e:
             return index, e
 
@@ -2787,6 +2792,45 @@ class RunnerBase:
                 {b"somd2": meta, **table.schema.metadata}
             )
             _pq_local.write_table(table, filepath)
+
+    def _save_ghost_residues(self, index, gcmc_sampler):
+        """
+        Record the current GCMC ghost residue indices for a window. This must
+        be called at the point the matching trajectory frame is taken. The
+        lines are written by _flush_ghost_residues() at checkpoint time, along
+        with the frames.
+
+        Parameters
+        ----------
+
+        index : int
+            The index of the window or replica.
+
+        gcmc_sampler : loch.GCMCSampler
+            The GCMC sampler for the window.
+        """
+        ghost_residues = gcmc_sampler.ghost_residues()
+        self._ghost_rows.setdefault(index, []).append(
+            f"{', '.join([str(x) for x in ghost_residues])}\n"
+        )
+
+    def _flush_ghost_residues(self, index):
+        """
+        Append the GCMC ghost residue lines buffered by _save_ghost_residues()
+        to the ghost residue file for a window.
+
+        Parameters
+        ----------
+
+        index : int
+            The index of the window or replica.
+        """
+        rows = self._ghost_rows.pop(index, [])
+        if not rows:
+            return
+
+        with open(self._filenames[index]["gcmc_ghosts"], "a") as f:
+            f.writelines(rows)
 
     def _restore_backup_files(self):
         """
