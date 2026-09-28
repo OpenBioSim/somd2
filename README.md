@@ -161,7 +161,8 @@ first create a stream file containing the *perturbable* system of interest.
 This can be created using [BioSimSpace](https://github.com/OpenBioSim/biosimspace).
 For example, following the tutorial
 [here](https://biosimspace.openbiosim.org/tutorials/hydration_freenrg.html).
-Once the system is created, it can be streamed to file using, e.g.:
+(For absolute binding free energies, the system can be created directly with
+Sire. See [below](#absolute-binding-free-energies).) Once the system is created, it can be streamed to file using, e.g.:
 
 ```python
 import BioSimSpace as BSS
@@ -383,8 +384,29 @@ then remove its Lennard-Jones interactions: `annihilate` removes all non-bonded
 interactions, including those within the ligand, whereas `decouple` retains the
 intramolecular terms.
 
+Unlike RBFE, no atom mapping is needed to set up an ABFE calculation, so the
+perturbable system can be created directly with
+[Sire](https://github.com/OpenBioSim/sire). Load the system for each leg, i.e.
+the ligand in the protein-ligand complex (bound) and in solvent (free), then
+decouple the ligand and update the system with the result:
+
+```python
+import sire as sr
+
+mols = sr.load("system.prm7", "system.rst7")
+
+mol = sr.morph.decouple(mols["resname LIG"], as_new_molecule=False)
+mols.update(mol)
+
+sr.stream.save(mols, "bound.s3")
 ```
-somd2 perturbable_system.bss --lambda-schedule decouple
+
+Here `resname LIG` is a `Sire` selection string for the ligand; adjust it to
+match your system. The ligand is now a perturbable molecule, and the system can
+be run with either schedule:
+
+```
+somd2 bound.s3 --lambda-schedule decouple
 ```
 
 The ligand must be restrained within the binding site. If no restraints are
