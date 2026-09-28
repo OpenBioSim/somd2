@@ -457,10 +457,9 @@ def test_repex_checkpoint_single_lock(ethane_methanol, max_contexts):
         finally:
             repex_module._FileLock = real_filelock
 
-    # Two cycles, each taking the lock once for the checkpoint files and once
-    # for the repex state. The last cycle is a checkpoint cycle, so there is no
-    # separate final save. This must not scale with the number of passes.
-    assert len(acquisitions) == 4
+    # Two checkpoint cycles, each taking the lock once for the checkpoint files
+    # and the repex state together. This must not scale with the number of passes.
+    assert len(acquisitions) == 2
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
@@ -550,6 +549,16 @@ def test_repex_gcmc_bounded_contexts(ethane_methanol, max_contexts):
 
         assert len(set(counts)) == 1, f"unbalanced ghost files: {counts}"
         assert counts[0] > 0
+
+        # Each ghost line pairs with a trajectory frame.
+        import sire as sr
+
+        for lam, count in zip(runner._lambda_values, counts):
+            traj = sr.load(
+                str(Path(tmpdir) / "system0.prm7"),
+                str(Path(tmpdir) / f"traj_{lam:.5f}.dcd"),
+            )
+            assert traj.num_frames() == count
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
