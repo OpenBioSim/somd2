@@ -442,17 +442,8 @@ class RunnerBase:
             self._config._extra_args["beutler_alpha"] = self._config.beutler_alpha
 
         # Build deferred schedules now that the softcore form is known.
-        fix_epsilon = (
-            self._config.softcore_form == "beutler" and self._config.beutler_fix_epsilon
-        )
-        if self._config._lambda_schedule_name == "annihilate":
-            from .._utils._schedules import annihilate as _annihilate
-
-            self._config._lambda_schedule = _annihilate(fix_epsilon=fix_epsilon)
-        elif self._config._lambda_schedule_name == "decouple":
-            from .._utils._schedules import decouple as _decouple
-
-            self._config._lambda_schedule = _decouple(fix_epsilon=fix_epsilon)
+        if self._config._lambda_schedule_name in ("annihilate", "decouple"):
+            self._config._lambda_schedule = self._config._build_deferred_schedule()
 
         # Alchemical ions are real (non-ghost) atoms mutating identity (e.g. a
         # water oxygen turning into Na+), not ghost-atom decoupling/annihilation
