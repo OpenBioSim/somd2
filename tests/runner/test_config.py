@@ -158,6 +158,36 @@ def test_lambda_schedule_input_forms():
         with pytest.raises(ValueError, match="Unable to interpret"):
             Config(lambda_schedule="not_a_schedule")
 
+
+def test_abfe_schedule_restraint_lever():
+    """Validate that the ABFE schedules match the Boresch restraint lever."""
+    import pytest
+
+    split_levers = {"restraint_dihedral", "restraint_distance_angle"}
+
+    # No restraint, so the lever used by the restraint search.
+    config = Config(lambda_schedule="annihilate")
+    assert split_levers.issubset(config.lambda_schedule.get_levers())
+
+    combined = sr.mm.BoreschRestraints()
+    combined.set_restraint_lever("combined")
+    split = sr.mm.BoreschRestraints()
+    split.set_restraint_lever("split")
+
+    for name in ["annihilate", "decouple"]:
+        config = Config(lambda_schedule=name, restraints=combined)
+        levers = config.lambda_schedule.get_levers()
+        assert "restraint" in levers
+        assert split_levers.isdisjoint(levers)
+
+        config = Config(lambda_schedule=name, restraints=split)
+        assert split_levers.issubset(config.lambda_schedule.get_levers())
+
+    with pytest.raises(ValueError, match="restraint_lever"):
+        Config(
+            lambda_schedule="annihilate", restraints=[combined, split]
+        ).lambda_schedule
+
         # A stream file holding the wrong type of object.
         wrong_path = os.path.join(tmpdir, "wrong.s3")
         sr.stream.save(sr.cas.Symbol("x"), wrong_path)
