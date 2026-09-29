@@ -237,10 +237,12 @@ class DynamicsCache:
 
         # Convert a legacy checkpoint to the current convention, in which the
         # stored state of a replica is its own, with the last mix already
-        # applied.
+        # applied. Legacy states hold the destination of each replica's
+        # configuration, so are inverted.
         if is_legacy:
-            self._openmm_states = [self._openmm_states[s] for s in self._states]
-            self._gcmc_states = [self._gcmc_states[s] for s in self._states]
+            sources = _np.argsort(self._states)
+            self._openmm_states = [self._openmm_states[s] for s in sources]
+            self._gcmc_states = [self._gcmc_states[s] for s in sources]
 
         # Every replica is seeded from its stored state on a restart, since the
         # contexts are created from the input system rather than the checkpoint.

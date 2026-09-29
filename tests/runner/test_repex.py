@@ -867,9 +867,9 @@ def test_legacy_checkpoint_restore():
     cache.__setstate__(dict(legacy))
 
     # Converted to the current convention: each replica's own state, with the
-    # last mix applied.
-    assert cache._openmm_states == ["state2", "state0", "state1", "state3"]
-    assert cache._gcmc_states == ["water2", "water0", "water1", "water3"]
+    # last mix applied. The legacy states hold each configuration's destination.
+    assert cache._openmm_states == ["state1", "state2", "state0", "state3"]
+    assert cache._gcmc_states == ["water1", "water2", "water0", "water3"]
 
     # Every replica is seeded from its stored state on a restart.
     assert cache._state_moved == [True] * n
