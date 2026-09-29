@@ -77,6 +77,43 @@ def test_repex_mixing():
     assert (off_diagonal == 0).all()
 
 
+def test_repex_mixing_moves_configurations():
+    """
+    Validate that each configuration is moved to the state that the mixing
+    accepted, for a mix that can only be a 3-cycle.
+    """
+    from somd2.runner._repex import DynamicsCache
+
+    num_replicas = 3
+
+    # The configuration from replica i is only favourable in state i + 1.
+    energy_matrix = 10000 * np.ones((num_replicas, num_replicas))
+    for i in range(num_replicas):
+        energy_matrix[i, (i + 1) % num_replicas] = -10000
+
+    proposed = np.zeros((num_replicas, num_replicas), dtype=np.int32)
+    accepted = np.zeros((num_replicas, num_replicas), dtype=np.int32)
+
+    np.random.seed(42)
+    states = RepexRunner._mix_replicas(num_replicas, energy_matrix, proposed, accepted)
+
+    cache = object.__new__(DynamicsCache)
+    cache._openmm_states = list(range(num_replicas))
+    cache._gcmc_states = list(range(num_replicas))
+    cache._state_moved = [False] * num_replicas
+    cache._num_swaps = np.zeros((num_replicas, num_replicas))
+    cache._states = states
+    cache.mix_states()
+
+    # Each state now holds the configuration that is favourable there.
+    for state, config in enumerate(cache._openmm_states):
+        assert energy_matrix[config, state] == -10000
+
+    # The swap matrix records each configuration's move.
+    for config in range(num_replicas):
+        assert cache._num_swaps[config, (config + 1) % num_replicas] == 1
+
+
 @pytest.mark.parametrize(
     "rest2_scale, is_valid",
     [
@@ -735,11 +772,10 @@ def test_gcmc_state_follows_replica():
 
     # Mix twice, since a slot is re-used within a cycle.
     for states in ([2, 0, 3, 1], [1, 3, 0, 2]):
-        old_states = list(range(num_replicas))
         expected = [cache._gcmc_states[state] for state in states]
 
         cache._states = states
-        cache.mix_states(old_states)
+        cache.mix_states()
 
         # The water occupancy follows the same permutation as the positions.
         assert cache._gcmc_states == expected

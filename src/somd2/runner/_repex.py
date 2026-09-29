@@ -951,7 +951,7 @@ class DynamicsCache:
             finally:
                 gcmc_sampler.pop()
 
-    def mix_states(self, old_states):
+    def mix_states(self):
         """
         Apply the result of a replica mix.
 
@@ -966,12 +966,6 @@ class DynamicsCache:
         may be loaded after another replica has already stored its post-run
         state; reading through the indirection at that point would pick up the
         new state rather than the pre-mix one.
-
-        Parameters
-        ----------
-
-        old_states : numpy.ndarray
-            The state indices from before the last replica mix.
         """
         # Permute the travelling state. This is a reference shuffle, so it is
         # cheap even for large systems. Statistics and output files stay with
@@ -989,9 +983,9 @@ class DynamicsCache:
             for i, (state, moved) in enumerate(zip(self._states, self._state_moved))
         ]
 
-        # Update the swap matrix.
+        # Update the swap matrix with each configuration's move.
         for i, state in enumerate(self._states):
-            self._num_swaps[old_states[i], state] += 1
+            self._num_swaps[state, i] += 1
 
     def get_proposed(self):
         """
@@ -2070,7 +2064,6 @@ class RepexRunner(_RunnerBase):
 
             # Mix the replicas.
             _logger.info("Mixing replicas")
-            old_states = self._dynamics_cache.get_states()
             self._dynamics_cache.set_states(
                 self._mix_replicas(
                     self._config.num_lambda,
@@ -2083,7 +2076,7 @@ class RepexRunner(_RunnerBase):
             # This only permutes the stored states. They are pushed into the
             # contexts by load_replica() at the start of the next block, which
             # is also where the pre-run state for crash recovery is captured.
-            self._dynamics_cache.mix_states(old_states)
+            self._dynamics_cache.mix_states()
 
             # Checkpoint. This happens once the whole cycle is complete, with
             # every checkpoint file written under a single lock, so that an
@@ -2956,7 +2949,8 @@ class RepexRunner(_RunnerBase):
         -------
 
         states: np.ndarray
-            The new states.
+            The new states, where states[i] is the replica whose configuration
+            seeds replica i.
         """
 
         # Adapted from OpenMMTools: https://github.com/choderalab/openmmtools
@@ -2996,7 +2990,9 @@ class RepexRunner(_RunnerBase):
                 accepted[state_i, state_j] += 1
                 accepted[state_j, state_i] += 1
 
-        return states
+        # Here states[i] is the state that replica i's configuration moves to,
+        # whereas the configurations are moved into fixed states, so invert.
+        return _np.argsort(states)
 
     def _merge_gcmc_stats(self):
         """
