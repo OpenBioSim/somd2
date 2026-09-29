@@ -444,6 +444,9 @@ class RunnerBase:
         # Build deferred schedules now that the softcore form is known.
         if self._config._lambda_schedule_name in ("annihilate", "decouple"):
             self._config._lambda_schedule = self._config._build_deferred_schedule()
+            if self._is_abfe_bound:
+                restraint_lever = self._config._boresch_restraint_lever() or "split"
+                _logger.info(f"Using the '{restraint_lever}' Boresch restraint lever.")
 
         # Alchemical ions are real (non-ghost) atoms mutating identity (e.g. a
         # water oxygen turning into Na+), not ghost-atom decoupling/annihilation

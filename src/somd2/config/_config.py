@@ -1249,17 +1249,35 @@ class Config:
 
     def _build_deferred_schedule(self):
         """
-        Build the ABFE schedules, which depend on the soft-core settings.
+        Build the ABFE schedules, which depend on the soft-core settings and
+        the lever of any Boresch restraint.
         """
         fix_epsilon = self._softcore_form == "beutler" and self._beutler_fix_epsilon
+        restraint_lever = self._boresch_restraint_lever() or "split"
         if self._lambda_schedule_name == "annihilate":
             from .._utils._schedules import annihilate as _annihilate
 
-            return _annihilate(fix_epsilon=fix_epsilon)
+            return _annihilate(fix_epsilon=fix_epsilon, restraint_lever=restraint_lever)
         elif self._lambda_schedule_name == "decouple":
             from .._utils._schedules import decouple as _decouple
 
-            return _decouple(fix_epsilon=fix_epsilon)
+            return _decouple(fix_epsilon=fix_epsilon, restraint_lever=restraint_lever)
+
+    def _boresch_restraint_lever(self):
+        """
+        Return the lever of the Boresch restraints, or None if there are none.
+        """
+        levers = {
+            restraint.restraint_lever()
+            for restraint in self._restraints or []
+            if isinstance(restraint, _sr.mm.BoreschRestraints)
+        }
+        if len(levers) > 1:
+            raise ValueError(
+                "All Boresch restraints must use the same 'restraint_lever', "
+                f"got {', '.join(sorted(levers))}."
+            )
+        return levers.pop() if levers else None
 
     @property
     def charge_scale_factor(self):

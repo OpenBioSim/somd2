@@ -13,6 +13,7 @@ Changelog
 * Write the replica exchange state and GCMC ghost residues under the same file lock as the checkpoint files, so that a process reading the output directory can't see files from different cycles. The regular runner's final remainder block now backs up its checkpoint and saves sampler statistics, matching the other blocks [#225](https://github.com/OpenBioSim/somd2/pull/225).
 * Return the `annihilate` and `decouple` lambda schedules from `Config.lambda_schedule`, built from the current soft-core settings, rather than `None` until a runner is created [#229](https://github.com/OpenBioSim/somd2/pull/229).
 * Fixed `charge_scale_factor` being ignored for the `charge_scaled_morph` lambda schedule, which always used a factor of 0.2 [#229](https://github.com/OpenBioSim/somd2/pull/229).
+* Fixed the ABFE lambda schedules ignoring the `restraint_lever` of a user-supplied Boresch restraint, which could leave the restraint uncoupled from the schedule [#229](https://github.com/OpenBioSim/somd2/pull/229).
 
 [2026.2.0](https://github.com/openbiosim/somd2/compare/2026.1.0...2026.2.0) - Sep 2026
 --------------------------------------------------------------------------------------
