@@ -671,7 +671,6 @@ class Config:
         self.num_lambda = num_lambda
         self.lambda_values = lambda_values
         self.lambda_energy = lambda_energy
-        self.lambda_schedule = lambda_schedule
         self.charge_scale_factor = charge_scale_factor
         self.swap_end_states = swap_end_states
         self.shift_coulomb = shift_coulomb
@@ -732,6 +731,7 @@ class Config:
         self.taylor_power = taylor_power
         self.beutler_alpha = beutler_alpha
         self.beutler_fix_epsilon = beutler_fix_epsilon
+        self.lambda_schedule = lambda_schedule
         self.somd1_compatibility = somd1_compatibility
         self.pert_file = pert_file
         self.auto_fix_minimise = auto_fix_minimise
@@ -1179,6 +1179,8 @@ class Config:
 
     @property
     def lambda_schedule(self):
+        if self._lambda_schedule is None:
+            return self._build_deferred_schedule()
         return self._lambda_schedule
 
     @lambda_schedule.setter
@@ -1200,7 +1202,9 @@ class Config:
                     self._lambda_schedule = _LambdaSchedule.standard_morph()
                     self._lambda_schedule_name = "standard_morph"
                 elif keyword == "charge_scaled_morph":
-                    self._lambda_schedule = _LambdaSchedule.charge_scaled_morph(0.2)
+                    self._lambda_schedule = _LambdaSchedule.charge_scaled_morph(
+                        self._charge_scale_factor
+                    )
                     self._lambda_schedule_name = "charge_scaled_morph"
                 elif keyword == "ring_break_morph":
                     from .._utils._schedules import (
@@ -1243,6 +1247,38 @@ class Config:
             self._lambda_schedule = _LambdaSchedule.standard_morph()
             self._lambda_schedule_name = "standard_morph"
 
+    def _build_deferred_schedule(self):
+        """
+        Build the ABFE schedules, which depend on the soft-core settings and
+        the lever of any Boresch restraint.
+        """
+        fix_epsilon = self._softcore_form == "beutler" and self._beutler_fix_epsilon
+        restraint_lever = self._boresch_restraint_lever() or "split"
+        if self._lambda_schedule_name == "annihilate":
+            from .._utils._schedules import annihilate as _annihilate
+
+            return _annihilate(fix_epsilon=fix_epsilon, restraint_lever=restraint_lever)
+        elif self._lambda_schedule_name == "decouple":
+            from .._utils._schedules import decouple as _decouple
+
+            return _decouple(fix_epsilon=fix_epsilon, restraint_lever=restraint_lever)
+
+    def _boresch_restraint_lever(self):
+        """
+        Return the lever of the Boresch restraints, or None if there are none.
+        """
+        levers = {
+            restraint.restraint_lever()
+            for restraint in self._restraints or []
+            if isinstance(restraint, _sr.mm.BoreschRestraints)
+        }
+        if len(levers) > 1:
+            raise ValueError(
+                "All Boresch restraints must use the same 'restraint_lever', "
+                f"got {', '.join(sorted(levers))}."
+            )
+        return levers.pop() if levers else None
+
     @property
     def charge_scale_factor(self):
         return self._charge_scale_factor
@@ -1256,7 +1292,9 @@ class Config:
                 raise ValueError("'charge_scale_factor' must be a float")
         self._charge_scale_factor = charge_scale_factor
         # Update the lambda schedule if it is charge scaled morph.
-        if self._lambda_schedule == "charge_scaled_morph":
+        if getattr(self, "_lambda_schedule_name", None) == "charge_scaled_morph":
+            from sire.cas import LambdaSchedule as _LambdaSchedule
+
             self._lambda_schedule = _LambdaSchedule.charge_scaled_morph(
                 self._charge_scale_factor
             )
