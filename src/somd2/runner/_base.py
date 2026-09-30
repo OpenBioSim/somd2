@@ -428,6 +428,15 @@ class RunnerBase:
                 )
 
         # Set the soft-core form.
+        if self._config._softcore_form == "auto":
+            schedule_name = self._config._lambda_schedule_name or "custom"
+            msg = (
+                f"Using the '{self._config.softcore_form}' soft-core form for the "
+                f"'{schedule_name}' lambda schedule."
+            )
+            if schedule_name == "custom":
+                msg += " Set softcore_form='beutler' for a custom ABFE schedule."
+            _logger.info(msg)
         if self._config.softcore_form == "taylor":
             self._config._extra_args["use_taylor_softening"] = True
             self._config._extra_args["taylor_power"] = self._config.taylor_power
@@ -2060,10 +2069,13 @@ class RunnerBase:
                 elif key == "gcmc_frequency" and v1 is None:
                     continue
                 elif v1 != v2:
-                    raise ValueError(
+                    msg = (
                         f"{key} has changed since the last run. This is not "
                         "allowed when using the restart option."
                     )
+                    if key == "softcore_form":
+                        msg += f" Set softcore_form='{v1}' to continue the run."
+                    raise ValueError(msg)
 
     def _verify_restart_config(self):
         """

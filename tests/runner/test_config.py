@@ -195,6 +195,46 @@ def test_abfe_schedule_restraint_lever():
             Config(lambda_schedule=wrong_path)
 
 
+def test_auto_softcore_form():
+    """
+    Validate that the "auto" soft-core form follows the lambda schedule, even
+    when the schedule is changed after the config is created, and that an
+    explicit form is never overridden.
+    """
+    import pytest
+
+    from somd2._utils._schedules import annihilate, decouple
+    from somd2.runner._base import RunnerBase
+
+    config = Config()
+    assert config._softcore_form == "auto"
+    assert config.softcore_form == "zacharias"
+
+    config.lambda_schedule = "annihilate"
+    assert config.softcore_form == "beutler"
+    assert config.as_dict()["softcore_form"] == "beutler"
+    assert config.lambda_schedule == annihilate(fix_epsilon=True)
+
+    config.lambda_schedule = sr.cas.LambdaSchedule.standard_morph()
+    assert config.softcore_form == "zacharias"
+
+    config.lambda_schedule = "decouple"
+    assert config.softcore_form == "beutler"
+
+    config.softcore_form = "zacharias"
+    assert config.softcore_form == "zacharias"
+    assert config.lambda_schedule == decouple(fix_epsilon=False)
+
+    config.lambda_schedule = "annihilate"
+    assert config.softcore_form == "zacharias"
+
+    # A run started with the old default can't silently switch form on restart.
+    old = Config(lambda_schedule="annihilate", softcore_form="zacharias").as_dict()
+    new = Config(lambda_schedule="annihilate").as_dict()
+    with pytest.raises(ValueError, match="softcore_form='zacharias'"):
+        RunnerBase._compare_configs(old, new)
+
+
 def test_restraints_input_forms():
     """Validate that all supported restraint input forms are accepted."""
     import os

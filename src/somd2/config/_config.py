@@ -74,7 +74,7 @@ class Config:
             "decouple",
         ],
         "log_level": [level.lower() for level in _logger._core.levels],
-        "softcore_form": ["zacharias", "taylor", "beutler"],
+        "softcore_form": ["auto", "zacharias", "taylor", "beutler"],
         "precision": ["single", "mixed", "double"],
     }
 
@@ -166,7 +166,7 @@ class Config:
         use_dispersion_correction=False,
         rest2_scale=1.0,
         rest2_selection=None,
-        softcore_form="zacharias",
+        softcore_form="auto",
         taylor_power=1,
         beutler_alpha=0.5,
         beutler_fix_epsilon=True,
@@ -528,8 +528,10 @@ class Config:
 
         softcore_form: str
             The soft-core potential form to use for alchemical interactions. Valid
-            options are "zacharias" (default), "taylor", and "beutler". The Beutler
-            form is recommended for ABFE calculations.
+            options are "auto" (default), "zacharias", "taylor", and "beutler".
+            "auto" uses "beutler" for the "annihilate" and "decouple" lambda
+            schedules, and "zacharias" otherwise, including for custom schedules.
+            Custom ABFE schedules should set "beutler" explicitly.
 
         taylor_power: int
             The power to use for the alpha term in the Taylor soft-core LJ expression,
@@ -833,6 +835,9 @@ class Config:
         # since these are just helper attributes.
         d.pop("lambda_schedule_name", None)
         d.pop("perturbed_system_file", None)
+
+        # Record the form that is used, so that restarts compare like with like.
+        d["softcore_form"] = self.softcore_form
 
         # Handle the lambda schedule separately so that we can use simplified
         # keyword options.
@@ -1252,7 +1257,7 @@ class Config:
         Build the ABFE schedules, which depend on the soft-core settings and
         the lever of any Boresch restraint.
         """
-        fix_epsilon = self._softcore_form == "beutler" and self._beutler_fix_epsilon
+        fix_epsilon = self.softcore_form == "beutler" and self._beutler_fix_epsilon
         restraint_lever = self._boresch_restraint_lever() or "split"
         if self._lambda_schedule_name == "annihilate":
             from .._utils._schedules import annihilate as _annihilate
@@ -2321,6 +2326,14 @@ class Config:
 
     @property
     def softcore_form(self):
+        # Resolved on read, so that "auto" follows later changes to the schedule.
+        if self._softcore_form == "auto":
+            if getattr(self, "_lambda_schedule_name", None) in (
+                "annihilate",
+                "decouple",
+            ):
+                return "beutler"
+            return "zacharias"
         return self._softcore_form
 
     @softcore_form.setter
