@@ -114,6 +114,215 @@ def test_repex_mixing_moves_configurations():
         assert cache._num_swaps[config, (config + 1) % num_replicas] == 1
 
 
+class _FakeState:
+    def __init__(self, context):
+        self._positions = context.positions.copy()
+        self._velocities = context.velocities.copy()
+        self._box = context.box
+
+    def getPositions(self, asNumpy=True):
+        return self._positions
+
+    def getVelocities(self, asNumpy=True):
+        return self._velocities
+
+    def getPeriodicBoxVectors(self, asNumpy=True):
+        return self._box
+
+
+class _FakeContext:
+    def __init__(self):
+        # Positions hold [configuration, steps run], with -1 the input system.
+        self.positions = np.array([-1, 0])
+        self.velocities = np.array([-1])
+        self.box = (1, 2, 3)
+        self.lam = None
+
+    def setPeriodicBoxVectors(self, *box):
+        self.box = box
+
+    def setPositions(self, positions):
+        self.positions = positions.copy()
+
+    def setVelocities(self, velocities):
+        self.velocities = velocities.copy()
+
+    def getState(self, getPositions=True, getVelocities=True):
+        return _FakeState(self)
+
+
+class _FakeDynamics:
+    def __init__(self):
+        self._context = _FakeContext()
+
+    def context(self):
+        return self._context
+
+    def clear_energy_cache(self):
+        pass
+
+    def set_lambda(self, lam, rest2_scale=None, update_constraints=None):
+        self._context.lam = lam
+
+    def _set_clock(self, clock):
+        pass
+
+    def set_energy_trajectory(self, trajectory):
+        pass
+
+
+class _FakeGCMCSampler:
+    def __init__(self, num_waters):
+        self.water = np.zeros(num_waters, dtype=int)
+
+    def water_state(self):
+        return self.water.copy()
+
+    def _set_water_state(self, context, indices=None, states=None, force=False):
+        self.water[indices] = states
+
+    def push(self):
+        pass
+
+    def pop(self):
+        pass
+
+    def set_lambda(self, lam, rest2_scale):
+        pass
+
+    def set_ghost_file(self, ghost_file):
+        pass
+
+    def num_waters(self, context=None):
+        return int(self.water.sum())
+
+
+def _fake_slots(cache, num_slots):
+    cache._num_slots = num_slots
+    cache._build_slot_layout()
+    cache._dynamics = [_FakeDynamics() for _ in range(num_slots)]
+    cache._gcmc_samplers = [
+        _FakeGCMCSampler(cache._num_replicas) for _ in range(num_slots)
+    ]
+
+
+@pytest.mark.parametrize(
+    "slot_schedule, inverted",
+    [
+        ([4], False),
+        ([2], False),
+        ([1], False),
+        ([4, 2, 3, 1], False),
+        ([2], True),
+    ],
+)
+def test_repex_mixing_samples_boltzmann(slot_schedule, inverted):
+    """
+    Validate that repeated mixing, pushed through replica loading and storing,
+    samples the Boltzmann distribution over assignments of configurations to
+    lambda windows. Each entry in the slot schedule is the number of contexts
+    for an equal share of the cycles, with a checkpoint restart in between.
+    Applying the inverse permutation must be detected.
+    """
+    import itertools
+    import pickle
+    from types import SimpleNamespace
+
+    from somd2.runner._repex import DynamicsCache
+
+    n = 4
+    num_cycles = 20000
+
+    # Reduced energies of order kT, so that accepted swaps often chain.
+    U = np.random.default_rng(1234).normal(0.0, 1.0, (n, n))
+
+    cache = object.__new__(DynamicsCache)
+    cache._lambdas = list(np.linspace(0, 1, n))
+    cache._rest2_scale_factors = [1.0] * n
+    cache._num_replicas = n
+    cache._update_constraints = True
+    cache._states = np.arange(n)
+    cache._time = None
+    cache._gcmc_stats = None
+    cache._terminal_flip_stats = [[0, 0] for _ in range(n)]
+    cache._energy_trajectories = [None] * n
+    cache._ghost_files = [None] * n
+    cache._gcmc_num_waters = [None] * n
+    cache._state_moved = [False] * n
+    cache._num_proposed = np.zeros((n, n))
+    cache._num_accepted = np.zeros((n, n))
+    cache._num_swaps = np.zeros((n, n))
+    _fake_slots(cache, slot_schedule[0])
+
+    # Each replica starts with its own configuration and water occupancy.
+    cache._openmm_states = [
+        {"positions": np.array([r, 0]), "velocities": np.array([r]), "box": (1, 2, 3)}
+        for r in range(n)
+    ]
+    cache._gcmc_states = [np.eye(n, dtype=int)[r] for r in range(n)]
+
+    # The configuration expected in each window.
+    expected = list(range(n))
+
+    counts = {}
+    cycles_per_restart = num_cycles // len(slot_schedule)
+
+    for cycle in range(num_cycles):
+        if cycle > 0 and cycle % cycles_per_restart == 0:
+            state = pickle.loads(pickle.dumps(cache.__getstate__()))
+            cache = object.__new__(DynamicsCache)
+            cache.__setstate__(state)
+            _fake_slots(cache, slot_schedule[cycle // cycles_per_restart])
+
+        energies = np.zeros((n, n))
+        runner = SimpleNamespace(_dynamics_cache=cache)
+
+        for batch in RepexRunner._replica_passes(runner, cycle):
+            for replica in batch:
+                cache.load_replica(replica)
+                slot = cache.slot_for(replica)
+                context = cache._dynamics[slot].context()
+                config = int(context.positions[0])
+                water = cache._gcmc_samplers[slot].water
+
+                assert context.lam == cache._lambdas[replica]
+                assert config == expected[replica]
+                assert water.sum() == 1 and water[config] == 1
+
+                context.positions = context.positions + np.array([0, 1])
+                energies[replica] = U[:, config]
+                cache.store_replica(replica)
+
+        states = RepexRunner._mix_replicas(
+            n, energies, cache._num_proposed, cache._num_accepted
+        )
+        if inverted:
+            states = np.argsort(states)
+
+        num_swaps = cache._num_swaps.copy()
+        cache.set_states(states)
+        cache.mix_states()
+
+        for window, source in enumerate(states):
+            assert cache._num_swaps[source, window] == num_swaps[source, window] + 1
+
+        expected = [expected[source] for source in states]
+        counts[tuple(expected)] = counts.get(tuple(expected), 0) + 1
+
+    # Compare with the exact distribution using the total variation distance.
+    perms = list(itertools.permutations(range(n)))
+    weights = np.array([np.exp(-sum(U[k, p[k]] for k in range(n))) for p in perms])
+    weights /= weights.sum()
+    tvd = 0.5 * sum(
+        abs(counts.get(p, 0) / num_cycles - w) for p, w in zip(perms, weights)
+    )
+
+    if inverted:
+        assert tvd > 0.05
+    else:
+        assert tvd < 0.03
+
+
 @pytest.mark.parametrize(
     "rest2_scale, is_valid",
     [
