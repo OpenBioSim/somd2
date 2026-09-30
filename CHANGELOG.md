@@ -15,6 +15,7 @@ Changelog
 * Fixed `charge_scale_factor` being ignored for the `charge_scaled_morph` lambda schedule, which always used a factor of 0.2 [#229](https://github.com/OpenBioSim/somd2/pull/229).
 * Fixed the ABFE lambda schedules ignoring the `restraint_lever` of a user-supplied Boresch restraint, which could leave the restraint uncoupled from the schedule [#229](https://github.com/OpenBioSim/somd2/pull/229).
 * Fixed replica exchange applying the inverse of the accepted permutation when mixing, which sent configurations to the wrong lambda windows whenever accepted swaps formed a cycle of three or more replicas. The replica exchange transition matrix now also records each configuration's move [#232](https://github.com/OpenBioSim/somd2/pull/232).
+* Add an `auto` option for `softcore_form`, which is now the default. It uses the Beutler form for the `annihilate` and `decouple` lambda schedules and the Zacharias form otherwise, including for custom schedules. The resolved form is recorded in the config file, so ABFE runs started with the previous default must set `softcore_form="zacharias"` to restart [#234](https://github.com/OpenBioSim/somd2/pull/234).
 
 [2026.2.0](https://github.com/openbiosim/somd2/compare/2026.1.0...2026.2.0) - Sep 2026
 --------------------------------------------------------------------------------------
