@@ -1089,11 +1089,24 @@ class RunnerBase:
 
         _logger.info("Tuning PME parameters")
 
-        params = _tune_pme(
-            system, device=0, return_errors=True, **self._dynamics_kwargs
-        )
+        try:
+            params = _tune_pme(
+                system, device=0, return_errors=True, **self._dynamics_kwargs
+            )
+        except Exception as e:
+            _logger.warning(
+                f"PME tuning failed, so using the default PME parameters: {str(e)}"
+            )
+            return
 
         error = f"relative force error {params['pme_error']:.2e} (target {params['pme_target_error']:.2e})"
+
+        if params["pme_error"] == float("inf"):
+            _logger.warning(
+                "PME tuning wasn't possible for this system, so using the default "
+                "PME parameters"
+            )
+            return
 
         if "pme_alpha" not in params:
             _logger.info(f"The default PME parameters are already the fastest, {error}")
