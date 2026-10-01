@@ -268,6 +268,14 @@ class RunnerBase:
             self._config.use_dispersion_correction
         )
 
+        # PME parameters.
+        self._config._extra_args["tolerance"] = self._config.pme_tolerance
+
+        for option in ["pme_alpha", "pme_grid", "pme_spacing"]:
+            value = getattr(self._config, option)
+            if value is not None:
+                self._config._extra_args[option] = value
+
         # GCMC LRC map options.
         if self._config.gcmc and self._config.use_dispersion_correction:
             self._config._extra_args["use_gcmc_lrc"] = True
@@ -1032,6 +1040,86 @@ class RunnerBase:
 
             # Update the maximum number of threads.
             _sr.legacy.Base.set_max_num_threads(sire_threads)
+
+        self._set_tuned_pme_parameters()
+
+    def _set_tuned_pme_parameters(self):
+        """
+        Tune the PME parameters for a new run, saving them so that restarts
+        reuse the same values, or load the values saved by a previous run.
+        """
+        import yaml as _yaml
+
+        pme_file = _Path(self._filenames["pme"])
+
+        has_pme_options = any(
+            getattr(self._config, option) is not None
+            for option in ["pme_alpha", "pme_grid", "pme_spacing"]
+        )
+
+        if self._is_restart:
+            if pme_file.exists():
+                with open(pme_file) as f:
+                    params = _yaml.safe_load(f)
+                _logger.info(f"Using PME parameters from {pme_file}: {params}")
+                self._config._extra_args["pme_alpha"] = params["pme_alpha"]
+                self._config._extra_args["pme_grid"] = params["pme_grid"]
+            elif self._config.tune_pme and not has_pme_options:
+                _logger.info(
+                    "No saved PME parameters for this restart, so using the "
+                    "default PME parameters"
+                )
+            return
+
+        if pme_file.exists():
+            pme_file.unlink()
+
+        if (
+            not self._config.tune_pme
+            or has_pme_options
+            or not self._has_space
+            or self._config.cutoff_type != "pme"
+            or self._config.platform not in ["cuda", "opencl"]
+        ):
+            return
+
+        from sire.convert.openmm import tune_pme as _tune_pme
+
+        system = self._system[0] if isinstance(self._system, list) else self._system
+
+        _logger.info("Tuning PME parameters")
+
+        try:
+            params = _tune_pme(
+                system, device=0, return_errors=True, **self._dynamics_kwargs
+            )
+        except Exception as e:
+            _logger.warning(
+                f"PME tuning failed, so using the default PME parameters: {str(e)}"
+            )
+            return
+
+        error = f"relative force error {params['pme_error']:.2e} (target {params['pme_target_error']:.2e})"
+
+        if params["pme_error"] == float("inf"):
+            _logger.warning(
+                "PME tuning wasn't possible for this system, so using the default "
+                "PME parameters"
+            )
+            return
+
+        if "pme_alpha" not in params:
+            _logger.info(f"The default PME parameters are already the fastest, {error}")
+            return
+
+        _logger.info(
+            f"Using tuned PME parameters: alpha={params['pme_alpha']:.4f} nm^-1, "
+            f"grid={params['pme_grid']}, {error}"
+        )
+
+        _dict_to_yaml(params, str(pme_file))
+        self._config._extra_args["pme_alpha"] = params["pme_alpha"]
+        self._config._extra_args["pme_grid"] = params["pme_grid"]
 
     @property
     def _is_abfe_bound(self):
@@ -1809,6 +1897,9 @@ class RunnerBase:
         # visulation and analysis.
         filenames["topology0"] = str(self._config.output_directory / "system0.prm7")
         filenames["topology1"] = str(self._config.output_directory / "system1.prm7")
+
+        # File for the tuned PME parameters, so that restarts can reuse them.
+        filenames["pme"] = str(self._config.output_directory / "pme_parameters.yaml")
 
         return filenames
 

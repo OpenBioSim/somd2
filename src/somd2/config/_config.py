@@ -87,6 +87,7 @@ class Config:
     _nargs = {
         "lambda_values": "+",
         "lambda_energy": "+",
+        "pme_grid": "+",
         "rest2_scale": "+",
         "restraints": "+",
     }
@@ -104,6 +105,11 @@ class Config:
         integrator="langevin_middle",
         cutoff_type="pme",
         cutoff="9 A",
+        pme_tolerance=0.0001,
+        pme_alpha=None,
+        pme_grid=None,
+        pme_spacing=None,
+        tune_pme=True,
         h_mass_factor=1.5,
         hmr=True,
         num_lambda=11,
@@ -223,6 +229,27 @@ class Config:
 
         cutoff: str
             Non-bonded cutoff distance. Use "infinite" for no cutoff.
+
+        pme_tolerance: float
+            The Ewald error tolerance, from which OpenMM chooses the PME parameters.
+            When 'tune_pme' is set, the tuned parameters are at least as accurate
+            as those chosen from this tolerance.
+
+        pme_alpha: float
+            The PME splitting parameter in inverse nanometers. Requires 'pme_grid'
+            or 'pme_spacing'. If not set, it is derived from the Ewald error tolerance.
+
+        pme_grid: [int]
+            The PME grid size, either a single integer or one per box vector.
+
+        pme_spacing: str
+            The maximum PME grid spacing, e.g. "0.12 nm", from which the grid size
+            is calculated.
+
+        tune_pme: bool
+            Whether to tune the PME parameters for the fastest settings that are at
+            least as accurate as the defaults. This only applies on the CUDA and
+            OpenCL platforms, and is ignored if any of the PME options are set.
 
         h_mass_factor: float
             Factor by which to scale hydrogen masses.
@@ -667,6 +694,11 @@ class Config:
         self.integrator = integrator
         self.cutoff_type = cutoff_type
         self.cutoff = cutoff
+        self.pme_tolerance = pme_tolerance
+        self.pme_alpha = pme_alpha
+        self.pme_grid = pme_grid
+        self.pme_spacing = pme_spacing
+        self.tune_pme = tune_pme
         self.h_mass_factor = h_mass_factor
         self.hmr = hmr
         self.timestep = timestep
@@ -1053,6 +1085,89 @@ class Config:
 
         else:
             self._cutoff = cutoff
+
+    @property
+    def pme_tolerance(self):
+        return self._pme_tolerance
+
+    @pme_tolerance.setter
+    def pme_tolerance(self, pme_tolerance):
+        try:
+            pme_tolerance = float(pme_tolerance)
+        except Exception:
+            raise ValueError("'pme_tolerance' must be a float")
+        if not 0 < pme_tolerance < 1:
+            raise ValueError("'pme_tolerance' must be between 0 and 1")
+        self._pme_tolerance = pme_tolerance
+
+    @property
+    def pme_alpha(self):
+        return self._pme_alpha
+
+    @pme_alpha.setter
+    def pme_alpha(self, pme_alpha):
+        if pme_alpha is not None:
+            try:
+                pme_alpha = float(pme_alpha)
+            except Exception:
+                raise ValueError("'pme_alpha' must be a float")
+            if pme_alpha <= 0:
+                raise ValueError("'pme_alpha' must be positive")
+        self._pme_alpha = pme_alpha
+
+    @property
+    def pme_grid(self):
+        return self._pme_grid
+
+    @pme_grid.setter
+    def pme_grid(self, pme_grid):
+        if pme_grid is not None:
+            if not isinstance(pme_grid, _Iterable) or isinstance(pme_grid, str):
+                pme_grid = [pme_grid]
+            try:
+                pme_grid = [int(x) for x in pme_grid]
+            except Exception:
+                raise ValueError("'pme_grid' must be an integer or a list of integers")
+            if len(pme_grid) not in [1, 3]:
+                raise ValueError("'pme_grid' must have one or three values")
+            if any(x < 6 for x in pme_grid):
+                raise ValueError("Each 'pme_grid' value must be at least 6")
+        self._pme_grid = pme_grid
+
+    @property
+    def pme_spacing(self):
+        return self._pme_spacing
+
+    @pme_spacing.setter
+    def pme_spacing(self, pme_spacing):
+        if pme_spacing is not None:
+            if not isinstance(pme_spacing, str):
+                raise TypeError("'pme_spacing' must be of type 'str'")
+
+            from sire.units import angstrom
+
+            try:
+                s = _sr.u(pme_spacing)
+            except:
+                raise ValueError(
+                    f"Unable to parse 'pme_spacing' as a Sire GeneralUnit: {pme_spacing}"
+                )
+            if not s.has_same_units(angstrom):
+                raise ValueError("'pme_spacing' units are invalid.")
+
+            pme_spacing = s
+
+        self._pme_spacing = pme_spacing
+
+    @property
+    def tune_pme(self):
+        return self._tune_pme
+
+    @tune_pme.setter
+    def tune_pme(self, tune_pme):
+        if not isinstance(tune_pme, bool):
+            raise ValueError("'tune_pme' must be of type 'bool'")
+        self._tune_pme = tune_pme
 
     @property
     def h_mass_factor(self):
