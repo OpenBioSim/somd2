@@ -268,7 +268,9 @@ class RunnerBase:
             self._config.use_dispersion_correction
         )
 
-        # Explicit PME parameters.
+        # PME parameters.
+        self._config._extra_args["tolerance"] = self._config.pme_tolerance
+
         for option in ["pme_alpha", "pme_grid", "pme_spacing"]:
             value = getattr(self._config, option)
             if value is not None:
@@ -1060,7 +1062,8 @@ class RunnerBase:
                 with open(pme_file) as f:
                     params = _yaml.safe_load(f)
                 _logger.info(f"Using PME parameters from {pme_file}: {params}")
-                self._config._extra_args.update(params)
+                self._config._extra_args["pme_alpha"] = params["pme_alpha"]
+                self._config._extra_args["pme_grid"] = params["pme_grid"]
             elif self._config.tune_pme and not has_pme_options:
                 _logger.info(
                     "No saved PME parameters for this restart, so using the "
@@ -1086,16 +1089,24 @@ class RunnerBase:
 
         _logger.info("Tuning PME parameters")
 
-        params = _tune_pme(system, device=0, **self._dynamics_kwargs)
+        params = _tune_pme(
+            system, device=0, return_errors=True, **self._dynamics_kwargs
+        )
 
-        if not params:
-            _logger.info("The default PME parameters are already the fastest")
+        error = f"relative force error {params['pme_error']:.2e} (target {params['pme_target_error']:.2e})"
+
+        if "pme_alpha" not in params:
+            _logger.info(f"The default PME parameters are already the fastest, {error}")
             return
 
-        _logger.info(f"Using tuned PME parameters: {params}")
+        _logger.info(
+            f"Using tuned PME parameters: alpha={params['pme_alpha']:.4f} nm^-1, "
+            f"grid={params['pme_grid']}, {error}"
+        )
 
         _dict_to_yaml(params, str(pme_file))
-        self._config._extra_args.update(params)
+        self._config._extra_args["pme_alpha"] = params["pme_alpha"]
+        self._config._extra_args["pme_grid"] = params["pme_grid"]
 
     @property
     def _is_abfe_bound(self):

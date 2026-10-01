@@ -105,6 +105,7 @@ class Config:
         integrator="langevin_middle",
         cutoff_type="pme",
         cutoff="9 A",
+        pme_tolerance=0.0001,
         pme_alpha=None,
         pme_grid=None,
         pme_spacing=None,
@@ -228,6 +229,11 @@ class Config:
 
         cutoff: str
             Non-bonded cutoff distance. Use "infinite" for no cutoff.
+
+        pme_tolerance: float
+            The Ewald error tolerance, from which OpenMM chooses the PME parameters.
+            When 'tune_pme' is set, the tuned parameters are at least as accurate
+            as those chosen from this tolerance.
 
         pme_alpha: float
             The PME splitting parameter in inverse nanometers. Requires 'pme_grid'
@@ -688,6 +694,7 @@ class Config:
         self.integrator = integrator
         self.cutoff_type = cutoff_type
         self.cutoff = cutoff
+        self.pme_tolerance = pme_tolerance
         self.pme_alpha = pme_alpha
         self.pme_grid = pme_grid
         self.pme_spacing = pme_spacing
@@ -1078,6 +1085,20 @@ class Config:
 
         else:
             self._cutoff = cutoff
+
+    @property
+    def pme_tolerance(self):
+        return self._pme_tolerance
+
+    @pme_tolerance.setter
+    def pme_tolerance(self, pme_tolerance):
+        try:
+            pme_tolerance = float(pme_tolerance)
+        except Exception:
+            raise ValueError("'pme_tolerance' must be a float")
+        if not 0 < pme_tolerance < 1:
+            raise ValueError("'pme_tolerance' must be between 0 and 1")
+        self._pme_tolerance = pme_tolerance
 
     @property
     def pme_alpha(self):

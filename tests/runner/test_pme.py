@@ -9,15 +9,21 @@ from somd2.config import Config
 from somd2.runner import Runner
 
 
-def _pme_parameters(runner):
-    from openmm import NonbondedForce, unit
+def _nonbonded_force(runner):
+    from openmm import NonbondedForce
 
     d = runner._system.dynamics(**runner._dynamics_kwargs)
 
     for force in d._d._omm_mols.getSystem().getForces():
         if isinstance(force, NonbondedForce):
-            alpha, *grid = force.getPMEParameters()
-            return alpha.value_in_unit(unit.nanometer**-1), grid
+            return force
+
+
+def _pme_parameters(runner):
+    from openmm import unit
+
+    alpha, *grid = _nonbonded_force(runner).getPMEParameters()
+    return alpha.value_in_unit(unit.nanometer**-1), grid
 
 
 def _short_run(tmpdir, **options):
@@ -38,6 +44,7 @@ def _short_run(tmpdir, **options):
 def test_pme_config_options():
     """Validate the parsing of the PME options."""
     assert Config().tune_pme
+    assert Config(pme_tolerance="5e-4").pme_tolerance == pytest.approx(5e-4)
 
     assert Config(pme_grid=64).pme_grid == [64]
     assert Config(pme_grid=["64", "64", "72"]).pme_grid == [64, 64, 72]
@@ -49,6 +56,7 @@ def test_pme_config_options():
         {"pme_grid": 4},
         {"pme_alpha": -1.0},
         {"pme_spacing": "1 ps"},
+        {"pme_tolerance": 0.0},
     ]:
         with pytest.raises(ValueError):
             Config(**options)
@@ -65,6 +73,16 @@ def test_pme_options_passed(ethane_methanol):
 
         assert alpha == pytest.approx(3.4)
         assert grid == [32, 32, 32]
+
+
+def test_pme_tolerance_passed(ethane_methanol):
+    """Validate that the Ewald error tolerance reaches the OpenMM context."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = Config(platform="cpu", output_directory=tmpdir, pme_tolerance=5e-4)
+
+        nbff = _nonbonded_force(Runner(ethane_methanol, config))
+
+        assert nbff.getEwaldErrorTolerance() == pytest.approx(5e-4)
 
 
 def test_pme_restart(ethane_methanol):
@@ -131,3 +149,4 @@ def test_pme_tuning(ethane_methanol, monkeypatch):
 
             assert alpha == pytest.approx(params["pme_alpha"])
             assert grid == params["pme_grid"]
+            assert params["pme_error"] <= params["pme_target_error"]
