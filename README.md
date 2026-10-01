@@ -251,6 +251,31 @@ the input system are used as they are.
 > you will need to reduce `--timestep` accordingly, or supply a system that has
 > already been repartitioned.
 
+## PME tuning
+
+The PME parameters that OpenMM chooses from the Ewald error tolerance often use
+a finer reciprocal-space grid than is needed for the requested accuracy. On the
+CUDA and OpenCL platforms SOMD2 therefore tunes the PME parameters at the start
+of a simulation, choosing the smallest grid, and the splitting parameter for it,
+that is at least as accurate as OpenMM's default choice. This takes tens of
+seconds, and the chosen parameters and their relative force error are logged.
+The speedup depends on the system and cutoff, and is largest at shorter cutoffs,
+such as the default of 9 Å, where more of the work is done on the grid.
+
+The tuned parameters are saved to `pme_parameters.yaml` in the output directory
+and reused when the simulation is restarted, including on different hardware.
+Restarts of simulations that were run without tuning carry on using the default
+parameters.
+
+Tuning can be disabled with `--no-tune-pme`. The accuracy that tuning must match
+is set by the Ewald error tolerance, `--pme-tolerance` (default 1e-4), so a
+looser tolerance allows a coarser grid. Alternatively, the PME parameters can
+be set explicitly with either `--pme-grid`, the grid size, or `--pme-spacing`,
+the maximum grid spacing, e.g. `--pme-spacing "0.12 nm"`, optionally along with
+`--pme-alpha`, the splitting parameter in inverse nanometers. If `--pme-alpha`
+isn't set it is derived from the tolerance. Tuning is skipped when any of these
+are set.
+
 ## Replica exchange
 
 SOMD2 supports Hamiltonian replica exchange (HREX) simulations, which can be
