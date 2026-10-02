@@ -21,12 +21,16 @@ license-files = ["LICENSE"]
 
 [project.scripts]
 somd2 = "somd2.app:somd2"
+somd2-view = "somd2.app:somd2_view"
 
 [project.urls]
 repository = "https://github.com/OpenBioSim/somd2"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"somd2._viewer" = ["_static/*"]
 
 [tool.versioningit.format]
 distance = "{base_version}+{distance}.{vcs}{rev}"

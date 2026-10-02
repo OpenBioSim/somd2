@@ -20,17 +20,7 @@
 #####################################################################
 
 """
-.. currentmodule:: somd2.app
-
-Functions
-=========
-
-.. autosummary::
-    :toctree: generated/
-
-    somd2
-    somd2_view
-    ghostly
+The web viewer behind the somd2-view command. Not part of the public API.
 """
 
-from ._cli import *
+from ._server import *

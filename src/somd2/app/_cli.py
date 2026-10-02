@@ -23,7 +23,7 @@
 SOMD2 command line interface.
 """
 
-__all__ = ["somd2"]
+__all__ = ["somd2", "somd2_view"]
 
 
 def somd2():
@@ -52,6 +52,20 @@ def somd2():
         "combined with a perturbation file via the --pert-file argument.",
     )
 
+    # Add an option to launch the viewer alongside the simulation.
+    parser.add_argument(
+        "--view",
+        action="store_true",
+        help="Launch a web viewer for the output directory while the simulation runs.",
+    )
+    parser.add_argument(
+        "--view-port",
+        type=int,
+        default=8000,
+        help="The port for the web viewer. If it is in use, the next free "
+        "port is used.",
+    )
+
     # Parse the arguments into a dictionary.
     args = vars(parser.parse_args())
 
@@ -73,6 +87,10 @@ def somd2():
         args.pop("config")
         args.pop("system")
 
+    # Pop the viewer options from the arguments dictionary.
+    view = args.pop("view")
+    view_port = args.pop("view_port")
+
     # Instantiate a Config object to validate the arguments.
     config = Config(**args)
 
@@ -82,9 +100,118 @@ def somd2():
     else:
         runner = Runner(system, config)
 
-    # Run the simulation.
+    # Run the viewer in its own process so that it doesn't compete with the
+    # simulation for the GIL.
+    viewer = None
+    if view:
+        import os
+        import subprocess
+        import sys
+
+        port = _free_port(view_port)
+        command = [
+            sys.executable,
+            "-m",
+            "somd2._viewer",
+            str(config.output_directory),
+            "--port",
+            str(port),
+            "--parent-pid",
+            str(os.getpid()),
+        ]
+
+        # Without a local display, the browser module may fall back to a
+        # text-mode browser that would take over the terminal. Over SSH, any
+        # display is remote.
+        over_ssh = os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_CLIENT")
+        has_display = sys.platform in ("darwin", "win32") or (
+            os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+        )
+        if has_display and not over_ssh:
+            command.append("--open")
+
+        # The URL is logged here, so the viewer's own output isn't needed.
+        viewer = subprocess.Popen(command, stdout=subprocess.DEVNULL)
+        _logger.info(
+            f"Viewer running at http://127.0.0.1:{port}. It stops 10 minutes "
+            "after the simulation ends and no page is open."
+        )
+
+    # Run the simulation. The viewer stops itself once it is no longer needed,
+    # except on Windows where it can't detect that the simulation has ended.
     try:
         runner.run()
     except Exception as e:
         _logger.error(f"An error occurred during the simulation: {e}")
         exit(1)
+    finally:
+        if viewer is not None and sys.platform == "win32":
+            viewer.terminate()
+
+
+def _free_port(start, attempts=100):
+    """
+    Return the first port from 'start' that is free on the loopback address,
+    so that simultaneous simulations each get their own viewer.
+    """
+    import socket
+
+    for port in range(start, start + attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    raise RuntimeError(
+        f"No free port for the viewer in {start}-{start + attempts - 1}."
+    )
+
+
+def somd2_view():
+    """
+    SOMD2 viewer: Command line interface.
+    """
+
+    from argparse import SUPPRESS, ArgumentParser
+
+    from somd2._viewer import serve
+
+    parser = ArgumentParser(
+        prog="somd2-view",
+        description="Serve a web viewer for SOMD2 output directories.",
+    )
+    parser.add_argument(
+        "paths",
+        type=str,
+        nargs="+",
+        help="SOMD2 output directories, or directories containing them.",
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="The address to bind to.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="The port to listen on.",
+    )
+    parser.add_argument(
+        "--open",
+        action="store_true",
+        help="Open the viewer in a web browser.",
+    )
+    # Used by 'somd2 --view', so that the viewer exits with the simulation.
+    parser.add_argument("--parent-pid", type=int, default=None, help=SUPPRESS)
+    args = parser.parse_args()
+
+    serve(
+        args.paths,
+        host=args.host,
+        port=args.port,
+        open_browser=args.open,
+        parent_pid=args.parent_pid,
+    )
