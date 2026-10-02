@@ -257,7 +257,8 @@ The PME parameters that OpenMM chooses from the Ewald error tolerance often use
 a finer reciprocal-space grid than is needed for the requested accuracy. On the
 CUDA and OpenCL platforms SOMD2 therefore tunes the PME parameters at the start
 of a simulation, choosing the smallest grid, and the splitting parameter for it,
-that is at least as accurate as OpenMM's default choice. This takes tens of
+that is at least as accurate as the parameters OpenMM chooses from SOMD2's
+error tolerance (see `--pme-tolerance` below). This takes tens of
 seconds, and the chosen parameters and their relative force error are logged.
 The speedup depends on the system and cutoff, and is largest at shorter cutoffs,
 such as the default of 9 Å, where more of the work is done on the grid.
