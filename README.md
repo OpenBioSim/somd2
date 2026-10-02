@@ -610,6 +610,68 @@ pmf2, overlap2 = BSS.FreeEnergy.Relative.analyse("output2")
 free_nrg = BSS.FreeEnergy.Relative.difference(pmf1, pmf2)
 ```
 
+## Viewer
+
+SOMD2 includes a web viewer for monitoring and analysing simulations, either
+while they are running or once they are complete. To view one or more output
+directories, run:
+
+```
+somd2-view output1 output2
+```
+
+Then open `http://127.0.0.1:8000` in a browser. A path can also be a directory
+containing several output directories, e.g. the bound and free legs of a
+perturbation, in which case all of them will be listed. Use `--port` to choose
+a different port and `--open` to open a browser automatically.
+
+The viewer shows:
+
+- Progress, simulation speed, and an estimate of the time remaining, along with any
+  recent warnings or errors from the log file.
+- Depictions of the perturbed molecules at each end state, highlighting the
+  atoms that are unique to each end state, or that change type.
+- The MBAR free energy, PMF, and overlap matrix. These are updated in the
+  background as new data is written.
+- Replica exchange statistics, i.e. the transition matrix, neighbour swap
+  acceptance, replica state trajectories, and round trips.
+- Energy components as a function of time for each λ window. These are
+  written at each checkpoint, or at every energy sample when using
+  `--save-energy-components`.
+- GCMC and terminal flip Monte Carlo statistics, if active.
+- The λ schedule, REST2 scale factors, and configuration options.
+
+The page refreshes automatically, with the interval set in the header.
+
+To launch the viewer alongside a simulation, pass the `--view` option to
+`somd2`:
+
+```
+somd2 perturbable_system.bss --view
+```
+
+The viewer runs in a separate process. Its address is written to the log, and
+it is opened in a browser automatically when a display is available. Once the
+simulation ends, the viewer keeps running while a page is open, so the final
+results can still be viewed, then stops 10 minutes after the last page is
+closed. On a cluster, the viewer stops when the job ends. The viewer uses port
+8000 by default, which can be changed with `--view-port`. If the port is in use,
+e.g. by another simulation on the same machine, the next free port is used.
+To monitor several simulations on one page, run `somd2-view` on their parent
+directory instead.
+
+> [!NOTE]
+> Free energies are only estimated when the output directory holds data for
+> every λ value, so directories from simulations that only sampled a subset of
+> windows will show progress but no free energy.
+
+> [!NOTE]
+> The viewer only listens on `127.0.0.1` by default. To view a simulation
+> running on a remote machine, forward the port over SSH, e.g.
+> `ssh -L 8000:localhost:8000 user@remote`, then open
+> `http://127.0.0.1:8000` locally. Over SSH, `--view` doesn't open a browser
+> automatically, so use the address written to the log.
+
 ## Truncated MBAR analysis
 
 When running HREX with a large number of replicas it can become computationally

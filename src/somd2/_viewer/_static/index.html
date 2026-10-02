@@ -1,0 +1,870 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SOMD2 Viewer</title>
+<style>
+:root {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #f0f2f5;
+  --paper: #ffffff;
+  --fg: #1c2330;
+  --muted: #5f6b7a;
+  --border: #dde1e7;
+  --accent: #2563c9;
+  --accent-rgb: 37, 99, 201;
+  --good: #1f8a5b;
+  --warn: #b7791f;
+  --bad: #c53b3b;
+  --info: #2563c9;
+  --grid: #e6e9ee;
+  --unique: #dc3220;
+  --changed: #005ab5;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12151b;
+    --surface: #1b1f27;
+    --surface-2: #232833;
+    --paper: #f7f7f5;
+    --fg: #e4e7ec;
+    --muted: #98a2b3;
+    --border: #2e3440;
+    --accent: #6ea0ff;
+    --accent-rgb: 110, 160, 255;
+    --good: #4cc38a;
+    --warn: #e0a84a;
+    --bad: #f07070;
+    --info: #6ea0ff;
+    --grid: #2a303b;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12151b;
+  --surface: #1b1f27;
+  --surface-2: #232833;
+  --paper: #f7f7f5;
+  --fg: #e4e7ec;
+  --muted: #98a2b3;
+  --border: #2e3440;
+  --accent: #6ea0ff;
+  --accent-rgb: 110, 160, 255;
+  --good: #4cc38a;
+  --warn: #e0a84a;
+  --bad: #f07070;
+  --info: #6ea0ff;
+  --grid: #2a303b;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+header h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: 0.01em; }
+header .spacer { flex: 1; }
+header select, header button, input[type="search"] {
+  font: inherit;
+  color: var(--fg);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+header button { cursor: pointer; }
+.layout { display: flex; min-height: calc(100vh - 49px); }
+nav {
+  width: 280px;
+  flex: none;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  overflow-y: auto;
+  max-height: calc(100vh - 49px);
+  position: sticky;
+  top: 49px;
+}
+nav[hidden] { display: none; }
+nav a {
+  display: block;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: inherit;
+  text-decoration: none;
+}
+nav a:hover { background: var(--surface-2); }
+nav a.active { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); }
+nav .name { font-weight: 600; word-break: break-all; }
+nav .meta { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; margin-top: 4px; }
+main { flex: 1; min-width: 0; padding: 16px; }
+.title-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; margin-bottom: 4px; }
+.title-row h2 { margin: 0; font-size: 20px; word-break: break-all; }
+.path { color: var(--muted); font-family: var(--mono); font-size: 12px; word-break: break-all; margin-bottom: 14px; }
+.multiples { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 4px 14px; }
+.sections { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); gap: 14px; }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  min-width: 0;
+}
+.card h3 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 650; }
+.card h4 { margin: 14px 0 6px; font-size: 13px; font-weight: 600; }
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid currentColor;
+  text-transform: capitalize;
+}
+.status-running { color: var(--good); }
+.status-finished { color: var(--info); }
+.status-stopped { color: var(--warn); }
+.status-error { color: var(--bad); }
+.status-waiting { color: var(--muted); }
+.bar { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.bar > span { display: block; height: 100%; background: var(--accent); }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 12px; }
+.stat .label { color: var(--muted); font-size: 12px; }
+.stat .value { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.big { font-size: 30px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.note { color: var(--muted); font-size: 13px; }
+.chart { width: 100%; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { fill: var(--muted); font-size: 11px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; }
+td.num, th.num { text-align: right; }
+.table-wrap { overflow-x: auto; }
+.config td:first-child { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+.config td:last-child { font-family: var(--mono); font-size: 12px; word-break: break-all; }
+.depiction { background: var(--paper); border-radius: 8px; padding: 8px; border: 1px solid var(--border); }
+.depiction svg { display: block; width: 100%; height: auto; }
+.depiction .panel-captions { display: grid; grid-template-columns: 1fr 1fr; text-align: center; color: #1c2330; font-size: 14px; }
+.depiction .caption { color: #3b4350; font-size: 12px; text-align: center; margin-top: 4px; }
+.smiles { font-family: var(--mono); font-size: 11px; color: #5f6b7a; text-align: center; word-break: break-all; margin-top: 2px; }
+pre { font-family: var(--mono); font-size: 12px; background: var(--surface-2); padding: 10px; border-radius: 6px; overflow-x: auto; margin: 0; }
+.messages { max-height: 220px; overflow-y: auto; font-family: var(--mono); font-size: 12px; }
+.messages div { padding: 3px 0; border-bottom: 1px solid var(--border); }
+.lvl-WARNING { color: var(--warn); }
+.lvl-ERROR, .lvl-CRITICAL { color: var(--bad); }
+details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 10px; }
+.empty { padding: 40px; text-align: center; color: var(--muted); }
+@media print {
+  :root, :root[data-theme="dark"], :root:not([data-theme="light"]) {
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #f0f2f5;
+    --fg: #1c2330;
+    --muted: #5f6b7a;
+    --border: #dde1e7;
+    --accent: #2563c9;
+    --accent-rgb: 37, 99, 201;
+    --good: #1f8a5b;
+    --warn: #b7791f;
+    --bad: #c53b3b;
+    --info: #2563c9;
+    --grid: #e6e9ee;
+    color-scheme: light;
+  }
+  body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  header, nav, #offline, #config-filter, details summary, .log-messages { display: none !important; }
+  .layout { display: block; min-height: 0; }
+  main { padding: 0; }
+  .sections, .grid, .multiples { display: block; }
+  .sections > .card { margin-bottom: 14px; }
+  .grid > div { margin-bottom: 10px; }
+  .multiples > div { display: inline-block; width: 48%; margin: 0 1% 10px 0; vertical-align: top; }
+  .depiction { display: inline-block; width: 48%; margin: 0 1% 10px 0; vertical-align: top; }
+  .depiction.mapping { display: block; width: auto; }
+  .stats { display: flex; flex-wrap: wrap; gap: 10px 24px; }
+  .card { break-inside: avoid; }
+  .grid > div, .multiples > div, .chart, .chart svg, .depiction, .stats, tr, pre { break-inside: avoid; }
+  h3, h4, .card > .note:first-of-type { break-after: avoid; }  .table-wrap, .messages { max-height: none !important; overflow: visible !important; }
+}
+@media (max-width: 760px) {
+  .layout { flex-direction: column; }
+  nav { width: auto; max-height: 240px; position: static; border-right: 0; border-bottom: 1px solid var(--border); }
+  main { padding: 12px 16px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>SOMD2 Viewer</h1>
+  <span class="spacer"></span>
+  <label class="muted" for="interval">Refresh</label>
+  <select id="interval">
+    <option value="10">10 s</option>
+    <option value="30" selected>30 s</option>
+    <option value="60">1 min</option>
+    <option value="0">Off</option>
+  </select>
+  <button id="refresh" type="button">Refresh now</button>
+  <button id="print" type="button">Save as PDF</button>
+</header>
+<div class="layout">
+  <nav id="nav" hidden></nav>
+  <main id="main"><div class="empty">Loading…</div></main>
+</div>
+<script>
+"use strict";
+
+const state = { runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, components: {}, componentsLambda: {}, configFilter: "" };
+const PALETTE = ["#2f6fdf", "#e0663b", "#2a9d6f", "#b04fc9", "#c9a227", "#3aa7c9", "#d64f7a", "#7a8699"];
+const LAMBDA = "λ";
+
+const $ = (sel) => document.querySelector(sel);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+function colour(i, n) {
+  if (n <= PALETTE.length) return PALETTE[i % PALETTE.length];
+  return `hsl(${Math.round((360 * i) / n)}, 62%, 52%)`;
+}
+
+function fmt(x, digits = 3) {
+  if (x === null || x === undefined || Number.isNaN(x)) return "–";
+  return Number(x).toFixed(digits);
+}
+
+function fmtLambda(x) {
+  return Number(x).toFixed(5);
+}
+
+function duration(seconds) {
+  if (seconds === null || seconds === undefined) return "–";
+  seconds = Math.max(0, Math.round(seconds));
+  const d = Math.floor(seconds / 86400), h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60), s = seconds % 60;
+  if (d) return `${d} d ${h} h`;
+  if (h) return `${h} h ${m} min`;
+  if (m) return `${m} min ${s} s`;
+  return `${s} s`;
+}
+
+function simTime(ns) {
+  if (ns === null || ns === undefined) return "–";
+  if (ns >= 1) return `${fmt(ns, ns >= 100 ? 0 : 2)} ns`;
+  return `${fmt(ns * 1000, ns * 1000 >= 100 ? 0 : 1)} ps`;
+}
+
+async function getJSON(url) {
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) {
+    let detail = "";
+    try { detail = (await r.json()).error || ""; } catch (e) {}
+    throw new Error(`${r.status} ${r.statusText}${detail ? `: ${detail}` : ""}`);
+  }
+  return r.json();
+}
+
+// ---------------------------------------------------------------- charts
+
+function niceStep(span, n) {
+  const raw = span / n;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const r = raw / mag;
+  return (r >= 7.5 ? 10 : r >= 3.5 ? 5 : r >= 1.5 ? 2 : 1) * mag;
+}
+
+function ticks(lo, hi, n) {
+  if (!(hi > lo)) { lo -= 1; hi += 1; }
+  const step = niceStep(hi - lo, n);
+  const out = [];
+  for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + step * 1e-9; v += step) out.push(+v.toPrecision(12));
+  return { ticks: out, step };
+}
+
+function tickLabel(v, step) {
+  const digits = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
+  return v.toFixed(Math.min(digits, 6));
+}
+
+function lineChart(el, opts) {
+  // A 4:3 aspect ratio, unless a fixed height is given for a full width chart.
+  const fullWidth = Math.max(280, el.clientWidth || 560);
+  const width = opts.height ? fullWidth : Math.min(640, fullWidth);
+  const height = opts.height || Math.round(width * 0.75);
+  const m = { l: 54, r: 14, t: 10, b: 40 };
+  const pw = width - m.l - m.r, ph = height - m.t - m.b;
+  const xs = [], ys = [];
+  for (const s of opts.series) {
+    s.x.forEach((x, i) => {
+      if (s.y[i] === null || s.y[i] === undefined) return;
+      xs.push(x);
+      const e = s.err ? s.err[i] || 0 : 0;
+      ys.push(s.y[i] - e, s.y[i] + e);
+    });
+  }
+  if (opts.bars) ys.push(0);
+  let x0 = opts.xMin ?? Math.min(...xs), x1 = opts.xMax ?? Math.max(...xs);
+  let y0 = opts.yMin ?? Math.min(...ys), y1 = opts.yMax ?? Math.max(...ys);
+  const xt = ticks(x0, x1, Math.max(3, Math.floor(pw / 80)));
+  const yt = ticks(y0, y1, 5);
+  if (opts.yMin === undefined) y0 = Math.min(y0, yt.ticks[0]);
+  if (opts.yMax === undefined) y1 = Math.max(y1, yt.ticks[yt.ticks.length - 1]);
+  if (!(x1 > x0)) { x0 -= 0.5; x1 += 0.5; }
+  if (!(y1 > y0)) { y0 -= 1; y1 += 1; }
+  const sx = (x) => m.l + ((x - x0) / (x1 - x0)) * pw;
+  const sy = (y) => m.t + (1 - (y - y0) / (y1 - y0)) * ph;
+  const grid = css("--grid"), fg = css("--muted");
+  let svg = `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" style="max-width:${width}px" role="img">`;
+  for (const v of yt.ticks) {
+    if (v < y0 - 1e-12 || v > y1 + 1e-12) continue;
+    svg += `<line x1="${m.l}" x2="${m.l + pw}" y1="${sy(v)}" y2="${sy(v)}" stroke="${grid}"/>`;
+    svg += `<text x="${m.l - 6}" y="${sy(v) + 4}" text-anchor="end">${opts.yFormat ? opts.yFormat(v) : tickLabel(v, yt.step)}</text>`;
+  }
+  for (const v of xt.ticks) {
+    if (v < x0 - 1e-12 || v > x1 + 1e-12) continue;
+    svg += `<text x="${sx(v)}" y="${m.t + ph + 16}" text-anchor="middle">${opts.xFormat ? opts.xFormat(v) : tickLabel(v, xt.step)}</text>`;
+  }
+  for (const v of opts.vlines || []) {
+    svg += `<line x1="${sx(v)}" x2="${sx(v)}" y1="${m.t}" y2="${m.t + ph}" stroke="${grid}" stroke-dasharray="3 3"/>`;
+  }
+  if (opts.hline !== undefined) {
+    svg += `<line x1="${m.l}" x2="${m.l + pw}" y1="${sy(opts.hline)}" y2="${sy(opts.hline)}" stroke="${css("--bad")}" stroke-dasharray="4 3"/>`;
+  }
+  svg += `<line x1="${m.l}" x2="${m.l + pw}" y1="${m.t + ph}" y2="${m.t + ph}" stroke="${fg}"/>`;
+  svg += `<line x1="${m.l}" x2="${m.l}" y1="${m.t}" y2="${m.t + ph}" stroke="${fg}"/>`;
+  for (const s of opts.series) {
+    const pts = s.x.map((x, i) => [x, s.y[i], s.err ? s.err[i] : null, i]).filter((p) => p[1] !== null && p[1] !== undefined);
+    if (opts.bars) {
+      const bw = Math.max(2, (pw / Math.max(1, pts.length)) * 0.7);
+      for (const [x, y] of pts) {
+        svg += `<rect x="${sx(x) - bw / 2}" y="${Math.min(sy(y), sy(0))}" width="${bw}" height="${Math.abs(sy(0) - sy(y))}" fill="${s.color}" rx="2"><title>${esc(s.title ? s.title(x, y) : `${x}: ${y}`)}</title></rect>`;
+      }
+      continue;
+    }
+    if (s.err) {
+      const upper = pts.map(([x, y, e]) => `${sx(x)},${sy(y + (e || 0))}`);
+      const lower = pts.map(([x, y, e]) => `${sx(x)},${sy(y - (e || 0))}`).reverse();
+      svg += `<polygon points="${upper.concat(lower).join(" ")}" fill="${s.color}" opacity="0.15"/>`;
+    }
+    let d = "";
+    pts.forEach(([x, y], i) => {
+      if (s.step && i > 0) d += `H${sx(x)}V${sy(y)}`;
+      else d += `${i ? "L" : "M"}${sx(x)},${sy(y)}`;
+    });
+    svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.width || 1.8}" ${s.dash ? `stroke-dasharray="${s.dash}"` : ""} stroke-linejoin="round"/>`;
+    if (s.points) {
+      for (const [x, y, e, i] of pts) {
+        const hollow = s.hollow && s.hollow[i];
+        svg += `<circle cx="${sx(x)}" cy="${sy(y)}" r="3" fill="${hollow ? css("--surface") : s.color}" stroke="${s.color}" stroke-width="1.5"><title>${esc(s.title ? s.title(x, y, e) : `${x}: ${y}`)}</title></circle>`;
+      }
+    }
+  }
+  if (opts.xLabel) svg += `<text x="${m.l + pw / 2}" y="${height - 4}" text-anchor="middle">${esc(opts.xLabel)}</text>`;
+  if (opts.yLabel) svg += `<text transform="translate(12 ${m.t + ph / 2}) rotate(-90)" text-anchor="middle">${esc(opts.yLabel)}</text>`;
+  svg += "</svg>";
+  let html = svg;
+  if (opts.legend && opts.series.length > 1) {
+    html += `<div class="legend">${opts.series.map((s) => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join("")}</div>`;
+  }
+  el.innerHTML = html;
+}
+
+function heatmap(el, matrix, opts = {}) {
+  const n = matrix.length;
+  const maxSize = Math.min(Math.max(240, el.clientWidth || 420), 520);
+  const pad = 34;
+  const cell = (maxSize - pad) / n;
+  const size = pad + cell * n;
+  const showValues = cell >= 26;
+  const rgb = css("--accent-rgb"), fg = css("--fg"), bad = css("--bad");
+  let svg = `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" style="max-width:${size}px">`;
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      const v = matrix[i][j] ?? 0;
+      const a = Math.min(1, Math.sqrt(Math.max(0, v)));
+      const x = pad + j * cell, y = pad + i * cell;
+      const flagged = opts.threshold !== undefined && Math.abs(i - j) === 1 && v < opts.threshold;
+      svg += `<rect x="${x}" y="${y}" width="${cell}" height="${cell}" fill="rgba(${rgb},${a.toFixed(3)})" stroke="${flagged ? bad : css("--border")}" stroke-width="${flagged ? 2 : 0.5}"><title>${i}, ${j}: ${fmt(v, 4)}</title></rect>`;
+      if (showValues) {
+        svg += `<text x="${x + cell / 2}" y="${y + cell / 2 + 4}" text-anchor="middle" style="fill:${a > 0.6 ? "#fff" : fg};font-size:${Math.min(11, cell / 3.2)}px">${v >= 0.995 ? "1" : v.toFixed(2).replace(/^0/, "")}</text>`;
+      }
+    }
+  }
+  const step = Math.ceil(n / Math.floor((size - pad) / 18));
+  for (let i = 0; i < n; i += step) {
+    svg += `<text x="${pad - 6}" y="${pad + i * cell + cell / 2 + 4}" text-anchor="end">${i}</text>`;
+    svg += `<text x="${pad + i * cell + cell / 2}" y="${pad - 8}" text-anchor="middle">${i}</text>`;
+  }
+  svg += "</svg>";
+  el.innerHTML = svg;
+}
+
+// ---------------------------------------------------------------- rendering
+
+function card(title, body) {
+  return `<section class="card"><h3>${esc(title)}</h3>${body}</section>`;
+}
+
+function stat(label, value) {
+  return `<div class="stat"><div class="label">${esc(label)}</div><div class="value">${value}</div></div>`;
+}
+
+function renderNav() {
+  const nav = $("#nav");
+  nav.hidden = state.runs.length < 2;
+  nav.innerHTML = state.runs.map((r) => {
+    const pct = r.fraction !== null && r.fraction !== undefined ? Math.round(r.fraction * 100) : 0;
+    const dg = r.free_energy !== null && r.free_energy !== undefined ? `ΔG ${fmt(r.free_energy, 2)} ± ${fmt(r.free_energy_error, 2)}` : "";
+    return `<a href="#${r.id}" class="${r.id === state.current ? "active" : ""}">
+      <div class="name">${esc(r.name)}</div>
+      <div class="bar" style="margin-top:6px"><span style="width:${pct}%"></span></div>
+      <div class="meta"><span class="status-${r.status}">${esc(r.status)} · ${pct}%</span><span>${dg}</span></div>
+    </a>`;
+  }).join("");
+}
+
+function renderOverview(s) {
+  const p = s.progress;
+  const pct = p.fraction !== null ? p.fraction * 100 : 0;
+  let html = `<div class="bar"><span style="width:${pct.toFixed(1)}%"></span></div>`;
+  html += `<div class="stats">`;
+  html += stat("Progress", `${fmt(pct, 1)}%`);
+  html += stat("Simulated / window", `${simTime(p.completed_ns / Math.max(1, s.lambda_values.length))} of ${simTime(p.runtime_ns)}`);
+  html += stat("Time remaining", p.status === "finished" ? "done" : duration(p.eta_seconds));
+  html += stat(`Current speed${p.throughput_label ? ` (${p.throughput_label})` : ""}`, p.throughput_ns_day ? `${fmt(p.throughput_ns_day, 1)} ns/day` : "–");
+  if (p.cycle) html += stat("Cycle", `${p.cycle} of ${p.num_cycles}`);
+  if (p.performance_ns_day) html += stat("Overall speed",`${fmt(p.performance_ns_day, 1)} ns/day`);
+  html += stat("Last log update", p.last_update_seconds !== null ? `${duration(p.last_update_seconds)} ago` : "–");
+  html += stat("Windows", `${s.windows.length} of ${s.lambda_values.length}`);
+  html += `</div>`;
+  if (p.messages && p.messages.length) {
+    const msgs = p.messages.slice().reverse().map((m) => `<div class="lvl-${m.level}">${esc(new Date(m.time * 1000).toLocaleString())} · ${esc(m.level)} · ${esc(m.message)}</div>`).join("");
+    html += `<details class="log-messages"${p.status === "error" ? " open" : ""}><summary>Recent warnings and errors (${p.messages.length})</summary><div class="messages">${msgs}</div></details>`;
+  }
+  return card("Progress", html);
+}
+
+function renderEndStates(s) {
+  const d = state.depictions[s.id];
+  if (!d) return card("End states", `<div class="note">Loading depictions…</div>`);
+  if (d.status !== "done") return card("End states", `<div class="note">${esc(d.reason || "Unavailable.")}</div>`);
+  if (!d.molecules.length) return card("End states", `<div class="note">No perturbed molecules found.</div>`);
+  const absolute = ["annihilate", "decouple"].includes(s.schedule.name);
+  let html = "";
+  for (const m of d.molecules) {
+    html += `<h4>${esc(m.name)}</h4>`;
+    if (absolute) {
+      const verb = s.schedule.name === "annihilate" ? "Annihilated" : "Decoupled";
+      html += `<div class="depiction" style="max-width:${(m.pixels || 300) + 18}px">${m.svg0}<div class="caption">${verb} at ${LAMBDA} = 1</div><div class="smiles">${esc(m.smiles0)}</div></div>`;
+      continue;
+    }
+    html += `<div class="depiction mapping" style="max-width:${2 * (m.pixels || 300) + 18}px">${m.svg_mapping}<div class="panel-captions"><span>${LAMBDA} = 0</span><span>${LAMBDA} = 1</span></div><div class="caption">Atoms are labelled with their index in the merged molecule.</div><div class="smiles">${esc(m.smiles0)} → ${esc(m.smiles1)}</div></div>`;
+    const noOrders = [m.bond_orders0 ? null : `${LAMBDA} = 0`, m.bond_orders1 ? null : `${LAMBDA} = 1`].filter(Boolean);
+    if (noOrders.length) html += `<div class="note">Bond orders couldn't be assigned at ${noOrders.join(" and ")}, so only the connectivity is shown.</div>`;
+    html += `<div class="legend">
+      <span><i style="background:var(--unique)"></i>Unique, i.e. a ghost at the other end state (${m.num_unique0} at ${LAMBDA} = 0, ${m.num_unique1} at ${LAMBDA} = 1)</span>
+      <span><i style="background:var(--changed)"></i>Mapped, element changes (${m.num_changed})</span>
+      <span>${m.num_mapped} mapped atoms</span>
+    </div>`;
+  }
+  return card("End states", html);
+}
+
+function renderFreeEnergy(s) {
+  const a = s.analysis;
+  if (a.status === "unavailable") return card("Free energy", `<div class="note">${esc(a.reason)}</div>`);
+  if (a.status === "pending") return card("Free energy", `<div class="note">Running MBAR analysis…</div>`);
+  if (a.status === "error") return card("Free energy", `<div class="note">Analysis failed: ${esc(a.reason)}</div>`);
+  let html = `<div class="grid">`;
+  let head = `<div class="big">${fmt(a.free_energy, 2)} <span class="muted" style="font-size:18px">± ${fmt(a.free_energy_error, 2)} kcal/mol</span></div>`;
+  head += `<div class="note">MBAR, ${a.lambda.length} windows · analysed ${esc(new Date(a.time * 1000).toLocaleTimeString())}${a.updating ? " · updating…" : ""}</div>`;
+  if (s.standard_state_correction !== null && s.standard_state_correction !== undefined) {
+    head += `<div class="stats">${stat("Restraint correction", `${fmt(s.standard_state_correction, 3)} kcal/mol`)}</div>`;
+    head += `<div class="note">The standard state correction for the Boresch restraint isn't included in the free energy above.</div>`;
+  }
+  html += `<div>${head}<div class="chart" id="pmf-chart" style="margin-top:10px"></div></div>`;
+  html += `<div><h4 style="margin-top:0">Overlap matrix</h4><div class="chart" id="overlap-chart"></div><div class="note">Neighbouring windows with overlap below 0.03 are outlined.</div></div>`;
+  const c = a.convergence;
+  html += `<div><h4 style="margin-top:0">Convergence</h4>`;
+  if (!c || c.status === "pending") html += `<div class="note">Running convergence analysis…</div>`;
+  else if (c.status !== "done") html += `<div class="note">${esc(c.reason)}</div>`;
+  else {
+    html += `<div class="chart" id="convergence-chart"></div><div class="note">MBAR free energy using the first (forward) or last (backward) fraction of the samples from each window, subsampled to at most 1000 per window. Updated at most every 5 minutes; last at ${esc(new Date(c.time * 1000).toLocaleTimeString())}.</div>`;
+    const flagged = [...(c.forward_bootstrapped || []), ...(c.backward_bootstrapped || [])].filter(Boolean).length;
+    if (flagged) html += `<div class="note" style="color:var(--warn)">${flagged} of ${2 * c.fraction.length} points had analytic errors above 3 kT, which suggests poor overlap between some windows. Their error bars are from a small bootstrap, shown as hollow points. Check the overlap matrix.</div>`;
+  }
+  html += `</div>`;
+  html += `</div>`;
+  return card("Free energy", html);
+}
+
+function renderRepex(s) {
+  const r = s.repex;
+  if (!r) return "";
+  let html = `<div class="grid">`;
+  if (r.transition_matrix) html += `<div><h4 style="margin-top:0">Transition matrix</h4><div class="chart" id="transition-chart"></div></div>`;
+  html += `<div>`;
+  if (r.neighbour_acceptance) html += `<h4 style="margin-top:0">Neighbour swap acceptance</h4><div class="chart" id="acceptance-chart"></div>`;
+  if (r.round_trips) {
+    const total = r.round_trips.reduce((a, b) => a + b, 0);
+    html += `<h4>Round trips</h4><div class="note">${total} complete round trips (${LAMBDA} = 0 → 1 → 0) across all replicas, from ${r.num_cycles} logged cycles.</div><div class="chart" id="trips-chart"></div>`;
+  }
+  html += `</div></div>`;
+  if (r.replica_states) html += `<h4>Replica state trajectories</h4><div class="chart" id="replica-chart"></div>`;
+  return card("Replica exchange", html);
+}
+
+function componentsLambda(s) {
+  const chosen = state.componentsLambda[s.id];
+  if (chosen !== undefined && s.lambda_values.includes(chosen)) return chosen;
+  return s.lambda_values[0];
+}
+
+function renderComponents(s) {
+  if (!s.has_components) return "";
+  const lam = componentsLambda(s);
+  const options = s.lambda_values.map((l) => `<option value="${l}"${l === lam ? " selected" : ""}>${fmtLambda(l)}</option>`).join("");
+  let html = `<label class="note">${LAMBDA} window <select id="components-lambda">${options}</select></label>`;
+  const c = state.components[s.id];
+  if (!c || c.lambda !== lam) html += `<div class="note" style="margin-top:8px">Loading…</div>`;
+  else if (c.status !== "done") html += `<div class="note" style="margin-top:8px">${esc(c.reason)}</div>`;
+  else {
+    html += `<div class="multiples">${Object.keys(c.components).map((name, i) => `<div><h4>${esc(name)}</h4><div class="chart" id="component-chart-${i}"></div></div>`).join("")}</div>`;
+    html += `<div class="note">${c.num_samples} samples. Each component has its own energy axis.</div>`;
+  }
+  return card("Energy components", html);
+}
+
+function renderSamplers(s) {
+  const sm = s.samplers || {};
+  let html = "";
+  if (sm.gcmc) {
+    const keys = Object.keys(sm.gcmc[0]).filter((k) => k !== "lambda");
+    html += `<h4 style="margin-top:0">GCMC</h4><div class="table-wrap"><table><tr><th>${LAMBDA}</th>${keys.map((k) => `<th class="num">${esc(k.replace(/^num_/, "").replace(/_/g, " "))}</th>`).join("")}</tr>`;
+    for (const row of sm.gcmc) html += `<tr><td>${fmtLambda(row.lambda)}</td>${keys.map((k) => `<td class="num">${k === "acceptance" ? fmt(row[k], 3) : row[k] ?? "–"}</td>`).join("")}</tr>`;
+    html += `</table></div>`;
+  }
+  if (sm.terminal_flip) {
+    html += `<h4${sm.gcmc ? "" : ' style="margin-top:0"'}>Terminal flips</h4><div class="table-wrap"><table><tr><th>${LAMBDA}</th><th class="num">attempted</th><th class="num">accepted</th><th class="num">acceptance</th></tr>`;
+    for (const row of sm.terminal_flip) html += `<tr><td>${fmtLambda(row.lambda)}</td><td class="num">${row.attempted}</td><td class="num">${row.accepted}</td><td class="num">${fmt(row.acceptance, 3)}</td></tr>`;
+    html += `</table></div>`;
+  }
+  return html ? card("Monte Carlo samplers", html) : "";
+}
+
+function renderWindows(s) {
+  const byLambda = new Map(s.windows.map((w) => [w.lambda, w]));
+  const rest2 = s.schedule.rest2 ? new Map(s.schedule.rest2.lambda.map((l, i) => [l, s.schedule.rest2.scale[i]])) : null;
+  let html = `<div class="table-wrap"><table><tr><th>${LAMBDA}</th><th class="num">samples</th><th class="num">progress</th><th class="num">speed (ns/day)</th>${rest2 ? `<th class="num">REST2 scale</th>` : ""}</tr>`;
+  for (const lam of s.lambda_values) {
+    const w = byLambda.get(lam);
+    html +=`<tr><td>${fmtLambda(lam)}</td><td class="num">${w ? w.samples : "–"}</td><td class="num">${w ? windowProgress(s, w) : "–"}</td><td class="num">${w && w.speed ? fmt(w.speed, 1) : "–"}</td>${rest2 ? `<td class="num">${fmt(rest2.get(lam), 3)}</td>` : ""}</tr>`;
+  }
+  html += `</table></div>`;
+  return card("Windows", html);
+}
+
+function windowProgress(s, w) {
+  const total = s.progress.expected_samples;
+  if (!total) return "–";
+  return `${fmt(Math.min(100, (100 * w.samples) / total), 0)}%`;
+}
+
+function renderSchedule(s) {
+  const sc = s.schedule;
+  let html = `<div class="note">Schedule: <strong>${esc(sc.name)}</strong></div><div class="grid" style="margin-top:8px">`;
+  if (sc.levers) html += `<div><h4 style="margin-top:0">Lever values</h4><div class="chart" id="lever-chart"></div><div class="note">Lever values with initial = 1 and final = 2. Dashed lines mark the ${LAMBDA} windows.</div></div>`;
+  else if (sc.error) html += `<div class="note">Couldn't build the schedule: ${esc(sc.error)}</div>`;
+  if (sc.rest2) {
+    html += `<div><h4 style="margin-top:0">REST2 scale factor</h4><div class="chart" id="rest2-chart"></div>`;
+    if (sc.rest2.selection) html += `<div class="note">Selection: <code>${esc(sc.rest2.selection)}</code></div>`;
+    html += `</div>`;
+  }
+  html += `</div>`;
+  if (sc.description) html += `<details><summary>Schedule definition</summary><pre>${esc(sc.description)}</pre></details>`;
+  return card(`${LAMBDA} schedule`, html);
+}
+
+function renderConfig(s) {
+  let html = `<input type="search" id="config-filter" placeholder="Filter options" value="${esc(state.configFilter)}" style="width:100%;margin-bottom:8px">`;
+  html += `<div class="table-wrap" style="max-height:420px;overflow-y:auto"><table class="config" id="config-table">`;
+  for (const [k, v] of Object.entries(s.config)) {
+    const value = v === null ? "null" : typeof v === "object" ? JSON.stringify(v) : String(v);
+    html += `<tr data-key="${esc(k)}"><td>${esc(k)}</td><td>${esc(value)}</td></tr>`;
+  }
+  html += `</table></div>`;
+  if (s.pme) html += `<details><summary>Tuned PME parameters</summary><pre>${esc(Object.entries(s.pme).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join("\n"))}</pre></details>`;
+  return card("Configuration", html);
+}
+
+function applyConfigFilter() {
+  const q = state.configFilter.toLowerCase();
+  document.querySelectorAll("#config-table tr").forEach((tr) => {
+    tr.hidden = q && !tr.textContent.toLowerCase().includes(q);
+  });
+}
+
+function renderCharts(s) {
+  const a = s.analysis;
+  if (a.status === "done") {
+    const el = $("#pmf-chart");
+    if (el) lineChart(el, {
+      series: [{ x: a.lambda, y: a.pmf, err: a.error, color: css("--accent"), points: true, title: (x, y, e) => `${LAMBDA} = ${fmtLambda(x)}: ${fmt(y, 3)} ± ${fmt(e, 3)} kcal/mol` }],
+      xLabel: LAMBDA, yLabel: "ΔG (kcal/mol)", xMin: 0, xMax: 1,
+    });
+    const ov = $("#overlap-chart");
+    if (ov && a.overlap) heatmap(ov, a.overlap, { threshold: 0.03 });
+    const cv = $("#convergence-chart");
+    const c = a.convergence;
+    if (cv && c && c.status === "done") {
+      const title = (label) => (x, y, e) => `${label}, ${fmt(x * 100, 0)}% of data: ${fmt(y, 3)} ± ${fmt(e, 3)} kcal/mol`;
+      lineChart(cv, {
+        series: [
+          { x: c.fraction, y: c.forward, err: c.forward_error, hollow: c.forward_bootstrapped, color: colour(0, 2), name: "forward", points: true, title: title("forward") },
+          { x: c.fraction, y: c.backward, err: c.backward_error, hollow: c.backward_bootstrapped, color: colour(1, 2), name: "backward", points: true, title: title("backward") },
+        ],
+        xLabel: "fraction of data", yLabel: "ΔG (kcal/mol)", xMin: 0, xMax: 1, legend: true,
+      });
+    }
+  }
+  const r = s.repex;
+  if (r) {
+    const tm = $("#transition-chart");
+    if (tm && r.transition_matrix) heatmap(tm, r.transition_matrix);
+    const acc = $("#acceptance-chart");
+    if (acc && r.neighbour_acceptance) {
+      lineChart(acc, {
+        series: [{ x: r.neighbour_acceptance.map((_, i) => i + 0.5), y: r.neighbour_acceptance, color: css("--accent"), title: (x, y) => `${Math.floor(x)} ↔ ${Math.ceil(x)}: ${fmt(y, 3)}` }],
+        bars: true, yMin: 0, yMax: 1, xMin: 0, xMax: r.neighbour_acceptance.length,
+        xLabel: "window pair", yLabel: "acceptance", xFormat: (v) => String(Math.round(v)),
+      });
+    }
+    const trips = $("#trips-chart");
+    if (trips && r.round_trips) {
+      lineChart(trips, {
+        series: [{ x: r.round_trips.map((_, i) => i), y: r.round_trips, color: css("--accent"), title: (x, y) => `replica ${x}: ${y}` }],
+        bars: true, yMin: 0, xMin: -0.5, xMax: r.round_trips.length - 0.5,
+        xLabel: "replica", yLabel: "round trips", xFormat: (v) => String(Math.round(v)),
+      });
+    }
+    const rc = $("#replica-chart");
+    if (rc && r.replica_states) {
+      const n = r.replica_states.length;
+      lineChart(rc, {
+        series: r.replica_states.map((path, i) => ({ x: path.map((_, c) => c * r.stride + 1), y: path, color: colour(i, n), name: `replica ${i}`, step: true, width: 1.4 })),
+        xLabel: "cycle", yLabel: "state", yMin: 0, yMax: n - 1, height: 300, legend: n <= 16,
+        yFormat: (v) => (Number.isInteger(v) ? String(v) : ""),
+      });
+    }
+  }
+  const c = state.components[s.id];
+  if (c && c.status === "done" && c.lambda === componentsLambda(s)) {
+    Object.entries(c.components).forEach(([name, values], i) => {
+      const el = $(`#component-chart-${i}`);
+      if (el) lineChart(el, {
+        series: [{ x: c.time, y: values, color: colour(i, Object.keys(c.components).length), width: 1.2 }],
+        xLabel: "time (ns)", yLabel: "kcal/mol",
+      });
+    });
+  }
+  const sc = s.schedule;
+  const lc = $("#lever-chart");
+  if (lc && sc.levers) {
+    const names = Object.keys(sc.levers);
+    lineChart(lc, {
+      series: names.map((n, i) => ({ x: sc.lambda, y: sc.levers[n], color: colour(i, names.length), name: n })),
+      xLabel: LAMBDA, yLabel: "lever value", xMin: 0, xMax: 1, vlines: s.lambda_values, legend: true,
+    });
+  }
+  const r2 = $("#rest2-chart");
+  if (r2 && sc.rest2) {
+    lineChart(r2, {
+      series: [{ x: sc.rest2.lambda, y: sc.rest2.scale, color: css("--accent"), points: true, title: (x, y) => `${LAMBDA} = ${fmtLambda(x)}: ${fmt(y, 3)}` }],
+      xLabel: LAMBDA, yLabel: "scale factor", xMin: 0, xMax: 1,
+    });
+  }
+}
+
+function render() {
+  if (state.printing) return;
+  const s = state.summary;
+  const main = $("#main");
+  if (!s) { main.innerHTML = `<div class="empty">No SOMD2 output found.</div>`; return; }
+  const scroll = window.scrollY;
+  let html = `<div class="title-row"><h2>${esc(s.name)}</h2><span class="badge status-${s.status}">${esc(s.status)}</span>`;
+  if (s.progress) html += `<span class="muted">${s.replica_exchange ? "Replica exchange" : "Independent windows"}</span>`;
+  html += `</div><div class="path">${esc(s.path)}</div>`;
+  if (!s.progress) {
+    const message = s.reason || "Waiting for the simulation to write its configuration.";
+    main.innerHTML = html + `<div class="empty">${esc(message)}</div>`;
+    return;
+  }
+  html += `<div class="sections">`;
+  html += renderOverview(s);
+  html += renderEndStates(s);
+  html += renderFreeEnergy(s);
+  html += renderRepex(s);
+  html += renderWindows(s);
+  html += renderComponents(s);
+  html += renderSamplers(s);
+  html += renderSchedule(s);
+  html += renderConfig(s);
+  html += `</div>`;
+  const focused = document.activeElement && document.activeElement.id === "config-filter" ? document.activeElement.selectionStart : null;
+  main.innerHTML = html;
+  renderCharts(s);
+  applyConfigFilter();
+  const lambdaSelect = $("#components-lambda");
+  if (lambdaSelect) lambdaSelect.addEventListener("change", (e) => {
+    state.componentsLambda[s.id] = parseFloat(e.target.value);
+    render();
+    loadComponents(s);
+  });
+  const filter = $("#config-filter");
+  if (filter) {
+    filter.addEventListener("input", (e) => { state.configFilter = e.target.value; applyConfigFilter(); });
+    if (focused !== null) { filter.focus(); filter.setSelectionRange(focused, focused); }
+  }
+  window.scrollTo(0, scroll);
+}
+
+// ---------------------------------------------------------------- data flow
+
+async function loadRuns() {
+  state.runs = await getJSON("/api/simulations");
+  if (!state.runs.find((r) => r.id === state.current)) {
+    const fromHash = location.hash.slice(1);
+    state.current = (state.runs.find((r) => r.id === fromHash) || state.runs[0] || {}).id || null;
+  }
+  renderNav();
+}
+
+function loadComponents(s) {
+  if (!s.has_components) return;
+  const id = s.id, lam = componentsLambda(s);
+  getJSON(`/api/simulation/${id}/components/${lam.toFixed(5)}`).then((c) => {
+    c.lambda = lam;
+    state.components[id] = c;
+    if (id === state.current && componentsLambda(state.summary) === lam) render();
+  }).catch(() => {});
+}
+
+async function loadCurrent() {
+  if (!state.current) { state.summary = null; render(); return; }
+  const id = state.current;
+  const summary = await getJSON(`/api/simulation/${id}`);
+  if (id !== state.current) return;
+  state.summary = summary;
+  render();
+  loadComponents(summary);
+  let pending = summary.status === "waiting" || (summary.progress && !summary.windows.length);
+  if (summary.analysis && (summary.analysis.status === "pending" || summary.analysis.updating)) pending = true;
+  // Depictions are fetched once, then again on the normal refresh until they
+  // succeed, and only one request is in flight at a time.
+  const depiction = state.depictions[id];
+  if (summary.progress && !state.depictionsLoading[id] && (!depiction || depiction.status !== "done")) {
+    if (!depiction) pending = true;
+    state.depictionsLoading[id] = true;
+    getJSON(`/api/simulation/${id}/depictions`).then((d) => {
+      state.depictions[id] = d;
+      if (id === state.current) render();
+    }).catch(() => {}).finally(() => { state.depictionsLoading[id] = false; });
+  }
+  // Check again shortly while a run is starting up or an analysis is running.
+  clearTimeout(state.quickTimer);
+  if (pending) state.quickTimer = setTimeout(loadCurrent, 3000);
+}
+
+function showOffline(message) {
+  let banner = $("#offline");
+  if (!message) { if (banner) banner.remove(); return; }
+  if (!banner) {
+    $("#main").insertAdjacentHTML("afterbegin", `<div id="offline" class="card" style="margin-bottom:12px;color:var(--bad)"></div>`);
+    banner = $("#offline");
+  }
+  banner.textContent = `Couldn't reach the viewer server: ${message}`;
+}
+
+async function refresh() {
+  try {
+    await loadRuns();
+    await loadCurrent();
+    showOffline(null);
+  } catch (e) {
+    showOffline(e.message);
+  }
+}
+
+// Reload the page when the server is restarted or the page changes.
+async function checkVersion() {
+  try {
+    const { version } = await getJSON("/api/version");
+    if (state.version === undefined) state.version = version;
+    else if (version !== state.version && !state.printing) location.reload();
+    showOffline(null);
+  } catch (e) {
+    showOffline(e.message);
+  }
+}
+
+function schedule() {
+  clearInterval(state.timer);
+  const seconds = parseInt($("#interval").value, 10);
+  if (seconds > 0) state.timer = setInterval(refresh, seconds * 1000);
+}
+
+window.addEventListener("hashchange", () => {
+  state.current = location.hash.slice(1);
+  renderNav();
+  loadCurrent();
+});
+$("#interval").addEventListener("change", schedule);
+$("#refresh").addEventListener("click", refresh);
+$("#print").addEventListener("click", () => window.print());
+// Show everything when printing, and don't re-render until it's done.
+window.addEventListener("beforeprint", () => {
+  state.printing = true;
+  document.querySelectorAll("details").forEach((d) => {
+    d.dataset.wasOpen = d.open ? "1" : "";
+    d.open = true;
+  });
+  document.querySelectorAll("#config-table tr").forEach((tr) => { tr.hidden = false; });
+});
+window.addEventListener("afterprint", () => {
+  state.printing = false;
+  document.querySelectorAll("details").forEach((d) => { d.open = d.dataset.wasOpen === "1"; });
+  render();
+});
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => state.summary && renderCharts(state.summary), 150);
+});
+
+checkVersion();
+setInterval(checkVersion, 3000);
+refresh();
+schedule();
+</script>
+</body>
+</html>
