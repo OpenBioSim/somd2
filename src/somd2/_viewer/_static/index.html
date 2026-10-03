@@ -376,7 +376,7 @@ function lineChart(el, opts) {
     if (s.err) {
       const upper = pts.map(([x, y, e]) => `${sx(x)},${sy(y + (e || 0))}`);
       const lower = pts.map(([x, y, e]) => `${sx(x)},${sy(y - (e || 0))}`).reverse();
-      svg += `<polygon points="${upper.concat(lower).join(" ")}" fill="${s.color}" opacity="0.15"/>`;
+      svg += `<polygon points="${upper.concat(lower).join(" ")}" fill="${s.color}" opacity="0.22"/>`;
     }
     let d = "";
     pts.forEach(([x, y], i) => {
@@ -515,7 +515,7 @@ function renderFreeEnergy(s) {
     head += `<div class="stats">${stat("Restraint correction", `${fmt(s.standard_state_correction, 3)} kcal/mol`)}</div>`;
     head += `<div class="note">The standard state correction for the Boresch restraint isn't included in the free energy above.</div>`;
   }
-  html += `<div>${head}<div class="chart" id="pmf-chart" style="margin-top:10px"></div></div>`;
+  html += `<div>${head}<div class="chart" id="pmf-chart" style="margin-top:10px"></div><div class="note">The shaded band is ±1 standard error, and may be too narrow to see when errors are small.</div></div>`;
   html += `<div><h4 style="margin-top:0">Overlap matrix</h4><div class="chart" id="overlap-chart"></div><div class="note">Neighbouring windows with overlap below 0.03 are outlined.</div></div>`;
   const c = a.convergence;
   html += `<div><h4 style="margin-top:0">Convergence</h4>`;
