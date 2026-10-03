@@ -463,11 +463,11 @@ somd2 bound.s3 --lambda-schedule decouple
 
 The ligand must be restrained within the binding site. If no restraints are
 passed, a Boresch restraint is generated automatically for the bound leg, i.e.
-when the system contains both a protein and water. This is done by minimising
-the system, running a short trajectory at lambda = 0, then choosing the anchor
-atoms and force constants from it. The length of this trajectory and the
-frequency at which frames are saved can be controlled with the
-`--restraint-search-time` and `--restraint-search-frequency` options. By
+when the system contains a protein as well as the ligand and water. This is
+done by minimising the system, running a short trajectory at lambda = 0, then
+choosing the anchor atoms and force constants from it. The length of this
+trajectory and the frequency at which frames are saved can be controlled with
+the `--restraint-search-time` and `--restraint-search-frequency` options. By
 default the receptor anchor atoms are chosen from the protein backbone; use
 `--restraint-search-receptor-selection` to pass a `Sire` selection string
 instead.
