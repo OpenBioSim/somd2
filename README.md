@@ -675,10 +675,14 @@ directory instead.
 
 > [!NOTE]
 > The viewer only listens on `127.0.0.1` by default. To view a simulation
-> running on a remote machine, forward the port over SSH, e.g.
-> `ssh -L 8000:localhost:8000 user@remote`, then open
-> `http://127.0.0.1:8000` locally. Over SSH, `--view` doesn't open a browser
-> automatically, so use the address written to the log.
+> running on a remote machine, forward the viewer's port over SSH, e.g.
+> `ssh -N -L 8000:localhost:8000 user@remote`, then open
+> `http://127.0.0.1:8000` locally. Use the port from the address written to
+> the log, since it may not be 8000 if that port was in use. Over SSH, `--view`
+> doesn't open a browser automatically. On a cluster, the simulation usually
+> runs on a compute node that can't be reached this way, so instead run
+> `somd2-view` on the login node, pointing at the output directory, and forward
+> its port.
 
 ## Truncated MBAR analysis
 
@@ -794,4 +798,5 @@ checkpoint.)
 
 PyMBAR uses JAX by default for GPU acceleration, which can cause issues in
 some environments. If you encounter issues when analysing simulation output,
-try setting the `PYMBAR_DISABLE_JAX` environment variable to `1`.
+try setting the `PYMBAR_DISABLE_JAX` environment variable to `1`. The
+[viewer](#viewer) does this automatically.

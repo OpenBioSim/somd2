@@ -156,8 +156,14 @@ def somd2_view():
     SOMD2 viewer: Command line interface.
     """
 
+    import os
     from argparse import SUPPRESS, ArgumentParser
     from sys import exit
+
+    # JAX can segfault, and holds on to the GPU after an MBAR analysis, which
+    # would stop simulations creating contexts on it. Must be set before pymbar
+    # is imported.
+    os.environ.setdefault("PYMBAR_DISABLE_JAX", "1")
 
     from somd2._viewer import find_port, serve
 
