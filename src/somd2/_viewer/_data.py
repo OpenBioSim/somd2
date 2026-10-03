@@ -961,9 +961,18 @@ class Simulation:
             from ..config import Config as _Config
 
             restraints = []
-            sources = [("User-defined", value) for value in serialised]
+            # Auto-generated ring-breaking restraints are also stored in the
+            # config, so these can't be labelled as user-defined.
+            n = len(serialised)
+            sources = [
+                (
+                    "From the configuration" + (f" ({i} of {n})" if n > 1 else ""),
+                    value,
+                )
+                for i, value in enumerate(serialised, start=1)
+            ]
             if auto.exists():
-                sources.append(("Auto-generated", None))
+                sources.append(("Auto-generated ABFE restraint", None))
             for source, value in sources:
                 try:
                     if value is None:
