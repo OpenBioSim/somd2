@@ -104,7 +104,7 @@ Then install `somd2` into the environment:
 pip install -e .
 ```
 
-> [!NOTE]
+> [!IMPORTANT]
 > Pixi does not run conda post-link scripts, so the `ocl-icd-system`
 > symlink needed for OpenCL won't be created automatically. After
 > creating the environment (or after a pixi update), run the following
@@ -249,7 +249,7 @@ can be varied. The most useful of these is `--runtime`, which allows a completed
 simulation to be extended. SOMD2 will tell you which option is at fault if you
 change one that isn't allowed.
 
-> [!NOTE]
+> [!TIP]
 > If the most recent checkpoint files are incomplete or corrupt, for example
 > when recovering from a crash, pass `--use-backup` to restart from the last
 > but one checkpoint instead.
@@ -265,7 +265,7 @@ If the masses of your input system have already been repartitioned, or you want
 to use a different repartitioning scheme, pass `--no-hmr` so that the masses of
 the input system are used as they are.
 
-> [!NOTE]
+> [!CAUTION]
 > A 4 fs timestep is not stable without repartitioning, so if you disable HMR
 > you will need to reduce `--timestep` accordingly, or supply a system that has
 > already been repartitioned.
@@ -374,7 +374,7 @@ related options, run:
 somd2 --help | grep -A2 '  --gcmc'
 ```
 
-> [!NOTE]
+> [!IMPORTANT]
 > GCMC is only supported when using the CUDA or OpenCL platforms.
 
 When using the CUDA platform, make sure that `nvcc` is in your `PATH`. If you
@@ -505,7 +505,7 @@ Unlike the ABFE restraints, these are regenerated on each run rather than being
 cached, since they are derived from the bond parameters alone and are therefore
 identical every time.
 
-> [!NOTE]
+> [!TIP]
 > The defaults are a reasonable starting point, but ring-breaking
 > perturbations are demanding. A non-uniform spacing of lambda values, set with
 > `--lambda-values`, is typically needed to obtain good overlap around the point
@@ -610,7 +610,7 @@ with FileLock("/path/to/output/somd2.lock"):
     ...
 ```
 
-> [!NOTE]
+> [!CAUTION]
 > The `--timeout` option (default: `300 s`) controls how long SOMD2 will
 > wait to re-acquire the lock after your copy completes. If you hold the lock
 > for longer than this, the simulation will raise a `Timeout` error.
@@ -716,7 +716,7 @@ directory instead.
 > every λ value, so directories from simulations that only sampled a subset of
 > windows will show progress but no free energy.
 
-> [!NOTE]
+> [!TIP]
 > The viewer only listens on `127.0.0.1` by default. To view a simulation
 > running on a remote machine, forward the viewer's port over SSH, e.g.
 > `ssh -N -L 8000:localhost:8000 user@remote`, then open
