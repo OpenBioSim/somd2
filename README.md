@@ -30,6 +30,13 @@ simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and [Ope
 - **[Multiple GPUs](#running-somd2-using-one-or-more-gpus)**: lambda windows are
   distributed across the available devices, with optional
   [oversubscription](#gpu-oversubscription).
+- **[Restarts](#restarting)**: simulations are checkpointed and can be
+  continued from their output directory, e.g. after a crash or a job time
+  limit, or to extend an existing simulation.
+- **[PME tuning](#pme-tuning)**: automatic choice of the smallest PME grid that
+  meets the requested accuracy, for faster simulations on CUDA and OpenCL.
+- **[Viewer](#viewer)**: a web page for monitoring simulations as they run and
+  analysing their results.
 
 ## Installation
 
