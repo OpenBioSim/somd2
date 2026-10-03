@@ -626,8 +626,33 @@ function renderConfig(s) {
     html += `<tr data-key="${esc(k)}"><td>${esc(k)}</td><td>${esc(value)}</td></tr>`;
   }
   html += `</table></div>`;
-  if (s.pme) html += `<details><summary>Tuned PME parameters</summary><pre>${esc(Object.entries(s.pme).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join("\n"))}</pre></details>`;
+  if (s.pme) html += `<details><summary>Tuned PME parameters</summary>${renderPME(s.pme)}</details>`;
   return card("Configuration", html);
+}
+
+function scientific(x) {
+  if (typeof x !== "number") return esc(String(x));
+  const [mantissa, exponent] = x.toExponential(2).split("e");
+  return `${mantissa} × 10<sup>${Number(exponent)}</sup>`;
+}
+
+function renderPME(pme) {
+  const rows = [];
+  if (pme.pme_alpha !== undefined) rows.push(["α", `${fmt(pme.pme_alpha, 4)} nm<sup>−1</sup>`]);
+  if (pme.pme_grid) rows.push(["Grid", esc(pme.pme_grid.join(" × "))]);
+  if (pme.pme_error !== undefined) rows.push(["Relative force error", scientific(pme.pme_error)]);
+  if (pme.pme_target_error !== undefined) rows.push(["Target error", scientific(pme.pme_target_error)]);
+  const known = ["pme_alpha", "pme_grid", "pme_error", "pme_target_error"];
+  for (const [k, v] of Object.entries(pme)) {
+    if (!known.includes(k)) rows.push([esc(k), esc(JSON.stringify(v))]);
+  }
+  return `<table>${rows.map(([k, v]) => `<tr><td>${k}</td><td class="num">${v}</td></tr>`).join("")}</table>`;
+}
+
+function renderRestraints(s) {
+  if (!s.restraints || !s.restraints.length) return "";
+  const html = s.restraints.map((r) => `<h4${r === s.restraints[0] ? ' style="margin-top:0"' : ""}>${esc(r.source)}</h4><pre>${esc(r.text)}</pre>`).join("");
+  return card("Restraints", html);
 }
 
 function applyConfigFilter() {
@@ -741,6 +766,7 @@ function render() {
   html += renderComponents(s);
   html += renderSamplers(s);
   html += renderSchedule(s);
+  html += renderRestraints(s);
   html += renderConfig(s);
   html += `</div>`;
   const focused = document.activeElement && document.activeElement.id === "config-filter" ? document.activeElement.selectionStart : null;

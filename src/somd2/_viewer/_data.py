@@ -947,6 +947,37 @@ class Simulation:
 
         return _clean(self._cached(f"components:{path.name}", _stamp(path), load))
 
+    def _restraints(self, config):
+        """
+        Return a text summary of each restraint, from the config and the
+        auto-generated ABFE restraint file.
+        """
+        auto = self.path / "abfe_restraint.s3"
+        serialised = config.get("restraints") or []
+
+        def load():
+            import sire as _sr
+
+            from ..config import Config as _Config
+
+            restraints = []
+            sources = [("User-defined", value) for value in serialised]
+            if auto.exists():
+                sources.append(("Auto-generated", None))
+            for source, value in sources:
+                try:
+                    if value is None:
+                        restraint = _sr.stream.load(str(auto))
+                    else:
+                        restraint = _Config._from_string(value, "restraints")
+                    text = str(restraint)
+                except Exception as e:
+                    text = f"Couldn't read this restraint: {e}"
+                restraints.append({"source": source, "text": text})
+            return restraints
+
+        return self._cached("restraints", (str(serialised), _stamp(auto)), load)
+
     def depictions(self):
         """
         Return depictions of the perturbed molecules at each end state.
@@ -1089,7 +1120,15 @@ class Simulation:
                 "samplers": self._samplers(config, lambda_values, repex_state),
                 "schedule": self._schedule(config, lambda_energy),
                 "pme": pme,
-                "config": {k: _config_value(v) for k, v in sorted(config.items())},
+                "restraints": self._restraints(config),
+                "config": {
+                    k: (
+                        "(see the Restraints section)"
+                        if k == "restraints" and v
+                        else _config_value(v)
+                    )
+                    for k, v in sorted(config.items())
+                },
             }
         )
 
