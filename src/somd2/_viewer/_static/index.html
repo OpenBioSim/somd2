@@ -112,6 +112,11 @@ nav a {
 nav a:hover { background: var(--surface-2); }
 nav a.active { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); }
 nav .name { font-weight: 600; word-break: break-all; }
+nav .nav-group > summary { list-style: none; cursor: pointer; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+nav .nav-group > summary::-webkit-details-marker { display: none; }
+nav .nav-group > summary .name::before { content: "▾"; display: inline-block; width: 1.1em; transition: transform 0.15s; }
+nav .nav-group:not([open]) > summary .name::before { transform: rotate(-90deg); }
+nav .nav-group > a { padding-left: 28px; }
 nav .meta { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; margin-top: 4px; }
 main { flex: 1; min-width: 0; padding: 16px; }
 .title-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; margin-bottom: 4px; }
@@ -243,11 +248,11 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
 <script>
 "use strict";
 
-function loadCollapsed() {
-  try { return new Set(JSON.parse(localStorage.getItem("somd2-viewer-collapsed") || "[]")); } catch (e) { return new Set(); }
+function loadCollapsed(key = "somd2-viewer-collapsed") {
+  try { return new Set(JSON.parse(localStorage.getItem(key) || "[]")); } catch (e) { return new Set(); }
 }
 
-const state = { runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), components: {}, componentsLambda: {}, configFilter: "" };
+const state = { runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "" };
 const PALETTE = ["#2f6fdf", "#e0663b", "#2a9d6f", "#b04fc9", "#c9a227", "#3aa7c9", "#d64f7a", "#7a8699"];
 const LAMBDA = "λ";
 
@@ -442,18 +447,46 @@ function stat(label, value) {
   return `<div class="stat"><div class="label">${esc(label)}</div><div class="value">${value}</div></div>`;
 }
 
+function navLink(r, label) {
+  const pct = r.fraction !== null && r.fraction !== undefined ? Math.round(r.fraction * 100) : 0;
+  const dg = r.free_energy !== null && r.free_energy !== undefined ? `ΔG ${fmt(r.free_energy, 2)} ± ${fmt(r.free_energy_error, 2)}` : "";
+  return `<a href="#${r.id}" class="${r.id === state.current ? "active" : ""}">
+    <div class="name">${esc(label)}</div>
+    <div class="bar" style="margin-top:6px"><span style="width:${pct}%"></span></div>
+    <div class="meta"><span class="status-${r.status}">${esc(r.status)} · ${pct}%</span><span>${dg}</span></div>
+  </a>`;
+}
+
 function renderNav() {
   const nav = $("#nav");
   nav.hidden = state.runs.length < 2;
-  nav.innerHTML = state.runs.map((r) => {
-    const pct = r.fraction !== null && r.fraction !== undefined ? Math.round(r.fraction * 100) : 0;
-    const dg = r.free_energy !== null && r.free_energy !== undefined ? `ΔG ${fmt(r.free_energy, 2)} ± ${fmt(r.free_energy_error, 2)}` : "";
-    return `<a href="#${r.id}" class="${r.id === state.current ? "active" : ""}">
-      <div class="name">${esc(r.name)}</div>
-      <div class="bar" style="margin-top:6px"><span style="width:${pct}%"></span></div>
-      <div class="meta"><span class="status-${r.status}">${esc(r.status)} · ${pct}%</span><span>${dg}</span></div>
-    </a>`;
-  }).join("");
+
+  // Group runs by their parent directory.
+  const groups = new Map();
+  for (const r of state.runs) {
+    const cut = r.name.lastIndexOf("/");
+    const parent = cut < 0 ? "" : r.name.slice(0, cut);
+    if (!groups.has(parent)) groups.set(parent, []);
+    groups.get(parent).push(r);
+  }
+  if (groups.size < 2) {
+    nav.innerHTML = state.runs.map((r) => navLink(r, r.name)).join("");
+    return;
+  }
+
+  let html = "";
+  for (const [parent, runs] of groups) {
+    if (!parent) { html += runs.map((r) => navLink(r, r.name)).join(""); continue; }
+    const counts = {};
+    for (const r of runs) counts[r.status] = (counts[r.status] || 0) + 1;
+    const summary = Object.entries(counts).map(([status, n]) => `<span class="status-${status}">${n} ${esc(status)}</span>`).join(" · ");
+    const open = state.navCollapsed.has(parent) ? "" : " open";
+    html += `<details class="nav-group" data-group="${esc(parent)}"${open}>
+      <summary><div class="name">${esc(parent)}</div><div class="meta"><span>${runs.length} run${runs.length > 1 ? "s" : ""}</span><span>${summary}</span></div></summary>
+      ${runs.map((r) => navLink(r, r.name.slice(parent.length + 1))).join("")}
+    </details>`;
+  }
+  nav.innerHTML = html;
 }
 
 function renderOverview(s) {
@@ -789,11 +822,24 @@ function render() {
 
 // ---------------------------------------------------------------- data flow
 
+// Expand the sidebar group holding a run when it's selected.
+function expandGroupOf(id) {
+  const run = state.runs.find((r) => r.id === id);
+  if (!run) return;
+  const cut = run.name.lastIndexOf("/");
+  if (cut >= 0 && state.navCollapsed.delete(run.name.slice(0, cut))) saveNavCollapsed();
+}
+
+function saveNavCollapsed() {
+  try { localStorage.setItem("somd2-viewer-nav-collapsed", JSON.stringify([...state.navCollapsed])); } catch (err) {}
+}
+
 async function loadRuns() {
   state.runs = await getJSON("/api/simulations");
   if (!state.runs.find((r) => r.id === state.current)) {
     const fromHash = location.hash.slice(1);
     state.current = (state.runs.find((r) => r.id === fromHash) || state.runs[0] || {}).id || null;
+    expandGroupOf(state.current);
   }
   renderNav();
 }
@@ -874,6 +920,7 @@ function schedule() {
 
 window.addEventListener("hashchange", () => {
   state.current = location.hash.slice(1);
+  expandGroupOf(state.current);
   renderNav();
   loadCurrent();
 });
@@ -898,6 +945,16 @@ window.addEventListener("afterprint", () => {
   state.printing = false;
   render();
 });
+// Remember which groups of runs are collapsed in the sidebar.
+$("#nav").addEventListener("toggle", (e) => {
+  const group = e.target.matches && e.target.matches("details.nav-group") ? e.target : null;
+  if (!group) return;
+  const name = group.dataset.group;
+  if (group.open !== state.navCollapsed.has(name)) return;
+  if (group.open) state.navCollapsed.delete(name);
+  else state.navCollapsed.add(name);
+  saveNavCollapsed();
+}, true);
 // Remember which sections are collapsed, and redraw charts in a section that
 // is opened, since they can't be sized while hidden.
 $("#main").addEventListener("toggle", (e) => {
