@@ -23,7 +23,7 @@
 A minimal HTTP server for the SOMD2 viewer.
 """
 
-__all__ = ["serve"]
+__all__ = ["find_port", "serve"]
 
 import json as _json
 import sys as _sys
@@ -95,6 +95,8 @@ class _Handler(_BaseHTTPRequestHandler):
                 # Lets the page reload itself when the server or page changes.
                 mtime = (_static / "index.html").stat().st_mtime_ns
                 self._json({"version": f"{self.server.start_time}-{mtime}"})
+            elif parts == ["api", "status"]:
+                self._json({"somd2_viewer": True, "idle": self.server.orphaned})
             elif parts == ["api", "simulations"]:
                 self._json([sim.overview() for sim in registry.refresh()])
             elif len(parts) in (3, 4, 5) and parts[:2] == ["api", "simulation"]:
@@ -124,6 +126,34 @@ class _Handler(_BaseHTTPRequestHandler):
             traceback.print_exc()
             self._json({"error": str(e)}, status=500)
 
+    def do_POST(self):
+        parts = [p for p in _urlparse(self.path).path.split("/") if p]
+        local = self.client_address[0] in ("127.0.0.1", "::1")
+
+        if parts == ["api", "closed"]:
+            # Sent by a page as it is closed. Not counted as a request, so the
+            # viewer can tell whether any other page is still open.
+            self.server.closed_at = _time.monotonic()
+            self._send(b"", "text/plain", status=204)
+        elif parts == ["api", "shutdown"] and local:
+            # Lets a new viewer take over the port from one whose simulation has
+            # ended. A viewer for a running simulation is never stopped.
+            if not self.server.orphaned:
+                self._json({"stopped": False}, status=409)
+                return
+            self._json({"stopped": True})
+            _threading.Thread(target=self._stop).start()
+        else:
+            self.send_error(404)
+
+    @staticmethod
+    def _stop():
+        import os
+
+        # Give the reply time to be sent before exiting.
+        _time.sleep(0.2)
+        os._exit(0)
+
     def _json(self, obj, status=200):
         self._send(
             _json.dumps(obj, allow_nan=False).encode(), "application/json", status
@@ -141,22 +171,82 @@ class _Handler(_BaseHTTPRequestHandler):
         pass
 
 
-def _watch_parent(server, parent_pid, idle_timeout, interval=2.0):
+def _port_is_free(port):
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        # Match the server, which can bind while closed connections linger.
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
+
+def _take_over(port, timeout=5.0):
     """
-    Once the parent process ends, however it ends, exit after no page has
-    contacted the server for 'idle_timeout' seconds. Open pages poll every few
-    seconds, so the viewer stays up while anyone is watching. An orphaned
-    process is re-parented, so its parent process ID changes.
+    Ask the process on a port to stop if it is a somd2 viewer whose simulation
+    has ended. Returns whether the port is now free.
+    """
+    import urllib.request
+
+    url = f"http://127.0.0.1:{port}/api"
+    try:
+        with urllib.request.urlopen(f"{url}/status", timeout=1) as r:
+            status = _json.load(r)
+        if not (status.get("somd2_viewer") and status.get("idle")):
+            return False
+        request = urllib.request.Request(f"{url}/shutdown", method="POST")
+        urllib.request.urlopen(request, timeout=1).close()
+    except Exception:
+        return False
+
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        if _port_is_free(port):
+            return True
+        _time.sleep(0.1)
+    return False
+
+
+def find_port(start, attempts=100):
+    """
+    Return the first usable port from 'start'. A port held by a somd2 viewer
+    whose simulation has ended is taken over, so that viewers don't pile up.
+    """
+    for port in range(start, start + attempts):
+        if _port_is_free(port) or _take_over(port):
+            return port
+    raise RuntimeError(
+        f"No free port for the viewer in {start}-{start + attempts - 1}."
+    )
+
+
+def _watch_parent(server, parent_pid, idle_timeout, close_grace, interval=2.0):
+    """
+    Once the parent process ends, however it ends, exit when no page is open:
+    either 'close_grace' seconds after the last page reported it was closed,
+    with no requests since, or after 'idle_timeout' seconds without a request,
+    in case a page couldn't report it. An orphaned process is re-parented, so
+    its parent process ID changes.
     """
     import os
 
     def watch():
         while os.getppid() == parent_pid:
             _time.sleep(interval)
+        server.orphaned = True
         ended = _time.monotonic()
-        while _time.monotonic() - max(server.last_request, ended) < idle_timeout:
+        while True:
+            now = _time.monotonic()
+            last = max(server.last_request, ended)
+            closed = server.closed_at
+            if now - last >= idle_timeout or (
+                closed is not None and last < closed and now - closed >= close_grace
+            ):
+                os._exit(0)
             _time.sleep(interval)
-        os._exit(0)
 
     _threading.Thread(target=watch, daemon=True).start()
 
@@ -168,6 +258,7 @@ def serve(
     open_browser=False,
     parent_pid=None,
     idle_timeout=600.0,
+    close_grace=30.0,
 ):
     """
     Serve the viewer for a set of SOMD2 output directories.
@@ -194,15 +285,21 @@ def serve(
     idle_timeout: float
         How long, in seconds, the viewer keeps running after 'parent_pid' has
         ended once no page has contacted it.
+
+    close_grace: float
+        How long, in seconds, the viewer keeps running after 'parent_pid' has
+        ended and the last open page was closed, in case it is reloaded.
     """
     server = _ThreadingHTTPServer((host, port), _Handler)
     server.daemon_threads = True
     server.registry = _Registry(paths)
     server.start_time = _time.time_ns()
     server.last_request = _time.monotonic()
+    server.closed_at = None
+    server.orphaned = False
 
     if parent_pid is not None and _sys.platform != "win32":
-        _watch_parent(server, parent_pid, idle_timeout)
+        _watch_parent(server, parent_pid, idle_timeout, close_grace)
 
     url = f"http://{host}:{server.server_address[1]}"
     print(f"SOMD2 viewer running at {url}", flush=True)

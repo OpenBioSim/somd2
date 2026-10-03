@@ -108,7 +108,9 @@ def somd2():
         import subprocess
         import sys
 
-        port = _free_port(view_port)
+        from somd2._viewer import find_port
+
+        port = find_port(view_port)
         command = [
             sys.executable,
             "-m",
@@ -133,8 +135,8 @@ def somd2():
         # The URL is logged here, so the viewer's own output isn't needed.
         viewer = subprocess.Popen(command, stdout=subprocess.DEVNULL)
         _logger.info(
-            f"Viewer running at http://127.0.0.1:{port}. It stops 10 minutes "
-            "after the simulation ends and no page is open."
+            f"Viewer running at http://127.0.0.1:{port}. Once the simulation "
+            "ends, it stops shortly after no page is open."
         )
 
     # Run the simulation. The viewer stops itself once it is no longer needed,
@@ -149,33 +151,15 @@ def somd2():
             viewer.terminate()
 
 
-def _free_port(start, attempts=100):
-    """
-    Return the first port from 'start' that is free on the loopback address,
-    so that simultaneous simulations each get their own viewer.
-    """
-    import socket
-
-    for port in range(start, start + attempts):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            try:
-                s.bind(("127.0.0.1", port))
-                return port
-            except OSError:
-                continue
-    raise RuntimeError(
-        f"No free port for the viewer in {start}-{start + attempts - 1}."
-    )
-
-
 def somd2_view():
     """
     SOMD2 viewer: Command line interface.
     """
 
     from argparse import SUPPRESS, ArgumentParser
+    from sys import exit
 
-    from somd2._viewer import serve
+    from somd2._viewer import find_port, serve
 
     parser = ArgumentParser(
         prog="somd2-view",
@@ -197,7 +181,7 @@ def somd2_view():
         "--port",
         type=int,
         default=8000,
-        help="The port to listen on.",
+        help="The port to listen on. If it is in use, the next free port is used.",
     )
     parser.add_argument(
         "--open",
@@ -208,10 +192,15 @@ def somd2_view():
     parser.add_argument("--parent-pid", type=int, default=None, help=SUPPRESS)
     args = parser.parse_args()
 
-    serve(
-        args.paths,
-        host=args.host,
-        port=args.port,
-        open_browser=args.open,
-        parent_pid=args.parent_pid,
-    )
+    try:
+        # 'somd2 --view' has already chosen the port.
+        port = args.port if args.parent_pid is not None else find_port(args.port)
+        serve(
+            args.paths,
+            host=args.host,
+            port=port,
+            open_browser=args.open,
+            parent_pid=args.parent_pid,
+        )
+    except (OSError, RuntimeError, ValueError) as e:
+        exit(f"somd2-view: {e}")

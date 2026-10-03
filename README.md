@@ -653,10 +653,12 @@ somd2 perturbable_system.bss --view
 The viewer runs in a separate process. Its address is written to the log, and
 it is opened in a browser automatically when a display is available. Once the
 simulation ends, the viewer keeps running while a page is open, so the final
-results can still be viewed, then stops 10 minutes after the last page is
-closed. On a cluster, the viewer stops when the job ends. The viewer uses port
-8000 by default, which can be changed with `--view-port`. If the port is in use,
-e.g. by another simulation on the same machine, the next free port is used.
+results can still be viewed, then stops shortly after the last page is closed.
+On a cluster, the viewer stops when the job ends. The viewer uses port 8000 by
+default, which can be changed with `--view-port`. If the port is in use by the
+viewer of a simulation that has ended, that viewer is replaced. Otherwise, e.g.
+if another simulation on the same machine is still running, the next free port
+is used.
 To monitor several simulations on one page, run `somd2-view` on their parent
 directory instead.
 
