@@ -639,19 +639,25 @@ starts writing output.
 
 The viewer shows:
 
-- Progress, simulation speed, and an estimate of the time remaining, along with any
-  recent warnings or errors from the log file.
-- Depictions of the perturbed molecules at each end state, highlighting the
-  atoms that are unique to each end state, or that change type.
-- The MBAR free energy, PMF, and overlap matrix. These are updated in the
-  background as new data is written.
+- Progress, simulation speed, and an estimate of the time remaining, along with
+  any recent warnings or errors from the log file.
+- Depictions of the perturbed molecules at each end state, in the style of
+  BioSimSpace's `viewMapping`, highlighting the atoms that are unique to each end
+  state, i.e. ghosts at the other, or that change element.
+- The MBAR free energy, PMF, overlap matrix, and forward and backward
+  convergence. These are updated in the background as new data is written. For
+  ABFE simulations, the standard state correction for the Boresch restraint is
+  also shown.
 - Replica exchange statistics, i.e. the transition matrix, neighbour swap
   acceptance, replica state trajectories, and round trips.
 - Energy components as a function of time for each λ window. These are
   written at each checkpoint, or at every energy sample when using
   `--save-energy-components`.
 - GCMC and terminal flip Monte Carlo statistics, if active.
-- The λ schedule, REST2 scale factors, and configuration options.
+- Any restraints, e.g. a Boresch restraint for an ABFE simulation, or Morse
+  restraints for a ring-breaking perturbation.
+- The λ schedule, REST2 scale factors, configuration options, and tuned PME
+  parameters.
 
 The page refreshes automatically, with the interval set in the header.
 Sections can be collapsed by clicking their heading.
