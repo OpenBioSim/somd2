@@ -57,6 +57,13 @@ Or, for the development version:
 conda install -c conda-forge -c openbiosim/label/dev somd2
 ```
 
+> [!NOTE]
+> The README on the [`devel`](https://github.com/OpenBioSim/somd2/tree/devel)
+> branch describes the development version, so during a development cycle it
+> may mention features that aren't yet in the latest release. The README on the
+> [`main`](https://github.com/OpenBioSim/somd2/tree/main) branch matches the
+> latest release.
+
 <a id="installing-from-source-standalone"></a>
 ### 🛠️ Installing from source (standalone)
 
