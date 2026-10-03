@@ -642,6 +642,12 @@ The viewer shows:
 - The λ schedule, REST2 scale factors, and configuration options.
 
 The page refreshes automatically, with the interval set in the header.
+Sections can be collapsed by clicking their heading.
+
+Use the "Save as PDF" button to create a report of a simulation, e.g. to attach
+to a GitHub issue alongside the input needed to reproduce a problem. Collapsed
+sections are left out of the PDF, so sensitive content, such as the structures
+of proprietary molecules, can be hidden before saving.
 
 To launch the viewer alongside a simulation, pass the `--view` option to
 `somd2`:
