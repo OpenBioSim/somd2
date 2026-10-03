@@ -625,6 +625,11 @@ containing several output directories, e.g. the bound and free legs of a
 perturbation, in which case all of them will be listed. Use `--port` to choose
 a different port and `--open` to open a browser automatically.
 
+New output directories are picked up while the viewer is running, so a whole
+campaign can be monitored by pointing the viewer at a single parent directory,
+even an empty one, before any jobs have started. Each simulation appears once it
+starts writing output.
+
 The viewer shows:
 
 - Progress, simulation speed, and an estimate of the time remaining, along with any
