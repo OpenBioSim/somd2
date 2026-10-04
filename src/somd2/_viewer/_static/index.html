@@ -831,11 +831,30 @@ function renderSummaryPage() {
     html += card("Binding free energies", table);
   }
 
+  if (d.hydration && d.hydration.length) {
+    let table = `<div class="table-wrap"><table><tr><th>System</th><th class="num">ΔG<sub>hyd</sub> (kcal/mol)</th><th>Free leg</th><th>Vacuum leg</th><th>Problems</th></tr>`;
+    for (const h of d.hydration) {
+      const f = byId.get(h.free), v = h.vacuum ? byId.get(h.vacuum) : null;
+      const problems = [...f.problems.map((p) => `free: ${p}`), ...(v ? v.problems.map((p) => `vacuum: ${p}`) : [])];
+      table += `<tr><td>${esc(h.name)}</td>
+        <td class="num">${h.value !== null ? valueWithError(h.value, h.error) : `<span class="muted" title="${esc(h.note || "")}">–</span>`}</td>
+        <td>${esc(h.free_name)}<div class="muted">${repeats(f)}</div></td>
+        <td>${v ? `${esc(h.vacuum_name)}<div class="muted">${repeats(v)}</div>` : `<span class="muted">not needed (decouple)</span>`}</td>
+        <td class="problems">${problems.map(esc).join("<br>")}${h.note ? `<div>${esc(h.note)}</div>` : ""}</td></tr>`;
+    }
+    table += `</table></div>`;
+    table += `<ul class="note formulas">
+      <li>Decouple: ΔG<sub>hyd</sub> = −ΔG<sub>free</sub></li>
+      <li>Annihilate: ΔG<sub>hyd</sub> = ΔG<sub>vacuum</sub> − ΔG<sub>free</sub></li>
+    </ul>`;
+    html += card("Hydration free energies", table);
+  }
+
   let table = `<div class="table-wrap"><table><tr><th>Simulation</th><th>Repeats</th><th class="num">ΔG (kcal/mol)</th><th>Problems</th><th>Runs</th></tr>`;
   for (const s of d.simulations) {
     const runs = s.runs.map((r) => `<a href="#${r.id}" class="status-${r.status}" title="${esc(r.name)}: ${esc(r.status)}">${esc(r.name.slice(r.name.lastIndexOf("/") + 1))}</a>`).join("");
     const open = s.runs.length > 1 ? "Open the first repeat" : "Open this run";
-    table += `<tr><td><a class="sim-link" href="#${s.runs[0].id}" title="${open}">${esc(s.name)}</a><div class="muted">${s.bound ? "bound" : "free"}${s.absolute ? " · absolute" : ""}</div></td>
+    table += `<tr><td><a class="sim-link" href="#${s.runs[0].id}" title="${open}">${esc(s.name)}</a><div class="muted">${esc(s.leg)}${s.absolute ? ` · ${esc(s.schedule)}` : ""}</div></td>
       <td>${repeats(s)}${s.num_analysed < s.runs.length ? `<div class="muted">${s.num_analysed} analysed</div>` : ""}</td>
       <td class="num">${valueWithError(s.free_energy, s.free_energy_error)}</td>
       <td class="problems">${s.problems.map(esc).join("<br>")}</td>

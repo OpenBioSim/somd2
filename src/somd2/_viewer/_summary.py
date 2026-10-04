@@ -120,7 +120,10 @@ def _fingerprint(topology0, topology1):
     return {
         "system": _hash(pairs),
         "perturbation": _hash(perturbed) if perturbed else None,
-        "bound": large > 1,
+        # The leg, as named in SOMD1: a protein, water only, or neither.
+        "leg": (
+            "bound" if large > 1 else "free" if len(indices) < len(mols0) else "vacuum"
+        ),
     }
 
 
@@ -145,6 +148,10 @@ def leg_settings_key(config, ignore):
     that are often set per leg, such as restraints and the λ windows, and GCMC,
     which is only used for the bound leg.
     """
+    return settings_key(config, _leg_specific(config) | set(ignore))
+
+
+def _leg_specific(config):
     per_leg = {
         "restraints",
         "num_lambda",
@@ -153,12 +160,30 @@ def leg_settings_key(config, ignore):
         "num_energy_neighbours",
         "null_energy",
     }
-    leg_specific = {
+    return {
         k
         for k in config
         if k in per_leg or k.startswith("restraint_search") or k.startswith("gcmc")
     }
-    return settings_key(config, set(ignore) | leg_specific)
+
+
+def vacuum_settings_keys(config, ignore):
+    """
+    Return keys for the settings that must match between the free and vacuum
+    legs of a hydration free energy, i.e. as for bound and free legs, but also
+    ignoring pressure, which isn't applied without water. The second key also
+    ignores the cutoff and PME options, which are disabled for a vacuum leg run
+    without a periodic box.
+    """
+    barostat = {"pressure", "barostat_frequency", "surface_tension"}
+    cutoff = {
+        k
+        for k in config
+        if k in ("cutoff", "cutoff_type", "tune_pme", "use_dispersion_correction")
+        or k.startswith("pme_")
+    }
+    base = _leg_specific(config) | set(ignore) | barostat
+    return settings_key(config, base), settings_key(config, base | cutoff)
 
 
 def _common_name(names):
@@ -282,10 +307,13 @@ def build_summary(entries):
                 "id": "|".join(key),
                 "name": _common_name([r["name"] for r in runs]),
                 "perturbation": first["perturbation"],
-                "bound": first["bound"],
+                "leg": first["leg"],
                 "absolute": runs[0]["absolute"],
                 "auto_restraint": all(r.get("auto_restraint") for r in runs),
                 "leg_settings": runs[0]["leg_settings"],
+                "vacuum_settings": runs[0]["vacuum_settings"],
+                "schedule": runs[0]["schedule"],
+                "cutoff_type": runs[0]["cutoff_type"],
                 "runs": [
                     {
                         k: r.get(k)
@@ -321,22 +349,90 @@ def build_summary(entries):
     legs = []
     unpaired = 0
     for sims in candidates.values():
-        bound = [s for s in sims if s["bound"]]
-        free = [s for s in sims if not s["bound"]]
+        bound = [s for s in sims if s["leg"] == "bound"]
+        free = [s for s in sims if s["leg"] == "free"]
         if len(free) == 1:
             legs.extend(_leg(b, free[0]) for b in bound)
         elif bound and free:
             unpaired += len(sims)
     legs.sort(key=lambda leg: leg["name"])
 
+    hydration = _hydration(simulations)
+
     return {
-        "available": bool(legs) or any(len(s["runs"]) > 1 for s in simulations),
+        "available": bool(legs)
+        or bool(hydration)
+        or any(len(s["runs"]) > 1 for s in simulations),
         "pending": pending,
         "updating": any(e.get("updating") for e in entries),
         "simulations": simulations,
         "legs": legs,
+        "hydration": hydration,
         "ambiguous": unpaired,
     }
+
+
+def _vacuum_match(free, vacuum):
+    """
+    Whether a vacuum leg was run with the same settings as a free leg. The
+    cutoff only has to match if the vacuum leg was run in a periodic box,
+    since it is otherwise disabled.
+    """
+    index = 1 if vacuum["cutoff_type"] == "none" else 0
+    return free["vacuum_settings"][index] == vacuum["vacuum_settings"][index]
+
+
+def _hydration(simulations):
+    """
+    Absolute hydration free energies from free legs, which need a vacuum leg
+    unless the decouple schedule was used.
+    """
+    results = []
+    vacuum = [s for s in simulations if s["leg"] == "vacuum" and s["perturbation"]]
+    for f in simulations:
+        if f["leg"] != "free" or not f["absolute"]:
+            continue
+        result = {
+            "name": f["name"],
+            "free": f["id"],
+            "free_name": f["name"],
+            "vacuum": None,
+            "vacuum_name": None,
+            "value": None,
+            "error": None,
+            "note": None,
+        }
+        if f["schedule"] == "decouple":
+            # ΔG_hyd = −ΔG_free
+            if f["free_energy"] is not None:
+                result["value"] = -f["free_energy"]
+                result["error"] = f["free_energy_error"]
+        else:
+            matches = [
+                v
+                for v in vacuum
+                if v["perturbation"] == f["perturbation"] and _vacuum_match(f, v)
+            ]
+            # Without a vacuum leg, e.g. for an ABFE campaign, it isn't a
+            # hydration free energy calculation.
+            if not matches:
+                continue
+            if len(matches) > 1:
+                result["note"] = "More than one vacuum leg has matching settings."
+            else:
+                v = matches[0]
+                result["vacuum"] = v["id"]
+                result["vacuum_name"] = v["name"]
+                result["name"] = _common_name([f["name"], v["name"]])
+                # ΔG_hyd = ΔG_vacuum − ΔG_free
+                if f["free_energy"] is not None and v["free_energy"] is not None:
+                    result["value"] = v["free_energy"] - f["free_energy"]
+                    result["error"] = _math.hypot(
+                        v["free_energy_error"], f["free_energy_error"]
+                    )
+        results.append(result)
+    results.sort(key=lambda r: r["name"])
+    return results
 
 
 def _leg(b, f):

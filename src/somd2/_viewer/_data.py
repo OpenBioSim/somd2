@@ -1168,7 +1168,7 @@ class Simulation:
         background analysis if its results are out of date.
         """
         from ..config import Config as _Config
-        from ._summary import leg_settings_key, settings_key
+        from ._summary import leg_settings_key, settings_key, vacuum_settings_keys
 
         try:
             config = self.config()
@@ -1208,6 +1208,11 @@ class Simulation:
                     "leg_settings": leg_settings_key(
                         config, _Config._restart_allowed_diffs
                     ),
+                    "vacuum_settings": vacuum_settings_keys(
+                        config, _Config._restart_allowed_diffs
+                    ),
+                    "schedule": schedule,
+                    "cutoff_type": str(config.get("cutoff_type") or "").lower(),
                     "fingerprint": fingerprint,
                     # Only runs whose fingerprint is being computed are pending.
                     "fingerprint_pending": fingerprint is None and has_topologies,
