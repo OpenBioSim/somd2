@@ -92,6 +92,36 @@ class Config:
         "restraints": "+",
     }
 
+    # Options that are allowed to change when a simulation is restarted.
+    _restart_allowed_diffs = frozenset(
+        [
+            "runtime",
+            "restart",
+            "minimise",
+            "equilibration_time",
+            "equilibration_timestep",
+            "equilibration_constraints",
+            "energy_frequency",
+            "frame_frequency",
+            "save_velocities",
+            "perturbed_system",
+            "platform",
+            "max_threads",
+            "max_gpus",
+            "use_backup",
+            "save_trajectories",
+            "write_config",
+            "log_level",
+            "log_file",
+            "overwrite",
+            "timeout",
+            "oversubscription_factor",
+            "max_contexts",
+            "restraint_search_time",
+            "restraint_search_frequency",
+        ]
+    )
+
     def __init__(
         self,
         log_level="info",

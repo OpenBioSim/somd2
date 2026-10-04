@@ -80,6 +80,7 @@ header {
   z-index: 2;
 }
 header h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: 0.01em; }
+#viewing { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 header .spacer { flex: 1; }
 header select, header button, input[type="search"] {
   font: inherit;
@@ -117,6 +118,16 @@ nav .nav-group > summary::-webkit-details-marker { display: none; }
 nav .nav-group > summary .name::before { content: "▾"; display: inline-block; width: 1.1em; transition: transform 0.15s; }
 nav .nav-group:not([open]) > summary .name::before { transform: rotate(-90deg); }
 nav .nav-group > a { padding-left: 28px; }
+nav .summary-link .name::before { content: "★"; color: var(--accent); margin-right: 6px; }
+.summary-header { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; }
+.summary-header img { height: 64px; width: auto; }
+.summary-header h2 { margin: 0; font-size: 20px; }
+.problems { color: var(--warn); font-size: 12px; }
+.formulas { margin: 8px 0 0; padding-left: 18px; }
+.formulas li { margin: 2px 0; }
+.sim-link { color: inherit; font-weight: 600; text-decoration: none; }
+.sim-link:hover { text-decoration: underline; }
+.run-links a { display: inline-block; margin-right: 8px; font-size: 12px; text-decoration: none; }
 nav .meta { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; margin-top: 4px; }
 main { flex: 1; min-width: 0; padding: 16px; }
 .title-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; margin-bottom: 4px; }
@@ -230,6 +241,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
 <body>
 <header>
   <h1>SOMD2 Viewer</h1>
+  <span id="viewing" class="muted"></span>
   <span class="spacer"></span>
   <label class="muted" for="interval" title="How often everything is reloaded. While a run is starting, or an analysis or depiction is in progress, the page also checks every few seconds.">Refresh</label>
   <select id="interval" title="How often everything is reloaded. While a run is starting, or an analysis or depiction is in progress, the page also checks every few seconds.">
@@ -252,7 +264,7 @@ function loadCollapsed(key = "somd2-viewer-collapsed") {
   try { return new Set(JSON.parse(localStorage.getItem(key) || "[]")); } catch (e) { return new Set(); }
 }
 
-const state = { runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "" };
+const state = { view: location.hash === "#summary" ? "summary" : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "" };
 const PALETTE = ["#2f6fdf", "#e0663b", "#2a9d6f", "#b04fc9", "#c9a227", "#3aa7c9", "#d64f7a", "#7a8699"];
 const LAMBDA = "λ";
 
@@ -450,7 +462,7 @@ function stat(label, value) {
 function navLink(r, label) {
   const pct = r.fraction !== null && r.fraction !== undefined ? Math.round(r.fraction * 100) : 0;
   const dg = r.free_energy !== null && r.free_energy !== undefined ? `ΔG ${fmt(r.free_energy, 2)} ± ${fmt(r.free_energy_error, 2)}` : "";
-  return `<a href="#${r.id}" class="${r.id === state.current ? "active" : ""}">
+  return `<a href="#${r.id}" class="${state.view === "run" && r.id === state.current ? "active" : ""}">
     <div class="name">${esc(label)}</div>
     <div class="bar" style="margin-top:6px"><span style="width:${pct}%"></span></div>
     <div class="meta"><span class="status-${r.status}">${esc(r.status)} · ${pct}%</span><span>${dg}</span></div>
@@ -460,6 +472,9 @@ function navLink(r, label) {
 function renderNav() {
   const nav = $("#nav");
   nav.hidden = state.runs.length < 2;
+  const summaryLink = state.summaryAvailable
+    ? `<a href="#summary" class="summary-link${state.view === "summary" ? " active" : ""}"><div class="name">Summary</div><div class="meta"><span>Results across all runs</span></div></a>`
+    : "";
 
   // Group runs by their parent directory.
   const groups = new Map();
@@ -470,11 +485,11 @@ function renderNav() {
     groups.get(parent).push(r);
   }
   if (groups.size < 2) {
-    nav.innerHTML = state.runs.map((r) => navLink(r, r.name)).join("");
+    nav.innerHTML = summaryLink + state.runs.map((r) => navLink(r, r.name)).join("");
     return;
   }
 
-  let html = "";
+  let html = summaryLink;
   for (const [parent, runs] of groups) {
     if (!parent) { html += runs.map((r) => navLink(r, r.name)).join(""); continue; }
     const counts = {};
@@ -776,8 +791,70 @@ function renderCharts(s) {
   }
 }
 
+function valueWithError(value, error) {
+  if (value === null || value === undefined) return "–";
+  return `${fmt(value, 2)} ± ${fmt(error, 2)}`;
+}
+
+function renderSummaryPage() {
+  const d = state.summaryData;
+  const main = $("#main");
+  let html = `<div class="summary-header"><img src="/logo.png" alt="SOMD2"><div><h2>Summary</h2>`;
+  if (d) {
+    const runs = d.simulations.reduce((n, s) => n + s.runs.length, 0);
+    html += `<div class="muted">${d.simulations.length} simulation${d.simulations.length === 1 ? "" : "s"} from ${runs} run${runs === 1 ? "" : "s"}${d.updating ? " · updating…" : ""}</div>`;
+  }
+  html += `</div></div>`;
+  if (!d) { main.innerHTML = html + `<div class="empty">Loading…</div>`; return; }
+
+  const byId = new Map(d.simulations.map((s) => [s.id, s]));
+  const repeats = (s) => `${s.num_finished} of ${s.runs.length} finished`;
+  html += `<div class="sections">`;
+
+  if (d.legs.length) {
+    let table = `<div class="table-wrap"><table><tr><th>System</th><th></th><th class="num">kcal/mol</th><th>Bound leg</th><th>Free leg</th><th>Problems</th></tr>`;
+    for (const leg of d.legs) {
+      const b = byId.get(leg.bound), f = byId.get(leg.free);
+      const problems = [...b.problems.map((p) => `bound: ${p}`), ...f.problems.map((p) => `free: ${p}`)];
+      table += `<tr><td>${esc(leg.name)}</td><td>${esc(leg.quantity)}</td>
+        <td class="num">${leg.value !== null ? valueWithError(leg.value, leg.error) : `<span class="muted" title="${esc(leg.note || "")}">–</span>`}</td>
+        <td>${esc(leg.bound_name)}<div class="muted">${repeats(b)}</div></td>
+        <td>${esc(leg.free_name)}<div class="muted">${repeats(f)}</div></td>
+        <td class="problems">${problems.map(esc).join("<br>") || ""}</td></tr>`;
+    }
+    table += `</table></div>`;
+    table += `<ul class="note formulas">
+      <li>Relative: ΔΔG = ΔG<sub>bound</sub> − ΔG<sub>free</sub></li>
+      <li>Absolute: ΔG<sub>bind</sub> = ΔG<sub>free</sub> − ΔG<sub>bound</sub> − ΔG<sub>correction</sub>, for an automatically generated Boresch restraint</li>
+      <li>Errors: standard error over repeats, or the MBAR error for a single run, combined in quadrature</li>
+    </ul>`;
+    html += card("Binding free energies", table);
+  }
+
+  let table = `<div class="table-wrap"><table><tr><th>Simulation</th><th>Repeats</th><th class="num">ΔG (kcal/mol)</th><th>Problems</th><th>Runs</th></tr>`;
+  for (const s of d.simulations) {
+    const runs = s.runs.map((r) => `<a href="#${r.id}" class="status-${r.status}" title="${esc(r.name)}: ${esc(r.status)}">${esc(r.name.slice(r.name.lastIndexOf("/") + 1))}</a>`).join("");
+    const open = s.runs.length > 1 ? "Open the first repeat" : "Open this run";
+    table += `<tr><td><a class="sim-link" href="#${s.runs[0].id}" title="${open}">${esc(s.name)}</a><div class="muted">${s.bound ? "bound" : "free"}${s.absolute ? " · absolute" : ""}</div></td>
+      <td>${repeats(s)}${s.num_analysed < s.runs.length ? `<div class="muted">${s.num_analysed} analysed</div>` : ""}</td>
+      <td class="num">${valueWithError(s.free_energy, s.free_energy_error)}</td>
+      <td class="problems">${s.problems.map(esc).join("<br>")}</td>
+      <td class="run-links">${runs}</td></tr>`;
+  }
+  table += `</table></div>`;
+  html += card("Simulations", table);
+
+  const notes = [];
+  if (d.pending) notes.push(`Identifying ${d.pending} run${d.pending === 1 ? "" : "s"}…`);
+  if (d.ambiguous) notes.push(`${d.ambiguous} legs couldn't be paired, since more than one bound or free leg has matching settings.`);
+  if (notes.length) html += `<div class="note">${notes.map(esc).join(" ")}</div>`;
+  html += `</div>`;
+  main.innerHTML = html;
+}
+
 function render() {
   if (state.printing) return;
+  if (state.view === "summary") { renderSummaryPage(); return; }
   const s = state.summary;
   const main = $("#main");
   if (!s) { main.innerHTML = `<div class="empty">No SOMD2 output found.</div>`; return; }
@@ -836,6 +913,8 @@ function saveNavCollapsed() {
 
 async function loadRuns() {
   state.runs = await getJSON("/api/simulations");
+  // The summary page reports this itself when it loads.
+  if (state.view !== "summary") await checkSummary();
   if (!state.runs.find((r) => r.id === state.current)) {
     const fromHash = location.hash.slice(1);
     state.current = (state.runs.find((r) => r.id === fromHash) || state.runs[0] || {}).id || null;
@@ -854,7 +933,33 @@ function loadComponents(s) {
   }).catch(() => {});
 }
 
+// Check whether there is a summary, without analysing every run. While runs
+// are still being identified, check again shortly.
+async function checkSummary() {
+  clearTimeout(state.summaryTimer);
+  if (state.runs.length < 2) { state.summaryAvailable = false; return; }
+  try {
+    const data = await getJSON("/api/summary");
+    const changed = data.available !== state.summaryAvailable;
+    state.summaryAvailable = data.available;
+    if (changed) renderNav();
+    if (data.pending) state.summaryTimer = setTimeout(checkSummary, 3000);
+  } catch (e) {}
+}
+
+async function loadSummary() {
+  const data = await getJSON("/api/summary?analyse=1");
+  if (state.view !== "summary") return;
+  state.summaryData = data;
+  state.summaryAvailable = data.available;
+  renderNav();
+  render();
+  clearTimeout(state.quickTimer);
+  if (data.pending || data.updating) state.quickTimer = setTimeout(loadCurrent, 3000);
+}
+
 async function loadCurrent() {
+  if (state.view === "summary") return loadSummary();
   if (!state.current) { state.summary = null; render(); return; }
   const id = state.current;
   const summary = await getJSON(`/api/simulation/${id}`);
@@ -919,9 +1024,17 @@ function schedule() {
 }
 
 window.addEventListener("hashchange", () => {
-  state.current = location.hash.slice(1);
-  expandGroupOf(state.current);
+  const target = location.hash.slice(1);
+  if (target === "summary") {
+    state.view = "summary";
+  } else {
+    state.view = "run";
+    state.current = target;
+    expandGroupOf(state.current);
+  }
   renderNav();
+  const active = $("#nav a.active");
+  if (active) active.scrollIntoView({ block: "nearest" });
   loadCurrent();
 });
 $("#interval").addEventListener("change", schedule);
@@ -973,6 +1086,14 @@ window.addEventListener("resize", () => {
   resizeTimer = setTimeout(() => state.summary && renderCharts(state.summary), 150);
 });
 
+// Show which directories this viewer is serving, with the full paths on hover.
+getJSON("/api/paths").then((paths) => {
+  const names = paths.map((p) => p.split("/").filter(Boolean).pop() || p);
+  const shown = names.length > 3 ? `${names.slice(0, 2).join(", ")} + ${names.length - 2} more` : names.join(", ");
+  const el = $("#viewing");
+  el.textContent = `Viewing: ${shown}`;
+  el.title = paths.join("\n");
+}).catch(() => {});
 checkVersion();
 setInterval(checkVersion, 3000);
 refresh();

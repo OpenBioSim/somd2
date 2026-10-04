@@ -699,6 +699,17 @@ to a GitHub issue alongside the input needed to reproduce a problem. Collapsed
 sections are left out of the PDF, so sensitive content, such as the structures
 of proprietary molecules, can be hidden before saving.
 
+When the viewer finds related simulations, a summary page is added to the top
+of the list of runs. Repeats of the same simulation are grouped, using the
+end-state topologies and the options that can't change on restart, and their
+free energies averaged, with a standard error. The bound and free legs of the
+same perturbation are paired to give the relative binding free energy, or the
+absolute binding free energy when the bound leg's Boresch restraint was
+generated automatically. Potential problems are highlighted for each
+simulation, e.g. stopped runs, poor overlap or replica mixing, or repeats that
+disagree, so problematic edges can be spotted early in a campaign. Results are
+updated in the background while the summary page is open.
+
 To launch the viewer alongside a simulation, pass the `--view` option to
 `somd2`:
 

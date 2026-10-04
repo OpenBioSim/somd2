@@ -42,6 +42,48 @@ import numpy as _np
 # Serialise the free-energy analyses, since each can use a lot of memory.
 _analysis_lock = _threading.Lock()
 
+# Concurrent Sire loads segfault, so all loading of files or serialised Sire
+# objects goes through this.
+sire_lock = _threading.RLock()
+
+# Priorities for background jobs. Lower values run first.
+_PRIORITY_SELECTED = 0
+_PRIORITY_FINGERPRINT = 1
+_PRIORITY_SUMMARY = 2
+
+
+class _Worker:
+    """
+    Run background jobs one at a time, in order of priority.
+    """
+
+    def __init__(self):
+        import itertools
+        import queue
+
+        self._queue = queue.PriorityQueue()
+        self._order = itertools.count()
+        self._thread = None
+        self._lock = _threading.Lock()
+
+    def submit(self, priority, job):
+        with self._lock:
+            if self._thread is None:
+                self._thread = _threading.Thread(target=self._run, daemon=True)
+                self._thread.start()
+        self._queue.put((priority, next(self._order), job))
+
+    def _run(self):
+        while True:
+            _, _, job = self._queue.get()
+            try:
+                job()
+            except Exception:
+                pass
+
+
+_worker = _Worker()
+
 _line_re = _re.compile(
     r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \| (\w+)\s*\| \S+ - (.*)$"
 )
@@ -300,6 +342,9 @@ class Simulation:
         self._analysis = None
         self._analysis_stamp = None
         self._analysis_running = False
+        self._queued = None
+        self._fingerprint = None
+        self._fingerprint_queued = False
         self._convergence_result = None
         self._convergence_stamp = None
         self._convergence_time = 0.0
@@ -508,25 +553,22 @@ class Simulation:
             "energy can't be estimated from it on its own."
         )
 
+    def _energy_stamp(self):
+        return _stamp(*sorted(self.path.glob("energy_traj_*.parquet")))
+
     def analysis(self, analysable, reason, start=True):
         """
-        Return the most recent MBAR analysis. If 'start' is True, a new one is
-        started in the background if the energy data has changed.
+        Return the most recent MBAR analysis. If 'start' is True, a new one,
+        with a convergence analysis, is queued ahead of any summary analyses if
+        the energy data has changed.
         """
         if not analysable:
             return {"status": "unavailable", "reason": reason}
 
-        stamp = _stamp(*sorted(self.path.glob("energy_traj_*.parquet")))
+        stamp = self._energy_stamp()
+        if start and (stamp != self._analysis_stamp or self._convergence_due(stamp)):
+            self._queue_analysis(_PRIORITY_SELECTED, convergence=True)
         with self._lock:
-            if (
-                start
-                and not self._analysis_running
-                and (stamp != self._analysis_stamp or self._convergence_due(stamp))
-            ):
-                self._analysis_running = True
-                _threading.Thread(
-                    target=self._run_analysis, args=(stamp,), daemon=True
-                ).start()
             result = dict(self._analysis or {"status": "pending"})
             result["updating"] = self._analysis_running
             if result["status"] == "done":
@@ -545,12 +587,65 @@ class Simulation:
             and _time.time() - self._convergence_time >= self._convergence_interval
         )
 
-    def _run_analysis(self, stamp):
+    def summary_analysis(self, analysable, reason, interval):
+        """
+        Return the most recent MBAR analysis, queueing a new one behind any for
+        the selected run if the energy data has changed and the last analysis
+        is more than 'interval' seconds old. Nothing is queued if 'interval' is
+        None.
+        """
+        if not analysable:
+            return {"status": "unavailable", "reason": reason}
+
+        stamp = self._energy_stamp()
+        with self._lock:
+            due = (
+                interval is not None
+                and stamp != self._analysis_stamp
+                and (
+                    self._analysis is None
+                    or _time.time() - self._analysis.get("time", 0) >= interval
+                )
+            )
+        if due:
+            self._queue_analysis(_PRIORITY_SUMMARY, convergence=False)
+        with self._lock:
+            result = dict(self._analysis or {"status": "pending"})
+            result["updating"] = self._analysis_running
+            return result
+
+    def _queue_analysis(self, priority, convergence):
+        """
+        Queue an analysis, unless one is already queued at the same or a higher
+        priority. A queued job superseded by a higher priority one is skipped.
+        """
+        with self._lock:
+            if self._queued is not None and self._queued <= priority:
+                return
+            self._queued = priority
+            self._analysis_running = True
+        _worker.submit(priority, lambda: self._run_job(priority, convergence))
+
+    def _run_job(self, priority, convergence):
+        with self._lock:
+            if self._queued != priority:
+                return
+        try:
+            self._run_analysis(self._energy_stamp(), convergence)
+        finally:
+            # A higher priority job queued meanwhile still needs to run.
+            with self._lock:
+                if self._queued == priority:
+                    self._queued = None
+                    self._analysis_running = False
+
+    def _run_analysis(self, stamp, convergence=True):
         if stamp != self._analysis_stamp:
             self._run_mbar(stamp)
         with self._lock:
             run_convergence = (
-                self._analysis is not None
+                convergence
+                and self._analysis is not None
                 and self._analysis["status"] == "done"
                 and self._convergence_due(stamp)
             )
@@ -561,8 +656,6 @@ class Simulation:
                 self._convergence_result = convergence
                 self._convergence_stamp = stamp
                 self._convergence_time = convergence["time"]
-        with self._lock:
-            self._analysis_running = False
 
     def _run_mbar(self, stamp):
         try:
@@ -718,9 +811,7 @@ class Simulation:
 
         return self._cached("repex_state", _stamp(path), load)
 
-    def _repex(self, log, lambda_values, repex_state):
-        result = {}
-
+    def _transition_matrix(self):
         path = self.path / "repex_matrix.txt"
 
         def load_matrix():
@@ -731,9 +822,25 @@ class Simulation:
                     continue
             return None
 
-        result["transition_matrix"] = self._cached(
-            "repex_matrix", _stamp(path), load_matrix
-        )
+        return self._cached("repex_matrix", _stamp(path), load_matrix)
+
+    @staticmethod
+    def _correction(windows, log):
+        """
+        The standard state correction for an auto-generated ABFE restraint,
+        from the energy trajectory metadata, or the log for older runs.
+        """
+        corrections = {
+            w["standard_state_correction"]
+            for w in windows
+            if w.get("standard_state_correction")
+        }
+        if len(corrections) == 1:
+            return float(corrections.pop())
+        return log.standard_state_correction if log is not None else None
+
+    def _repex(self, log, lambda_values, repex_state):
+        result = {"transition_matrix": self._transition_matrix()}
 
         if repex_state is not None:
             proposed = repex_state["proposed"]
@@ -860,7 +967,8 @@ class Simulation:
         name = config.get("lambda_schedule") or "standard_morph"
 
         def load():
-            schedule = _resolve_schedule(config)
+            with sire_lock:
+                schedule = _resolve_schedule(config)
             df = schedule.get_lever_values(num_lambda=101)
             levers = {col: df[col].tolist() for col in df.columns if col != "stage"}
             is_keyword = isinstance(name, str) and len(name) < 64
@@ -975,11 +1083,12 @@ class Simulation:
                 sources.append(("Auto-generated ABFE restraint", None))
             for source, value in sources:
                 try:
-                    if value is None:
-                        restraint = _sr.stream.load(str(auto))
-                    else:
-                        restraint = _Config._from_string(value, "restraints")
-                    text = str(restraint)
+                    with sire_lock:
+                        if value is None:
+                            restraint = _sr.stream.load(str(auto))
+                        else:
+                            restraint = _Config._from_string(value, "restraints")
+                        text = str(restraint)
                 except Exception as e:
                     text = f"Couldn't read this restraint: {e}"
                 restraints.append({"source": source, "text": text})
@@ -1000,7 +1109,8 @@ class Simulation:
 
         def load():
             try:
-                return {"status": "done", "molecules": depict(top0, top1)}
+                with sire_lock:
+                    return {"status": "done", "molecules": depict(top0, top1)}
             except Exception as e:
                 return {"status": "error", "reason": str(e)}
 
@@ -1020,6 +1130,107 @@ class Simulation:
             "reason": f"Couldn't read this output directory: {error}",
         }
 
+    def fingerprint(self):
+        """
+        Return the fingerprint of the run's end-state topologies, or None while
+        it is being computed in the background.
+        """
+        from ._summary import topology_fingerprint
+
+        top0 = self.path / "system0.prm7"
+        top1 = self.path / "system1.prm7"
+        if not (top0.exists() and top1.exists()):
+            return None
+        stamp = _stamp(top0, top1)
+        with self._lock:
+            if self._fingerprint is not None and self._fingerprint[0] == stamp:
+                return self._fingerprint[1]
+            if self._fingerprint_queued:
+                return None
+            self._fingerprint_queued = True
+
+        def job():
+            try:
+                with sire_lock:
+                    result = topology_fingerprint(top0, top1)
+            except Exception as e:
+                result = {"error": str(e)}
+            with self._lock:
+                self._fingerprint = (stamp, result)
+                self._fingerprint_queued = False
+
+        _worker.submit(_PRIORITY_FINGERPRINT, job)
+        return None
+
+    def summary_entry(self, interval):
+        """
+        A compact description of the run for the summary page, queueing a
+        background analysis if its results are out of date.
+        """
+        from ..config import Config as _Config
+        from ._summary import leg_settings_key, settings_key
+
+        try:
+            config = self.config()
+            if config is None:
+                return {"id": self.id, "name": self.name, "status": "waiting"}
+            state = self._state(config)
+            progress = state.progress
+            analysis = self.summary_analysis(state.analysable, state.reason, interval)
+
+            overlap = analysis.get("overlap")
+            min_overlap = None
+            if overlap and len(overlap) > 1:
+                min_overlap = min(
+                    min(overlap[i][i + 1], overlap[i + 1][i])
+                    for i in range(len(overlap) - 1)
+                )
+            matrix = (
+                self._transition_matrix() if config.get("replica_exchange") else None
+            )
+            min_transition = None
+            if matrix and len(matrix) > 1:
+                min_transition = min(matrix[i][i + 1] for i in range(len(matrix) - 1))
+
+            done = analysis.get("status") == "done"
+            schedule = str(config.get("lambda_schedule") or "").lower()
+            fingerprint = self.fingerprint()
+            has_topologies = (self.path / "system0.prm7").exists() and (
+                self.path / "system1.prm7"
+            ).exists()
+            return _clean(
+                {
+                    "id": self.id,
+                    "name": self.name,
+                    "status": progress["status"],
+                    "fraction": progress["fraction"],
+                    "settings": settings_key(config, _Config._restart_allowed_diffs),
+                    "leg_settings": leg_settings_key(
+                        config, _Config._restart_allowed_diffs
+                    ),
+                    "fingerprint": fingerprint,
+                    # Only runs whose fingerprint is being computed are pending.
+                    "fingerprint_pending": fingerprint is None and has_topologies,
+                    "absolute": schedule in ("annihilate", "decouple"),
+                    "auto_restraint": (self.path / "abfe_restraint.s3").exists(),
+                    "correction": self._correction(state.windows, state.log),
+                    "free_energy": analysis.get("free_energy") if done else None,
+                    "free_energy_error": (
+                        analysis.get("free_energy_error") if done else None
+                    ),
+                    "min_overlap": min_overlap,
+                    "min_transition": min_transition,
+                    "updating": bool(analysis.get("updating")),
+                }
+            )
+        except Exception as e:
+            return {
+                "id": self.id,
+                "name": self.name,
+                "status": "error",
+                "reason": str(e),
+            }
+
     def overview(self):
         """
         A brief summary of the run, for listing alongside other runs.
@@ -1038,10 +1249,13 @@ class Simulation:
         except Exception as e:
             return self._unreadable(e)
 
-    def _overview(self):
-        config = self.config()
-        if config is None:
-            return {"id": self.id, "name": self.name, "status": "waiting"}
+    def _state(self, config):
+        """
+        The current state of the run, shared by its overview, summary, and
+        summary page entry.
+        """
+        from types import SimpleNamespace
+
         lambda_values, lambda_energy = self._lambdas(config)
         windows = self.windows()
         log = self._log_monitor(config)
@@ -1049,8 +1263,24 @@ class Simulation:
         analysable, reason = self._completeness(
             config, lambda_values, lambda_energy, windows
         )
+        return SimpleNamespace(
+            lambda_values=lambda_values,
+            lambda_energy=lambda_energy,
+            windows=windows,
+            log=log,
+            progress=progress,
+            analysable=analysable,
+            reason=reason,
+        )
+
+    def _overview(self):
+        config = self.config()
+        if config is None:
+            return {"id": self.id, "name": self.name, "status": "waiting"}
+        state = self._state(config)
+        progress = state.progress
         # Only the selected run is analysed, so this reports the last result.
-        analysis = self.analysis(analysable, reason, start=False)
+        analysis = self.analysis(state.analysable, state.reason, start=False)
         return _clean(
             {
                 "id": self.id,
@@ -1075,13 +1305,9 @@ class Simulation:
                 "status": "waiting",
             }
 
-        lambda_values, lambda_energy = self._lambdas(config)
-        windows = self.windows()
-        log = self._log_monitor(config)
-        progress = self._progress(config, lambda_values, windows, log)
-        analysable, reason = self._completeness(
-            config, lambda_values, lambda_energy, windows
-        )
+        state = self._state(config)
+        lambda_values, windows, log = state.lambda_values, state.windows, state.log
+        progress = state.progress
         is_repex = bool(config.get("replica_exchange"))
         repex_state = self._repex_state() if is_repex else None
 
@@ -1097,12 +1323,6 @@ class Simulation:
             except Exception:
                 pme = None
 
-        corrections = {
-            w["standard_state_correction"]
-            for w in windows
-            if w.get("standard_state_correction")
-        }
-
         return _clean(
             {
                 "id": self.id,
@@ -1112,22 +1332,16 @@ class Simulation:
                 "status": progress["status"],
                 "progress": progress,
                 "lambda_values": lambda_values,
-                "lambda_energy": sorted(lambda_energy),
+                "lambda_energy": sorted(state.lambda_energy),
                 "windows": windows,
                 "has_components": any(self.path.glob("energy_components_*.parquet")),
-                "analysis": self.analysis(analysable, reason),
-                "standard_state_correction": (
-                    float(corrections.pop())
-                    if len(corrections) == 1
-                    else log.standard_state_correction
-                    if log is not None
-                    else None
-                ),
+                "analysis": self.analysis(state.analysable, state.reason),
+                "standard_state_correction": self._correction(windows, log),
                 "repex": (
                     self._repex(log, lambda_values, repex_state) if is_repex else None
                 ),
                 "samplers": self._samplers(config, lambda_values, repex_state),
-                "schedule": self._schedule(config, lambda_energy),
+                "schedule": self._schedule(config, state.lambda_energy),
                 "pme": pme,
                 "restraints": self._restraints(config),
                 "config": {

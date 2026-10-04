@@ -2030,34 +2030,7 @@ class RunnerBase:
 
         from sire.units import GeneralUnit as _GeneralUnit
 
-        # Define the subset of settings that are allowed to change after restart.
-        allowed_diffs = [
-            "runtime",
-            "restart",
-            "minimise",
-            "equilibration_time",
-            "equilibration_timestep",
-            "equilibration_constraints",
-            "energy_frequency",
-            "frame_frequency",
-            "save_velocities",
-            "perturbed_system",
-            "platform",
-            "max_threads",
-            "max_gpus",
-            "restart",
-            "use_backup",
-            "save_trajectories",
-            "write_config",
-            "log_level",
-            "log_file",
-            "overwrite",
-            "timeout",
-            "oversubscription_factor",
-            "max_contexts",
-            "restraint_search_time",
-            "restraint_search_frequency",
-        ]
+        allowed_diffs = _Config._restart_allowed_diffs
         for key in config1.keys():
             if key not in allowed_diffs:
                 # Extract the config values.

@@ -36,6 +36,7 @@ from urllib.parse import urlparse as _urlparse
 
 from ._data import Simulation as _Simulation
 from ._data import discover as _discover
+from ._summary import build_summary as _build_summary
 
 _static = _Path(__file__).parent / "_static"
 
@@ -50,7 +51,7 @@ class _Registry:
     _interval = 15.0
 
     def __init__(self, paths):
-        self._paths = paths
+        self.paths = paths
         self._lock = _threading.Lock()
         self._simulations = {}
         self._last_search = None
@@ -65,7 +66,7 @@ class _Registry:
             ):
                 return list(self._simulations.values())
             self._last_search = now
-        found = _discover(self._paths, strict=strict)
+        found = _discover(self.paths, strict=strict)
         with self._lock:
             by_path = {s.path: s for s in self._simulations.values()}
             simulations = {}
@@ -97,8 +98,19 @@ class _Handler(_BaseHTTPRequestHandler):
                 self._json({"version": f"{self.server.start_time}-{mtime}"})
             elif parts == ["api", "status"]:
                 self._json({"somd2_viewer": True, "idle": self.server.orphaned})
+            elif parts == ["api", "paths"]:
+                self._json([str(_Path(p).resolve()) for p in registry.paths])
+            elif parts == ["logo.png"]:
+                self._send((_static / "somd2.png").read_bytes(), "image/png")
             elif parts == ["api", "simulations"]:
                 self._json([sim.overview() for sim in registry.refresh()])
+            elif parts == ["api", "summary"]:
+                # Results are only brought up to date while the summary page
+                # is open, which asks for them to be analysed.
+                analyse = "analyse=1" in _urlparse(self.path).query
+                interval = self.server.summary_interval if analyse else None
+                entries = [sim.summary_entry(interval) for sim in registry.refresh()]
+                self._json(_build_summary(entries))
             elif len(parts) in (3, 4, 5) and parts[:2] == ["api", "simulation"]:
                 sim = registry.get(parts[2])
                 if sim is None:
@@ -259,6 +271,7 @@ def serve(
     parent_pid=None,
     idle_timeout=600.0,
     close_grace=30.0,
+    summary_interval=600.0,
 ):
     """
     Serve the viewer for a set of SOMD2 output directories.
@@ -289,6 +302,10 @@ def serve(
     close_grace: float
         How long, in seconds, the viewer keeps running after 'parent_pid' has
         ended and the last open page was closed, in case it is reloaded.
+
+    summary_interval: float
+        The minimum time, in seconds, between analyses of a run for the
+        summary page.
     """
     server = _ThreadingHTTPServer((host, port), _Handler)
     server.daemon_threads = True
@@ -297,6 +314,7 @@ def serve(
     server.last_request = _time.monotonic()
     server.closed_at = None
     server.orphaned = False
+    server.summary_interval = summary_interval
 
     if parent_pid is not None and _sys.platform != "win32":
         _watch_parent(server, parent_pid, idle_timeout, close_grace)
