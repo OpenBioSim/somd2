@@ -91,6 +91,7 @@ header select, header button, input[type="search"] {
   padding: 4px 8px;
 }
 header button { cursor: pointer; }
+body.disconnected #main > :not(#offline) { opacity: 0.4; }
 .layout { display: flex; min-height: calc(100vh - 49px); }
 nav {
   width: 280px;
@@ -335,6 +336,14 @@ async function getJSON(url) {
     error.offline = true;
     throw error;
   }
+  // A new viewer, e.g. for a different output directory, gets a fresh page
+  // rather than having its results mixed with the old ones.
+  const instance = r.headers.get("X-Viewer-Instance");
+  if (instance && state.instance && instance !== state.instance && !state.printing) {
+    location.reload();
+    return new Promise(() => {});
+  }
+  if (instance) state.instance = instance;
   if (!r.ok) {
     let detail = "";
     try { detail = (await r.json()).error || ""; } catch (e) {}
@@ -1650,6 +1659,7 @@ async function loadCurrent(force = false) {
 function showProblem(kind, message) {
   if (message) state.problems[kind] = message;
   else delete state.problems[kind];
+  document.body.classList.toggle("disconnected", Boolean(state.problems.offline));
   let banner = $("#offline");
   const text = Object.values(state.problems).join(" ");
   if (!text) { if (banner) banner.remove(); return; }
@@ -1661,15 +1671,16 @@ function showProblem(kind, message) {
 }
 
 function showError(e) {
+  const message = e.message.replace(/\.+$/, "");
   if (e.offline) {
-    showProblem("offline", `Couldn't reach the viewer server: ${e.message}`);
+    showProblem("offline", `Couldn't reach the viewer server: ${message}. The results shown may be out of date.`);
   } else if (e.status) {
     showProblem("offline", null);
-    showProblem("error", `The viewer server reported an error: ${e.message}. Details are in the viewer's log.`);
+    showProblem("error", `The viewer server reported an error: ${message}. Details are in the viewer's log.`);
   } else {
     console.error(e);
     showProblem("offline", null);
-    showProblem("error", `Something went wrong showing this page: ${e.message}. Details are in the browser's console.`);
+    showProblem("error", `Something went wrong showing this page: ${message}. Details are in the browser's console.`);
   }
 }
 
@@ -1791,6 +1802,9 @@ getJSON("/api/paths").then((paths) => {
 }).catch(() => {});
 checkVersion();
 setInterval(checkVersion, 3000);
+// Timers are throttled in background tabs, so check as soon as the page is seen.
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkVersion(); });
+window.addEventListener("pageshow", (e) => { if (e.persisted) checkVersion(); });
 refresh();
 schedule();
 </script>

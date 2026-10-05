@@ -201,6 +201,8 @@ class _Handler(_BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        # Lets a page tell that it is talking to a different viewer.
+        self.send_header("X-Viewer-Instance", str(self.server.start_time))
         self.end_headers()
         self.wfile.write(body)
 
