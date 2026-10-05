@@ -456,6 +456,17 @@ geometry. To override this for all groups:
 somd2 perturbable_system.bss --terminal-flip-frequency "1 ps" --terminal-flip-angle "180 degrees"
 ```
 
+<a id="ghost-atom-modifications"></a>
+
+## 👻 Ghost atom modifications
+
+We support modification of ghost atom bonded terms to avoid spurious coupling
+to the physical system using the approach described in
+[this](https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328) paper. These are
+enabled by default, but can be disabled using the `--no-ghost-modifications`
+option. Modifications are implemented using the
+[ghostly](https://github.com/OpenBioSim/ghostly) package.
+
 <a id="lambda-schedules"></a>
 
 ## 📈 Lambda schedules
@@ -862,17 +873,6 @@ its two neighbours on either side. The value assigned to the remaining windows
 can be controlled via the `--null-energy` option. The number of neighbours should
 be chosen as a trade off between accuracy and computational cost. A value of around
 20% of the number of replicas has been found to be a good starting point.
-
-<a id="ghost-atom-modifications"></a>
-
-## 👻 Ghost atom modifications
-
-We support modification of ghost atom bonded terms to avoid spurious coupling
-to the physical system using the approach described in
-[this](https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328) paper.
-These are enabled by default, but can be disabled using the `--no-ghost-modifications`
-option. Modifications are implemented using the [ghostly](https://github.com/OpenBioSim/ghostly)
-package.
 
 <a id="note-for-somd1-users"></a>
 
