@@ -29,14 +29,34 @@ __all__ = ["depict"]
 # orders for.
 _MAX_ATOMS = 400
 
+# Molecules with up to this many heavy atoms are drawn with their hydrogens,
+# since a skeletal formula of e.g. methane is just a label.
+_MAX_HEAVY_WITH_HYDROGENS = 1
 
-def _panel_size(num_atoms, scale=70, minimum=300, maximum=640):
+# The bond length in pixels, so that small molecules aren't stretched to fill
+# the panel. Larger molecules are scaled down to fit.
+_BOND_LENGTH = 35
+
+
+def _panel_size(num_atoms, scale=70, minimum=200, maximum=640):
     """
-    The width of a depiction panel in pixels. RDKit draws bonds at a fixed
-    length, so scaling with the square root of the number of atoms keeps
-    atoms and labels a similar size across molecules.
+    The width of a depiction panel in pixels. Scaling with the square root of
+    the number of atoms keeps atoms and labels a similar size across
+    molecules.
     """
     return int(min(maximum, max(minimum, scale * num_atoms**0.5)))
+
+
+def _set_options(drawer):
+    """
+    Drawing options shared by all depictions.
+    """
+    options = drawer.drawOptions()
+    options.useBWAtomPalette()
+    options.fixedBondLength = _BOND_LENGTH
+    # Label terminal carbons, e.g. CH3-OH rather than a bare line to OH.
+    options.explicitMethyl = True
+    return options
 
 
 def depict(topology0, topology1):
@@ -245,8 +265,7 @@ def _draw_mapping(rdmol0, rdmol1, mapping, map0, map1, pixels):
 
     height = int(0.75 * pixels)
     drawer = rdMolDraw2D.MolDraw2DSVG(2 * pixels, height, pixels, height)
-    options = drawer.drawOptions()
-    options.useBWAtomPalette()
+    options = _set_options(drawer)
     options.continuousHighlight = False
     options.setHighlightColour(red)
     drawer.DrawMolecules(
@@ -275,18 +294,20 @@ def _draw_mapping(rdmol0, rdmol1, mapping, map0, map1, pixels):
 
 def _draw(rdmol, pixels):
     """
-    Draw a single end state as SVG, without hydrogens.
+    Draw a single end state as SVG, without hydrogens unless the molecule is
+    very small.
     """
     from rdkit import Chem
     from rdkit.Chem.Draw import rdMolDraw2D
 
-    try:
-        rdmol = Chem.RemoveHs(rdmol)
-    except Exception:
-        rdmol = Chem.RemoveHs(rdmol, sanitize=False)
+    if rdmol.GetNumHeavyAtoms() > _MAX_HEAVY_WITH_HYDROGENS:
+        try:
+            rdmol = Chem.RemoveHs(rdmol)
+        except Exception:
+            rdmol = Chem.RemoveHs(rdmol, sanitize=False)
 
     drawer = rdMolDraw2D.MolDraw2DSVG(pixels, int(0.75 * pixels))
-    drawer.drawOptions().useBWAtomPalette()
+    _set_options(drawer)
     rdMolDraw2D.PrepareAndDrawMolecule(drawer, rdmol)
     drawer.FinishDrawing()
     svg = drawer.GetDrawingText()
