@@ -247,6 +247,80 @@ def _closure(parent, start, end, edge, sign):
     }
 
 
+def _ligand_free_energies(ligands, edges):
+    """
+    Fit a free energy for each ligand to the combined ΔΔG of the edges, by
+    weighted least squares. Each connected part of the network is centred on
+    its mean, and the errors come from the covariance of the fit.
+    """
+    import numpy as _np
+
+    measured = [e for e in edges if e["combined"]["value"] is not None]
+    connected = sorted(
+        {lig for e in measured for lig in (e["a"], e["b"])}, key=ligands.index
+    )
+    if not measured:
+        return {}, []
+    index = {lig: i for i, lig in enumerate(connected)}
+
+    # The weighted graph Laplacian, and the weighted sum of ΔΔG into each ligand.
+    n = len(connected)
+    laplacian = _np.zeros((n, n))
+    rhs = _np.zeros(n)
+    for e in measured:
+        i, j = index[e["a"]], index[e["b"]]
+        w = 1.0 / e["combined"]["error"] ** 2
+        laplacian[i, i] += w
+        laplacian[j, j] += w
+        laplacian[i, j] -= w
+        laplacian[j, i] -= w
+        rhs[j] += w * e["combined"]["value"]
+        rhs[i] -= w * e["combined"]["value"]
+
+    # The pseudo-inverse gives the solution centred on the mean of each
+    # connected part, and its diagonal gives the variances.
+    covariance = _np.linalg.pinv(laplacian)
+    values = covariance @ rhs
+
+    groups = {}
+    for lig in connected:
+        if lig not in groups:
+            group = len(set(groups.values()))
+            stack = [lig]
+            while stack:
+                node = stack.pop()
+                if node in groups:
+                    continue
+                groups[node] = group
+                for e in measured:
+                    if node in (e["a"], e["b"]):
+                        stack.append(e["b"] if node == e["a"] else e["a"])
+
+    # The lower triangle of the covariance within each connected part, so that
+    # the page can give errors relative to a chosen reference ligand.
+    members = [[] for _ in range(len(set(groups.values())))]
+    for lig in connected:
+        members[groups[lig]].append(lig)
+    matrices = [
+        [
+            [float(covariance[index[a], index[b]]) for b in part[: i + 1]]
+            for i, a in enumerate(part)
+        ]
+        for part in members
+    ]
+
+    free_energies = {
+        lig: {
+            "value": float(values[index[lig]]),
+            "error": float(_np.sqrt(max(covariance[index[lig], index[lig]], 0.0))),
+            "group": groups[lig],
+            "index": members[groups[lig]].index(lig),
+        }
+        for lig in connected
+    }
+    return free_energies, matrices
+
+
 def build_network(edges, summary):
     """
     Attach the summary's results to the edges of a network.
@@ -264,8 +338,9 @@ def build_network(edges, summary):
     -------
 
     network: dict
-        The ligands, the edges with the results in each direction, and the
-        cycles with their closures.
+        The ligands, the edges with the results in each direction, the
+        cycles with their closures, and the fitted ligand free energies with
+        their covariance.
     """
     directories = _directory_names(edges)
     sims = []
@@ -321,8 +396,11 @@ def build_network(edges, summary):
     for edge in results:
         edge["in_flagged_cycle"] = (edge["a"], edge["b"]) in flagged
 
+    free_energies, covariance = _ligand_free_energies(ligands, results)
     return {
         "ligands": ligands,
         "edges": results,
         "cycles": cycles,
+        "free_energies": free_energies,
+        "covariance": covariance,
     }

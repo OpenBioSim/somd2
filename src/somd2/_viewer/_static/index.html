@@ -878,8 +878,58 @@ function exportNetwork() {
   download("somd2-network.csv", toCSV(header, rows), "text/csv");
 }
 
+// The chosen reference for ligand free energies, saved for each network file.
+function ligandReference() {
+  const d = state.networkData;
+  const key = `${networkKey(d)}:reference`;
+  if (!state.ligandReference || state.ligandReference.key !== key) {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(key) || "null"); } catch (e) {}
+    state.ligandReference = { key, saved };
+  }
+  const saved = state.ligandReference.saved;
+  return saved && d.free_energies[saved.ligand] ? saved : null;
+}
+
+function setLigandReference(reference) {
+  const key = `${networkKey(state.networkData)}:reference`;
+  state.ligandReference = { key, saved: reference };
+  try { localStorage.setItem(key, JSON.stringify(reference)); } catch (e) {}
+}
+
+// A ligand's fitted free energy, relative to the chosen reference if it's in
+// the same part of the network, or the mean otherwise.
+function ligandFreeEnergy(lig, reference = ligandReference()) {
+  const d = state.networkData;
+  const f = d.free_energies[lig];
+  if (!f) return null;
+  const r = reference && d.free_energies[reference.ligand];
+  if (!r || r.group !== f.group) return { value: f.value, error: f.error, relative: "the mean" };
+  const matrix = d.covariance[f.group];
+  const cov = (i, j) => (i >= j ? matrix[i][j] : matrix[j][i]);
+  const variance = cov(f.index, f.index) + cov(r.index, r.index) - 2 * cov(f.index, r.index);
+  return {
+    value: f.value - r.value + (reference.value || 0),
+    error: Math.sqrt(Math.max(variance, 0)),
+    relative: reference.ligand,
+  };
+}
+
+function exportLigands() {
+  const d = state.networkData;
+  if (!d) return;
+  const header = ["ligand", "dG (kcal/mol)", "error (kcal/mol)", "relative to", "part of network"];
+  const reference = ligandReference();
+  const rows = d.ligands.filter((lig) => d.free_energies[lig]).map((lig) => {
+    const f = ligandFreeEnergy(lig, reference);
+    return [lig, f.value, f.error, f.relative, d.free_energies[lig].group + 1];
+  });
+  download("somd2-ligands.csv", toCSV(header, rows), "text/csv");
+}
+
 function exportSummary(kind) {
   if (kind === "network") return exportNetwork();
+  if (kind === "ligands") return exportLigands();
   const d = state.summaryData;
   if (!d) return;
   if (kind === "json") {
@@ -1017,9 +1067,11 @@ function drawNetwork(svg) {
     }
   }
   html += labels.join("");
+  const reference = ligandReference();
   for (const lig of d.ligands) {
     const p = pos[lig];
-    html += `<g class="node${lig === state.selectedLigand ? " selected" : ""}" data-ligand="${esc(lig)}"><circle cx="${p.x}" cy="${p.y}" r="${radius}"/><text class="node-label" x="${p.x}" y="${p.y + radius + 16}" text-anchor="middle">${esc(lig)}</text><title>${esc(lig)}</title></g>`;
+    const f = ligandFreeEnergy(lig, reference);
+    html += `<g class="node${lig === state.selectedLigand ? " selected" : ""}" data-ligand="${esc(lig)}"><circle cx="${p.x}" cy="${p.y}" r="${radius}"/><text class="node-label" x="${p.x}" y="${p.y + radius + 16}" text-anchor="middle">${esc(lig)}</text><title>${esc(lig)}${f ? `\nfitted ΔG: ${fmt(f.value, 2)} ± ${fmt(f.error, 2)} kcal/mol` : ""}</title></g>`;
   }
   svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
   svg.dataset.labels = String(showLabels);
@@ -1085,8 +1137,10 @@ function renderLigandPanel() {
       : e.forward.status !== "not started" ? e.forward.status : e.reverse.status;
     rows += `<tr><td>${runs.length ? `<a href="#${runs[0].id}">${esc(other)}</a>` : esc(other)}</td><td class="num">${value}</td><td class="status-${status === "problem" ? "error" : status === "finished" ? "finished" : status === "running" ? "running" : "waiting"}">${esc(status)}</td></tr>`;
   }
+  const fitted = ligandFreeEnergy(lig);
   panel.innerHTML = `<div class="ligand-panel-header"><h4>${esc(lig)}</h4><button type="button" data-close-panel title="Close">×</button></div>
     ${structure}
+    ${fitted ? `<div class="stats">${stat(`Fitted ΔG (relative to ${esc(fitted.relative)})`, `${valueWithError(fitted.value, fitted.error)} kcal/mol`)}</div>` : ""}
     <div class="table-wrap"><table><tr><th>To</th><th class="num">ΔΔG</th><th></th></tr>${rows}</table></div>
     <div class="note">ΔΔG in kcal/mol from ${esc(lig)} to each neighbour, combining both directions.</div>`;
   panel.querySelector("[data-close-panel]").addEventListener("click", () => {
@@ -1166,8 +1220,44 @@ function renderNetworkPage() {
     cycles += `</table></div><div class="note">The sum of the combined ΔΔG around each independent cycle, which should be zero. Cycles more than twice their error from zero are flagged.</div>`;
     html += card("Cycle closure", cycles);
   }
+
+  const fitted = d.ligands.filter((lig) => d.free_energies[lig]);
+  if (fitted.length) {
+    const groups = new Set(fitted.map((lig) => d.free_energies[lig].group)).size;
+    const reference = ligandReference();
+    const options = [`<option value="">the mean</option>`]
+      .concat(fitted.map((lig) => `<option value="${esc(lig)}"${reference && reference.ligand === lig ? " selected" : ""}>${esc(lig)}</option>`))
+      .join("");
+    let ligands = `<div class="note">Relative to <select id="ligand-reference">${options}</select>
+      ${reference ? `with ΔG <input id="ligand-reference-value" type="number" step="0.01" value="${reference.value || 0}" style="width:6em"> kcal/mol` : ""}</div>
+      <div class="table-wrap"><table><tr><th>Ligand</th><th class="num">ΔG (kcal/mol)</th>${groups > 1 ? "<th>Part of network</th>" : ""}</tr>`;
+    for (const lig of fitted) {
+      const f = ligandFreeEnergy(lig, reference);
+      const mean = reference && f.relative !== reference.ligand;
+      ligands += `<tr${mean ? ` class="muted" title="Relative to the mean of its part of the network, which doesn't contain ${esc(reference.ligand)}"` : ""}><td>${esc(lig)}</td><td class="num">${valueWithError(f.value, f.error)}${mean ? " (mean)" : ""}</td>${groups > 1 ? `<td>${d.free_energies[lig].group + 1}</td>` : ""}</tr>`;
+    }
+    ligands += `</table></div>
+      <div class="note">Fitted to the combined ΔΔG of all edges by weighted least squares, relative to the mean${groups > 1 ? " of each connected part of the network" : ""}, or to a chosen ligand${groups > 1 ? " in the same part" : ""}. Ligands without results are left out.</div>
+      <div class="export no-print"><a href="#" data-export="ligands">Download CSV</a></div>`;
+    html += card("Ligand free energies", ligands);
+  }
   html += `</div>`;
+  const typing = document.activeElement && document.activeElement.id === "ligand-reference-value" ? document.activeElement.value : null;
   main.innerHTML = html;
+
+  const referenceSelect = $("#ligand-reference");
+  if (referenceSelect) referenceSelect.addEventListener("change", (e) => {
+    const previous = ligandReference();
+    setLigandReference(e.target.value ? { ligand: e.target.value, value: previous ? previous.value : 0 } : null);
+    renderNetworkPage();
+  });
+  const referenceValue = $("#ligand-reference-value");
+  if (referenceValue && typing !== null) { referenceValue.value = typing; referenceValue.focus(); }
+  if (referenceValue) referenceValue.addEventListener("change", (e) => {
+    const value = parseFloat(e.target.value);
+    setLigandReference({ ...ligandReference(), value: Number.isFinite(value) ? value : 0 });
+    renderNetworkPage();
+  });
 
   const svg = $("#network-svg");
   if (svg) {

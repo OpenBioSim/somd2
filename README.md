@@ -725,8 +725,10 @@ the names giving the direction run. (The names can be separated by `~`, `-`,
 `_`, `->` or `_to_`.) The network is drawn as an interactive graph, with
 each edge coloured by its status and labelled with its free energy as results
 come in. Edges run in both directions are checked for hysteresis, and cycles in
-the network for closure, to help find problem edges. Clicking a ligand shows its
-structure and the results for its edges.
+the network for closure, to help find problem edges. A free energy for each
+ligand is fitted to the results for all of the edges, relative to the mean or
+to a reference ligand with a known value, which you can choose on the page.
+Clicking a ligand shows its structure and the results for its edges.
 
 To launch the viewer alongside a simulation, pass the `--view` option to
 `somd2`:
