@@ -127,11 +127,11 @@ pip install -e .
 > ln -sfn /etc/OpenCL/vendors "${CONDA_PREFIX}/etc/OpenCL/vendors/ocl-icd-system"
 > ```
 
-<a id="testing"></a>
+<a id="checking-the-installation"></a>
 
-### ✅ Testing
+### ✅ Checking the installation
 
-You should now have a `somd2` executable in your path. To test, run:
+You should now have a `somd2` executable in your path. To check, run:
 
 ```
 somd2 --help
@@ -183,6 +183,29 @@ files:
 ```
 pre-commit run --all-files
 ```
+
+<a id="running-the-tests"></a>
+
+### 🧪 Running the tests
+
+The tests can be run from the root of the repository with:
+
+```
+python -m pytest tests
+```
+
+Tests that need a GPU, e.g. those for GCMC, are skipped unless
+`CUDA_VISIBLE_DEVICES` is set. The GCMC kernels are compiled when they are
+first used, so `nvcc` must also be in your `PATH`, or be given with the
+`PYCUDA_NVCC` environment variable. For example, with CUDA installed in
+`/opt/cuda`:
+
+```
+CUDA_VISIBLE_DEVICES=0 PATH=/opt/cuda/bin:$PATH python -m pytest tests
+```
+
+Packages are only published once the tests have passed, so this is only needed
+when developing SOMD2.
 
 <a id="usage"></a>
 
