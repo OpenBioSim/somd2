@@ -30,7 +30,6 @@ Functions
 
     somd2
     somd2_view
-    ghostly
 """
 
 from ._cli import *
