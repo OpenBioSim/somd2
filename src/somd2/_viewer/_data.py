@@ -39,6 +39,8 @@ from pathlib import Path as _Path
 
 import numpy as _np
 
+from ._log import report as _report
+
 # Serialise the free-energy analyses, since each can use a lot of memory.
 _analysis_lock = _threading.Lock()
 
@@ -78,8 +80,8 @@ class _Worker:
             _, _, job = self._queue.get()
             try:
                 job()
-            except Exception:
-                pass
+            except Exception as e:
+                _report(e, "A background job failed")
 
 
 _worker = _Worker()
@@ -349,6 +351,23 @@ class Simulation:
         self._convergence_stamp = None
         self._convergence_time = 0.0
         self._convergence_interval = 300.0
+
+    def _report(self, error, action):
+        """
+        Log an error for this run, returning its description for the page.
+        """
+        return _report(error, f"Couldn't {action} in {self.path}")
+
+    def _section(self, action, func, on_error=None):
+        """
+        Return part of the run's summary, or the error if it can't be made,
+        so that the rest of the summary can still be shown.
+        """
+        try:
+            return func()
+        except Exception as e:
+            reason = self._report(e, action)
+            return on_error(reason) if on_error else {"error": reason}
 
     def _cached(self, key, stamp, func):
         with self._lock:
@@ -632,6 +651,8 @@ class Simulation:
                 return
         try:
             self._run_analysis(self._energy_stamp(), convergence)
+        except Exception as e:
+            self._report(e, "run a background analysis")
         finally:
             # A higher priority job queued meanwhile still needs to run.
             with self._lock:
@@ -682,7 +703,11 @@ class Simulation:
             result["free_energy"] = result["pmf"][-1] - result["pmf"][0]
             result["free_energy_error"] = result["error"][-1]
         except Exception as e:
-            result = {"status": "error", "reason": str(e), "time": _time.time()}
+            result = {
+                "status": "error",
+                "reason": self._report(e, "run the MBAR analysis"),
+                "time": _time.time(),
+            }
         with self._lock:
             self._analysis = result
             self._analysis_stamp = stamp
@@ -781,7 +806,10 @@ class Simulation:
                     result["fraction"] = [i / num for i in range(1, num + 1)]
             return result
         except Exception as e:
-            return {"status": "error", "reason": str(e)}
+            return {
+                "status": "error",
+                "reason": self._report(e, "run the convergence analysis"),
+            }
 
     def _repex_state(self):
         """
@@ -791,8 +819,11 @@ class Simulation:
         backup = self.path / "repex_state.pkl.bak"
 
         def load():
+            if not path.exists():
+                return None
             # The state is rewritten in place, so fall back to the backup if
             # it is caught part way through.
+            error = None
             for p in (path, backup):
                 try:
                     with open(p, "rb") as f:
@@ -805,8 +836,9 @@ class Simulation:
                             state, "_terminal_flip_stats", None
                         ),
                     }
-                except Exception:
-                    continue
+                except Exception as e:
+                    error = error or e
+            self._report(error, "read the replica exchange state")
             return None
 
         return self._cached("repex_state", _stamp(path), load)
@@ -815,11 +847,15 @@ class Simulation:
         path = self.path / "repex_matrix.txt"
 
         def load_matrix():
+            if not path.exists():
+                return None
+            error = None
             for p in (path, path.with_suffix(".txt.bak")):
                 try:
                     return _np.loadtxt(p, ndmin=2).tolist()
-                except Exception:
-                    continue
+                except Exception as e:
+                    error = error or e
+            self._report(error, "read the transition matrix")
             return None
 
         return self._cached("repex_matrix", _stamp(path), load_matrix)
@@ -928,7 +964,8 @@ class Simulation:
                     try:
                         with open(path, "rb") as f:
                             return _pickle.load(f)
-                    except Exception:
+                    except Exception as e:
+                        self._report(e, f"read {path.name}")
                         return None
 
                 stats = self._cached(f"sampler:{path.name}", _stamp(path), load)
@@ -997,7 +1034,7 @@ class Simulation:
                 "name": name,
                 "levers": None,
                 "description": None,
-                "error": str(e),
+                "error": self._report(e, "build the λ schedule"),
             }
 
         rest2 = config.get("rest2_scale")
@@ -1034,14 +1071,15 @@ class Simulation:
         def load():
             # The file is rewritten at each checkpoint, so fall back to the
             # backup if it is caught part way through.
+            error = None
             for p in (path, _Path(str(path) + ".bak")):
                 try:
                     df = _pq.read_table(p).to_pandas()
                     break
-                except Exception:
-                    continue
+                except Exception as e:
+                    error = error or e
             else:
-                return {"status": "error", "reason": "Couldn't read the file."}
+                raise error
             df = df.sort_values("time")
             stride = max(1, len(df) // max_points)
             df = df.iloc[::stride]
@@ -1053,7 +1091,13 @@ class Simulation:
                 "components": {c: df[c].tolist() for c in df.columns if c != "time"},
             }
 
-        return _clean(self._cached(f"components:{path.name}", _stamp(path), load))
+        try:
+            return _clean(self._cached(f"components:{path.name}", _stamp(path), load))
+        except Exception as e:
+            return {
+                "status": "error",
+                "reason": self._report(e, f"read {path.name}"),
+            }
 
     def _restraints(self, config):
         """
@@ -1090,7 +1134,8 @@ class Simulation:
                             restraint = _Config._from_string(value, "restraints")
                         text = str(restraint)
                 except Exception as e:
-                    text = f"Couldn't read this restraint: {e}"
+                    reason = self._report(e, f"read a restraint ({source})")
+                    text = f"Couldn't read this restraint: {reason}"
                 restraints.append({"source": source, "text": text})
             return restraints
 
@@ -1112,7 +1157,10 @@ class Simulation:
                 with sire_lock:
                     return {"status": "done", "molecules": depict(top0, top1)}
             except Exception as e:
-                return {"status": "error", "reason": str(e)}
+                return {
+                    "status": "error",
+                    "reason": self._report(e, "depict the end states"),
+                }
 
         # Concurrent requests wait for the first, rather than repeating it.
         with self._depict_lock:
@@ -1122,12 +1170,13 @@ class Simulation:
         """
         A placeholder for a run whose output can't be read.
         """
+        reason = self._report(error, "read the output directory")
         return {
             "id": self.id,
             "name": self.name,
             "path": str(self.path),
             "status": "error",
-            "reason": f"Couldn't read this output directory: {error}",
+            "reason": f"Couldn't read this output directory: {reason}",
         }
 
     def fingerprint(self):
@@ -1154,7 +1203,7 @@ class Simulation:
                 with sire_lock:
                     result = topology_fingerprint(top0, top1)
             except Exception as e:
-                result = {"error": str(e)}
+                result = {"error": self._report(e, "identify the system")}
             with self._lock:
                 self._fingerprint = (stamp, result)
                 self._fingerprint_queued = False
@@ -1233,7 +1282,7 @@ class Simulation:
                 "id": self.id,
                 "name": self.name,
                 "status": "error",
-                "reason": str(e),
+                "reason": self._report(e, "summarise the run"),
             }
 
     def overview(self):
@@ -1319,14 +1368,16 @@ class Simulation:
         pme = None
         pme_path = self.path / "pme_parameters.yaml"
         if pme_path.exists():
-            try:
-                from ..io import yaml_to_dict
+            from ..io import yaml_to_dict
 
-                pme = self._cached(
+            pme = self._section(
+                "read the tuned PME parameters",
+                lambda: self._cached(
                     "pme", _stamp(pme_path), lambda: yaml_to_dict(str(pme_path))
-                )
-            except Exception:
-                pme = None
+                ),
+            )
+
+        schedule_name = str(config.get("lambda_schedule") or "standard_morph")
 
         return _clean(
             {
@@ -1343,12 +1394,38 @@ class Simulation:
                 "analysis": self.analysis(state.analysable, state.reason),
                 "standard_state_correction": self._correction(windows, log),
                 "repex": (
-                    self._repex(log, lambda_values, repex_state) if is_repex else None
+                    self._section(
+                        "summarise the replica exchange",
+                        lambda: self._repex(log, lambda_values, repex_state),
+                    )
+                    if is_repex
+                    else None
                 ),
-                "samplers": self._samplers(config, lambda_values, repex_state),
-                "schedule": self._schedule(config, state.lambda_energy),
+                "samplers": self._section(
+                    "summarise the Monte Carlo samplers",
+                    lambda: self._samplers(config, lambda_values, repex_state),
+                ),
+                "schedule": self._section(
+                    "summarise the λ schedule",
+                    lambda: self._schedule(config, state.lambda_energy),
+                    lambda reason: {
+                        "name": schedule_name,
+                        "levers": None,
+                        "description": None,
+                        "error": reason,
+                    },
+                ),
                 "pme": pme,
-                "restraints": self._restraints(config),
+                "restraints": self._section(
+                    "read the restraints",
+                    lambda: self._restraints(config),
+                    lambda reason: [
+                        {
+                            "source": "Restraints",
+                            "text": f"Couldn't read the restraints: {reason}",
+                        }
+                    ],
+                ),
                 "config": {
                     k: (
                         "(see the Restraints section)"

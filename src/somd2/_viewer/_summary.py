@@ -284,13 +284,23 @@ def build_summary(entries):
     -------
 
     summary: dict
-        The simulations, legs, and whether there is anything to summarise.
+        The simulations, legs, runs left out because of an error, and
+        whether there is anything to summarise.
     """
     groups = {}
+    excluded = []
     pending = sum(bool(e.get("fingerprint_pending")) for e in entries)
     for entry in entries:
         fingerprint = entry.get("fingerprint")
-        if not fingerprint or "error" in fingerprint or not entry.get("settings"):
+        reason = entry.get("reason")
+        if reason is None and fingerprint and "error" in fingerprint:
+            reason = f"Couldn't identify the system: {fingerprint['error']}"
+        if reason is not None:
+            excluded.append(
+                {"id": entry["id"], "name": entry["name"], "reason": reason}
+            )
+            continue
+        if not fingerprint or not entry.get("settings"):
             continue
         key = (fingerprint["system"], entry["settings"])
         groups.setdefault(key, []).append(entry)
@@ -379,6 +389,7 @@ def build_summary(entries):
         "legs": legs,
         "hydration": hydration,
         "ambiguous": unpaired,
+        "excluded": sorted(excluded, key=lambda e: e["name"]),
     }
 
 

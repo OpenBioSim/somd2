@@ -749,6 +749,11 @@ is used.
 To monitor several simulations on one page, run `somd2-view` on their parent
 directory instead.
 
+Any errors in the viewer are logged to `viewer.log` in the output directory
+when using `--view`, or to the terminal for `somd2-view`, unless a file is
+given with `--log-file`. Please include the log when reporting a problem with
+the viewer.
+
 > [!NOTE]
 > Free energies are only estimated when the output directory holds data for
 > every λ value, so directories from simulations that only sampled a subset of

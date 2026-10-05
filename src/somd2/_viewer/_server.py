@@ -35,7 +35,10 @@ from pathlib import Path as _Path
 from urllib.parse import urlparse as _urlparse
 
 from ._data import Simulation as _Simulation
+from ._data import _clean
 from ._data import discover as _discover
+from ._log import configure as _configure_log
+from ._log import report as _report
 from ._network import build_network as _build_network
 from ._network import find_network as _find_network
 from ._network import read_network as _read_network
@@ -127,15 +130,14 @@ class _Handler(_BaseHTTPRequestHandler):
                 summary = _build_summary(entries)
                 summary["network"] = self.server.network is not None
                 if parts[1] == "summary":
-                    self._json(summary)
+                    self._json(_clean(summary))
                 else:
                     edges = _read_network(self.server.network)
                     network = _build_network(edges, summary)
                     network["file"] = str(self.server.network)
-                    network["available"] = summary["available"]
-                    network["pending"] = summary["pending"]
-                    network["updating"] = summary["updating"]
-                    self._json(network)
+                    for key in ("available", "pending", "updating", "excluded"):
+                        network[key] = summary[key]
+                    self._json(_clean(network))
             elif len(parts) in (3, 4, 5) and parts[:2] == ["api", "simulation"]:
                 sim = registry.get(parts[2])
                 if sim is None:
@@ -158,10 +160,8 @@ class _Handler(_BaseHTTPRequestHandler):
         except BrokenPipeError:
             pass
         except Exception as e:
-            import traceback
-
-            traceback.print_exc()
-            self._json({"error": str(e)}, status=500)
+            reason = _report(e, f"Couldn't handle the request for {self.path}")
+            self._json({"error": reason}, status=500)
 
     def do_POST(self):
         parts = [p for p in _urlparse(self.path).path.split("/") if p]
@@ -298,6 +298,7 @@ def serve(
     close_grace=30.0,
     summary_interval=600.0,
     network=None,
+    log_file=None,
 ):
     """
     Serve the viewer for a set of SOMD2 output directories.
@@ -337,7 +338,12 @@ def serve(
         A file listing the edges of a perturbation network, one per line as
         'ligand_a ligand_b'. By default, a 'network.dat' directly in one of
         the paths is used.
+
+    log_file: str
+        The file that errors are logged to. By default, they are written to
+        stderr.
     """
+    _configure_log(log_file)
     network = _find_network(paths, network)
     if network is not None and not network.is_file():
         raise ValueError(f"Network file not found: {network}")

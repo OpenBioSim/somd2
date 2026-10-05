@@ -287,7 +287,7 @@ function loadCollapsed(key = "somd2-viewer-collapsed") {
   try { return new Set(JSON.parse(localStorage.getItem(key) || "[]")); } catch (e) { return new Set(); }
 }
 
-const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "" };
+const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "", problems: {} };
 const PALETTE = ["#2f6fdf", "#e0663b", "#2a9d6f", "#b04fc9", "#c9a227", "#3aa7c9", "#d64f7a", "#7a8699"];
 const LAMBDA = "λ";
 
@@ -327,11 +327,20 @@ function simTime(ns) {
 }
 
 async function getJSON(url) {
-  const r = await fetch(url, { cache: "no-store" });
+  let r;
+  try {
+    r = await fetch(url, { cache: "no-store" });
+  } catch (e) {
+    const error = new Error(e.message);
+    error.offline = true;
+    throw error;
+  }
   if (!r.ok) {
     let detail = "";
     try { detail = (await r.json()).error || ""; } catch (e) {}
-    throw new Error(`${r.status} ${r.statusText}${detail ? `: ${detail}` : ""}`);
+    const error = new Error(`${r.status} ${r.statusText}${detail ? `: ${detail}` : ""}`);
+    error.status = r.status;
+    throw error;
   }
   return r.json();
 }
@@ -611,6 +620,7 @@ function renderFreeEnergy(s) {
 function renderRepex(s) {
   const r = s.repex;
   if (!r) return "";
+  if (r.error) return card("Replica exchange", `<div class="note">Couldn't summarise the replica exchange: ${esc(r.error)}</div>`);
   let html = `<div class="grid">`;
   if (r.transition_matrix) html += `<div><h4 style="margin-top:0">Transition matrix</h4><div class="chart" id="transition-chart"></div></div>`;
   html += `<div>`;
@@ -647,6 +657,7 @@ function renderComponents(s) {
 
 function renderSamplers(s) {
   const sm = s.samplers || {};
+  if (sm.error) return card("Monte Carlo samplers", `<div class="note">Couldn't summarise the samplers: ${esc(sm.error)}</div>`);
   let html = "";
   if (sm.gcmc) {
     const keys = Object.keys(sm.gcmc[0]).filter((k) => k !== "lambda");
@@ -714,6 +725,7 @@ function scientific(x) {
 }
 
 function renderPME(pme) {
+  if (pme.error) return `<div class="note">Couldn't read the tuned PME parameters: ${esc(pme.error)}</div>`;
   const rows = [];
   if (pme.pme_alpha !== undefined) rows.push(["α", `${fmt(pme.pme_alpha, 4)} nm<sup>−1</sup>`]);
   if (pme.pme_grid) rows.push(["Grid", esc(pme.pme_grid.join(" × "))]);
@@ -1241,6 +1253,7 @@ function renderNetworkPage() {
       <div class="export no-print"><a href="#" data-export="ligands">Download CSV</a></div>`;
     html += card("Ligand free energies", ligands);
   }
+  html += renderExcluded(d);
   html += `</div>`;
   const typing = document.activeElement && document.activeElement.id === "ligand-reference-value" ? document.activeElement.value : null;
   main.innerHTML = html;
@@ -1372,6 +1385,14 @@ function enableNetworkDragging(svg) {
   });
 }
 
+function renderExcluded(d) {
+  if (!d.excluded || !d.excluded.length) return "";
+  let table = `<div class="table-wrap"><table><tr><th>Run</th><th>Problem</th></tr>`;
+  for (const r of d.excluded) table += `<tr><td><a href="#${r.id}">${esc(r.name)}</a></td><td class="problems">${esc(r.reason)}</td></tr>`;
+  table += `</table></div><div class="note">These runs couldn't be read, so they're left out. Details are in the viewer's log.</div>`;
+  return card("Runs left out", table);
+}
+
 function renderSummaryPage() {
   const d = state.summaryData;
   const main = $("#main");
@@ -1443,6 +1464,8 @@ function renderSummaryPage() {
   table += `</table></div>`;
   table += `<div class="export no-print"><a href="#" data-export="simulations">Download CSV</a></div>`;
   html += card("Simulations", table);
+
+  html += renderExcluded(d);
 
   const notes = [];
   if (d.pending) notes.push(`Identifying ${d.pending} run${d.pending === 1 ? "" : "s"}…`);
@@ -1536,7 +1559,11 @@ function loadComponents(s) {
     c.lambda = lam;
     state.components[id] = c;
     if (id === state.current && componentsLambda(state.summary) === lam) render();
-  }).catch(() => {});
+  }).catch((e) => {
+    if (e.offline) return;
+    state.components[id] = { lambda: lam, status: "error", reason: e.message };
+    if (id === state.current) render();
+  });
 }
 
 // Check whether there is a summary, without analysing every run. While runs
@@ -1565,7 +1592,7 @@ async function loadSummary(force = false) {
   renderNav();
   render();
   clearTimeout(state.quickTimer);
-  if (data.pending || data.updating) state.quickTimer = setTimeout(loadCurrent, 3000);
+  if (data.pending || data.updating) state.quickTimer = setTimeout(poll, 3000);
 }
 
 async function loadNetwork(force = false) {
@@ -1587,7 +1614,7 @@ async function loadNetwork(force = false) {
   renderNav();
   render();
   clearTimeout(state.quickTimer);
-  if (data.pending || data.updating) state.quickTimer = setTimeout(loadCurrent, 3000);
+  if (data.pending || data.updating) state.quickTimer = setTimeout(poll, 3000);
 }
 
 async function loadCurrent(force = false) {
@@ -1615,26 +1642,55 @@ async function loadCurrent(force = false) {
   }
   // Check again shortly while a run is starting up or an analysis is running.
   clearTimeout(state.quickTimer);
-  if (pending) state.quickTimer = setTimeout(loadCurrent, 3000);
+  if (pending) state.quickTimer = setTimeout(poll, 3000);
 }
 
-function showOffline(message) {
+// Problems are kept by kind, so that a successful version check doesn't hide
+// an error from loading the page.
+function showProblem(kind, message) {
+  if (message) state.problems[kind] = message;
+  else delete state.problems[kind];
   let banner = $("#offline");
-  if (!message) { if (banner) banner.remove(); return; }
+  const text = Object.values(state.problems).join(" ");
+  if (!text) { if (banner) banner.remove(); return; }
   if (!banner) {
     $("#main").insertAdjacentHTML("afterbegin", `<div id="offline" class="card" style="margin-bottom:12px;color:var(--bad)"></div>`);
     banner = $("#offline");
   }
-  banner.textContent = `Couldn't reach the viewer server: ${message}`;
+  banner.textContent = text;
+}
+
+function showError(e) {
+  if (e.offline) {
+    showProblem("offline", `Couldn't reach the viewer server: ${e.message}`);
+  } else if (e.status) {
+    showProblem("offline", null);
+    showProblem("error", `The viewer server reported an error: ${e.message}. Details are in the viewer's log.`);
+  } else {
+    console.error(e);
+    showProblem("offline", null);
+    showProblem("error", `Something went wrong showing this page: ${e.message}. Details are in the browser's console.`);
+  }
 }
 
 async function refresh(force = false) {
   try {
     await loadRuns();
     await loadCurrent(force);
-    showOffline(null);
+    showProblem("offline", null);
+    showProblem("error", null);
   } catch (e) {
-    showOffline(e.message);
+    showError(e);
+  }
+}
+
+async function poll() {
+  try {
+    await loadCurrent();
+    showProblem("offline", null);
+    showProblem("error", null);
+  } catch (e) {
+    showError(e);
   }
 }
 
@@ -1644,9 +1700,9 @@ async function checkVersion() {
     const { version } = await getJSON("/api/version");
     if (state.version === undefined) state.version = version;
     else if (version !== state.version && !state.printing) location.reload();
-    showOffline(null);
+    showProblem("offline", null);
   } catch (e) {
-    showOffline(e.message);
+    if (e.offline) showError(e);
   }
 }
 
@@ -1668,7 +1724,7 @@ window.addEventListener("hashchange", () => {
   renderNav();
   const active = $("#nav a.active");
   if (active) active.scrollIntoView({ block: "nearest" });
-  loadCurrent();
+  poll();
 });
 $("#interval").addEventListener("change", schedule);
 $("#refresh").addEventListener("click", () => refresh(true));

@@ -111,6 +111,7 @@ def somd2():
         from somd2._viewer import find_port
 
         port = find_port(view_port)
+        log_file = os.path.join(str(config.output_directory), "viewer.log")
         command = [
             sys.executable,
             "-m",
@@ -120,6 +121,8 @@ def somd2():
             str(port),
             "--parent-pid",
             str(os.getpid()),
+            "--log-file",
+            log_file,
         ]
 
         # Without a local display, the browser module may fall back to a
@@ -135,8 +138,8 @@ def somd2():
         # The URL is logged here, so the viewer's own output isn't needed.
         viewer = subprocess.Popen(command, stdout=subprocess.DEVNULL)
         _logger.info(
-            f"Viewer running at http://127.0.0.1:{port}. Once the simulation "
-            "ends, it stops shortly after no page is open."
+            f"Viewer running at http://127.0.0.1:{port}, logging to {log_file}. "
+            "Once the simulation ends, it stops shortly after no page is open."
         )
 
     # Run the simulation. The viewer stops itself once it is no longer needed,
@@ -202,6 +205,13 @@ def somd2_view():
         "as 'ligand_a ligand_b'. By default, a 'network.dat' directly in one of "
         "the paths is used.",
     )
+    parser.add_argument(
+        "--log-file",
+        type=str,
+        default=None,
+        help="A file to log errors to, to include when reporting a problem. "
+        "By default, they are written to the terminal.",
+    )
     # Used by 'somd2 --view', so that the viewer exits with the simulation.
     parser.add_argument("--parent-pid", type=int, default=None, help=SUPPRESS)
     args = parser.parse_args()
@@ -216,6 +226,7 @@ def somd2_view():
             open_browser=args.open,
             parent_pid=args.parent_pid,
             network=args.network,
+            log_file=args.log_file,
         )
     except (OSError, RuntimeError, ValueError) as e:
         exit(f"somd2-view: {e}")
