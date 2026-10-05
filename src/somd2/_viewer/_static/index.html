@@ -91,6 +91,7 @@ header select, header button, input[type="search"] {
   padding: 4px 8px;
 }
 header button { cursor: pointer; }
+body.disconnected #main > :not(#offline) { opacity: 0.4; }
 .layout { display: flex; min-height: calc(100vh - 49px); }
 nav {
   width: 280px;
@@ -1719,6 +1720,7 @@ async function loadCurrent(force = false) {
 function showProblem(kind, message) {
   if (message) state.problems[kind] = message;
   else delete state.problems[kind];
+  document.body.classList.toggle("disconnected", Boolean(state.problems.offline));
   let banner = $("#offline");
   const text = Object.values(state.problems).join(" ");
   if (!text) { if (banner) banner.remove(); return; }
