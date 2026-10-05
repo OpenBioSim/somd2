@@ -128,6 +128,8 @@ nav .summary-link .name::before { content: "★"; color: var(--accent); margin-r
 .sim-link { color: inherit; font-weight: 600; text-decoration: none; }
 .sim-link:hover { text-decoration: underline; }
 .run-links a { display: inline-block; margin-right: 8px; font-size: 12px; text-decoration: none; }
+.export { margin-top: 8px; font-size: 12px; }
+.summary-header button { margin-left: auto; font: inherit; color: var(--fg); background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
 nav .meta { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; margin-top: 4px; }
 main { flex: 1; min-width: 0; padding: 16px; }
 .title-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; margin-bottom: 4px; }
@@ -214,7 +216,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
     color-scheme: light;
   }
   body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-  header, nav, #offline, #config-filter, details summary, .log-messages, details.section:not([open]) { display: none !important; }
+  header, nav, #offline, #config-filter, details summary, .log-messages, details.section:not([open]), .no-print { display: none !important; }
   details.section > summary { display: block !important; }
   details.section > summary h3::before { content: none; }
   .layout { display: block; min-height: 0; }
@@ -796,6 +798,66 @@ function valueWithError(value, error) {
   return `${fmt(value, 2)} ± ${fmt(error, 2)}`;
 }
 
+// Use the browser's save dialog where available, otherwise ask for a name.
+async function download(name, text, type) {
+  if (window.showSaveFilePicker) {
+    const extension = name.slice(name.lastIndexOf("."));
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: name,
+        types: [{ description: extension.slice(1).toUpperCase(), accept: { [type]: [extension] } }],
+      });
+      const file = await handle.createWritable();
+      await file.write(text);
+      await file.close();
+    } catch (e) {
+      if (e.name !== "AbortError") window.alert(`Couldn't save the file: ${e.message}`);
+    }
+    return;
+  }
+  name = window.prompt("Save as", name);
+  if (!name) return;
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function toCSV(header, rows) {
+  const field = (v) => {
+    const s = v === null || v === undefined ? "" : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return [header, ...rows].map((row) => row.map(field).join(",")).join("\n") + "\n";
+}
+
+function exportSummary(kind) {
+  const d = state.summaryData;
+  if (!d) return;
+  if (kind === "json") {
+    download("somd2-summary.json", JSON.stringify(d, null, 2), "application/json");
+    return;
+  }
+  const byId = new Map(d.simulations.map((s) => [s.id, s]));
+  const problems = (s) => (s ? s.problems.join("; ") : "");
+  let header, rows;
+  if (kind === "simulations") {
+    header = ["simulation", "leg", "schedule", "repeats", "finished", "analysed", "progress (%)", "dG (kcal/mol)", "error (kcal/mol)", "problems", "runs"];
+    rows = d.simulations.map((s) => [s.name, s.leg, s.schedule, s.runs.length, s.num_finished, s.num_analysed, s.progress === null ? null : Math.round(1000 * s.progress) / 10, s.free_energy, s.free_energy_error, problems(s), s.runs.map((r) => r.name).join("; ")]);
+  } else if (kind === "binding") {
+    header = ["system", "quantity", "value (kcal/mol)", "error (kcal/mol)", "bound", "free", "bound problems", "free problems"];
+    rows = d.legs.map((l) => [l.name, l.quantity, l.value, l.error, l.bound_name, l.free_name, problems(byId.get(l.bound)), problems(byId.get(l.free))]);
+  } else {
+    header = ["system", "dG hydration (kcal/mol)", "error (kcal/mol)", "free", "vacuum", "free problems", "vacuum problems"];
+    rows = d.hydration.map((h) => [h.name, h.value, h.error, h.free_name, h.vacuum_name, problems(byId.get(h.free)), problems(byId.get(h.vacuum))]);
+  }
+  download(`somd2-summary-${kind}.csv`, toCSV(header, rows), "text/csv");
+}
+
 function renderSummaryPage() {
   const d = state.summaryData;
   const main = $("#main");
@@ -804,7 +866,9 @@ function renderSummaryPage() {
     const runs = d.simulations.reduce((n, s) => n + s.runs.length, 0);
     html += `<div class="muted">${d.simulations.length} simulation${d.simulations.length === 1 ? "" : "s"} from ${runs} run${runs === 1 ? "" : "s"}${d.updating ? " · updating…" : ""}</div>`;
   }
-  html += `</div></div>`;
+  html += `</div>`;
+  if (d) html += `<button type="button" class="no-print" data-export="json">Download JSON</button>`;
+  html += `</div>`;
   if (!d) { main.innerHTML = html + `<div class="empty">Loading…</div>`; return; }
 
   const byId = new Map(d.simulations.map((s) => [s.id, s]));
@@ -828,6 +892,7 @@ function renderSummaryPage() {
       <li>Absolute: ΔG<sub>bind</sub> = ΔG<sub>free</sub> − ΔG<sub>bound</sub> − ΔG<sub>correction</sub>, for an automatically generated Boresch restraint</li>
       <li>Errors: standard error over repeats, or the MBAR error for a single run, combined in quadrature</li>
     </ul>`;
+    table += `<div class="export no-print"><a href="#" data-export="binding">Download CSV</a></div>`;
     html += card("Binding free energies", table);
   }
 
@@ -847,6 +912,7 @@ function renderSummaryPage() {
       <li>Decouple: ΔG<sub>hyd</sub> = −ΔG<sub>free</sub></li>
       <li>Annihilate: ΔG<sub>hyd</sub> = ΔG<sub>vacuum</sub> − ΔG<sub>free</sub></li>
     </ul>`;
+    table += `<div class="export no-print"><a href="#" data-export="hydration">Download CSV</a></div>`;
     html += card("Hydration free energies", table);
   }
 
@@ -861,6 +927,7 @@ function renderSummaryPage() {
       <td class="run-links">${runs}</td></tr>`;
   }
   table += `</table></div>`;
+  table += `<div class="export no-print"><a href="#" data-export="simulations">Download CSV</a></div>`;
   html += card("Simulations", table);
 
   const notes = [];
@@ -1089,6 +1156,12 @@ $("#nav").addEventListener("toggle", (e) => {
 }, true);
 // Remember which sections are collapsed, and redraw charts in a section that
 // is opened, since they can't be sized while hidden.
+$("#main").addEventListener("click", (e) => {
+  const target = e.target.closest("[data-export]");
+  if (!target) return;
+  e.preventDefault();
+  exportSummary(target.dataset.export);
+});
 $("#main").addEventListener("toggle", (e) => {
   const section = e.target.matches && e.target.matches("details.section") ? e.target : null;
   if (!section || state.printing) return;

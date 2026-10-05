@@ -1203,7 +1203,7 @@ class Simulation:
                     "id": self.id,
                     "name": self.name,
                     "status": progress["status"],
-                    "fraction": progress["fraction"],
+                    "progress": progress["fraction"],
                     "settings": settings_key(config, _Config._restart_allowed_diffs),
                     "leg_settings": leg_settings_key(
                         config, _Config._restart_allowed_diffs

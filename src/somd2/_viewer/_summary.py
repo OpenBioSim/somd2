@@ -217,6 +217,15 @@ def _mean_and_error(values, errors):
     return mean, sd / _math.sqrt(n)
 
 
+def _mean_progress(runs):
+    """
+    The average fraction of the requested simulation time completed by a set
+    of repeats.
+    """
+    values = [r["progress"] for r in runs if r.get("progress") is not None]
+    return sum(values) / len(values) if values else None
+
+
 def _usable(run):
     """
     Whether a run has a free energy and an error to average.
@@ -321,13 +330,14 @@ def build_summary(entries):
                             "id",
                             "name",
                             "status",
-                            "fraction",
+                            "progress",
                             "free_energy",
                             "free_energy_error",
                         )
                     }
                     for r in runs
                 ],
+                "progress": _mean_progress(runs),
                 "num_finished": sum(r["status"] == "finished" for r in runs),
                 "num_analysed": len(done),
                 "free_energy": mean,
