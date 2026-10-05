@@ -14,6 +14,7 @@ Open-source GPU accelerated molecular dynamics engine for alchemical free-energy
 simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and [OpenMM](https://github.com/openmm/openmm).
 
 <a id="features"></a>
+
 ## ✨ Features
 
 - 🧬 **Perturbations**: relative binding free energies,
@@ -40,9 +41,11 @@ simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and [Ope
   and analysing their results.
 
 <a id="installation"></a>
+
 ## 📦 Installation
 
 <a id="conda-package"></a>
+
 ### 🐍 Conda package
 
 Install `somd2` directly from the `openbiosim` channel:
@@ -65,6 +68,7 @@ conda install -c conda-forge -c openbiosim/label/dev somd2
 > latest release.
 
 <a id="installing-from-source-standalone"></a>
+
 ### 🛠️ Installing from source (standalone)
 
 To install from source using [pixi](https://pixi.sh), which will
@@ -83,6 +87,7 @@ pip install -e .
 ```
 
 <a id="installing-from-source-full-openbiosim-development"></a>
+
 ### 🧰 Installing from source (full OpenBioSim development)
 
 If you are developing across the full OpenBioSim stack, first install
@@ -123,6 +128,7 @@ pip install -e .
 > ```
 
 <a id="testing"></a>
+
 ### ✅ Testing
 
 You should now have a `somd2` executable in your path. To test, run:
@@ -132,6 +138,7 @@ somd2 --help
 ```
 
 <a id="keeping-up-to-date"></a>
+
 ### 🔃 Keeping up to date
 
 During a development cycle the OpenBioSim packages are pinned only to a
@@ -158,6 +165,7 @@ For a full source install, `git pull` in *every* repository you have installed
 `sire` is compiled, you will also need to rebuild it.
 
 <a id="development"></a>
+
 ## 👩‍💻 Development
 
 Pre-commit hooks are used to ensure consistent code formatting and linting.
@@ -177,6 +185,7 @@ pre-commit run --all-files
 ```
 
 <a id="usage"></a>
+
 ## 🚀 Usage
 
 In order to run an alchemical free-energy simulation you will need to
@@ -213,6 +222,7 @@ from a simple charge-change validation system to full case studies, can be found
 in the [somd2_examples](https://github.com/OpenBioSim/somd2_examples) repository.
 
 <a id="running-somd2-using-one-or-more-gpus"></a>
+
 ### 🖥️ Running SOMD2 using one or more GPUs
 
 In order to run using GPUs you will first need to set the relevant environment
@@ -234,6 +244,7 @@ the `--max-gpus` option can be set, for example setting `--max-gpus 2` while
 GPUs 0 and 1.
 
 <a id="restarting"></a>
+
 ## 💾 Restarting
 
 A simulation can be continued from the files in its output directory using the
@@ -262,6 +273,7 @@ change one that isn't allowed.
 > but one checkpoint instead.
 
 <a id="hydrogen-mass-repartitioning"></a>
+
 ## ⚖️ Hydrogen mass repartitioning
 
 By default SOMD2 applies hydrogen mass repartitioning (HMR), scaling hydrogen
@@ -278,6 +290,7 @@ the input system are used as they are.
 > already been repartitioned.
 
 <a id="pme-tuning"></a>
+
 ## 🎛️ PME tuning
 
 The PME parameters that OpenMM chooses from the Ewald error tolerance often use
@@ -305,6 +318,7 @@ isn't set it is derived from the tolerance. Tuning is skipped when any of these
 are set.
 
 <a id="replica-exchange"></a>
+
 ## 🔁 Replica exchange
 
 SOMD2 supports Hamiltonian replica exchange (HREX) simulations, which can be
@@ -345,6 +359,7 @@ attempt to mix the replicas. A larger value will improve performance, but may
 reduce the efficiency of the exchange.
 
 <a id="rest2"></a>
+
 ## 🌡️ REST2
 
 We also support Replica Exchange with Solute Scaling
@@ -367,6 +382,7 @@ user can fully control the schedule. When doing so, the number of values must
 match the number of lambda windows.
 
 <a id="gcmc"></a>
+
 ## 💧 GCMC
 
 SOMD2 also supports grand canonical Monte Carlo (GCMC) water sampling using
@@ -391,6 +407,7 @@ Depending on your setup, you may also need to install the `cuda-nvvm` package
 from `conda-forge`.
 
 <a id="terminal-ring-flip-monte-carlo"></a>
+
 ## 🔄 Terminal ring flip Monte Carlo
 
 SOMD2 supports terminal ring flip Monte Carlo (MC) moves to improve sampling
@@ -415,6 +432,7 @@ somd2 perturbable_system.bss --terminal-flip-frequency "1 ps" --terminal-flip-an
 ```
 
 <a id="lambda-schedules"></a>
+
 ## 📈 Lambda schedules
 
 The way that the perturbation is applied across the lambda coordinate is
@@ -435,6 +453,7 @@ For the `annihilate`, `decouple`, and ring-breaking schedules, appropriate
 restraints can be generated automatically. See the sections below.
 
 <a id="absolute-binding-free-energies"></a>
+
 ## 🧬 Absolute binding free energies
 
 Absolute binding free energy (ABFE) calculations are supported using the
@@ -490,6 +509,7 @@ needing to scan the log.
 > supported with the ABFE schedules, or a custom schedule.
 
 <a id="ring-breaking-perturbations"></a>
+
 ## 🧬 Ring-breaking perturbations
 
 Perturbations that break (or form) a ring are supported using the
@@ -521,6 +541,7 @@ identical every time.
 > workflows for iteratively optimising the lambda schedule.
 
 <a id="charge-change-perturbations"></a>
+
 ## 🧬 Charge-change perturbations
 
 Perturbations that change the net charge of the system are handled
@@ -562,6 +583,7 @@ somd2 perturbable_system.bss --coalchemical-restraint-dist "10 A"
 > schedules described above, are all retained.
 
 <a id="debugging-with-energy-components"></a>
+
 ## 🐞 Debugging with energy components
 
 To help diagnose simulation instabilities, SOMD2 can record the potential
@@ -590,6 +612,7 @@ The recording interval depends on the runner and active samplers:
 > to one `checkpoint-frequency` interval when copying output mid-simulation.
 
 <a id="copying-output-files-during-a-simulation"></a>
+
 ## 📋 Copying output files during a simulation
 
 When SOMD2 writes checkpoint files it acquires an exclusive
@@ -623,6 +646,7 @@ with FileLock("/path/to/output/somd2.lock"):
 > for longer than this, the simulation will raise a `Timeout` error.
 
 <a id="analysis"></a>
+
 ## 🧮 Analysis
 
 Simulation output will be written to the directory specified using the
@@ -649,6 +673,7 @@ free_nrg = BSS.FreeEnergy.Relative.difference(pmf1, pmf2)
 ```
 
 <a id="viewer"></a>
+
 ## 📊 Viewer
 
 SOMD2 includes a web viewer for monitoring and analysing simulations, either
@@ -749,10 +774,12 @@ it is opened in a browser automatically when a display is available. Once the
 simulation ends, the viewer keeps running while a page is open, so the final
 results can still be viewed, then stops shortly after the last page is closed.
 On a cluster, the viewer stops when the job ends. The viewer uses port 8000 by
-default, which can be changed with `--view-port`. If the port is in use by the
-viewer of a simulation that has ended, that viewer is replaced. Otherwise, e.g.
-if another simulation on the same machine is still running, the next free port
-is used.
+default, which can be changed with `--view-port`, or for both `--view` and
+`somd2-view` by setting the `SOMD2_VIEW_PORT` environment variable, e.g. on a
+remote machine whose viewers are reached through a forwarded port. The option
+takes precedence over the variable. If the port is in use by the viewer of a
+simulation that has ended, that viewer is replaced. Otherwise, e.g. if another
+simulation on the same machine is still running, the next free port is used.
 To monitor several simulations on one page, run `somd2-view` on their parent
 directory instead.
 
@@ -778,6 +805,7 @@ the viewer.
 > its port.
 
 <a id="truncated-mbar-analysis"></a>
+
 ## ✂️ Truncated MBAR analysis
 
 When running HREX with a large number of replicas it can become computationally
@@ -792,6 +820,7 @@ be chosen as a trade off between accuracy and computational cost. A value of aro
 20% of the number of replicas has been found to be a good starting point.
 
 <a id="ghost-atom-modifications"></a>
+
 ## 👻 Ghost atom modifications
 
 We support modification of ghost atom bonded terms to avoid spurious coupling
@@ -802,6 +831,7 @@ option. Modifications are implemented using the [ghostly](https://github.com/Ope
 package.
 
 <a id="note-for-somd1-users"></a>
+
 ## 📝 Note for SOMD1 users
 
 SOMD2 can be run in SOMD1 *compatibility* mode by passing the
@@ -839,6 +869,7 @@ new SOMD2 [ghost atom bonded-term modifications](https://github.com/OpenBioSim/g
 then simply omit the `--somd1-compatibility` option.
 
 <a id="gpu-oversubscription"></a>
+
 ## 🖥️ GPU oversubscription
 
 If you have an NVIDIA GPU that supports the multi-process service (MPS), you can
@@ -857,6 +888,7 @@ More details on MPS, including tuning options, can be found in the following
 [technical blog](https://developer.nvidia.com/blog/maximizing-openmm-molecular-dynamics-throughput-with-nvidia-multi-process-service/).
 
 <a id="python-api"></a>
+
 ## 🐍 Python API
 
 SOMD2 can also be used as a Python API, allowing it to be embedded
@@ -881,6 +913,7 @@ somd2 perturbable_system.bss --lambda-schedule my_schedule.s3 --restraints my_re
 ```
 
 <a id="known-issues"></a>
+
 ## ⚠️ Known issues
 
 If using the regular `Runner` class via the Python API, then you will need to

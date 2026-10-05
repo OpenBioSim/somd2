@@ -26,6 +26,24 @@ SOMD2 command line interface.
 __all__ = ["somd2", "somd2_view"]
 
 
+def _default_view_port(parser):
+    """
+    The default port for the viewer, from SOMD2_VIEW_PORT if it is set.
+    """
+    import os
+
+    value = os.environ.get("SOMD2_VIEW_PORT", "").strip()
+    if not value:
+        return 8000
+    try:
+        port = int(value)
+    except ValueError:
+        port = 0
+    if not 1 <= port <= 65535:
+        parser.error(f"SOMD2_VIEW_PORT must be a port number, not '{value}'.")
+    return port
+
+
 def somd2():
     """
     SOMD2: Command line interface.
@@ -61,9 +79,9 @@ def somd2():
     parser.add_argument(
         "--view-port",
         type=int,
-        default=8000,
-        help="The port for the web viewer. If it is in use, the next free "
-        "port is used.",
+        default=_default_view_port(parser),
+        help="The port for the web viewer, by default SOMD2_VIEW_PORT if set, "
+        "or 8000. If it is in use, the next free port is used.",
     )
 
     # Parse the arguments into a dictionary.
@@ -189,8 +207,9 @@ def somd2_view():
     parser.add_argument(
         "--port",
         type=int,
-        default=8000,
-        help="The port to listen on. If it is in use, the next free port is used.",
+        default=_default_view_port(parser),
+        help="The port to listen on, by default SOMD2_VIEW_PORT if set, or 8000. "
+        "If it is in use, the next free port is used.",
     )
     parser.add_argument(
         "--open",
