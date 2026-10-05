@@ -1556,8 +1556,8 @@ async function checkSummary() {
   } catch (e) {}
 }
 
-async function loadSummary() {
-  const data = await getJSON("/api/summary?analyse=1");
+async function loadSummary(force = false) {
+  const data = await getJSON(`/api/summary?analyse=1${force ? "&force=1" : ""}`);
   if (state.view !== "summary") return;
   state.summaryData = data;
   state.summaryAvailable = data.available;
@@ -1568,10 +1568,10 @@ async function loadSummary() {
   if (data.pending || data.updating) state.quickTimer = setTimeout(loadCurrent, 3000);
 }
 
-async function loadNetwork() {
+async function loadNetwork(force = false) {
   let data;
   try {
-    data = await getJSON("/api/network?analyse=1");
+    data = await getJSON(`/api/network?analyse=1${force ? "&force=1" : ""}`);
   } catch (e) {
     // No network file, e.g. after a restart without one, so show something else.
     if (!/^404/.test(e.message)) throw e;
@@ -1590,9 +1590,9 @@ async function loadNetwork() {
   if (data.pending || data.updating) state.quickTimer = setTimeout(loadCurrent, 3000);
 }
 
-async function loadCurrent() {
-  if (state.view === "summary") return loadSummary();
-  if (state.view === "network") return loadNetwork();
+async function loadCurrent(force = false) {
+  if (state.view === "summary") return loadSummary(force);
+  if (state.view === "network") return loadNetwork(force);
   if (!state.current) { state.summary = null; render(); return; }
   const id = state.current;
   const summary = await getJSON(`/api/simulation/${id}`);
@@ -1628,10 +1628,10 @@ function showOffline(message) {
   banner.textContent = `Couldn't reach the viewer server: ${message}`;
 }
 
-async function refresh() {
+async function refresh(force = false) {
   try {
     await loadRuns();
-    await loadCurrent();
+    await loadCurrent(force);
     showOffline(null);
   } catch (e) {
     showOffline(e.message);
@@ -1653,7 +1653,7 @@ async function checkVersion() {
 function schedule() {
   clearInterval(state.timer);
   const seconds = parseInt($("#interval").value, 10);
-  if (seconds > 0) state.timer = setInterval(refresh, seconds * 1000);
+  if (seconds > 0) state.timer = setInterval(() => refresh(), seconds * 1000);
 }
 
 window.addEventListener("hashchange", () => {
@@ -1671,7 +1671,7 @@ window.addEventListener("hashchange", () => {
   loadCurrent();
 });
 $("#interval").addEventListener("change", schedule);
-$("#refresh").addEventListener("click", refresh);
+$("#refresh").addEventListener("click", () => refresh(true));
 $("#print").addEventListener("click", () => window.print());
 // Let a viewer whose simulation has ended stop soon after its last page closes.
 window.addEventListener("pagehide", () => {

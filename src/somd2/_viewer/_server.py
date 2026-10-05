@@ -85,6 +85,9 @@ class _Registry:
 
 
 class _Handler(_BaseHTTPRequestHandler):
+    # The minimum time, in seconds, between forced analyses of a run.
+    _force_interval = 60.0
+
     def do_GET(self):
         parts = [p for p in _urlparse(self.path).path.split("/") if p]
         registry = self.server.registry
@@ -112,8 +115,13 @@ class _Handler(_BaseHTTPRequestHandler):
             elif parts in (["api", "summary"], ["api", "network"]):
                 # Results are only brought up to date while the summary or
                 # network page is open, which asks for them to be analysed.
-                analyse = "analyse=1" in _urlparse(self.path).query
-                interval = self.server.summary_interval if analyse else None
+                # Refreshing the page forces it, after a short cooldown.
+                query = _urlparse(self.path).query.split("&")
+                interval = None
+                if "analyse=1" in query:
+                    interval = self.server.summary_interval
+                    if "force=1" in query:
+                        interval = min(interval, self._force_interval)
                 entries = [sim.summary_entry(interval) for sim in registry.refresh()]
                 summary = _build_summary(entries)
                 summary["network"] = self.server.network is not None
