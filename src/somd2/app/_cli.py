@@ -326,11 +326,21 @@ def somd2_summary():
     # Errors are still shown, but not the versions in use.
     configure(level="WARNING")
 
+    action = "Identifying" if args.no_analysis else "Analysing"
+    line_open = False
+
     def progress(done, total):
+        nonlocal line_open
         if sys.stderr.isatty():
-            print(f"\rAnalysing runs: {done} of {total}", end="", file=sys.stderr)
-            if done == total:
+            print(f"\r{action} runs: {done} of {total}", end="", file=sys.stderr)
+            line_open = done < total
+            if not line_open:
                 print(file=sys.stderr)
+
+    def finish_line():
+        # So that a message isn't printed on the end of the progress line.
+        if line_open:
+            print(file=sys.stderr)
 
     try:
         summary = collect(args.paths, analyse=not args.no_analysis, progress=progress)
@@ -345,6 +355,8 @@ def somd2_summary():
                     json.dump(report, f, indent=2)
             print(format_text(report))
     except (OSError, ValueError) as e:
+        finish_line()
         exit(f"somd2-summary: {e}")
     except KeyboardInterrupt:
+        finish_line()
         exit(130)
