@@ -36,6 +36,9 @@ from urllib.parse import urlparse as _urlparse
 
 from ._data import Simulation as _Simulation
 from ._data import discover as _discover
+from ._network import build_network as _build_network
+from ._network import find_network as _find_network
+from ._network import read_network as _read_network
 from ._summary import build_summary as _build_summary
 
 _static = _Path(__file__).parent / "_static"
@@ -104,13 +107,26 @@ class _Handler(_BaseHTTPRequestHandler):
                 self._send((_static / "somd2.png").read_bytes(), "image/png")
             elif parts == ["api", "simulations"]:
                 self._json([sim.overview() for sim in registry.refresh()])
-            elif parts == ["api", "summary"]:
-                # Results are only brought up to date while the summary page
-                # is open, which asks for them to be analysed.
+            elif parts == ["api", "network"] and self.server.network is None:
+                self.send_error(404)
+            elif parts in (["api", "summary"], ["api", "network"]):
+                # Results are only brought up to date while the summary or
+                # network page is open, which asks for them to be analysed.
                 analyse = "analyse=1" in _urlparse(self.path).query
                 interval = self.server.summary_interval if analyse else None
                 entries = [sim.summary_entry(interval) for sim in registry.refresh()]
-                self._json(_build_summary(entries))
+                summary = _build_summary(entries)
+                summary["network"] = self.server.network is not None
+                if parts[1] == "summary":
+                    self._json(summary)
+                else:
+                    edges = _read_network(self.server.network)
+                    network = _build_network(edges, summary)
+                    network["file"] = str(self.server.network)
+                    network["available"] = summary["available"]
+                    network["pending"] = summary["pending"]
+                    network["updating"] = summary["updating"]
+                    self._json(network)
             elif len(parts) in (3, 4, 5) and parts[:2] == ["api", "simulation"]:
                 sim = registry.get(parts[2])
                 if sim is None:
@@ -272,6 +288,7 @@ def serve(
     idle_timeout=600.0,
     close_grace=30.0,
     summary_interval=600.0,
+    network=None,
 ):
     """
     Serve the viewer for a set of SOMD2 output directories.
@@ -306,8 +323,18 @@ def serve(
     summary_interval: float
         The minimum time, in seconds, between analyses of a run for the
         summary page.
+
+    network: str
+        A file listing the edges of a perturbation network, one per line as
+        'ligand_a ligand_b'. By default, a 'network.dat' directly in one of
+        the paths is used.
     """
+    network = _find_network(paths, network)
+    if network is not None and not network.is_file():
+        raise ValueError(f"Network file not found: {network}")
+
     server = _ThreadingHTTPServer((host, port), _Handler)
+    server.network = network
     server.daemon_threads = True
     server.registry = _Registry(paths)
     server.start_time = _time.time_ns()

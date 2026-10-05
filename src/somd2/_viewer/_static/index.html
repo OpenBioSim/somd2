@@ -119,6 +119,27 @@ nav .nav-group > summary .name::before { content: "▾"; display: inline-block; 
 nav .nav-group:not([open]) > summary .name::before { transform: rotate(-90deg); }
 nav .nav-group > a { padding-left: 28px; }
 nav .summary-link .name::before { content: "★"; color: var(--accent); margin-right: 6px; }
+nav .nav-pinned { position: sticky; top: 0; z-index: 1; background: var(--surface); }
+.back-links { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.back-links a { text-decoration: none; }
+nav .network-link .name::before { content: "⬡"; }
+.network-graph svg { display: block; width: 100%; height: auto; max-height: 70vh; touch-action: none; user-select: none; cursor: move; border: 1px solid var(--border); border-radius: 8px; }
+.network-tools { display: flex; gap: 6px; margin-bottom: 8px; }
+.network-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.network-layout.with-panel { grid-template-columns: minmax(0, 1fr) 300px; }
+.ligand-panel { border: 1px solid var(--border); border-radius: 8px; padding: 10px; max-height: 70vh; overflow-y: auto; }
+.ligand-panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.ligand-panel-header h4 { margin: 0; }
+.ligand-panel-header button { font: inherit; color: var(--fg); background: none; border: none; font-size: 18px; cursor: pointer; line-height: 1; }
+.ligand-panel .depiction { margin-bottom: 8px; }
+.network-graph .node.selected circle { stroke: var(--accent); stroke-width: 4; }
+@media (max-width: 900px) { .network-layout.with-panel { grid-template-columns: minmax(0, 1fr); } }
+.network-tools button { font: inherit; min-width: 32px; color: var(--fg); background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 10px; cursor: pointer; }
+.network-graph .node circle { fill: var(--surface-2); stroke: var(--fg); stroke-width: 1.5; cursor: grab; }
+.network-graph .node text { fill: var(--fg); font-size: 13px; font-weight: 600; pointer-events: none; paint-order: stroke; stroke: var(--surface); stroke-width: 4px; }
+.network-graph .edge { fill: none; stroke-width: 2.5; cursor: pointer; }
+.network-graph .edge-label { font-size: 11px; fill: var(--fg); paint-order: stroke; stroke: var(--surface); stroke-width: 4px; pointer-events: none; }
+.network-graph .flagged-cycle { stroke: var(--bad); stroke-width: 9; opacity: 0.25; fill: none; }
 .summary-header { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; }
 .summary-header img { height: 64px; width: auto; }
 .summary-header h2 { margin: 0; font-size: 20px; }
@@ -266,7 +287,7 @@ function loadCollapsed(key = "somd2-viewer-collapsed") {
   try { return new Set(JSON.parse(localStorage.getItem(key) || "[]")); } catch (e) { return new Set(); }
 }
 
-const state = { view: location.hash === "#summary" ? "summary" : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "" };
+const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "" };
 const PALETTE = ["#2f6fdf", "#e0663b", "#2a9d6f", "#b04fc9", "#c9a227", "#3aa7c9", "#d64f7a", "#7a8699"];
 const LAMBDA = "λ";
 
@@ -473,10 +494,16 @@ function navLink(r, label) {
 
 function renderNav() {
   const nav = $("#nav");
-  nav.hidden = state.runs.length < 2;
-  const summaryLink = state.summaryAvailable
+  // A network can be shown before more than one run has started.
+  nav.hidden = state.runs.length < 2 && !state.networkAvailable;
+  let summaryLink = state.summaryAvailable
     ? `<a href="#summary" class="summary-link${state.view === "summary" ? " active" : ""}"><div class="name">Summary</div><div class="meta"><span>Results across all runs</span></div></a>`
     : "";
+  if (state.networkAvailable) {
+    summaryLink += `<a href="#network" class="summary-link network-link${state.view === "network" ? " active" : ""}"><div class="name">Network</div><div class="meta"><span>Perturbation network</span></div></a>`;
+  }
+  // Kept at the top of the sidebar while the list of runs is scrolled.
+  if (summaryLink) summaryLink = `<div class="nav-pinned">${summaryLink}</div>`;
 
   // Group runs by their parent directory.
   const groups = new Map();
@@ -835,7 +862,24 @@ function toCSV(header, rows) {
   return [header, ...rows].map((row) => row.map(field).join(",")).join("\n") + "\n";
 }
 
+function exportNetwork() {
+  const d = state.networkData;
+  if (!d) return;
+  const header = ["ligand_a", "ligand_b", "forward (kcal/mol)", "forward error", "forward status", "reverse (kcal/mol)", "reverse error", "reverse status", "combined (kcal/mol)", "combined error", "hysteresis (kcal/mol)", "hysteresis error", "in flagged cycle", "problems"];
+  const rows = d.edges.map((e) => [
+    e.a, e.b,
+    e.forward.value, e.forward.error, e.forward.status,
+    e.reverse.value, e.reverse.error, e.reverse.status,
+    e.combined.value, e.combined.error,
+    e.hysteresis ? e.hysteresis.value : null, e.hysteresis ? e.hysteresis.error : null,
+    e.in_flagged_cycle,
+    [...e.forward.problems, ...e.reverse.problems].join("; "),
+  ]);
+  download("somd2-network.csv", toCSV(header, rows), "text/csv");
+}
+
 function exportSummary(kind) {
+  if (kind === "network") return exportNetwork();
   const d = state.summaryData;
   if (!d) return;
   if (kind === "json") {
@@ -856,6 +900,386 @@ function exportSummary(kind) {
     rows = d.hydration.map((h) => [h.name, h.value, h.error, h.free_name, h.vacuum_name, problems(byId.get(h.free)), problems(byId.get(h.vacuum))]);
   }
   download(`somd2-summary-${kind}.csv`, toCSV(header, rows), "text/csv");
+}
+
+const NETWORK_SIZE = { width: 900, height: 560, radius: 22 };
+
+// The layout's canvas grows with the number of ligands, so they don't crowd.
+function networkCanvas(n) {
+  const scale = Math.max(1, Math.sqrt(n / 8));
+  return { width: NETWORK_SIZE.width * scale, height: NETWORK_SIZE.height * scale };
+}
+
+// A view of the whole network, keeping the default aspect ratio.
+function fitNetworkView() {
+  const pos = Object.values(state.networkPositions);
+  const pad = 60;
+  let x0 = Math.min(...pos.map((p) => p.x)) - pad, x1 = Math.max(...pos.map((p) => p.x)) + pad;
+  let y0 = Math.min(...pos.map((p) => p.y)) - pad, y1 = Math.max(...pos.map((p) => p.y)) + pad;
+  const aspect = NETWORK_SIZE.width / NETWORK_SIZE.height;
+  let w = Math.max(x1 - x0, 300), h = Math.max(y1 - y0, 300 / aspect);
+  if (w / h > aspect) h = w / aspect; else w = h * aspect;
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  return { x: cx - w / 2, y: cy - h / 2, w, h };
+}
+
+function networkKey(d) {
+  return `somd2-viewer-network:${d.file}`;
+}
+
+// Simple force-directed layout: nodes repel, edges attract, and everything is
+// pulled gently towards the centre. Saved positions are used as the start.
+function layoutNetwork(d) {
+  const { width, height } = networkCanvas(d.ligands.length);
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(networkKey(d)) || "{}"); } catch (e) {}
+  const pos = {};
+  const n = d.ligands.length;
+  d.ligands.forEach((lig, i) => {
+    pos[lig] = saved[lig] || {
+      x: width / 2 + 0.35 * width * Math.cos((2 * Math.PI * i) / n),
+      y: height / 2 + 0.35 * height * Math.sin((2 * Math.PI * i) / n),
+    };
+  });
+  if (d.ligands.every((lig) => saved[lig])) return pos;
+
+  const k = 0.8 * Math.sqrt((width * height) / Math.max(n, 1));
+  for (let step = 0; step < 400; step++) {
+    const temperature = 0.1 * width * (1 - step / 400);
+    const shift = Object.fromEntries(d.ligands.map((lig) => [lig, { x: 0, y: 0 }]));
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const a = pos[d.ligands[i]], b = pos[d.ligands[j]];
+        const dx = a.x - b.x, dy = a.y - b.y;
+        const dist = Math.max(Math.hypot(dx, dy), 1);
+        const force = (k * k) / dist;
+        shift[d.ligands[i]].x += (dx / dist) * force; shift[d.ligands[i]].y += (dy / dist) * force;
+        shift[d.ligands[j]].x -= (dx / dist) * force; shift[d.ligands[j]].y -= (dy / dist) * force;
+      }
+    }
+    for (const e of d.edges) {
+      const a = pos[e.a], b = pos[e.b];
+      const dx = a.x - b.x, dy = a.y - b.y;
+      const dist = Math.max(Math.hypot(dx, dy), 1);
+      const force = (dist * dist) / k;
+      shift[e.a].x -= (dx / dist) * force; shift[e.a].y -= (dy / dist) * force;
+      shift[e.b].x += (dx / dist) * force; shift[e.b].y += (dy / dist) * force;
+    }
+    for (const lig of d.ligands) {
+      const s = shift[lig];
+      s.x += 0.02 * (width / 2 - pos[lig].x) * k / 10;
+      s.y += 0.02 * (height / 2 - pos[lig].y) * k / 10;
+      const length = Math.max(Math.hypot(s.x, s.y), 1e-9);
+      const move = Math.min(length, temperature);
+      pos[lig].x = Math.min(width - 40, Math.max(40, pos[lig].x + (s.x / length) * move));
+      pos[lig].y = Math.min(height - 40, Math.max(40, pos[lig].y + (s.y / length) * move));
+    }
+  }
+  return pos;
+}
+
+function statusColour(status) {
+  return { finished: "var(--good)", running: "var(--info)", problem: "var(--warn)" }[status] || "var(--muted)";
+}
+
+function drawNetwork(svg) {
+  const d = state.networkData;
+  const pos = state.networkPositions;
+  const { radius } = NETWORK_SIZE;
+  const view = state.networkView;
+  // Labels would overlap when zoomed far out, but still show on hover.
+  const showLabels = view.w < 1.8 * NETWORK_SIZE.width;
+  const statuses = ["finished", "running", "problem", "not started"];
+  let html = `<defs>${statuses.map((s) => `<marker id="arrow-${s.replace(" ", "-")}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${statusColour(s)}"/></marker>`).join("")}</defs>`;
+  const labels = [];
+  for (const e of d.edges) {
+    const a = pos[e.a], b = pos[e.b];
+    if (e.in_flagged_cycle) html += `<line class="flagged-cycle" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`;
+    const runs = [["forward", e.a, e.b], ["reverse", e.b, e.a]].filter(([dir]) => e[dir].status !== "not started");
+    if (!runs.length) {
+      html += `<line class="edge" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="var(--muted)" stroke-dasharray="6 5"><title>${esc(e.a)} – ${esc(e.b)}: not started</title></line>`;
+      continue;
+    }
+    for (const [dir, from, to] of runs) {
+      const r = e[dir];
+      const p = pos[from], q = pos[to];
+      const dx = q.x - p.x, dy = q.y - p.y, length = Math.max(Math.hypot(dx, dy), 1);
+      const bend = runs.length > 1 ? 28 : 0;
+      const c = { x: (p.x + q.x) / 2 - (dy / length) * bend, y: (p.y + q.y) / 2 + (dx / length) * bend };
+      const start = towards(p, c, radius), end = towards(q, c, radius + 3);
+      const colour = e.hysteresis && e.hysteresis.flagged ? "problem" : r.status;
+      const title = `${from} → ${to}: ${r.value !== null ? `${fmt(r.value, 2)} ± ${fmt(r.error, 2)} kcal/mol` : r.status}${r.problems.length ? `\n${r.problems.join("\n")}` : ""}`;
+      html += `<path class="edge" d="M${start.x},${start.y} Q${c.x},${c.y} ${end.x},${end.y}" stroke="${statusColour(colour)}" marker-end="url(#arrow-${colour.replace(" ", "-")})" data-run="${r.runs.length ? r.runs[0].id : ""}"><title>${esc(title)}</title></path>`;
+      if (r.value !== null && showLabels) {
+        const m = { x: 0.25 * p.x + 0.5 * c.x + 0.25 * q.x, y: 0.25 * p.y + 0.5 * c.y + 0.25 * q.y };
+        labels.push(`<text class="edge-label" x="${m.x}" y="${m.y - 6}" text-anchor="middle">${fmt(r.value, 2)}</text>`);
+      }
+    }
+  }
+  html += labels.join("");
+  for (const lig of d.ligands) {
+    const p = pos[lig];
+    html += `<g class="node${lig === state.selectedLigand ? " selected" : ""}" data-ligand="${esc(lig)}"><circle cx="${p.x}" cy="${p.y}" r="${radius}"/><text class="node-label" x="${p.x}" y="${p.y + radius + 16}" text-anchor="middle">${esc(lig)}</text><title>${esc(lig)}</title></g>`;
+  }
+  svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
+  svg.dataset.labels = String(showLabels);
+  svg.innerHTML = html;
+}
+
+// The run and end state whose depiction shows a ligand: in an edge a → b,
+// ligand a is the λ = 0 end state and ligand b the λ = 1 end state.
+function ligandSource(lig) {
+  for (const e of state.networkData.edges) {
+    for (const [dir, from, to] of [["forward", e.a, e.b], ["reverse", e.b, e.a]]) {
+      const r = e[dir];
+      if (r.runs.length && (from === lig || to === lig)) return { run: r.runs[0].id, state: from === lig ? 0 : 1 };
+    }
+  }
+  return null;
+}
+
+function selectLigand(lig) {
+  state.selectedLigand = lig;
+  renderLigandPanel();
+  const source = lig && ligandSource(lig);
+  const done = source && state.depictions[source.run] && state.depictions[source.run].status === "done";
+  if (!source || done || state.depictionsLoading[source.run]) return;
+  state.depictionsLoading[source.run] = true;
+  getJSON(`/api/simulation/${source.run}/depictions`).then((d) => {
+    state.depictions[source.run] = d;
+    if (state.selectedLigand === lig) renderLigandPanel();
+  }).catch(() => {}).finally(() => { state.depictionsLoading[source.run] = false; });
+}
+
+function renderLigandPanel() {
+  const panel = $("#ligand-panel");
+  if (!panel) return;
+  const lig = state.selectedLigand;
+  const layout = panel.parentElement;
+  if (!lig || !state.networkData || !state.networkData.ligands.includes(lig)) {
+    panel.hidden = true;
+    layout.classList.remove("with-panel");
+    return;
+  }
+  panel.hidden = false;
+  layout.classList.add("with-panel");
+
+  let structure = `<div class="note">No runs for this ligand yet.</div>`;
+  const source = ligandSource(lig);
+  if (source) {
+    const d = state.depictions[source.run];
+    if (!d) structure = `<div class="note">Loading structure…</div>`;
+    else if (d.status !== "done" || !d.molecules.length) structure = `<div class="note">${esc(d.reason || "No structure available.")}</div>`;
+    else structure = `<div class="depiction">${d.molecules[0][source.state ? "svg1" : "svg0"]}</div>`;
+  }
+
+  let rows = "";
+  for (const e of state.networkData.edges) {
+    if (e.a !== lig && e.b !== lig) continue;
+    const other = e.a === lig ? e.b : e.a;
+    const sign = e.a === lig ? 1 : -1;
+    const value = e.combined.value !== null ? valueWithError(sign * e.combined.value, e.combined.error) : "–";
+    const runs = [...e.forward.runs, ...e.reverse.runs];
+    const status = [e.forward.status, e.reverse.status].includes("problem") || (e.hysteresis && e.hysteresis.flagged) || e.in_flagged_cycle
+      ? "problem"
+      : e.forward.status !== "not started" ? e.forward.status : e.reverse.status;
+    rows += `<tr><td>${runs.length ? `<a href="#${runs[0].id}">${esc(other)}</a>` : esc(other)}</td><td class="num">${value}</td><td class="status-${status === "problem" ? "error" : status === "finished" ? "finished" : status === "running" ? "running" : "waiting"}">${esc(status)}</td></tr>`;
+  }
+  panel.innerHTML = `<div class="ligand-panel-header"><h4>${esc(lig)}</h4><button type="button" data-close-panel title="Close">×</button></div>
+    ${structure}
+    <div class="table-wrap"><table><tr><th>To</th><th class="num">ΔΔG</th><th></th></tr>${rows}</table></div>
+    <div class="note">ΔΔG in kcal/mol from ${esc(lig)} to each neighbour, combining both directions.</div>`;
+  panel.querySelector("[data-close-panel]").addEventListener("click", () => {
+    selectLigand(null);
+    const svg = $("#network-svg");
+    if (svg) drawNetwork(svg);
+  });
+}
+
+function towards(point, target, distance) {
+  const dx = target.x - point.x, dy = target.y - point.y, length = Math.max(Math.hypot(dx, dy), 1);
+  return { x: point.x + (dx / length) * distance, y: point.y + (dy / length) * distance };
+}
+
+function renderNetworkPage() {
+  // Redrawing mid-drag would replace the graph being dragged.
+  if (state.networkInteracting) { state.networkRenderPending = true; return; }
+  const d = state.networkData;
+  const main = $("#main");
+  let html = `<div class="summary-header"><img src="/logo.png" alt="SOMD2"><div><h2>Network</h2>`;
+  if (d) html += `<div class="muted" title="${esc(d.file)}">${d.ligands.length} ligands, ${d.edges.length} edges${d.updating ? " · updating…" : ""}</div>`;
+  html += `</div>`;
+  if (d) html += `<button type="button" class="no-print" data-export="network">Download CSV</button>`;
+  html += `</div>`;
+  if (!d) { main.innerHTML = html + `<div class="empty">Loading…</div>`; return; }
+  if (!d.ligands.length) {
+    main.innerHTML = html + `<div class="empty">No edges found in ${esc(d.file)}. Edges are read one per line as 'ligand_a ligand_b', separated by spaces.</div>`;
+    return;
+  }
+
+  if (!state.networkPositions || d.ligands.some((lig) => !state.networkPositions[lig])) {
+    state.networkPositions = layoutNetwork(d);
+    state.networkView = null;
+  }
+  if (!state.networkView) {
+    state.networkView = fitNetworkView();
+  }
+
+  html += `<div class="sections">`;
+  html += card("Graph", `<div class="network-tools no-print"><button type="button" data-zoom="in" title="Zoom in">+</button><button type="button" data-zoom="out" title="Zoom out">−</button><button type="button" data-zoom="fit" title="Show the whole network">Fit</button></div>
+    <div class="network-layout"><div class="network-graph"><svg id="network-svg"></svg></div><aside id="ligand-panel" class="ligand-panel" hidden></aside></div>
+    <div class="legend">
+      <span><i style="background:var(--good)"></i>finished</span>
+      <span><i style="background:var(--info)"></i>running</span>
+      <span><i style="background:var(--warn)"></i>problem or hysteresis</span>
+      <span><i style="background:var(--muted)"></i>not started</span>
+      <span><i style="background:var(--bad);opacity:0.4"></i>in a cycle that doesn't close</span>
+    </div>
+    <div class="note">Click a ligand to see its structure and edges, or an arrow to open one of its runs. Scroll or pinch to zoom, drag the background to pan, and drag the ligands to rearrange the graph.</div>`);
+
+  const value = (r) => (r.value !== null ? valueWithError(r.value, r.error) : `<span class="muted">${esc(r.status)}</span>`);
+  let table = `<div class="table-wrap"><table><tr><th>Edge</th><th class="num">Forward</th><th class="num">Reverse</th><th class="num">Combined</th><th class="num">Hysteresis</th><th>Problems</th></tr>`;
+  for (const e of d.edges) {
+    const h = e.hysteresis;
+    const problems = [...e.forward.problems.map((p) => `forward: ${p}`), ...e.reverse.problems.map((p) => `reverse: ${p}`)];
+    if (h && h.flagged) problems.push("forward and reverse disagree");
+    if (e.in_flagged_cycle) problems.push("in a cycle that doesn't close");
+    table += `<tr><td>${esc(e.a)} → ${esc(e.b)}</td><td class="num">${value(e.forward)}</td><td class="num">${value(e.reverse)}</td>
+      <td class="num">${e.combined.value !== null ? valueWithError(e.combined.value, e.combined.error) : "–"}</td>
+      <td class="num">${h ? valueWithError(h.value, h.error) : "–"}</td>
+      <td class="problems">${problems.map(esc).join("<br>")}</td></tr>`;
+  }
+  table += `</table></div>
+    <ul class="note formulas">
+      <li>ΔΔG in kcal/mol, for the edge's direction in the network file. The reverse column is for runs from the second ligand to the first.</li>
+      <li>Combined: the forward and negated reverse results, weighted by their errors</li>
+      <li>Hysteresis: forward + reverse, which should be zero</li>
+    </ul>`;
+  html += card("Edges", table);
+
+  if (d.cycles.length) {
+    let cycles = `<div class="table-wrap"><table><tr><th>Cycle</th><th class="num">Closure (kcal/mol)</th><th></th></tr>`;
+    for (const c of d.cycles) {
+      cycles += `<tr><td>${c.ligands.map(esc).join(" → ")} → ${esc(c.ligands[0])}</td><td class="num">${valueWithError(c.value, c.error)}</td>
+        <td class="problems">${c.flagged ? "doesn't close within errors" : ""}</td></tr>`;
+    }
+    cycles += `</table></div><div class="note">The sum of the combined ΔΔG around each independent cycle, which should be zero. Cycles more than twice their error from zero are flagged.</div>`;
+    html += card("Cycle closure", cycles);
+  }
+  html += `</div>`;
+  main.innerHTML = html;
+
+  const svg = $("#network-svg");
+  if (svg) {
+    drawNetwork(svg);
+    enableNetworkDragging(svg);
+    // Also retries a structure that wasn't available last time.
+    selectLigand(state.selectedLigand);
+  }
+}
+
+// Zoom the view by a factor, keeping the point (cx, cy) fixed on screen.
+function zoomNetwork(svg, factor, cx, cy) {
+  const v = state.networkView;
+  const w = Math.min(Math.max(v.w * factor, 150), 50 * NETWORK_SIZE.width);
+  const scale = w / v.w;
+  state.networkView = { x: cx - (cx - v.x) * scale, y: cy - (cy - v.y) * scale, w, h: v.h * scale };
+  updateNetworkView(svg);
+}
+
+// Moving the view only needs the viewBox changing, unless the edge labels are
+// shown or hidden.
+function updateNetworkView(svg) {
+  const v = state.networkView;
+  if (String(v.w < 1.8 * NETWORK_SIZE.width) !== svg.dataset.labels) {
+    drawNetwork(svg);
+  } else {
+    svg.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
+  }
+}
+
+function enableNetworkDragging(svg) {
+  // Dragging a ligand moves it, and dragging the background pans the view.
+  let dragging = null;
+  let panning = null;
+  const point = (e) => {
+    const p = svg.createSVGPoint();
+    p.x = e.clientX; p.y = e.clientY;
+    return p.matrixTransform(svg.getScreenCTM().inverse());
+  };
+  let pressed = null;
+  svg.addEventListener("pointerdown", (e) => {
+    const node = e.target.closest(".node");
+    if (node) {
+      dragging = node.dataset.ligand;
+      pressed = { x: e.clientX, y: e.clientY, moved: false };
+    } else if (!e.target.closest("[data-run]")) {
+      // Graph units per screen pixel, from the graph's actual scaling.
+      const ctm = svg.getScreenCTM();
+      if (!ctm || !ctm.a) return;
+      panning = { x: e.clientX, y: e.clientY, view: { ...state.networkView }, scale: 1 / ctm.a };
+    } else {
+      return;
+    }
+    state.networkInteracting = true;
+    svg.setPointerCapture(e.pointerId);
+  });
+  svg.addEventListener("pointermove", (e) => {
+    if (dragging) {
+      if (!pressed.moved && Math.hypot(e.clientX - pressed.x, e.clientY - pressed.y) < 4) return;
+      pressed.moved = true;
+      const p = point(e);
+      state.networkPositions[dragging] = { x: p.x, y: p.y };
+      drawNetwork(svg);
+    } else if (panning) {
+      state.networkView = {
+        ...panning.view,
+        x: panning.view.x - (e.clientX - panning.x) * panning.scale,
+        y: panning.view.y - (e.clientY - panning.y) * panning.scale,
+      };
+      updateNetworkView(svg);
+    }
+  });
+  svg.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const p = point(e);
+    zoomNetwork(svg, Math.exp(e.deltaY * 0.0015), p.x, p.y);
+  }, { passive: false });
+  const tools = svg.closest(".card").querySelector(".network-tools");
+  if (tools) tools.addEventListener("click", (e) => {
+    const button = e.target.closest("[data-zoom]");
+    if (!button) return;
+    const v = state.networkView;
+    if (button.dataset.zoom === "fit") {
+      state.networkView = fitNetworkView();
+      updateNetworkView(svg);
+    } else {
+      zoomNetwork(svg, button.dataset.zoom === "in" ? 1 / 1.3 : 1.3, v.x + v.w / 2, v.y + v.h / 2);
+    }
+  });
+  const stop = () => {
+    panning = null;
+    state.networkInteracting = false;
+    const ligand = dragging;
+    dragging = null;
+    if (ligand && !pressed.moved) {
+      selectLigand(ligand === state.selectedLigand ? null : ligand);
+      drawNetwork(svg);
+    } else if (ligand) {
+      try { localStorage.setItem(networkKey(state.networkData), JSON.stringify(state.networkPositions)); } catch (e) {}
+    }
+    // Catch up with any refresh that arrived during the drag.
+    if (state.networkRenderPending) {
+      state.networkRenderPending = false;
+      render();
+    }
+  };
+  svg.addEventListener("pointerup", stop);
+  svg.addEventListener("pointercancel", stop);
+  svg.addEventListener("click", (e) => {
+    const edge = e.target.closest("[data-run]");
+    if (edge && edge.dataset.run) location.hash = edge.dataset.run;
+  });
 }
 
 function renderSummaryPage() {
@@ -941,11 +1365,17 @@ function renderSummaryPage() {
 function render() {
   if (state.printing) return;
   if (state.view === "summary") { renderSummaryPage(); return; }
+  if (state.view === "network") { renderNetworkPage(); return; }
   const s = state.summary;
   const main = $("#main");
   if (!s) { main.innerHTML = `<div class="empty">No SOMD2 output found.</div>`; return; }
   const scroll = window.scrollY;
-  let html = `<div class="title-row"><h2>${esc(s.name)}</h2><span class="badge status-${s.status}">${esc(s.status)}</span>`;
+  const back = [
+    state.summaryAvailable ? `<a href="#summary">Summary</a>` : "",
+    state.networkAvailable ? `<a href="#network">Network</a>` : "",
+  ].filter(Boolean);
+  let html = back.length ? `<div class="back-links no-print">← ${back.join(" · ")}</div>` : "";
+  html += `<div class="title-row"><h2>${esc(s.name)}</h2><span class="badge status-${s.status}">${esc(s.status)}</span>`;
   if (s.progress) html += `<span class="muted">${s.replica_exchange ? "Replica exchange" : "Independent windows"}</span>`;
   html += `</div><div class="path">${esc(s.path)}</div>`;
   if (!s.progress) {
@@ -1000,7 +1430,7 @@ function saveNavCollapsed() {
 async function loadRuns() {
   state.runs = await getJSON("/api/simulations");
   // The summary page reports this itself when it loads.
-  if (state.view !== "summary") await checkSummary();
+  if (state.view === "run") await checkSummary();
   if (!state.runs.find((r) => r.id === state.current)) {
     const fromHash = location.hash.slice(1);
     state.current = (state.runs.find((r) => r.id === fromHash) || state.runs[0] || {}).id || null;
@@ -1023,12 +1453,15 @@ function loadComponents(s) {
 // are still being identified, check again shortly.
 async function checkSummary() {
   clearTimeout(state.summaryTimer);
-  if (state.runs.length < 2) { state.summaryAvailable = false; return; }
   try {
     const data = await getJSON("/api/summary");
-    const changed = data.available !== state.summaryAvailable;
+    const changed = data.available !== state.summaryAvailable || data.network !== state.networkAvailable;
     state.summaryAvailable = data.available;
-    if (changed) renderNav();
+    state.networkAvailable = data.network;
+    if (changed) {
+      renderNav();
+      if (state.view === "run" && state.summary) render();
+    }
     if (data.pending) state.summaryTimer = setTimeout(checkSummary, 3000);
   } catch (e) {}
 }
@@ -1038,6 +1471,29 @@ async function loadSummary() {
   if (state.view !== "summary") return;
   state.summaryData = data;
   state.summaryAvailable = data.available;
+  state.networkAvailable = data.network;
+  renderNav();
+  render();
+  clearTimeout(state.quickTimer);
+  if (data.pending || data.updating) state.quickTimer = setTimeout(loadCurrent, 3000);
+}
+
+async function loadNetwork() {
+  let data;
+  try {
+    data = await getJSON("/api/network?analyse=1");
+  } catch (e) {
+    // No network file, e.g. after a restart without one, so show something else.
+    if (!/^404/.test(e.message)) throw e;
+    state.networkAvailable = false;
+    const run = state.current || (state.runs[0] && state.runs[0].id) || "";
+    location.replace(state.summaryAvailable ? "#summary" : `#${run}`);
+    return;
+  }
+  if (state.view !== "network") return;
+  state.networkData = data;
+  state.summaryAvailable = data.available;
+  state.networkAvailable = true;
   renderNav();
   render();
   clearTimeout(state.quickTimer);
@@ -1046,6 +1502,7 @@ async function loadSummary() {
 
 async function loadCurrent() {
   if (state.view === "summary") return loadSummary();
+  if (state.view === "network") return loadNetwork();
   if (!state.current) { state.summary = null; render(); return; }
   const id = state.current;
   const summary = await getJSON(`/api/simulation/${id}`);
@@ -1111,8 +1568,8 @@ function schedule() {
 
 window.addEventListener("hashchange", () => {
   const target = location.hash.slice(1);
-  if (target === "summary") {
-    state.view = "summary";
+  if (target === "summary" || target === "network") {
+    state.view = target;
   } else {
     state.view = "run";
     state.current = target;

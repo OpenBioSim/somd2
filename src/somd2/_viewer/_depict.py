@@ -133,6 +133,7 @@ def depict(topology0, topology1):
                     rdmol0, rdmol1, mapping, map0, map1, pixels
                 ),
                 "svg0": _draw(rdmol0, pixels),
+                "svg1": _draw(rdmol1, pixels),
             }
         )
 

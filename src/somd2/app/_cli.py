@@ -194,6 +194,14 @@ def somd2_view():
         action="store_true",
         help="Open the viewer in a web browser.",
     )
+    parser.add_argument(
+        "--network",
+        type=str,
+        default=None,
+        help="A file listing the edges of a perturbation network, one per line "
+        "as 'ligand_a ligand_b'. By default, a 'network.dat' directly in one of "
+        "the paths is used.",
+    )
     # Used by 'somd2 --view', so that the viewer exits with the simulation.
     parser.add_argument("--parent-pid", type=int, default=None, help=SUPPRESS)
     args = parser.parse_args()
@@ -207,6 +215,7 @@ def somd2_view():
             port=port,
             open_browser=args.open,
             parent_pid=args.parent_pid,
+            network=args.network,
         )
     except (OSError, RuntimeError, ValueError) as e:
         exit(f"somd2-view: {e}")

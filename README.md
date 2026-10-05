@@ -712,6 +712,22 @@ simulation, e.g. stopped runs, poor overlap or replica mixing, or repeats that
 disagree, so problematic edges can be spotted early in a campaign. Results are
 updated in the background while the summary page is open.
 
+For a relative binding free energy campaign, a network page can also be shown,
+using a file that lists the edges of the perturbation network, one per line as
+`ligand_a ligand_b`, with any further columns ignored. This is the format of the
+`network.dat` file written by BioSimSpace and
+[ligand_fep_workflows](https://github.com/OpenBioSim/ligand_fep_workflows). A
+`network.dat` directly in one of the paths given to `somd2-view` is used
+automatically, or a file can be passed with `--network`. The runs for an edge
+are expected somewhere below a directory named after the two ligands, e.g.
+`ligand_a~ligand_b/bound_0` or `ligand_a~ligand_b/free/run_0`, with the order of
+the names giving the direction run. (The names can be separated by `~`, `-`,
+`_`, `->` or `_to_`.) The network is drawn as an interactive graph, with
+each edge coloured by its status and labelled with its free energy as results
+come in. Edges run in both directions are checked for hysteresis, and cycles in
+the network for closure, to help find problem edges. Clicking a ligand shows its
+structure and the results for its edges.
+
 To launch the viewer alongside a simulation, pass the `--view` option to
 `somd2`:
 
