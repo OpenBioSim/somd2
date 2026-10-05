@@ -197,8 +197,9 @@ def somd2_view():
     parser.add_argument(
         "paths",
         type=str,
-        nargs="+",
-        help="SOMD2 output directories, or directories containing them.",
+        nargs="*",
+        help="SOMD2 output directories, or directories containing them. Not "
+        "needed with --clear-cache.",
     )
     parser.add_argument(
         "--host",
@@ -237,16 +238,22 @@ def somd2_view():
         "--clear-cache",
         action="store_true",
         help="Clear the viewer's cache, e.g. of the systems identified for each "
-        "run, before starting.",
+        "run, before starting, or on its own if no paths are given.",
     )
     # Used by 'somd2 --view', so that the viewer exits with the simulation.
     parser.add_argument("--parent-pid", type=int, default=None, help=SUPPRESS)
     args = parser.parse_args()
-    if args.port is None:
-        args.port = _default_view_port(parser)
 
     if args.clear_cache:
-        clear_cache()
+        cleared = clear_cache()
+        # Clearing the cache can be done on its own.
+        if not args.paths:
+            print(f"Cleared the viewer's cache in {cleared}.")
+            return
+    if not args.paths:
+        parser.error("the following arguments are required: paths")
+    if args.port is None:
+        args.port = _default_view_port(parser)
 
     try:
         # 'somd2 --view' has already chosen the port.

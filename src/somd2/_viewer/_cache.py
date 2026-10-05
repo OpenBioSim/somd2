@@ -42,8 +42,10 @@ def cache_dir():
 
 def clear_cache():
     """
-    Remove everything in the viewer's cache.
+    Remove everything in the viewer's cache, returning its directory.
     """
     import shutil
 
-    shutil.rmtree(cache_dir(), ignore_errors=True)
+    path = cache_dir()
+    shutil.rmtree(path, ignore_errors=True)
+    return path
