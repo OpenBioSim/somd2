@@ -169,7 +169,9 @@ class _Handler(_BaseHTTPRequestHandler):
                 self.send_error(404)
             elif len(parts) == 3 and parts[:2] == ["api", "group"]:
                 group = _unquote(parts[2])
-                interval = self._analysis_interval()
+                # Repeats are compared on the same page, so all are kept up to
+                # date as their data changes, behind the selected run.
+                interval = 0 if self._analysis_interval() is not None else None
                 members = sorted(
                     (s for s in registry.refresh() if s.group() == group),
                     key=lambda s: s.name,

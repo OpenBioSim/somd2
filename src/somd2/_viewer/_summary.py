@@ -93,18 +93,21 @@ def _read_cached(key):
 
 
 def _write_cached(key, fingerprint):
+    import contextlib
     import os
 
     from ._log import report
 
     path = _cached_path(key)
+    # Written then renamed, so that another viewer never reads part of it.
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Written then renamed, so that another viewer never reads part of it.
-        temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
         temporary.write_text(_json.dumps(fingerprint))
         os.replace(temporary, path)
     except OSError as e:
+        with contextlib.suppress(OSError):
+            temporary.unlink()
         report(e, f"Couldn't write to the cache in {path.parent}")
 
 
