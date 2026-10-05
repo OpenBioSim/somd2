@@ -115,7 +115,8 @@ class _Handler(_BaseHTTPRequestHandler):
             elif parts in (["api", "summary"], ["api", "network"]):
                 # Results are only brought up to date while the summary or
                 # network page is open, which asks for them to be analysed.
-                # Refreshing the page forces it, after a short cooldown.
+                # Refreshing the page forces it for runs not analysed in the
+                # last minute.
                 query = _urlparse(self.path).query.split("&")
                 interval = None
                 if "analyse=1" in query:
