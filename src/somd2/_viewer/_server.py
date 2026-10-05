@@ -197,7 +197,8 @@ class _Handler(_BaseHTTPRequestHandler):
         except BrokenPipeError:
             pass
         except Exception as e:
-            reason = _report(e, f"Couldn't handle the request for {self.path}")
+            path = _urlparse(self.path).path
+            reason = _report(e, f"Couldn't handle the request for {path}")
             self._json({"error": reason}, status=500)
 
     def do_POST(self):
@@ -254,16 +255,27 @@ class _Handler(_BaseHTTPRequestHandler):
 
 
 def _port_is_free(port):
+    import errno
     import socket
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        # Match the server, which can bind while closed connections linger.
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    # Browsers use both addresses for 'localhost', and a port forwarded over
+    # SSH may only hold the IPv6 one.
+    for family, address in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
         try:
-            s.bind(("127.0.0.1", port))
-            return True
+            s = socket.socket(family, socket.SOCK_STREAM)
         except OSError:
-            return False
+            continue
+        with s:
+            # Match the server, which can bind while closed connections linger.
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind((address, port))
+            except OSError as e:
+                # IPv6 may not be enabled.
+                if family == socket.AF_INET6 and e.errno == errno.EADDRNOTAVAIL:
+                    continue
+                return False
+    return True
 
 
 def _take_over(port, timeout=5.0):

@@ -91,7 +91,6 @@ header select, header button, input[type="search"] {
   padding: 4px 8px;
 }
 header button { cursor: pointer; }
-body.disconnected #main > :not(#offline) { opacity: 0.4; }
 .layout { display: flex; min-height: calc(100vh - 49px); }
 nav {
   width: 280px;
@@ -327,22 +326,46 @@ function simTime(ns) {
   return `${fmt(ns * 1000, ns * 1000 >= 100 ? 0 : 1)} ps`;
 }
 
+// Reload for a new viewer, unless the page has only just done so, which means
+// that more than one viewer is answering at this address.
+function reloadForViewer(from, to) {
+  const key = "somd2-viewer-reloaded";
+  let last = 0;
+  try { last = Number(sessionStorage.getItem(key)) || 0; } catch (e) {}
+  if (Date.now() - last < 10000) return false;
+  try { sessionStorage.setItem(key, String(Date.now())); } catch (e) {}
+  console.info(`Reloading, since this is a different viewer (${from} → ${to}).`);
+  reload();
+  return true;
+}
+
+// The page carries on until it is replaced, so later responses are ignored.
+function reload() {
+  state.reloading = true;
+  location.reload();
+}
+
 async function getJSON(url) {
   let r;
   try {
-    r = await fetch(url, { cache: "no-store" });
+    // A unique URL, since browsers can return stored responses from an
+    // earlier viewer despite being told not to.
+    const unique = `${url}${url.includes("?") ? "&" : "?"}_=${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    r = await fetch(unique, { cache: "no-store" });
   } catch (e) {
     const error = new Error(e.message);
     error.offline = true;
     throw error;
   }
+  if (state.reloading) return new Promise(() => {});
   // A new viewer, e.g. for a different output directory, gets a fresh page
   // rather than having its results mixed with the old ones.
   const instance = r.headers.get("X-Viewer-Instance");
   if (instance && state.instance && instance !== state.instance && !state.printing) {
-    console.info("Reloading, since this is a different viewer.");
-    location.reload();
-    return new Promise(() => {});
+    if (reloadForViewer(state.instance, instance)) return new Promise(() => {});
+    const error = new Error(`More than one viewer is answering at ${location.host}. Stop the others, then reload this page`);
+    error.conflict = true;
+    throw error;
   }
   if (instance) state.instance = instance;
   if (!r.ok) {
@@ -1696,7 +1719,6 @@ async function loadCurrent(force = false) {
 function showProblem(kind, message) {
   if (message) state.problems[kind] = message;
   else delete state.problems[kind];
-  document.body.classList.toggle("disconnected", Boolean(state.problems.offline));
   let banner = $("#offline");
   const text = Object.values(state.problems).join(" ");
   if (!text) { if (banner) banner.remove(); return; }
@@ -1711,6 +1733,9 @@ function showError(e) {
   const message = e.message.replace(/\.+$/, "");
   if (e.offline) {
     showProblem("offline", `Couldn't reach the viewer server: ${message}. The results shown may be out of date.`);
+  } else if (e.conflict) {
+    showProblem("offline", null);
+    showProblem("error", `${message}.`);
   } else if (e.status) {
     showProblem("offline", null);
     showProblem("error", `The viewer server reported an error: ${message}. Details are in the viewer's log.`);
@@ -1752,7 +1777,7 @@ async function checkVersion() {
     if (state.version === undefined) state.version = version;
     else if (version !== state.version && !state.printing) {
       console.info("Reloading, since the viewer has changed.");
-      location.reload();
+      reload();
     }
     showProblem("offline", null);
   } catch (e) {
