@@ -39,17 +39,17 @@ _reported_lock = _threading.Lock()
 _MAX_PER_CONTEXT = 5
 
 
-def configure(log_file=None):
+def configure(log_file=None, level="INFO"):
     """
     Send the viewer's log to a file, or to stderr, and record the versions in
-    use.
+    use, which are only shown at the INFO level.
     """
     from .. import get_versions
 
     _loguru.remove()
     _loguru.add(
         _sys.stderr if log_file is None else str(log_file),
-        level="INFO",
+        level=level,
         filter=lambda record: record["extra"].get("somd2_viewer", False),
         diagnose=False,
     )

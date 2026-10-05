@@ -39,6 +39,8 @@ simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and [Ope
   that meets the requested accuracy, for faster simulations on CUDA and OpenCL.
 - 📊 **[Viewer](#viewer)**: a web page for monitoring simulations as they run
   and analysing their results.
+- 📋 **[Command-line summary](#summary-from-the-command-line)**: the progress
+  and free energies of a campaign as tables, CSV or JSON, without the viewer.
 
 <a id="installation"></a>
 
@@ -827,6 +829,24 @@ the viewer.
 > runs on a compute node that can't be reached this way, so instead run
 > `somd2-view` on the login node, pointing at the output directory, and forward
 > its port.
+
+<a id="summary-from-the-command-line"></a>
+
+### 📋 Summary from the command line
+
+The same summary can be printed without starting the viewer, e.g. on a cluster
+or from a script:
+
+```
+somd2-summary output_directories
+```
+
+Every run is analysed first, which can take a while for a large campaign, so
+pass `--no-analysis` for a quick check of progress alone. Each table can also be
+written as a CSV file with `--csv directory`, and the whole summary as JSON with
+`--json file`, or to standard output in place of the tables with `--json -`. The
+JSON has a `version` field, which changes whenever its structure does, and all
+free energies are in kcal/mol.
 
 <a id="truncated-mbar-analysis"></a>
 

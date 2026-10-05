@@ -29,6 +29,7 @@ Functions
     :toctree: generated/
 
     somd2
+    somd2_summary
     somd2_view
 """
 

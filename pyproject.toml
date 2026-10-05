@@ -21,6 +21,7 @@ license-files = ["LICENSE"]
 
 [project.scripts]
 somd2 = "somd2.app:somd2"
+somd2-summary = "somd2.app:somd2_summary"
 somd2-view = "somd2.app:somd2_view"
 
 [project.urls]

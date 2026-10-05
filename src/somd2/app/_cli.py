@@ -23,7 +23,7 @@
 SOMD2 command line interface.
 """
 
-__all__ = ["somd2", "somd2_view"]
+__all__ = ["somd2", "somd2_summary", "somd2_view"]
 
 
 def _default_view_port(parser):
@@ -269,3 +269,82 @@ def somd2_view():
         )
     except (OSError, RuntimeError, ValueError) as e:
         exit(f"somd2-view: {e}")
+
+
+def somd2_summary():
+    """
+    SOMD2 summary: Command line interface.
+    """
+
+    import json
+    import os
+    import sys
+    from argparse import ArgumentParser
+    from sys import exit
+
+    # As for the viewer, JAX must be disabled before pymbar is imported.
+    os.environ.setdefault("PYMBAR_DISABLE_JAX", "1")
+
+    parser = ArgumentParser(
+        prog="somd2-summary",
+        description="Summarise the progress and free energies of SOMD2 output "
+        "directories, as on the viewer's summary page.",
+    )
+    parser.add_argument(
+        "paths",
+        type=str,
+        nargs="+",
+        help="SOMD2 output directories, or directories containing them.",
+    )
+    parser.add_argument(
+        "--csv",
+        type=str,
+        default=None,
+        metavar="DIRECTORY",
+        help="Also write each table as a CSV file in this directory.",
+    )
+    parser.add_argument(
+        "--json",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help="Also write the summary as JSON to this file, or to standard output "
+        "instead of the tables if '-'.",
+    )
+    parser.add_argument(
+        "--no-analysis",
+        action="store_true",
+        help="Only report progress, without estimating free energies, which is "
+        "much quicker.",
+    )
+    args = parser.parse_args()
+
+    from somd2._viewer._data import _clean
+    from somd2._viewer._log import configure
+    from somd2._viewer._summary_cli import collect, format_text, to_json, write_csv
+
+    # Errors are still shown, but not the versions in use.
+    configure(level="WARNING")
+
+    def progress(done, total):
+        if sys.stderr.isatty():
+            print(f"\rAnalysing runs: {done} of {total}", end="", file=sys.stderr)
+            if done == total:
+                print(file=sys.stderr)
+
+    try:
+        summary = collect(args.paths, analyse=not args.no_analysis, progress=progress)
+        report = _clean(to_json(summary, args.paths))
+        if args.csv is not None:
+            write_csv(report, args.csv)
+        if args.json == "-":
+            print(json.dumps(report, indent=2))
+        else:
+            if args.json is not None:
+                with open(args.json, "w") as f:
+                    json.dump(report, f, indent=2)
+            print(format_text(report))
+    except (OSError, ValueError) as e:
+        exit(f"somd2-summary: {e}")
+    except KeyboardInterrupt:
+        exit(130)
