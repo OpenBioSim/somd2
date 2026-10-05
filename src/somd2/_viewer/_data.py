@@ -1217,7 +1217,12 @@ class Simulation:
         background analysis if its results are out of date.
         """
         from ..config import Config as _Config
-        from ._summary import leg_settings_key, settings_key, vacuum_settings_keys
+        from ._summary import (
+            leg_settings_key,
+            settings_key,
+            vacuum_settings,
+            vacuum_settings_keys,
+        )
 
         try:
             config = self.config()
@@ -1247,6 +1252,7 @@ class Simulation:
             has_topologies = (self.path / "system0.prm7").exists() and (
                 self.path / "system1.prm7"
             ).exists()
+            vacuum = vacuum_settings(config, _Config._restart_allowed_diffs)
             return _clean(
                 {
                     "id": self.id,
@@ -1257,9 +1263,9 @@ class Simulation:
                     "leg_settings": leg_settings_key(
                         config, _Config._restart_allowed_diffs
                     ),
-                    "vacuum_settings": vacuum_settings_keys(
-                        config, _Config._restart_allowed_diffs
-                    ),
+                    "vacuum_settings": vacuum_settings_keys(vacuum),
+                    # Used to say which settings stop a vacuum leg matching.
+                    "vacuum_values": vacuum,
                     "schedule": schedule,
                     "cutoff_type": str(config.get("cutoff_type") or "").lower(),
                     "fingerprint": fingerprint,

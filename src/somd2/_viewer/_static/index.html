@@ -1448,7 +1448,7 @@ function renderSummaryPage() {
       table += `<tr><td>${esc(h.name)}</td>
         <td class="num">${h.value !== null ? valueWithError(h.value, h.error) : `<span class="muted" title="${esc(h.note || "")}">–</span>`}</td>
         <td>${esc(h.free_name)}<div class="muted">${repeats(f)}</div></td>
-        <td>${v ? `${esc(h.vacuum_name)}<div class="muted">${repeats(v)}</div>` : `<span class="muted">not needed (decouple)</span>`}</td>
+        <td>${v ? `${esc(h.vacuum_name)}<div class="muted">${repeats(v)}</div>` : h.decouple ? `<span class="muted">not needed (decouple)</span>` : "–"}</td>
         <td class="problems">${problems.map(esc).join("<br>")}${h.note ? `<div>${esc(h.note)}</div>` : ""}</td></tr>`;
     }
     table += `</table></div>`;

@@ -127,10 +127,10 @@ def _fingerprint(topology0, topology1):
     }
 
 
-def settings_key(config, ignore):
+def _settings(config, ignore):
     """
-    Return a key for the settings that must match between repeats, i.e. all
-    except those that may change on restart, and the output directory.
+    The settings in a config, except those ignored and the output directory,
+    as JSON values.
     """
     # Restart validation treats None and False as equal, so do the same here.
     kept = {
@@ -138,7 +138,15 @@ def settings_key(config, ignore):
         for k, v in sorted(config.items())
         if k not in ignore and k != "output_directory"
     }
-    return _hash(_json.loads(_json.dumps(kept, default=str)))
+    return _json.loads(_json.dumps(kept, default=str))
+
+
+def settings_key(config, ignore):
+    """
+    Return a key for the settings that must match between repeats, i.e. all
+    except those that may change on restart, and the output directory.
+    """
+    return _hash(_settings(config, ignore))
 
 
 def leg_settings_key(config, ignore):
@@ -167,13 +175,11 @@ def _leg_specific(config):
     }
 
 
-def vacuum_settings_keys(config, ignore):
+def vacuum_settings(config, ignore):
     """
-    Return keys for the settings that must match between the free and vacuum
-    legs of a hydration free energy, i.e. as for bound and free legs, but also
-    ignoring pressure and the dispersion correction, which aren't applied
-    without water. The second key also ignores the cutoff and PME options,
-    which are disabled for a vacuum leg run without a periodic box.
+    Return the settings that must match between the free and vacuum legs of a
+    hydration free energy, i.e. as for bound and free legs, but also ignoring
+    pressure and the dispersion correction, which aren't applied without water.
     """
     no_water = {
         "pressure",
@@ -181,13 +187,22 @@ def vacuum_settings_keys(config, ignore):
         "surface_tension",
         "use_dispersion_correction",
     }
-    cutoff = {
-        k
-        for k in config
-        if k in ("cutoff", "cutoff_type", "tune_pme") or k.startswith("pme_")
-    }
-    base = _leg_specific(config) | set(ignore) | no_water
-    return settings_key(config, base), settings_key(config, base | cutoff)
+    return _settings(config, _leg_specific(config) | set(ignore) | no_water)
+
+
+def _is_cutoff_option(key):
+    return key in ("cutoff", "cutoff_type", "tune_pme") or key.startswith("pme_")
+
+
+def vacuum_settings_keys(settings):
+    """
+    Return keys for the settings from vacuum_settings(). The second key also
+    ignores the cutoff and PME options, which are disabled for a vacuum leg run
+    without a periodic box.
+    """
+    return _hash(settings), _hash(
+        {k: v for k, v in settings.items() if not _is_cutoff_option(k)}
+    )
 
 
 def _common_name(names):
@@ -335,6 +350,7 @@ def build_summary(entries):
                 "auto_restraint": all(r.get("auto_restraint") for r in runs),
                 "leg_settings": runs[0]["leg_settings"],
                 "vacuum_settings": runs[0]["vacuum_settings"],
+                "vacuum_values": runs[0].get("vacuum_values") or {},
                 "schedule": runs[0]["schedule"],
                 "cutoff_type": runs[0]["cutoff_type"],
                 "runs": [
@@ -381,7 +397,10 @@ def build_summary(entries):
             unpaired += len(sims)
     legs.sort(key=lambda leg: leg["name"])
 
-    hydration = _hydration(simulations)
+    hydration = _hydration(simulations, legs)
+    # Only needed to explain unmatched vacuum legs.
+    for sim in simulations:
+        del sim["vacuum_values"]
 
     return {
         "available": bool(legs)
@@ -407,13 +426,27 @@ def _vacuum_match(free, vacuum):
     return free["vacuum_settings"][index] == vacuum["vacuum_settings"][index]
 
 
-def _hydration(simulations):
+def _differences(free, vacuum):
+    """
+    The settings that stop a vacuum leg matching a free leg.
+    """
+    a, b = free["vacuum_values"], vacuum["vacuum_values"]
+    ignore_cutoff = vacuum["cutoff_type"] == "none"
+    return sorted(
+        k
+        for k in set(a) | set(b)
+        if a.get(k) != b.get(k) and not (ignore_cutoff and _is_cutoff_option(k))
+    )
+
+
+def _hydration(simulations, legs):
     """
     Absolute hydration free energies from free legs, which need a vacuum leg
     unless the decouple schedule was used.
     """
     results = []
     vacuum = [s for s in simulations if s["leg"] == "vacuum" and s["perturbation"]]
+    binding = {leg["free"] for leg in legs}
     for f in simulations:
         if f["leg"] != "free" or not f["absolute"]:
             continue
@@ -423,6 +456,7 @@ def _hydration(simulations):
             "free_name": f["name"],
             "vacuum": None,
             "vacuum_name": None,
+            "decouple": f["schedule"] == "decouple",
             "value": None,
             "error": None,
             "note": None,
@@ -433,16 +467,23 @@ def _hydration(simulations):
                 result["value"] = -f["free_energy"]
                 result["error"] = f["free_energy_error"]
         else:
-            matches = [
-                v
-                for v in vacuum
-                if v["perturbation"] == f["perturbation"] and _vacuum_match(f, v)
-            ]
-            # Without a vacuum leg, e.g. for an ABFE campaign, it isn't a
-            # hydration free energy calculation.
+            same = [v for v in vacuum if v["perturbation"] == f["perturbation"]]
+            matches = [v for v in same if _vacuum_match(f, v)]
             if not matches:
-                continue
-            if len(matches) > 1:
+                if same:
+                    closest = min(same, key=lambda v: len(_differences(f, v)))
+                    differences = _differences(f, closest)
+                    result["note"] = "No vacuum leg has matching settings." + (
+                        f" {closest['name']} differs in: {', '.join(differences)}."
+                        if differences
+                        else ""
+                    )
+                elif vacuum and f["id"] not in binding:
+                    result["note"] = "No vacuum leg found for this molecule."
+                else:
+                    # E.g. the free leg of an ABFE campaign.
+                    continue
+            elif len(matches) > 1:
                 result["note"] = "More than one vacuum leg has matching settings."
             else:
                 v = matches[0]
