@@ -1291,6 +1291,54 @@ class Simulation:
                 "reason": self._report(e, "summarise the run"),
             }
 
+    def group(self):
+        """
+        The simulation this run is a repeat of, i.e. its system and settings,
+        as used to group repeats on the summary page. None until the system
+        has been identified, or if the run can't be read.
+        """
+        from ..config import Config as _Config
+        from ._summary import settings_key
+
+        try:
+            config = self.config()
+            fingerprint = self.fingerprint()
+            if config is None or not fingerprint or "error" in fingerprint:
+                return None
+            settings = settings_key(config, _Config._restart_allowed_diffs)
+        except Exception:
+            # Reported by the run's own summary.
+            return None
+        return f"{fingerprint['system']}|{settings}"
+
+    def group_entry(self, interval):
+        """
+        The run's results for comparison with its repeats, queueing a
+        background analysis as for the summary page.
+        """
+        entry = self.summary_entry(interval)
+        with self._lock:
+            analysis = self._analysis
+        done = analysis is not None and analysis.get("status") == "done"
+        result = {
+            k: entry.get(k)
+            for k in (
+                "id",
+                "name",
+                "status",
+                "progress",
+                "free_energy",
+                "free_energy_error",
+                "min_overlap",
+                "min_transition",
+                "updating",
+                "reason",
+            )
+        }
+        for k in ("lambda", "pmf", "error"):
+            result[k] = analysis[k] if done else None
+        return _clean(result)
+
     def overview(self):
         """
         A brief summary of the run, for listing alongside other runs.
@@ -1341,11 +1389,14 @@ class Simulation:
         progress = state.progress
         # Only the selected run is analysed, so this reports the last result.
         analysis = self.analysis(state.analysable, state.reason, start=False)
+        fingerprint = self.fingerprint()
         return _clean(
             {
                 "id": self.id,
                 "name": self.name,
                 "path": str(self.path),
+                "group": self.group(),
+                "leg": fingerprint.get("leg") if fingerprint else None,
                 "replica_exchange": bool(config.get("replica_exchange")),
                 "status": progress["status"],
                 "fraction": progress["fraction"],

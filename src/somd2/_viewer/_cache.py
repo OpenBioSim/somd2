@@ -20,8 +20,30 @@
 #####################################################################
 
 """
-The web viewer behind the somd2-view command. Not part of the public API.
+The viewer's cache of results that are slow to compute, kept between runs.
 """
 
-from ._cache import clear_cache
-from ._server import *
+__all__ = ["cache_dir", "clear_cache"]
+
+import os as _os
+from pathlib import Path as _Path
+
+
+def cache_dir():
+    """
+    The viewer's cache directory, following the XDG base directory spec.
+    """
+    base = _os.environ.get("XDG_CACHE_HOME", "")
+    # The spec says a relative path should be ignored.
+    if not _os.path.isabs(base):
+        base = _os.path.join(_os.path.expanduser("~"), ".cache")
+    return _Path(base) / "somd2" / "viewer"
+
+
+def clear_cache():
+    """
+    Remove everything in the viewer's cache.
+    """
+    import shutil
+
+    shutil.rmtree(cache_dir(), ignore_errors=True)

@@ -32,6 +32,7 @@ import time as _time
 from http.server import BaseHTTPRequestHandler as _BaseHTTPRequestHandler
 from http.server import ThreadingHTTPServer as _ThreadingHTTPServer
 from pathlib import Path as _Path
+from urllib.parse import unquote as _unquote
 from urllib.parse import urlparse as _urlparse
 
 from ._data import Simulation as _Simulation
@@ -126,6 +127,20 @@ class _Handler(_BaseHTTPRequestHandler):
         self.send_error(403)
         return False
 
+    def _analysis_interval(self):
+        """
+        Results for the summary, network and repeats are only brought up to
+        date while a page showing them asks for them to be analysed.
+        Refreshing the page forces it for runs not analysed in the last minute.
+        """
+        query = _urlparse(self.path).query.split("&")
+        if "analyse=1" not in query:
+            return None
+        interval = self.server.summary_interval
+        if "force=1" in query:
+            interval = min(interval, self._force_interval)
+        return interval
+
     def do_GET(self):
         if not self._allowed_host():
             return
@@ -152,17 +167,17 @@ class _Handler(_BaseHTTPRequestHandler):
                 self._json([sim.overview() for sim in registry.refresh()])
             elif parts == ["api", "network"] and self.server.network is None:
                 self.send_error(404)
+            elif len(parts) == 3 and parts[:2] == ["api", "group"]:
+                group = _unquote(parts[2])
+                interval = self._analysis_interval()
+                members = sorted(
+                    (s for s in registry.refresh() if s.group() == group),
+                    key=lambda s: s.name,
+                )
+                runs = [s.group_entry(interval) for s in members]
+                self._json({"id": group, "runs": runs})
             elif parts in (["api", "summary"], ["api", "network"]):
-                # Results are only brought up to date while the summary or
-                # network page is open, which asks for them to be analysed.
-                # Refreshing the page forces it for runs not analysed in the
-                # last minute.
-                query = _urlparse(self.path).query.split("&")
-                interval = None
-                if "analyse=1" in query:
-                    interval = self.server.summary_interval
-                    if "force=1" in query:
-                        interval = min(interval, self._force_interval)
+                interval = self._analysis_interval()
                 entries = [sim.summary_entry(interval) for sim in registry.refresh()]
                 summary = _build_summary(entries)
                 summary["network"] = self.server.network is not None

@@ -58,16 +58,54 @@ def _file_key(path):
 def topology_fingerprint(topology0, topology1):
     """
     Fingerprint the end-state topologies of a run. Topologies with identical
-    contents, e.g. those of repeats, reuse the same fingerprint.
+    contents, e.g. those of repeats, reuse the same fingerprint, which is also
+    kept on disk so that it is available straight away next time.
     """
     key = (_file_key(topology0), _file_key(topology1))
     with _cache_lock:
         if key in _cache:
             return _cache[key]
-    fingerprint = _fingerprint(topology0, topology1)
+    fingerprint = _read_cached(key)
+    if fingerprint is None:
+        fingerprint = _fingerprint(topology0, topology1)
+        _write_cached(key, fingerprint)
     with _cache_lock:
         _cache[key] = fingerprint
     return fingerprint
+
+
+# Changed whenever the fingerprint does, so that cached ones are recomputed.
+_FINGERPRINT_VERSION = 1
+
+
+def _cached_path(key):
+    from ._cache import cache_dir
+
+    name = f"v{_FINGERPRINT_VERSION}-{key[0]}-{key[1]}.json"
+    return cache_dir() / "fingerprints" / name
+
+
+def _read_cached(key):
+    try:
+        return _json.loads(_cached_path(key).read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _write_cached(key, fingerprint):
+    import os
+
+    from ._log import report
+
+    path = _cached_path(key)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Written then renamed, so that another viewer never reads part of it.
+        temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        temporary.write_text(_json.dumps(fingerprint))
+        os.replace(temporary, path)
+    except OSError as e:
+        report(e, f"Couldn't write to the cache in {path.parent}")
 
 
 def _fingerprint(topology0, topology1):

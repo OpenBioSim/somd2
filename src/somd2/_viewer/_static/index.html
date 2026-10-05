@@ -119,6 +119,19 @@ nav .nav-group > summary::-webkit-details-marker { display: none; }
 nav .nav-group > summary .name::before { content: "▾"; display: inline-block; width: 1.1em; transition: transform 0.15s; }
 nav .nav-group:not([open]) > summary .name::before { transform: rotate(-90deg); }
 nav .nav-group > a { padding-left: 28px; }
+nav .nav-repeats > summary { list-style: none; cursor: pointer; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+nav .nav-repeats > summary::-webkit-details-marker { display: none; }
+nav .nav-repeats > summary:hover { background: var(--surface-2); }
+nav .nav-repeats > summary.active { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); }
+nav .nav-repeats > summary::before { content: "▾"; float: left; width: 1.1em; color: var(--muted); transition: transform 0.15s; }
+nav .nav-repeats:not([open]) > summary::before { transform: rotate(-90deg); }
+nav .nav-repeats > summary a { display: inline; padding: 0; border: 0; }
+nav .nav-repeats > summary a:hover { background: none; text-decoration: underline; }
+nav .nav-repeats > a { padding-left: 32px; }
+nav .nav-group .nav-repeats > summary { padding-left: 28px; }
+nav .nav-group .nav-repeats > a { padding-left: 46px; }
+.repeats-table tr[data-repeat] { cursor: pointer; }
+.repeats-table tr.selected td { font-weight: 600; background: var(--surface-2); }
 nav .summary-link .name::before { content: "★"; color: var(--accent); margin-right: 6px; }
 nav .nav-pinned { position: sticky; top: 0; z-index: 1; background: var(--surface); }
 .back-links { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
@@ -288,7 +301,7 @@ function loadCollapsed(key = "somd2-viewer-collapsed") {
   try { return new Set(JSON.parse(localStorage.getItem(key) || "[]")); } catch (e) { return new Set(); }
 }
 
-const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "", problems: {}, requests: 0, latest: {}, shown: {} };
+const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "", problems: {}, requests: 0, latest: {}, shown: {}, group: null, repeatsOpen: new Map() };
 const PALETTE = ["#2f6fdf", "#e0663b", "#2a9d6f", "#b04fc9", "#c9a227", "#3aa7c9", "#d64f7a", "#7a8699"];
 const LAMBDA = "λ";
 
@@ -466,7 +479,9 @@ function lineChart(el, opts) {
       if (s.step && i > 0) d += `H${sx(x)}V${sy(y)}`;
       else d += `${i ? "L" : "M"}${sx(x)},${sy(y)}`;
     });
-    svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.width || 1.8}" ${s.dash ? `stroke-dasharray="${s.dash}"` : ""} stroke-linejoin="round"/>`;
+    svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.width || 1.8}" ${s.dash ? `stroke-dasharray="${s.dash}"` : ""} ${s.opacity !== undefined ? `stroke-opacity="${s.opacity}"` : ""} stroke-linejoin="round"/>`;
+    // A wider, invisible copy is easier to click and hover over.
+    if (s.repeat) svg += `<path d="${d}" fill="none" stroke="transparent" stroke-width="10" data-repeat="${esc(s.repeat)}" style="cursor:pointer"><title>${esc(s.name)}</title></path>`;
     if (s.points) {
       for (const [x, y, e, i] of pts) {
         const hollow = s.hollow && s.hollow[i];
@@ -548,32 +563,168 @@ function renderNav() {
   // Kept at the top of the sidebar while the list of runs is scrolled.
   if (summaryLink) summaryLink = `<div class="nav-pinned">${summaryLink}</div>`;
 
-  // Group runs by their parent directory.
-  const groups = new Map();
+  // Each entry is a run or a set of repeats, grouped by parent directory.
+  const repeats = repeatGroups();
+  const entries = [];
+  const listed = new Set();
   for (const r of state.runs) {
-    const cut = r.name.lastIndexOf("/");
-    const parent = cut < 0 ? "" : r.name.slice(0, cut);
-    if (!groups.has(parent)) groups.set(parent, []);
-    groups.get(parent).push(r);
+    const gid = r.group && repeats.has(r.group) ? r.group : null;
+    if (!gid) {
+      const cut = r.name.lastIndexOf("/");
+      entries.push({ parent: cut < 0 ? "" : r.name.slice(0, cut), run: r });
+    } else if (!listed.has(gid)) {
+      listed.add(gid);
+      entries.push({ parent: repeatsName(repeats.get(gid)).parent, gid });
+    }
   }
+  const groups = new Map();
+  for (const entry of entries) {
+    if (!groups.has(entry.parent)) groups.set(entry.parent, []);
+    groups.get(entry.parent).push(entry);
+  }
+  // A set of repeats alone in its directory is named after the directory.
+  const show = (entry, prefix) => entry.gid
+    ? navRepeats(entry.gid, repeats.get(entry.gid), prefix, groups.get(entry.parent).length === 1)
+    : navLink(entry.run, entry.run.name.slice(prefix.length));
+
   if (groups.size < 2) {
-    nav.innerHTML = summaryLink + state.runs.map((r) => navLink(r, r.name)).join("");
+    nav.innerHTML = summaryLink + entries.map((entry) => show(entry, "")).join("");
     return;
   }
 
   let html = summaryLink;
-  for (const [parent, runs] of groups) {
-    if (!parent) { html += runs.map((r) => navLink(r, r.name)).join(""); continue; }
+  for (const [parent, members] of groups) {
+    if (!parent || (members.length === 1 && members[0].gid)) {
+      html += members.map((entry) => show(entry, "")).join("");
+      continue;
+    }
+    const runs = members.flatMap((entry) => (entry.gid ? repeats.get(entry.gid) : [entry.run]));
     const counts = {};
     for (const r of runs) counts[r.status] = (counts[r.status] || 0) + 1;
     const summary = Object.entries(counts).map(([status, n]) => `<span class="status-${status}">${n} ${esc(status)}</span>`).join(" · ");
     const open = state.navCollapsed.has(parent) ? "" : " open";
     html += `<details class="nav-group" data-group="${esc(parent)}"${open}>
       <summary><div class="name">${esc(parent)}</div><div class="meta"><span>${runs.length} run${runs.length > 1 ? "s" : ""}</span><span>${summary}</span></div></summary>
-      ${runs.map((r) => navLink(r, r.name.slice(parent.length + 1))).join("")}
+      ${members.map((entry) => show(entry, `${parent}/`)).join("")}
     </details>`;
   }
   nav.innerHTML = html;
+}
+
+// Repeats of the same simulation, i.e. runs with the same system and
+// settings, by group. Only groups of more than one run are included.
+function repeatGroups() {
+  const groups = new Map();
+  for (const r of state.runs) {
+    if (!r.group) continue;
+    if (!groups.has(r.group)) groups.set(r.group, []);
+    groups.get(r.group).push(r);
+  }
+  for (const [gid, runs] of groups) if (runs.length < 2) groups.delete(gid);
+  return groups;
+}
+
+function repeatGroupOf(id) {
+  const run = state.runs.find((r) => r.id === id);
+  return run && run.group && repeatGroups().has(run.group) ? run.group : null;
+}
+
+// Where a set of repeats is listed, i.e. the directory its runs share, and
+// a label: the path they share below it, their leg, or else the common
+// start of their names, e.g. 'bound' for bound_1 and bound_2.
+function repeatsName(runs) {
+  const parts = runs.map((r) => r.name.split("/"));
+  const lead = [];
+  const shortest = Math.min(...parts.map((p) => p.length));
+  for (let i = 0; i < shortest - 1 && parts.every((p) => p[i] === parts[0][i]); i++) lead.push(parts[0][i]);
+  const rest = parts.map((p) => p.slice(lead.length));
+  const trail = [];
+  const fewest = Math.min(...rest.map((p) => p.length));
+  for (let i = 1; i <= fewest && rest.every((p) => p[p.length - i] === rest[0][rest[0].length - i]); i++) {
+    trail.unshift(rest[0][rest[0].length - i]);
+  }
+  let label = trail.join("/") || runs[0].leg;
+  if (!label) {
+    const names = rest.map((p) => p.join("/"));
+    let common = names[0];
+    for (const n of names) while (!n.startsWith(common)) common = common.slice(0, -1);
+    label = common.replace(/[\s_.\-]*\d*$/, "");
+  }
+  return { parent: lead.join("/"), label: label || "repeats" };
+}
+
+// The mean of a set of values and its standard error, or the single value
+// and its own error.
+function meanAndError(values, errors) {
+  const n = values.length;
+  if (!n) return [null, null];
+  const mean = values.reduce((a, b) => a + b, 0) / n;
+  if (n === 1) return [mean, errors[0]];
+  const sd = Math.sqrt(values.reduce((a, v) => a + (v - mean) ** 2, 0) / (n - 1));
+  return [mean, sd / Math.sqrt(n)];
+}
+
+function navRepeats(gid, runs, prefix, alone) {
+  const { parent, label } = repeatsName(runs);
+  const current = runs.find((r) => r.id === state.current);
+  const active = state.view === "run" && current;
+  const open = state.repeatsOpen.has(gid) ? state.repeatsOpen.get(gid) : Boolean(current);
+  const counts = {};
+  for (const r of runs) counts[r.status] = (counts[r.status] || 0) + 1;
+  const statuses = Object.entries(counts).map(([status, n]) => `<span class="status-${status}">${n} ${esc(status)}</span>`).join(" · ");
+  const done = runs.filter((r) => r.free_energy !== null && r.free_energy !== undefined);
+  const [mean, error] = meanAndError(done.map((r) => r.free_energy), done.map((r) => r.free_energy_error));
+  const dg = mean !== null ? `ΔG ${fmt(mean, 2)} ± ${fmt(error, 2)}` : "";
+  const own = parent ? `${parent}/` : "";
+  const name = alone && parent ? parent.slice(prefix.length) : own.slice(prefix.length) + label;
+  return `<details class="nav-repeats" data-repeats="${esc(gid)}"${open ? " open" : ""}>
+    <summary class="${active ? "active" : ""}"><a href="#${(current || runs[0]).id}"><span class="name">${esc(name)}</span></a>
+      <div class="meta"><span>${runs.length} repeats · ${statuses}</span><span>${dg}</span></div></summary>
+    ${runs.map((r) => navLink(r, r.name.slice(own.length))).join("")}
+  </details>`;
+}
+
+function repeatLabel(group, r) {
+  const { parent } = repeatsName(group.runs);
+  return parent ? r.name.slice(parent.length + 1) : r.name;
+}
+
+// The mean PMF of the analysed repeats and its standard error, if they share
+// the same λ values.
+function meanPMF(runs) {
+  const done = runs.filter((r) => r.pmf);
+  if (done.length < 2 || done.some((r) => JSON.stringify(r.lambda) !== JSON.stringify(done[0].lambda))) return null;
+  const pmf = [], error = [];
+  done[0].lambda.forEach((_, i) => {
+    const [mean, se] = meanAndError(done.map((r) => r.pmf[i]), done.map((r) => r.error[i]));
+    pmf.push(mean);
+    error.push(se);
+  });
+  return { lambda: done[0].lambda, pmf, error };
+}
+
+function renderRepeats(s) {
+  const g = state.group;
+  if (!g || g.runs.length < 2 || !g.runs.some((r) => r.id === s.id)) return "";
+  const options = g.runs.map((r) => `<option value="${r.id}"${r.id === s.id ? " selected" : ""}>${esc(repeatLabel(g, r))}</option>`).join("");
+  let html = `<label class="note">Showing results for <select id="repeat-select">${options}</select></label>`;
+  if (g.runs.some((r) => r.pmf)) {
+    html += `<div class="chart" id="repeats-chart" style="margin-top:8px"></div>`;
+    html += `<div class="note">The selected repeat is drawn in bold${meanPMF(g.runs) ? ", and the mean of the repeats with its standard error is dashed" : ""}. Click a curve, a row or the menu to show a repeat's results below.</div>`;
+  } else {
+    html += `<div class="note" style="margin-top:8px">Running MBAR analysis for the repeats…</div>`;
+  }
+  const mixing = g.runs.some((r) => r.min_transition !== null && r.min_transition !== undefined);
+  html += `<div class="table-wrap" style="margin-top:8px"><table class="repeats-table"><tr><th>Repeat</th><th>Status</th><th class="num">ΔG (kcal/mol)</th><th class="num">Lowest overlap</th>${mixing ? `<th class="num">Lowest mixing</th>` : ""}</tr>`;
+  for (const r of g.runs) {
+    const value = r.free_energy !== null && r.free_energy !== undefined ? valueWithError(r.free_energy, r.free_energy_error) : r.updating ? "analysing…" : "–";
+    html += `<tr data-repeat="${r.id}"${r.id === s.id ? ' class="selected"' : ""}><td>${esc(repeatLabel(g, r))}</td><td class="status-${r.status}">${esc(r.status)}</td><td class="num">${value}</td><td class="num">${fmt(r.min_overlap, 3)}</td>${mixing ? `<td class="num">${fmt(r.min_transition, 3)}</td>` : ""}</tr>`;
+  }
+  const done = g.runs.filter((r) => r.free_energy !== null && r.free_energy !== undefined);
+  const [mean, error] = meanAndError(done.map((r) => r.free_energy), done.map((r) => r.free_energy_error));
+  if (done.length > 1) html += `<tr><td colspan="2"><strong>Mean of ${done.length}</strong></td><td class="num"><strong>${valueWithError(mean, error)}</strong></td><td></td>${mixing ? "<td></td>" : ""}</tr>`;
+  html += `</table></div>`;
+  return card("Repeats", html);
 }
 
 function renderOverview(s) {
@@ -786,6 +937,20 @@ function applyConfigFilter() {
 }
 
 function renderCharts(s) {
+  const rc = $("#repeats-chart");
+  if (rc && state.group) {
+    const g = state.group;
+    const muted = css("--muted"), accent = css("--accent");
+    // The selected repeat is drawn last, so that it's on top.
+    const runs = g.runs.filter((r) => r.pmf).sort((a, b) => (a.id === s.id) - (b.id === s.id));
+    const series = runs.map((r) => ({
+      x: r.lambda, y: r.pmf, repeat: r.id, name: repeatLabel(g, r),
+      color: r.id === s.id ? accent : muted, width: r.id === s.id ? 2.6 : 1.2, opacity: r.id === s.id ? 1 : 0.6,
+    }));
+    const mean = meanPMF(g.runs);
+    if (mean) series.push({ x: mean.lambda, y: mean.pmf, err: mean.error, color: colour(1, 2), width: 1.6, dash: "6 4", name: "mean" });
+    lineChart(rc, { series, xLabel: LAMBDA, yLabel: "ΔG (kcal/mol)", xMin: 0, xMax: 1 });
+  }
   const a = s.analysis;
   if (a.status === "done") {
     const el = $("#pmf-chart");
@@ -1542,6 +1707,7 @@ function render() {
     return;
   }
   html += `<div class="sections">`;
+  html += renderRepeats(s);
   html += renderOverview(s);
   html += renderEndStates(s);
   html += renderFreeEnergy(s);
@@ -1557,6 +1723,8 @@ function render() {
   main.innerHTML = html;
   renderCharts(s);
   applyConfigFilter();
+  const repeatSelect = $("#repeat-select");
+  if (repeatSelect) repeatSelect.addEventListener("change", (e) => { location.hash = e.target.value; });
   const lambdaSelect = $("#components-lambda");
   if (lambdaSelect) lambdaSelect.addEventListener("change", (e) => {
     state.componentsLambda[s.id] = parseFloat(e.target.value);
@@ -1577,8 +1745,15 @@ function render() {
 function expandGroupOf(id) {
   const run = state.runs.find((r) => r.id === id);
   if (!run) return;
-  const cut = run.name.lastIndexOf("/");
-  if (cut >= 0 && state.navCollapsed.delete(run.name.slice(0, cut))) saveNavCollapsed();
+  const gid = repeatGroupOf(id);
+  let parent;
+  if (gid) {
+    state.repeatsOpen.set(gid, true);
+    parent = repeatsName(repeatGroups().get(gid)).parent;
+  } else {
+    parent = run.name.slice(0, Math.max(0, run.name.lastIndexOf("/")));
+  }
+  if (parent && state.navCollapsed.delete(parent)) saveNavCollapsed();
 }
 
 function saveNavCollapsed() {
@@ -1692,13 +1867,21 @@ async function loadCurrent(force = false) {
   if (!state.current) { state.summary = null; render(); return; }
   const id = state.current;
   const seq = ++state.requests;
-  const summary = await getJSON(`/api/simulation/${id}`);
+  const gid = repeatGroupOf(id);
+  const [summary, group] = await Promise.all([
+    getJSON(`/api/simulation/${id}`),
+    gid ? getJSON(`/api/group/${encodeURIComponent(gid)}?analyse=1${force ? "&force=1" : ""}`) : null,
+  ]);
   if (id !== state.current || state.view !== "run" || !isLatest("run", seq)) return;
   state.summary = summary;
-  if (hasChanged("run", summary)) render();
+  state.group = group;
+  const runChanged = hasChanged("run", summary);
+  const groupChanged = hasChanged("group", group);
+  if (runChanged || groupChanged) render();
   loadComponents(summary);
   let pending = summary.status === "waiting" || (summary.progress && !summary.windows.length);
   if (summary.analysis && (summary.analysis.status === "pending" || summary.analysis.updating)) pending = true;
+  if (group && group.runs.some((r) => r.updating)) pending = true;
   // Depictions are fetched once, then again on the normal refresh until they
   // succeed, and only one request is in flight at a time.
   const depiction = state.depictions[id];
@@ -1835,6 +2018,10 @@ window.addEventListener("afterprint", () => {
 });
 // Remember which groups of runs are collapsed in the sidebar.
 $("#nav").addEventListener("toggle", (e) => {
+  if (e.target.matches && e.target.matches("details.nav-repeats")) {
+    state.repeatsOpen.set(e.target.dataset.repeats, e.target.open);
+    return;
+  }
   const group = e.target.matches && e.target.matches("details.nav-group") ? e.target : null;
   if (!group) return;
   const name = group.dataset.group;
@@ -1846,6 +2033,8 @@ $("#nav").addEventListener("toggle", (e) => {
 // Remember which sections are collapsed, and redraw charts in a section that
 // is opened, since they can't be sized while hidden.
 $("#main").addEventListener("click", (e) => {
+  const repeat = e.target.closest("[data-repeat]");
+  if (repeat) { location.hash = repeat.dataset.repeat; return; }
   const target = e.target.closest("[data-export]");
   if (!target) return;
   e.preventDefault();

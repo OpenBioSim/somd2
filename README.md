@@ -712,6 +712,13 @@ simulation, e.g. stopped runs, poor overlap or replica mixing, or repeats that
 disagree, so problematic edges can be spotted early in a campaign. Results are
 updated in the background while the summary page is open.
 
+Repeats are also listed together in the list of runs. Opening one shows the
+free energy profiles of all of the repeats on one plot, along with their mean,
+and a table comparing them, above the results for the selected repeat. The
+systems identified for each run are cached in `$XDG_CACHE_HOME/somd2/viewer`,
+or `~/.cache/somd2/viewer`, so that repeats are grouped straight away next
+time. Pass `--clear-cache` to `somd2-view` to clear it.
+
 For a relative binding free energy campaign, a network page can also be shown,
 using a file that lists the edges of the perturbation network, one per line as
 `ligand_a ligand_b`, with any further columns ignored. This is the format of the

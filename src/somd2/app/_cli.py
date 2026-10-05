@@ -168,7 +168,7 @@ def somd2_view():
     # is imported.
     os.environ.setdefault("PYMBAR_DISABLE_JAX", "1")
 
-    from somd2._viewer import find_port, serve
+    from somd2._viewer import clear_cache, find_port, serve
 
     parser = ArgumentParser(
         prog="somd2-view",
@@ -212,9 +212,18 @@ def somd2_view():
         help="A file to log errors to, to include when reporting a problem. "
         "By default, they are written to the terminal.",
     )
+    parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="Clear the viewer's cache, e.g. of the systems identified for each "
+        "run, before starting.",
+    )
     # Used by 'somd2 --view', so that the viewer exits with the simulation.
     parser.add_argument("--parent-pid", type=int, default=None, help=SUPPRESS)
     args = parser.parse_args()
+
+    if args.clear_cache:
+        clear_cache()
 
     try:
         # 'somd2 --view' has already chosen the port.
