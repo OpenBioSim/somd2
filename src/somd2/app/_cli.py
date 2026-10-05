@@ -79,7 +79,7 @@ def somd2():
     parser.add_argument(
         "--view-port",
         type=int,
-        default=_default_view_port(parser),
+        default=None,
         help="The port for the web viewer, by default SOMD2_VIEW_PORT if set, "
         "or 8000. If it is in use, the next free port is used.",
     )
@@ -128,6 +128,8 @@ def somd2():
 
         from somd2._viewer import find_port
 
+        if view_port is None:
+            view_port = _default_view_port(parser)
         port = find_port(view_port)
         log_file = os.path.join(str(config.output_directory), "viewer.log")
         command = [
@@ -207,7 +209,7 @@ def somd2_view():
     parser.add_argument(
         "--port",
         type=int,
-        default=_default_view_port(parser),
+        default=None,
         help="The port to listen on, by default SOMD2_VIEW_PORT if set, or 8000. "
         "If it is in use, the next free port is used.",
     )
@@ -240,6 +242,8 @@ def somd2_view():
     # Used by 'somd2 --view', so that the viewer exits with the simulation.
     parser.add_argument("--parent-pid", type=int, default=None, help=SUPPRESS)
     args = parser.parse_args()
+    if args.port is None:
+        args.port = _default_view_port(parser)
 
     if args.clear_cache:
         clear_cache()
