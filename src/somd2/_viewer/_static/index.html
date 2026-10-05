@@ -288,7 +288,7 @@ function loadCollapsed(key = "somd2-viewer-collapsed") {
   try { return new Set(JSON.parse(localStorage.getItem(key) || "[]")); } catch (e) { return new Set(); }
 }
 
-const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "", problems: {} };
+const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "", problems: {}, requests: 0, latest: {}, shown: {} };
 const PALETTE = ["#2f6fdf", "#e0663b", "#2a9d6f", "#b04fc9", "#c9a227", "#3aa7c9", "#d64f7a", "#7a8699"];
 const LAMBDA = "λ";
 
@@ -340,6 +340,7 @@ async function getJSON(url) {
   // rather than having its results mixed with the old ones.
   const instance = r.headers.get("X-Viewer-Instance");
   if (instance && state.instance && instance !== state.instance && !state.printing) {
+    console.info("Reloading, since this is a different viewer.");
     location.reload();
     return new Promise(() => {});
   }
@@ -1603,19 +1604,41 @@ async function checkSummary() {
   } catch (e) {}
 }
 
+// Requests can overlap, e.g. a poll and a refresh, so a slow response mustn't
+// replace a newer one.
+function isLatest(kind, seq) {
+  if (seq < (state.latest[kind] || 0)) return false;
+  state.latest[kind] = seq;
+  return true;
+}
+
+// Whether a response differs from the last one shown, so that the page is
+// only redrawn when something has changed.
+function hasChanged(kind, data) {
+  if (state.printing) return false;
+  const text = JSON.stringify(data);
+  if (state.shown[kind] === text) return false;
+  state.shown[kind] = text;
+  return true;
+}
+
 async function loadSummary(force = false) {
+  const seq = ++state.requests;
   const data = await getJSON(`/api/summary?analyse=1${force ? "&force=1" : ""}`);
-  if (state.view !== "summary") return;
-  state.summaryData = data;
-  state.summaryAvailable = data.available;
-  state.networkAvailable = data.network;
-  renderNav();
-  render();
+  if (state.view !== "summary" || !isLatest("summary", seq)) return;
+  if (hasChanged("summary", data)) {
+    state.summaryData = data;
+    state.summaryAvailable = data.available;
+    state.networkAvailable = data.network;
+    renderNav();
+    render();
+  }
   clearTimeout(state.quickTimer);
   if (data.pending || data.updating) state.quickTimer = setTimeout(poll, 3000);
 }
 
 async function loadNetwork(force = false) {
+  const seq = ++state.requests;
   let data;
   try {
     data = await getJSON(`/api/network?analyse=1${force ? "&force=1" : ""}`);
@@ -1627,12 +1650,14 @@ async function loadNetwork(force = false) {
     location.replace(state.summaryAvailable ? "#summary" : `#${run}`);
     return;
   }
-  if (state.view !== "network") return;
-  state.networkData = data;
-  state.summaryAvailable = data.available;
-  state.networkAvailable = true;
-  renderNav();
-  render();
+  if (state.view !== "network" || !isLatest("network", seq)) return;
+  if (hasChanged("network", data)) {
+    state.networkData = data;
+    state.summaryAvailable = data.available;
+    state.networkAvailable = true;
+    renderNav();
+    render();
+  }
   clearTimeout(state.quickTimer);
   if (data.pending || data.updating) state.quickTimer = setTimeout(poll, 3000);
 }
@@ -1642,10 +1667,11 @@ async function loadCurrent(force = false) {
   if (state.view === "network") return loadNetwork(force);
   if (!state.current) { state.summary = null; render(); return; }
   const id = state.current;
+  const seq = ++state.requests;
   const summary = await getJSON(`/api/simulation/${id}`);
-  if (id !== state.current) return;
+  if (id !== state.current || state.view !== "run" || !isLatest("run", seq)) return;
   state.summary = summary;
-  render();
+  if (hasChanged("run", summary)) render();
   loadComponents(summary);
   let pending = summary.status === "waiting" || (summary.progress && !summary.windows.length);
   if (summary.analysis && (summary.analysis.status === "pending" || summary.analysis.updating)) pending = true;
@@ -1718,13 +1744,21 @@ async function poll() {
 
 // Reload the page when the server is restarted or the page changes.
 async function checkVersion() {
+  // Checks would otherwise pile up while the server is busy.
+  if (state.checkingVersion) return;
+  state.checkingVersion = true;
   try {
     const { version } = await getJSON("/api/version");
     if (state.version === undefined) state.version = version;
-    else if (version !== state.version && !state.printing) location.reload();
+    else if (version !== state.version && !state.printing) {
+      console.info("Reloading, since the viewer has changed.");
+      location.reload();
+    }
     showProblem("offline", null);
   } catch (e) {
     if (e.offline) showError(e);
+  } finally {
+    state.checkingVersion = false;
   }
 }
 
@@ -1736,6 +1770,8 @@ function schedule() {
 
 window.addEventListener("hashchange", () => {
   const target = location.hash.slice(1);
+  // The new view hasn't been drawn yet, whatever was last shown.
+  state.shown = {};
   if (target === "summary" || target === "network") {
     state.view = target;
   } else {
