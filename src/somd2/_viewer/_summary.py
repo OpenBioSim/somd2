@@ -171,18 +171,22 @@ def vacuum_settings_keys(config, ignore):
     """
     Return keys for the settings that must match between the free and vacuum
     legs of a hydration free energy, i.e. as for bound and free legs, but also
-    ignoring pressure, which isn't applied without water. The second key also
-    ignores the cutoff and PME options, which are disabled for a vacuum leg run
-    without a periodic box.
+    ignoring pressure and the dispersion correction, which aren't applied
+    without water. The second key also ignores the cutoff and PME options,
+    which are disabled for a vacuum leg run without a periodic box.
     """
-    barostat = {"pressure", "barostat_frequency", "surface_tension"}
+    no_water = {
+        "pressure",
+        "barostat_frequency",
+        "surface_tension",
+        "use_dispersion_correction",
+    }
     cutoff = {
         k
         for k in config
-        if k in ("cutoff", "cutoff_type", "tune_pme", "use_dispersion_correction")
-        or k.startswith("pme_")
+        if k in ("cutoff", "cutoff_type", "tune_pme") or k.startswith("pme_")
     }
-    base = _leg_specific(config) | set(ignore) | barostat
+    base = _leg_specific(config) | set(ignore) | no_water
     return settings_key(config, base), settings_key(config, base | cutoff)
 
 
