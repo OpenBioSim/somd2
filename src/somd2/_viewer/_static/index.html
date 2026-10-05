@@ -877,7 +877,9 @@ async function download(name, text, type) {
 
 function toCSV(header, rows) {
   const field = (v) => {
-    const s = v === null || v === undefined ? "" : String(v);
+    let s = v === null || v === undefined ? "" : String(v);
+    // Stops spreadsheets treating text, e.g. a run or ligand name, as a formula.
+    if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   return [header, ...rows].map((row) => row.map(field).join(",")).join("\n") + "\n";
@@ -906,10 +908,17 @@ function ligandReference() {
   if (!state.ligandReference || state.ligandReference.key !== key) {
     let saved = null;
     try { saved = JSON.parse(localStorage.getItem(key) || "null"); } catch (e) {}
+    // Stored values are only trusted as a known ligand and a finite number.
+    if (saved && typeof saved.ligand === "string") {
+      const value = Number(saved.value);
+      saved = { ligand: saved.ligand, value: Number.isFinite(value) ? value : 0 };
+    } else {
+      saved = null;
+    }
     state.ligandReference = { key, saved };
   }
   const saved = state.ligandReference.saved;
-  return saved && d.free_energies[saved.ligand] ? saved : null;
+  return saved && Object.hasOwn(d.free_energies, saved.ligand) ? saved : null;
 }
 
 function setLigandReference(reference) {
@@ -1004,10 +1013,12 @@ function layoutNetwork(d) {
   const { width, height } = networkCanvas(d.ligands.length);
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(networkKey(d)) || "{}"); } catch (e) {}
+  if (!saved || typeof saved !== "object") saved = {};
   const pos = {};
   const n = d.ligands.length;
+  const valid = (p) => p && Number.isFinite(p.x) && Number.isFinite(p.y);
   d.ligands.forEach((lig, i) => {
-    pos[lig] = saved[lig] || {
+    pos[lig] = (Object.hasOwn(saved, lig) && valid(saved[lig]) && { x: saved[lig].x, y: saved[lig].y }) || {
       x: width / 2 + 0.35 * width * Math.cos((2 * Math.PI * i) / n),
       y: height / 2 + 0.35 * height * Math.sin((2 * Math.PI * i) / n),
     };
@@ -1729,7 +1740,8 @@ window.addEventListener("hashchange", () => {
     state.view = target;
   } else {
     state.view = "run";
-    state.current = target;
+    // Only known runs are requested, whatever is typed in the address bar.
+    if (state.runs.some((r) => r.id === target)) state.current = target;
     expandGroupOf(state.current);
   }
   renderNav();
