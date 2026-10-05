@@ -46,6 +46,21 @@ from ._summary import build_summary as _build_summary
 
 _static = _Path(__file__).parent / "_static"
 
+# Required on a request to stop the viewer. Browsers won't send a custom header
+# to another site without its permission, so a web page can't stop it.
+_SHUTDOWN_HEADER = "X-SOMD2-Viewer"
+
+
+def _is_loopback(host):
+    import ipaddress
+
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
 
 class _Registry:
     """
@@ -91,7 +106,29 @@ class _Handler(_BaseHTTPRequestHandler):
     # The minimum time, in seconds, between forced analyses of a run.
     _force_interval = 60.0
 
+    def _allowed_host(self):
+        """
+        Whether a request to a viewer bound to loopback was addressed to it by
+        a loopback name, which stops a website reading it by pointing its own
+        domain at 127.0.0.1. Other requests are refused.
+        """
+        if not self.server.loopback:
+            return True
+        host = self.headers.get("Host")
+        if host is None:
+            return True
+        try:
+            name = _urlparse(f"//{host}").hostname
+        except ValueError:
+            name = None
+        if name is not None and _is_loopback(name):
+            return True
+        self.send_error(403)
+        return False
+
     def do_GET(self):
+        if not self._allowed_host():
+            return
         parts = [p for p in _urlparse(self.path).path.split("/") if p]
         registry = self.server.registry
         self.server.last_request = _time.monotonic()
@@ -164,6 +201,8 @@ class _Handler(_BaseHTTPRequestHandler):
             self._json({"error": reason}, status=500)
 
     def do_POST(self):
+        if not self._allowed_host():
+            return
         parts = [p for p in _urlparse(self.path).path.split("/") if p]
         local = self.client_address[0] in ("127.0.0.1", "::1")
 
@@ -172,7 +211,11 @@ class _Handler(_BaseHTTPRequestHandler):
             # viewer can tell whether any other page is still open.
             self.server.closed_at = _time.monotonic()
             self._send(b"", "text/plain", status=204)
-        elif parts == ["api", "shutdown"] and local:
+        elif (
+            parts == ["api", "shutdown"]
+            and local
+            and self.headers.get(_SHUTDOWN_HEADER) == "1"
+        ):
             # Lets a new viewer take over the port from one whose simulation has
             # ended. A viewer for a running simulation is never stopped.
             if not self.server.orphaned:
@@ -236,7 +279,9 @@ def _take_over(port, timeout=5.0):
             status = _json.load(r)
         if not (status.get("somd2_viewer") and status.get("idle")):
             return False
-        request = urllib.request.Request(f"{url}/shutdown", method="POST")
+        request = urllib.request.Request(
+            f"{url}/shutdown", method="POST", headers={_SHUTDOWN_HEADER: "1"}
+        )
         urllib.request.urlopen(request, timeout=1).close()
     except Exception:
         return False
@@ -351,6 +396,7 @@ def serve(
         raise ValueError(f"Network file not found: {network}")
 
     server = _ThreadingHTTPServer((host, port), _Handler)
+    server.loopback = _is_loopback(host)
     server.network = network
     server.daemon_threads = True
     server.registry = _Registry(paths)
