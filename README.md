@@ -11,7 +11,8 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 Open-source GPU accelerated molecular dynamics engine for alchemical free-energy
-simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and [OpenMM](https://github.com/openmm/openmm).
+simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and
+[OpenMM](https://github.com/openmm/openmm).
 
 <a id="features"></a>
 
@@ -23,14 +24,14 @@ simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and [Ope
   [charge-change](#charge-change-perturbations), and protein mutations.
 - 💧 **[GCMC](#gcmc)**: grand canonical Monte Carlo water sampling.
 - 🔁 **[Replica exchange](#replica-exchange)**: Hamiltonian replica exchange
-  between lambda windows.
+  between λ windows.
 - 🌡️ **[REST2](#rest2)**: replica exchange with solute scaling.
 - 🔄 **[Terminal ring flips](#terminal-ring-flip-monte-carlo)**: Monte Carlo
   moves to improve sampling of terminal aromatic rings.
 - 👻 **[Ghost atom modifications](#ghost-atom-modifications)**: modification of
   ghost atom bonded terms to avoid spurious coupling to the physical system.
-- 🖥️ **[Multiple GPUs](#running-somd2-using-one-or-more-gpus)**: lambda windows
-  are distributed across the available devices, with optional
+- 🖥️ **[Multiple GPUs](#running-somd2-using-one-or-more-gpus)**: λ windows are
+  distributed across the available devices, with optional
   [oversubscription](#gpu-oversubscription).
 - 💾 **[Restarts](#restarting)**: simulations are checkpointed and can be
   continued from their output directory, e.g. after a crash or a job time
@@ -213,13 +214,11 @@ when developing SOMD2.
 
 ## 🚀 Usage
 
-In order to run an alchemical free-energy simulation you will need to
-first create a stream file containing the *perturbable* system of interest.
-This can be created using [BioSimSpace](https://github.com/OpenBioSim/biosimspace).
-For example, following the tutorial
-[here](https://biosimspace.openbiosim.org/tutorials/hydration_freenrg.html).
-(For absolute binding free energies, the system can be created directly with
-Sire. See [below](#absolute-binding-free-energies).) Once the system is created, it can be streamed to file using, e.g.:
+To run an alchemical free-energy simulation, you first need a stream file
+containing the *perturbable* system of interest. This can be created with
+[BioSimSpace](https://github.com/OpenBioSim/biosimspace), e.g. by following its
+[hydration free energy tutorial](https://biosimspace.openbiosim.org/tutorials/hydration_freenrg.html),
+then saved with:
 
 ```python
 import BioSimSpace as BSS
@@ -227,7 +226,9 @@ import BioSimSpace as BSS
 BSS.Stream.save(system, "perturbable_system")
 ```
 
-You can then run a simulation with:
+For absolute binding free energies, the system can instead be created directly
+with Sire, as described [below](#absolute-binding-free-energies). You can then
+run a simulation with:
 
 ```
 somd2 perturbable_system.bss
@@ -238,9 +239,9 @@ with their default values. Options can be specified on the command line, or
 using a YAML configuration file, passed with the `--config` option. Any options
 explicitly set on the command line will override those set via the config file.
 
-An example perturbable system for a methane to ethanol perturbation in solvent
-can be found [here](https://sire.openbiosim.org/m/merged_molecule.s3.bz2).
-This is a `bzip2` compressed file that will need to be extracted before use.
+An example perturbable system, for an ethane to methanol perturbation in
+solvent, can be found [here](https://sire.openbiosim.org/m/merged_molecule.s3.bz2).
+It is compressed with `bzip2`, so must be extracted before use.
 
 A larger collection of input files and end-to-end tutorials, covering everything
 from a simple charge-change validation system to full case studies, can be found
@@ -250,23 +251,20 @@ in the [somd2_examples](https://github.com/OpenBioSim/somd2_examples) repository
 
 ### 🖥️ Running SOMD2 using one or more GPUs
 
-In order to run using GPUs you will first need to set the relevant environment
-variable. For example, to run using 4 CUDA enabled GPUs set `CUDA_VISIBLE_DEVICES=0,1,2,3`
-(for OpenCL and HIP use `OPENCL_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES` respectively).
+To run on GPUs, list the devices in the relevant environment variable. This is
+always required, since SOMD2 finds the devices to run on from the variable
+itself. For example, to run on 4 CUDA GPUs, set `CUDA_VISIBLE_DEVICES=0,1,2,3`.
+For OpenCL and HIP, use `OPENCL_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES`
+instead.
 
-This is required in all cases, since SOMD2 enumerates the devices to run on from
-the environment variable itself.
+SOMD2 uses `--platform auto` by default, which selects the first platform
+registered by OpenMM in order of preference: CUDA, OpenCL, HIP, Metal,
+Reference, then CPU. If detection fails, or you want a specific platform, use
+the `--platform` option, e.g. `--platform cuda`.
 
-By default SOMD2 uses `--platform auto`, which selects the first platform
-registered by OpenMM in order of preference: CUDA, OpenCL, HIP, Metal, Reference,
-then CPU. If detection fails, or if you want a specific platform, use the
-`--platform` option (for example `--platform cuda`).
-
-By default, SOMD2 will automatically manage the distribution of lambda windows
-across all listed devices. In order to restrict the number of devices used
-the `--max-gpus` option can be set, for example setting `--max-gpus 2` while
-`CUDA_VISIBLE_DEVICES` are set as above would restrict SOMD2 to using only
-GPUs 0 and 1.
+The λ windows are distributed across all of the listed devices automatically.
+To use fewer of them, set `--max-gpus`, e.g. `--max-gpus 2` with
+`CUDA_VISIBLE_DEVICES` set as above restricts SOMD2 to GPUs 0 and 1.
 
 <a id="restarting"></a>
 
@@ -279,11 +277,10 @@ A simulation can be continued from the files in its output directory using the
 somd2 perturbable_system.bss --restart --output-directory output
 ```
 
-Each λ window (or replica) resumes from its most recent checkpoint. The
-configuration used for the original run is written to `config.yaml` in the
-output directory, controlled by `--write-config`, which is enabled by default.
-This file is required in order to restart, since the current configuration is
-validated against it.
+Each λ window (or replica) resumes from its most recent checkpoint. Restarting
+requires the `config.yaml` file in the output directory, which records the
+configuration of the original run so that the new one can be validated against
+it. It is always written, unless `--no-write-config` is passed.
 
 Only a limited set of options may be changed on restart. Broadly, anything that
 would change the perturbation or the Hamiltonian is fixed, whereas options
@@ -347,64 +344,62 @@ are set.
 ## 🔁 Replica exchange
 
 SOMD2 supports Hamiltonian replica exchange (HREX) simulations, which can be
-enabled using the `--replica-exchange` option. By default, dynamics contexts are
-created up-front for all replicas, so this can be memory intensive. As such,
-replica exchange is intended for use on multi-GPU nodes with a large amount of
-memory. It is also possible to oversubscribe the GPUs, i.e. have more than one
-replica running on a GPU at a time. This can be controlled via the
-`--oversubscription-factor` option, e.g. a value of 2 would allow 2 replicas to
-run on each GPU at a time. This requires the NVIDIA multi-process service (MPS)
-to be enabled, see [GPU oversubscription](#gpu-oversubscription) below.
+enabled using the `--replica-exchange` option. By default, a dynamics context is
+created up-front for every replica, so replica exchange is memory intensive and
+best suited to multi-GPU nodes.
 
-If the number of replicas you want doesn't fit in GPU memory, use the
-`--max-contexts` option to cap the number of contexts that are created. Each
-context is then re-used to propagate several replicas per cycle, changing its
-lambda value as it goes, so the number of replicas is no longer limited by
-memory. For example, `--num-lambda 24 --max-contexts 4` runs 24 replicas using
-the memory of 4. This costs some performance, since the replicas sharing a
-context run one after another rather than at the same time, so only use it when
-one context per replica won't fit. When contexts are re-used, `--frame-frequency`
-must equal `--checkpoint-frequency`.
+The GPUs can also be oversubscribed, i.e. run more than one replica at a time,
+using the `--oversubscription-factor` option, e.g. a value of 2 runs 2 replicas
+on each GPU at once. This requires the NVIDIA multi-process service (MPS) to be
+enabled. See [GPU oversubscription](#gpu-oversubscription) below.
+
+If the replicas you want don't fit in GPU memory, use the `--max-contexts`
+option to cap the number of contexts that are created. Each context is then
+re-used to propagate several replicas per cycle, changing its λ value as it
+goes, so the number of replicas is no longer limited by memory. For example,
+`--num-lambda 24 --max-contexts 4` runs 24 replicas using the memory of 4. This
+costs some performance, since the replicas sharing a context run one after
+another rather than at the same time, so only use it when one context per
+replica won't fit. When contexts are re-used, `--frame-frequency` must equal
+`--checkpoint-frequency`.
 
 For optimal performance, it is recommended that the number of contexts, i.e. the
 number of replicas, or `--max-contexts` if it is set, be a multiple of the number
 of GPUs, and no smaller than the number of GPUs multiplied by the
 oversubscription factor. SOMD2 will warn you if this isn't the case.
 
-Changing the lambda value of a context requires it to be reinitialised whenever a
-constrained bond length actually perturbs with lambda, which is slow. If this
+Changing the λ value of a context requires it to be reinitialised whenever a
+constrained bond length actually perturbs with λ, which is slow. If this
 overhead is significant, pass `--no-update-constraints` to freeze the
-constrained bond lengths at those of a single lambda value, chosen with
+constrained bond lengths at those of a single λ value, chosen with
 `--constraint-lambda-index`. Both options are ignored unless contexts are being
 re-used.
 
-The swap frequency for replica exchange is controlled by the `--energy-frequency`
-option, i.e. we compute the energies for all replicas at this frequency, then
-attempt to mix the replicas. A larger value will improve performance, but may
-reduce the efficiency of the exchange.
+The swap frequency for replica exchange is controlled by the
+`--energy-frequency` option: the energies of all replicas are computed at this
+frequency, then swaps between them are attempted. A larger value improves
+performance, but may reduce the efficiency of the exchange.
 
 <a id="rest2"></a>
 
 ## 🌡️ REST2
 
-We also support Replica Exchange with Solute Scaling
-([REST2](https://pubs.acs.org/doi/10.1021/jp204407d)) simulations to facilitate sampling for perturbations
-involving conformational changes, e.g. ring flips. This can be enabled
-using the `--rest2-scale` option, which specifies the "temperature" of the
-REST2 region relative to the rest of the system. By default, the REST2 region
-comprises *all* atoms in perturbable molecules, but can be controlled via the
-`--rest2-selection` option. This should be a `Sire` selection string that specifies
-additional atoms of interest, i.e. those in regular, non-perturbable molecules.
-If the selection does contain atoms within perturbable molecules, then only
-those atoms within the perturbable molecules will be considered as part of the
-REST2 region, i.e. you can select a sub-set of atoms within a perturbable
-molecule to be scaled.
+SOMD2 also supports replica exchange with solute scaling
+([REST2](https://pubs.acs.org/doi/10.1021/jp204407d)), to improve sampling for
+perturbations involving conformational changes, e.g. ring flips. It is enabled
+with the `--rest2-scale` option, which specifies the "temperature" of the REST2
+region relative to the rest of the system.
 
-By default, the REST2 schedule is a triangular function that starts and ends
-at 1.0, with a peak at the middle of the lambda schedule corresponding to
-the value of `--rest2-scale`. By passing multiple values for `--rest2-scale`, the
-user can fully control the schedule. When doing so, the number of values must
-match the number of lambda windows.
+By default, the REST2 region comprises *all* atoms in perturbable molecules.
+Atoms in other, non-perturbable molecules can be added with `--rest2-selection`,
+a `Sire` selection string. If the selection includes atoms in perturbable
+molecules, only the selected atoms of those molecules are scaled, so a subset of
+a perturbable molecule can be chosen.
+
+The REST2 schedule is a triangular function that starts and ends at 1.0,
+peaking at the value of `--rest2-scale` in the middle of the λ schedule.
+Passing multiple values to `--rest2-scale` gives full control of the schedule,
+in which case there must be one value for each λ window.
 
 <a id="gcmc"></a>
 
@@ -460,28 +455,27 @@ somd2 perturbable_system.bss --terminal-flip-frequency "1 ps" --terminal-flip-an
 
 ## 👻 Ghost atom modifications
 
-We support modification of ghost atom bonded terms to avoid spurious coupling
-to the physical system using the approach described in
-[this](https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328) paper. These are
-enabled by default, but can be disabled using the `--no-ghost-modifications`
-option. Modifications are implemented using the
-[ghostly](https://github.com/OpenBioSim/ghostly) package.
+SOMD2 modifies the bonded terms of ghost atoms to avoid spurious coupling to the
+physical system, using the approach described in
+[this paper](https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328). The
+modifications are made with the [ghostly](https://github.com/OpenBioSim/ghostly)
+package, and are enabled by default, but can be disabled with
+`--no-ghost-modifications`.
 
 <a id="lambda-schedules"></a>
 
 ## 📈 Lambda schedules
 
-The way that the perturbation is applied across the lambda coordinate is
-controlled by the `--lambda-schedule` option, which defaults to
-`standard_morph`, which is intended for use with relative binding free
-energy (RBFE) simulations. The available schedules are:
+How the perturbation is applied along the λ coordinate is controlled by the
+`--lambda-schedule` option. The default, `standard_morph`, is intended for
+relative binding free energy (RBFE) simulations. The available schedules are:
 
 | Schedule | Description |
 | --- | --- |
 | `standard_morph` | Linear interpolation between the two end states. |
-| `charge_scaled_morph` | As above, but with charges scaled at intermediate lambda values. |
-| `annihilate` | Absolute binding free energies, removing all non-bonded interactions. |
-| `decouple` | Absolute binding free energies, removing only intermolecular interactions. |
+| `charge_scaled_morph` | As above, but with charges scaled at intermediate λ values. |
+| `annihilate` | Absolute binding or hydration free energies, removing all non-bonded interactions. |
+| `decouple` | Absolute binding or hydration free energies, removing only intermolecular interactions. |
 | `ring_break_morph` | Ring-breaking perturbations. |
 | `reverse_ring_break_morph` | Ring-making perturbations, i.e. the reverse of the above. |
 
@@ -493,8 +487,8 @@ restraints can be generated automatically. See the sections below.
 ## 🧬 Absolute binding free energies
 
 Absolute binding free energy (ABFE) calculations are supported using the
-`annihilate` and `decouple` lambda schedules. Both first discharge the ligand,
-then remove its Lennard-Jones interactions: `annihilate` removes all non-bonded
+`annihilate` and `decouple` λ schedules. Both first discharge the ligand, then
+remove its Lennard-Jones interactions: `annihilate` removes all non-bonded
 interactions, including those within the ligand, whereas `decouple` retains the
 intramolecular terms.
 
@@ -526,7 +520,7 @@ somd2 bound.s3 --lambda-schedule decouple
 The ligand must be restrained within the binding site. If no restraints are
 passed, a Boresch restraint is generated automatically for the bound leg, i.e.
 when the system contains a protein as well as the ligand and water. This is
-done by minimising the system, running a short trajectory at lambda = 0, then
+done by minimising the system, running a short trajectory at λ = 0, then
 choosing the anchor atoms and force constants from it. The length of this
 trajectory and the frequency at which frames are saved can be controlled with
 the `--restraint-search-time` and `--restraint-search-frequency` options. By
@@ -569,12 +563,11 @@ cached, since they are derived from the bond parameters alone and are therefore
 identical every time.
 
 > [!TIP]
-> The defaults are a reasonable starting point, but ring-breaking
-> perturbations are demanding. A non-uniform spacing of lambda values, set with
-> `--lambda-values`, is typically needed to obtain good overlap around the point
-> at which the bond is broken. The
-> [alchemate](https://github.com/akalpokas/alchemate) package provides
-> workflows for iteratively optimising the lambda schedule.
+> The defaults are a reasonable starting point, but ring-breaking perturbations
+> are demanding. A non-uniform spacing of λ values, set with `--lambda-values`,
+> is typically needed to obtain good overlap around the point at which the bond
+> is broken. The [alchemate](https://github.com/akalpokas/alchemate) package
+> provides workflows for iteratively optimising the λ schedule.
 
 <a id="charge-change-perturbations"></a>
 
@@ -585,10 +578,10 @@ automatically using the co-alchemical ion method. The charge difference between
 the two end states is computed when the system is loaded, and, if it is
 non-zero, a number of water molecules equal to the absolute charge difference
 are perturbed into counter-ions alongside the main perturbation, keeping the
-total charge constant at every lambda value. The waters furthest from the
-perturbable molecule are chosen, and the ion type is picked to offset the
-charge change, re-using the parameters of a free ion already present in the
-system where possible.
+total charge constant at every λ value. The waters furthest from the
+perturbable molecule are chosen, and the ion type is picked to offset the charge
+change, re-using the parameters of a free ion already present in the system
+where possible.
 
 No options are needed to enable this. The automatically detected value can be
 overridden with `--charge-difference`, which takes the perturbed charge minus
@@ -685,11 +678,12 @@ with FileLock("/path/to/output/somd2.lock"):
 
 ## 🧮 Analysis
 
-Simulation output will be written to the directory specified using the
-`--output-directory` parameter. This will contain a number of files, including
+Simulation output is written to the directory given by `--output-directory`.
+This contains a number of files, including
 [Parquet files](https://en.wikipedia.org/wiki/Apache_Parquet) for the energy
-trajectories of each λ window. These can be processed using
-[BioSimSpace](https://github.com/OpenBioSim/biosimspace) as follows:
+trajectories of each λ window. These can be analysed with
+[BioSimSpace](https://github.com/OpenBioSim/biosimspace), e.g. for an output
+directory called `output1`:
 
 ```python
 import BioSimSpace as BSS
@@ -697,16 +691,17 @@ import BioSimSpace as BSS
 pmf1, overlap1 = BSS.FreeEnergy.Relative.analyse("output1")
 ```
 
-(Here we assume that the output directory is called `output1`.)
-
-To compute the relative free-energy difference between two legs, e.g.
-legs 1 and 2, you can use:
+The free-energy difference between two legs, e.g. the bound and free legs of a
+perturbation, can then be computed from their PMFs:
 
 ```python
 pmf2, overlap2 = BSS.FreeEnergy.Relative.analyse("output2")
 
 free_nrg = BSS.FreeEnergy.Relative.difference(pmf1, pmf2)
 ```
+
+The [viewer](#viewer) and [`somd2-summary`](#summary-from-the-command-line) also
+run this analysis, and pair the legs of each perturbation automatically.
 
 <a id="viewer"></a>
 
@@ -772,15 +767,16 @@ of proprietary molecules, can be hidden before saving.
 When the viewer finds related simulations, a summary page is added to the top
 of the list of runs. Repeats of the same simulation are grouped, using the
 end-state topologies and the options that can't change on restart, and their
-free energies averaged, with a standard error. The bound and free legs of the
-same perturbation are paired to give the relative binding free energy, or the
-absolute binding free energy when the bound leg's Boresch restraint was
-generated automatically. Absolute hydration free energies are given for free
-legs run with the `decouple` schedule, or with the `annihilate` schedule when
-paired with a vacuum leg. Potential problems are highlighted for each
-simulation, e.g. stopped runs, poor overlap or replica mixing, or repeats that
-disagree, so problematic edges can be spotted early in a campaign. Results are
-updated in the background while the summary page is open.
+free energies averaged, with a standard error. Potential problems are
+highlighted for each simulation, e.g. stopped runs, poor overlap or replica
+mixing, or repeats that disagree, so problematic edges can be spotted early in a
+campaign. Results are updated in the background while the summary page is open.
+
+The bound and free legs of the same perturbation are paired to give the
+relative binding free energy, or the absolute binding free energy when the
+bound leg's Boresch restraint was generated automatically. Absolute hydration
+free energies are given for free legs run with the `decouple` schedule, or with
+the `annihilate` schedule when paired with a vacuum leg.
 
 Repeats are also listed together in the list of runs. Opening one shows the
 free energy profiles of all of the repeats on one plot, along with their mean,
@@ -799,14 +795,16 @@ using a file that lists the edges of the perturbation network, one per line as
 automatically, or a file can be passed with `--network`. The runs for an edge
 are expected somewhere below a directory named after the two ligands, e.g.
 `ligand_a~ligand_b/bound_0` or `ligand_a~ligand_b/free/run_0`, with the order of
-the names giving the direction run. (The names can be separated by `~`, `-`,
-`_`, `->` or `_to_`.) The network is drawn as an interactive graph, with
-each edge coloured by its status and labelled with its free energy as results
-come in. Edges run in both directions are checked for hysteresis, and cycles in
-the network for closure, to help find problem edges. A free energy for each
-ligand is fitted to the results for all of the edges, relative to the mean or
-to a reference ligand with a known value, which you can choose on the page.
-Clicking a ligand shows its structure and the results for its edges.
+the names giving the direction run. The names can be separated by `~`, `-`,
+`_`, `->` or `_to_`.
+
+The network is drawn as an interactive graph, with each edge coloured by its
+status and labelled with its free energy as results come in. Edges run in both
+directions are checked for hysteresis, and cycles in the network for closure,
+to help find problem edges. A free energy for each ligand is fitted to the
+results for all of the edges, relative to the mean or to a reference ligand
+with a known value, which you can choose on the page. Clicking a ligand shows
+its structure and the results for its edges.
 
 To launch the viewer alongside a simulation, pass the `--view` option to
 `somd2`:
@@ -819,15 +817,16 @@ The viewer runs in a separate process. Its address is written to the log, and
 it is opened in a browser automatically when a display is available. Once the
 simulation ends, the viewer keeps running while a page is open, so the final
 results can still be viewed, then stops shortly after the last page is closed.
-On a cluster, the viewer stops when the job ends. The viewer uses port 8000 by
-default, which can be changed with `--view-port`, or for both `--view` and
-`somd2-view` by setting the `SOMD2_VIEW_PORT` environment variable, e.g. on a
-remote machine whose viewers are reached through a forwarded port. The option
-takes precedence over the variable. If the port is in use by the viewer of a
-simulation that has ended, that viewer is replaced. Otherwise, e.g. if another
-simulation on the same machine is still running, the next free port is used.
-To monitor several simulations on one page, run `somd2-view` on their parent
-directory instead.
+On a cluster, the viewer stops when the job ends.
+
+The viewer uses port 8000 by default, which can be changed with `--view-port`,
+or for both `--view` and `somd2-view` by setting the `SOMD2_VIEW_PORT`
+environment variable, e.g. on a remote machine whose viewers are reached through
+a forwarded port. The option takes precedence over the variable. If the port is
+in use by the viewer of a simulation that has ended, that viewer is replaced.
+Otherwise, e.g. if another simulation on the same machine is still running, the
+next free port is used. To monitor several simulations on one page, run
+`somd2-view` on their parent directory instead.
 
 Any errors in the viewer are logged to `viewer.log` in the output directory
 when using `--view`, or to the terminal for `somd2-view`, unless a file is
@@ -873,15 +872,13 @@ field, which changes whenever its structure does.
 
 ## ✂️ Truncated MBAR analysis
 
-When running HREX with a large number of replicas it can become computationally
-expensive to compute energies. (We need the energies of each replica at each
-lambda value.) As a shortcut, it's possible to truncate the neighbourhood of
-windows for which we compute energies, then use a large null energy for the
-remaining windows. This can be controlled via the `--num-energy-neighbours` option.
-For example, setting this to 2 would compute energies for the current window and
-its two neighbours on either side. The value assigned to the remaining windows
-can be controlled via the `--null-energy` option. The number of neighbours should
-be chosen as a trade off between accuracy and computational cost. A value of around
+When running HREX with a large number of replicas, computing the energy of each
+replica at every λ value can become expensive. As a shortcut, energies can be
+computed for a neighbourhood of windows only, with a large null energy used for
+the rest. The size of the neighbourhood is set with `--num-energy-neighbours`,
+e.g. a value of 2 computes energies for the current window and the two windows
+on either side of it, and the null energy with `--null-energy`. The number of
+neighbours is a trade-off between accuracy and computational cost, and around
 20% of the number of replicas has been found to be a good starting point.
 
 <a id="note-for-somd1-users"></a>
@@ -889,14 +886,13 @@ be chosen as a trade off between accuracy and computational cost. A value of aro
 ## 📝 Note for SOMD1 users
 
 SOMD2 can be run in SOMD1 *compatibility* mode by passing the
-`--somd1-compatibility` command-line option to the `somd2` executable. This ensures
-that the perturbation used is consistent with the approach from SOMD1, i.e.
-it uses the same modifications for bonded-terms involving dummy atoms as SOMD1.
+`--somd1-compatibility` option. This makes the perturbation consistent with
+SOMD1, i.e. it uses the same modifications to the bonded terms involving dummy
+atoms.
 
 It is also possible to run SOMD2 using an existing SOMD1 perturbation file. To
-do so, you will need to create a stream file representing the λ = 0 state. For
-existing input generated by `prepareFEP.py`, this can be done as follows. (This
-assumes that the output has a prefix `somd1`.)
+do so, create a stream file for the λ = 0 state. For input generated by
+`prepareFEP.py` with the prefix `somd1`, this can be done as follows:
 
 ```python
 import BioSimSpace as BSS
@@ -908,19 +904,18 @@ system = BSS.IO.readMolecules(["somd1.prm7", "somd1.rst7"], reduce_box=True)
 BSS.Stream.save(system, "somd1")
 ```
 
-(This will write a stream file called `somd1.bss`.)
-
-This can then be run with SOMD2 using the following:
+This writes a stream file called `somd1.bss`, which can be run with:
 
 ```
 somd2 somd1.bss --pert-file somd1.pert --somd1-compatibility
 ```
 
-(This only shows the limited options required. Others will take default values and can be set accordingly.)
+Only the required options are shown. The others take their default values, and
+can be set as usual.
 
-If you want to load an existing system from a perturbation file and use the
-new SOMD2 [ghost atom bonded-term modifications](https://github.com/OpenBioSim/ghostly),
-then simply omit the `--somd1-compatibility` option.
+To use the SOMD2
+[ghost atom bonded-term modifications](https://github.com/OpenBioSim/ghostly)
+instead, omit the `--somd1-compatibility` option.
 
 <a id="gpu-oversubscription"></a>
 
@@ -945,11 +940,11 @@ More details on MPS, including tuning options, can be found in the following
 
 ## 🐍 Python API
 
-SOMD2 can also be used as a Python API, allowing it to be embedded
-within other Python scripts.
+SOMD2 can also be used from Python, so that it can be embedded in other
+scripts.
 
 A few options take objects rather than values, so cannot be set directly on the
-command line. A custom lambda schedule can be passed to `lambda_schedule` as a
+command line. A custom λ schedule can be passed to `lambda_schedule` as a
 `sire.cas.LambdaSchedule`, rather than one of the named schedules, and
 user-defined restraints can be passed to `restraints`.
 
@@ -970,9 +965,9 @@ somd2 perturbable_system.bss --lambda-schedule my_schedule.s3 --restraints my_re
 
 ## ⚠️ Known issues
 
-If using the regular `Runner` class via the Python API, then you will need to
-guard calls to its `run()` method within a `if __name__ == "__main__":` block
-since it uses multiprocessing with the `spawn` start method.
+If using the regular `Runner` class from Python, calls to its `run()` method
+must be guarded by an `if __name__ == "__main__":` block, since it uses
+multiprocessing with the `spawn` start method.
 
 During a checkpoint cycle trajectory frames are stored in memory before being
 paged to disk. When running replica exchange simulations with a large number
