@@ -34,8 +34,10 @@ _MAX_ATOMS = 400
 _MAX_HEAVY_WITH_HYDROGENS = 1
 
 # The bond length in pixels, so that small molecules aren't stretched to fill
-# the panel. Larger molecules are scaled down to fit.
+# the panel. Larger molecules are scaled down to fit. The side-by-side mapping
+# drawings are larger, since they show every atom with its index.
 _BOND_LENGTH = 35
+_MAPPING_BOND_LENGTH = 50
 
 
 def _panel_size(num_atoms, scale=70, minimum=200, maximum=640):
@@ -47,13 +49,20 @@ def _panel_size(num_atoms, scale=70, minimum=200, maximum=640):
     return int(min(maximum, max(minimum, scale * num_atoms**0.5)))
 
 
-def _set_options(drawer):
+def _mapping_panel_size(num_atoms):
+    """
+    The width of each panel of a side-by-side mapping drawing in pixels.
+    """
+    return _panel_size(num_atoms, scale=90, minimum=300, maximum=720)
+
+
+def _set_options(drawer, bond_length=_BOND_LENGTH):
     """
     Drawing options shared by all depictions.
     """
     options = drawer.drawOptions()
     options.useBWAtomPalette()
-    options.fixedBondLength = _BOND_LENGTH
+    options.fixedBondLength = bond_length
     # Label terminal carbons, e.g. CH3-OH rather than a bare line to OH.
     options.explicitMethyl = True
     return options
@@ -135,7 +144,9 @@ def depict(topology0, topology1):
 
         from rdkit import Chem
 
-        pixels = _panel_size(max(rdmol0.GetNumAtoms(), rdmol1.GetNumAtoms()))
+        num_atoms = max(rdmol0.GetNumAtoms(), rdmol1.GetNumAtoms())
+        pixels = _panel_size(num_atoms)
+        mapping_pixels = _mapping_panel_size(num_atoms)
         results.append(
             {
                 "name": name,
@@ -149,8 +160,9 @@ def depict(topology0, topology1):
                 "smiles0": Chem.MolToSmiles(Chem.RemoveHs(rdmol0, sanitize=False)),
                 "smiles1": Chem.MolToSmiles(Chem.RemoveHs(rdmol1, sanitize=False)),
                 "pixels": pixels,
+                "mapping_pixels": mapping_pixels,
                 "svg_mapping": _draw_mapping(
-                    rdmol0, rdmol1, mapping, map0, map1, pixels
+                    rdmol0, rdmol1, mapping, map0, map1, mapping_pixels
                 ),
                 "svg0": _draw(rdmol0, pixels),
                 "svg1": _draw(rdmol1, pixels),
@@ -265,7 +277,7 @@ def _draw_mapping(rdmol0, rdmol1, mapping, map0, map1, pixels):
 
     height = int(0.75 * pixels)
     drawer = rdMolDraw2D.MolDraw2DSVG(2 * pixels, height, pixels, height)
-    options = _set_options(drawer)
+    options = _set_options(drawer, _MAPPING_BOND_LENGTH)
     options.continuousHighlight = False
     options.setHighlightColour(red)
     drawer.DrawMolecules(

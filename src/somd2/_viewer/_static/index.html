@@ -762,7 +762,7 @@ function renderEndStates(s) {
       html += `<div class="depiction" style="max-width:${(m.pixels || 300) + 18}px">${m.svg0}<div class="caption">${verb} at ${LAMBDA} = 1</div><div class="smiles">${esc(m.smiles0)}</div></div>`;
       continue;
     }
-    html += `<div class="depiction mapping" style="max-width:${2 * (m.pixels || 300) + 18}px">${m.svg_mapping}<div class="panel-captions"><span>${LAMBDA} = 0</span><span>${LAMBDA} = 1</span></div><div class="caption">Atoms are labelled with their index in the merged molecule.</div><div class="smiles">${esc(m.smiles0)} → ${esc(m.smiles1)}</div></div>`;
+    html += `<div class="depiction mapping" style="max-width:${2 * (m.mapping_pixels || m.pixels || 300) + 18}px">${m.svg_mapping}<div class="panel-captions"><span>${LAMBDA} = 0</span><span>${LAMBDA} = 1</span></div><div class="caption">Atoms are labelled with their index in the merged molecule.</div><div class="smiles">${esc(m.smiles0)} → ${esc(m.smiles1)}</div></div>`;
     const noOrders = [m.bond_orders0 ? null : `${LAMBDA} = 0`, m.bond_orders1 ? null : `${LAMBDA} = 1`].filter(Boolean);
     if (noOrders.length) html += `<div class="note">Bond orders couldn't be assigned at ${noOrders.join(" and ")}, so only the connectivity is shown.</div>`;
     html += `<div class="legend">
