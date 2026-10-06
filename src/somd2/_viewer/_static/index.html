@@ -312,7 +312,8 @@ function loadCollapsed(key = "somd2-viewer-collapsed") {
 const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "", problems: {}, requests: 0, latest: {}, shown: {}, group: null, repeatsOpen: new Map(), conformers: {}, conformersLoading: {}, structureMode: "0", structureMolecule: {}, viewer3d: null, bindingSites: {}, bindingSitesLoading: {}, viewerSite: null };
 const PALETTE = ["#2f6fdf", "#e0663b", "#2a9d6f", "#b04fc9", "#c9a227", "#3aa7c9", "#d64f7a", "#7a8699"];
 const LAMBDA = "λ";
-// Matches the threshold for poor replica mixing in the summary.
+// The thresholds for poor overlap and replica mixing, as in the summary.
+const MIN_OVERLAP = 0.03;
 const MIN_TRANSITION = 0.05;
 
 const $ = (sel) => document.querySelector(sel);
@@ -725,10 +726,14 @@ function renderRepeats(s) {
     html += `<div class="note" style="margin-top:8px">Running MBAR analysis for the repeats…</div>`;
   }
   const mixing = g.runs.some((r) => r.min_transition !== null && r.min_transition !== undefined);
+  const lowCell = (value, min, what) => {
+    const low = value !== null && value !== undefined && value < min;
+    return low ? `<td class="num" style="color:var(--warn)" title="Poor ${what}, below ${min}">${fmt(value, 3)}</td>` : `<td class="num">${fmt(value, 3)}</td>`;
+  };
   html += `<div class="table-wrap" style="margin-top:8px"><table class="repeats-table"><tr><th>Repeat</th><th>Status</th><th class="num">ΔG (kcal/mol)</th><th class="num">Lowest overlap</th>${mixing ? `<th class="num">Lowest mixing</th>` : ""}</tr>`;
   for (const r of g.runs) {
     const value = r.free_energy !== null && r.free_energy !== undefined ? valueWithError(r.free_energy, r.free_energy_error) : r.updating ? "analysing…" : "–";
-    html += `<tr data-repeat="${r.id}"${r.id === s.id ? ' class="selected"' : ""}><td>${esc(repeatLabel(g, r))}</td><td class="status-${r.status}">${esc(r.status)}</td><td class="num">${value}</td><td class="num">${fmt(r.min_overlap, 3)}</td>${mixing ? `<td class="num">${fmt(r.min_transition, 3)}</td>` : ""}</tr>`;
+    html += `<tr data-repeat="${r.id}"${r.id === s.id ? ' class="selected"' : ""}><td>${esc(repeatLabel(g, r))}</td><td class="status-${r.status}">${esc(r.status)}</td><td class="num">${value}</td>${lowCell(r.min_overlap, MIN_OVERLAP, "overlap")}${mixing ? lowCell(r.min_transition, MIN_TRANSITION, "mixing") : ""}</tr>`;
   }
   const done = g.runs.filter((r) => r.free_energy !== null && r.free_energy !== undefined);
   const [mean, error] = meanAndError(done.map((r) => r.free_energy), done.map((r) => r.free_energy_error));
@@ -1087,7 +1092,7 @@ function renderFreeEnergy(s) {
     head += `<div class="note">The standard state correction for the Boresch restraint isn't included in the free energy above.</div>`;
   }
   html += `<div>${head}<div class="chart" id="pmf-chart" style="margin-top:10px"></div><div class="note">The shaded band is ±1 standard error, and may be too narrow to see when errors are small.</div></div>`;
-  html += `<div><h4 style="margin-top:0">Overlap matrix</h4><div class="chart" id="overlap-chart"></div><div class="note">Neighbouring windows with overlap below 0.03 are outlined.</div></div>`;
+  html += `<div><h4 style="margin-top:0">Overlap matrix</h4><div class="chart" id="overlap-chart"></div><div class="note">Neighbouring windows with overlap below ${MIN_OVERLAP} are outlined.</div></div>`;
   const c = a.convergence;
   html += `<div><h4 style="margin-top:0">Convergence</h4>`;
   if (!c || c.status === "pending") html += `<div class="note">Running convergence analysis…</div>`;
@@ -1259,7 +1264,7 @@ function renderCharts(s) {
       xLabel: LAMBDA, yLabel: "ΔG (kcal/mol)", xMin: 0, xMax: 1,
     });
     const ov = $("#overlap-chart");
-    if (ov && a.overlap) heatmap(ov, a.overlap, { threshold: 0.03 });
+    if (ov && a.overlap) heatmap(ov, a.overlap, { threshold: MIN_OVERLAP });
     const cv = $("#convergence-chart");
     const c = a.convergence;
     if (cv && c && c.status === "done") {
