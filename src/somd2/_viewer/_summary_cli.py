@@ -31,6 +31,10 @@ import time as _time
 # Changed whenever the structure of the JSON output changes.
 _JSON_VERSION = 1
 
+# ANSI escape codes for problems in the text tables.
+_WARN = "\033[33m"
+_RESET = "\033[0m"
+
 _VALUE = "value (kcal/mol)"
 _ERROR = "error (kcal/mol)"
 
@@ -263,10 +267,15 @@ def to_tables(report):
     return tables
 
 
-def format_text(report):
+def format_text(report, colour=False):
     """
-    The summary as plain text tables, for a terminal.
+    The summary as plain text tables, for a terminal, with problems shown in
+    colour if requested.
     """
+
+    def warn(text):
+        return f"{_WARN}{text}{_RESET}" if colour else text
+
     titles = {
         "binding": "Binding free energies",
         "hydration": "Hydration free energies",
@@ -313,21 +322,30 @@ def format_text(report):
         ]
         cells = [[cell(v) for v in row] for row in rows]
         widths = [max(len(c) for c in column) for column in zip(header, *cells)]
+        problems = header.index("problems") if "problems" in header else None
 
-        def line(row):
-            return "  ".join(
+        def line(row, highlight=False):
+            parts = [
                 c.rjust(w) if n else c.ljust(w) for c, w, n in zip(row, widths, numeric)
-            ).rstrip()
+            ]
+            # Coloured after padding, so that the escape codes don't count
+            # towards the width.
+            if highlight and problems is not None and row[problems]:
+                text = parts[problems].rstrip()
+                parts[problems] = warn(text) + parts[problems][len(text) :]
+            return "  ".join(parts).rstrip()
 
         lines = [titles[key], "", line(header)]
         lines.append("  ".join("-" * w for w in widths))
-        lines.extend(line(row) for row in cells)
+        lines.extend(line(row, highlight=True) for row in cells)
         sections.append("\n".join(lines))
 
     if report["ambiguous"]:
         sections.append(
-            f"{report['ambiguous']} legs couldn't be paired, since more than one "
-            "bound or free leg has matching settings."
+            warn(
+                f"{report['ambiguous']} legs couldn't be paired, since more than "
+                "one bound or free leg has matching settings."
+            )
         )
     if not sections:
         return "No SOMD2 output found."

@@ -353,7 +353,13 @@ def somd2_summary():
             if args.json is not None:
                 with open(args.json, "w") as f:
                     json.dump(report, f, indent=2)
-            print(format_text(report))
+            # Coloured only for a terminal, unless NO_COLOR is set.
+            colour = (
+                sys.stdout.isatty()
+                and not os.environ.get("NO_COLOR")
+                and os.environ.get("TERM") != "dumb"
+            )
+            print(format_text(report, colour=colour))
     except (OSError, ValueError) as e:
         finish_line()
         exit(f"somd2-summary: {e}")

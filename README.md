@@ -862,11 +862,12 @@ somd2-summary output_directories
 ```
 
 Every run is analysed first, which can take a while for a large campaign, so
-pass `--no-analysis` for a quick check of progress alone. Each table can also be
-written as a CSV file with `--csv directory`, and the whole summary as JSON with
-`--json file`, or to standard output in place of the tables with `--json -`. The
-JSON has a `version` field, which changes whenever its structure does, and all
-free energies are in kcal/mol.
+pass `--no-analysis` for a quick check of progress alone. Problems are shown in
+colour when printing to a terminal, unless `NO_COLOR` is set. Each table can
+also be written as a CSV file with `--csv directory`, and the whole summary as
+JSON with `--json file`, or to standard output in place of the tables with
+`--json -`. The JSON has a `version` field, which changes whenever its structure
+does, and all free energies are in kcal/mol.
 
 <a id="truncated-mbar-analysis"></a>
 
