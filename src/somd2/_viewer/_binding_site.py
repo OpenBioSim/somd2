@@ -63,10 +63,9 @@ def binding_site(topology0, topology1, saved):
 
     site: dict
         The protein, without hydrogens, and the λ = 0 end state of each
-        perturbed molecule, as PDB text, with the indices of the atoms of the
-        protein residues near them, and of the perturbed molecules, in the
-        order they are written. None if there isn't a protein and a perturbed
-        molecule to show.
+        perturbed molecule, as PDB text, with the serial numbers of the atoms
+        of the protein residues near them, and of the perturbed molecules. None
+        if there isn't a protein and a perturbed molecule to show.
     """
     topology = _topology(topology0, topology1)
     if topology is None:
@@ -94,7 +93,7 @@ def binding_site(topology0, topology1, saved):
     near = _np.concatenate(ligands)
     lines = []
     pocket = []
-    index = 0
+    serial = 0
     for molecule, positions in zip(topology["proteins"], proteins):
         # A residue is in the pocket if any of its atoms is close enough.
         distances = _np.linalg.norm(
@@ -103,10 +102,10 @@ def binding_site(topology0, topology1, saved):
         records = molecule["records"]
         residues = {records[i][2] for i in _np.where(distances < _CUTOFF)[0]}
         for record, xyz in zip(records, positions):
+            serial += 1
             if record[2] in residues:
-                pocket.append(index)
-            lines.append(_atom("ATOM", index + 1, record, molecule["chain"], xyz))
-            index += 1
+                pocket.append(serial)
+            lines.append(_atom("ATOM", serial, record, molecule["chain"], xyz))
         lines.append("TER")
 
     ligand_atoms = []
@@ -114,9 +113,9 @@ def binding_site(topology0, topology1, saved):
         for record, xyz in zip(molecule["records"], positions):
             name, residue, _, element = record
             record = (name, residue, _LIGAND_RESIDUE - i, element)
-            ligand_atoms.append(index)
-            lines.append(_atom("HETATM", index + 1, record, _LIGAND_CHAIN, xyz))
-            index += 1
+            serial += 1
+            ligand_atoms.append(serial)
+            lines.append(_atom("HETATM", serial, record, _LIGAND_CHAIN, xyz))
     lines.append("END")
 
     return {

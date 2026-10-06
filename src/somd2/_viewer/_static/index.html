@@ -851,8 +851,7 @@ async function attachStructure(s) {
   disposeViewer(v);
   const el = viewerElement(host);
   v = state.viewer3d = { key, el, viewer: null, molecule: c.molecules[index], absolute: isAbsolute(s), picture: "#structure-3d-print" };
-  // zoomTo() leaves a wide margin around the molecule, relative to its size.
-  v.fit = () => { v.viewer.zoomTo(); v.viewer.zoom(1.8); };
+  v.fit = () => fitMolecule(v);
   let lib;
   try {
     lib = await load3Dmol();
@@ -865,6 +864,38 @@ async function attachStructure(s) {
   v.models = [v.viewer.addModel(v.molecule.mol0, "sdf"), v.absolute ? null : v.viewer.addModel(v.molecule.mol1, "sdf")];
   styleStructure(v);
   refreshViewer(v);
+}
+
+// Frame the bounding box of both end states. zoomTo() frames a sphere of at
+// least 5 Å, which suits neither small nor elongated molecules.
+function fitMolecule(v) {
+  const viewer = v.viewer;
+  viewer.zoomTo();
+  const lo = { x: Infinity, y: Infinity, z: Infinity };
+  const hi = { x: -Infinity, y: -Infinity, z: -Infinity };
+  for (const model of v.models.filter(Boolean)) {
+    for (const a of model.selectedAtoms({})) {
+      for (const k of "xyz") {
+        lo[k] = Math.min(lo[k], a[k]);
+        hi[k] = Math.max(hi[k], a[k]);
+      }
+    }
+  }
+  // Room for the atoms and their halos.
+  const pad = 1.2;
+  const halfWidth = (hi.x - lo.x) / 2 + pad;
+  const halfHeight = (hi.y - lo.y) / 2 + pad;
+  const aspect = v.el.clientWidth / v.el.clientHeight;
+  const half = Math.max(halfHeight, halfWidth / aspect);
+  // The distance at which the box's nearest face just fits the view.
+  const tan = Math.tan((viewer.camera.fov * Math.PI) / 360);
+  const distance = half / tan + (hi.z - lo.z) / 2 + pad;
+  const view = viewer.getView();
+  view[0] = -(lo.x + hi.x) / 2;
+  view[1] = -(lo.y + hi.y) / 2;
+  view[2] = -(lo.z + hi.z) / 2;
+  view[3] = viewer.CAMERA_Z - distance;
+  viewer.setView(view);
 }
 
 // A plain scroll is kept from the viewer so that it scrolls the page. Zooming
@@ -968,7 +999,7 @@ async function attachBindingSite(s) {
   v = state.viewerSite = { key: s.id, el, viewer: null, site: null, picture: "#binding-site-print" };
   // Framed on the perturbed molecule and the residues around it.
   v.fit = () => {
-    if (v.site) v.viewer.zoomTo({ within: { distance: 6, sel: { index: v.site.ligand } }, byres: true });
+    if (v.site) v.viewer.zoomTo({ within: { distance: 6, sel: { serial: v.site.ligand } }, byres: true });
   };
   let lib;
   try {
@@ -991,9 +1022,9 @@ function showSite(v, site) {
   const model = v.viewer.addModel(site.pdb, "pdb");
   model.setStyle({}, { cartoon: { color: "lightgrey" } });
   // Added to the cartoon, rather than replacing it.
-  model.setStyle({ index: site.pocket }, { stick: { radius: 0.15, colorscheme: "grayCarbon" } }, true);
+  model.setStyle({ serial: site.pocket }, { stick: { radius: 0.15, colorscheme: "grayCarbon" } }, true);
   const ligand = { colorscheme: "greenCarbon" };
-  model.setStyle({ index: site.ligand }, { stick: { radius: 0.14, ...ligand }, sphere: { scale: 0.22, ...ligand } });
+  model.setStyle({ serial: site.ligand }, { stick: { radius: 0.14, ...ligand }, sphere: { scale: 0.22, ...ligand } });
   v.viewer.render();
 }
 

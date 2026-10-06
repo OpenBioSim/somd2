@@ -189,7 +189,7 @@ def _embed(mol, template=None, mapping=None):
     mapped onto it are placed and kept at its coordinates, so that the two
     overlay.
     """
-    from rdkit.Chem import AllChem, rdMolAlign
+    from rdkit.Chem import AllChem, rdMolAlign, rdMolTransforms
 
     coord_map = None
     if template is not None:
@@ -207,7 +207,10 @@ def _embed(mol, template=None, mapping=None):
 
     _relax(mol, coord_map or {})
 
-    if template is not None:
+    if template is None:
+        # Lay the molecule's long axis across the wide viewer.
+        rdMolTransforms.CanonicalizeConformer(mol.GetConformer())
+    else:
         rdMolAlign.AlignMol(mol, template, atomMap=[(j, i) for i, j in mapping.items()])
 
 

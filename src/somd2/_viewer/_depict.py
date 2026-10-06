@@ -33,6 +33,9 @@ _MAX_ATOMS = 400
 # since a skeletal formula of e.g. methane is just a label.
 _MAX_HEAVY_WITH_HYDROGENS = 1
 
+# The number of bonds of a positively charged N, O, P or S, by atomic number.
+_ONIUM_DEGREE = {7: 4, 8: 3, 15: 4, 16: 3}
+
 # The bond length in pixels, so that small molecules aren't stretched to fill
 # the panel. Larger molecules are scaled down to fit. The side-by-side mapping
 # drawings are larger, since they show every atom with its index.
@@ -271,8 +274,12 @@ def _assign_bond_orders(rdmol, charges):
         ):
             return mol, True
 
-    # Fall back to the connectivity alone.
+    # Fall back to the connectivity alone, charging atoms with an extra bond,
+    # e.g. a protonated amine, which RDKit would otherwise reject.
     mol = template.GetMol()
+    for atom in mol.GetAtoms():
+        if atom.GetDegree() == _ONIUM_DEGREE.get(atom.GetAtomicNum()):
+            atom.SetFormalCharge(1)
     mol.UpdatePropertyCache(strict=False)
     Chem.FastFindRings(mol)
     return mol, False
