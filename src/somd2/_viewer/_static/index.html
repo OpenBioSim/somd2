@@ -131,6 +131,11 @@ nav .nav-repeats > a { padding-left: 32px; }
 nav .nav-group .nav-repeats > summary { padding-left: 28px; }
 nav .nav-group .nav-repeats > a { padding-left: 46px; }
 .structure-3d .viewer { position: relative; width: 100%; height: 400px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.structure-panel:fullscreen { display: flex; flex-direction: column; padding: 16px; background: var(--surface); color: var(--fg); }
+.structure-panel:fullscreen .structure-3d { flex: 1; min-height: 0; }
+.structure-panel:fullscreen .structure-3d .viewer { height: 100%; }
+/* Changing molecule redraws the page, which waits until full screen is left. */
+.structure-panel:fullscreen .structure-molecule { display: none; }
 .viewer-hint { position: absolute; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.45); color: #fff; font-size: 1.1em; pointer-events: none; opacity: 0; transition: opacity 0.3s; }
 .viewer-hint.visible { opacity: 1; }
 .structure-controls label { margin-right: 14px; white-space: nowrap; }
@@ -802,21 +807,23 @@ function renderStructure(s) {
   const m = c.molecules[index];
   let controls = "";
   if (c.molecules.length > 1) {
-    controls += `<label>Molecule <select id="structure-molecule">${c.molecules.map((mol, i) => `<option value="${i}"${i === index ? " selected" : ""}>${esc(mol.name)}</option>`).join("")}</select></label>`;
+    controls += `<label class="structure-molecule">Molecule <select id="structure-molecule">${c.molecules.map((mol, i) => `<option value="${i}"${i === index ? " selected" : ""}>${esc(mol.name)}</option>`).join("")}</select></label>`;
   }
   if (!isAbsolute(s)) {
     const modes = [["0", `${LAMBDA} = 0`], ["1", `${LAMBDA} = 1`]];
     controls += modes.map(([value, label]) => `<label><input type="radio" name="structure-mode" value="${value}"${state.structureMode === value ? " checked" : ""}> ${label}</label>`).join("");
   }
   controls += `<button type="button" id="structure-reset">Reset view</button>`;
-  let html = `<div class="structure-controls note" style="margin-bottom:8px">${controls}</div>`;
-  html += `<div id="structure-3d" class="structure-3d"></div><img id="structure-3d-print" class="print-only" alt="3D structure">`;
+  if (document.fullscreenEnabled) controls += fullScreenButton();
+  let html = `<div class="structure-panel"><div class="structure-controls note" style="margin-bottom:8px">${controls}</div>`;
+  html += `<div id="structure-3d" class="structure-3d"></div>`;
   if (!isAbsolute(s)) {
     html += `<div class="legend">
       <span><i style="background:var(--unique)"></i>Unique, i.e. a ghost at the other end state</span>
       <span><i style="background:var(--changed)"></i>Mapped, element changes</span>
     </div>`;
   }
+  html += `</div><img id="structure-3d-print" class="print-only" alt="3D structure">`;
   html += `<div class="note">A generated conformer, for checking the molecule and mapping rather than the simulated pose. Drag to rotate, Ctrl + scroll to zoom.</div>`;
   if (m.stereo === "simulation") html += `<div class="note">Stereochemistry is taken from the simulation.</div>`;
   if (m.stereo === "unknown") html += `<div class="note" style="color:var(--warn)">No coordinates have been saved yet, so the stereochemistry isn't known, and stereocentres may be shown in the wrong configuration.</div>`;
@@ -911,14 +918,20 @@ function createViewer(lib, el) {
   return lib.createViewer(el, { backgroundColor: css("--surface"), rows: 1, cols: 1, row: 0, col: 0 });
 }
 
+// The 3D view is shown full screen with its controls.
+function fullScreenButton() {
+  const label = document.fullscreenElement ? "Exit full screen" : "Full screen";
+  return `<button type="button" class="fullscreen-button">${label}</button>`;
+}
+
 // A plain scroll is kept from the viewer so that it scrolls the page. Zooming
-// needs Ctrl or ⌘, which a trackpad pinch also sends.
+// needs Ctrl or ⌘, which a trackpad pinch also sends, except in full screen.
 function viewerElement(host) {
   const el = document.createElement("div");
   el.className = "viewer";
   let hint, timer;
   el.addEventListener("wheel", (e) => {
-    if (e.ctrlKey || e.metaKey) return;
+    if (e.ctrlKey || e.metaKey || el.closest(":fullscreen")) return;
     e.stopPropagation();
     // Added on first use, so that it sits above the viewer's canvas.
     if (!hint || !el.contains(hint)) {
@@ -975,8 +988,9 @@ function renderBindingSite(s) {
   if (!b || b.status === "none") return "";
   if (b.status !== "done") return card("Binding site", `<div class="note">${esc(b.reason || "Unavailable.")}</div>`);
   const time = b.time_ps !== null && b.time_ps !== undefined ? ` at ${fmt(b.time_ps / 1000, 2)} ns` : "";
-  let html = `<div class="structure-controls note" style="margin-bottom:8px"><button type="button" id="binding-site-reset">Reset view</button></div>`;
-  html += `<div id="binding-site-3d" class="structure-3d"></div><img id="binding-site-print" class="print-only" alt="Binding site">`;
+  const full = document.fullscreenEnabled ? fullScreenButton() : "";
+  let html = `<div class="structure-panel"><div class="structure-controls note" style="margin-bottom:8px"><button type="button" id="binding-site-reset">Reset view</button>${full}</div>`;
+  html += `<div id="binding-site-3d" class="structure-3d"></div></div><img id="binding-site-print" class="print-only" alt="Binding site">`;
   html += `<div class="note">The latest saved coordinates of the ${LAMBDA} = 0 window${time}, updated as the simulation runs. Residues within 6 Å of the perturbed molecule are shown in detail, and the rest of the protein as a cartoon. Drag to rotate, Ctrl + scroll to zoom.</div>`;
   return card("Binding site", html);
 }
@@ -1992,6 +2006,9 @@ function renderSummaryPage() {
 
 function render() {
   if (state.printing) return;
+  // Redrawing would move a full-screen viewer, which ends full screen, so it
+  // waits until full screen is left.
+  if (document.fullscreenElement) { state.renderPending = true; return; }
   if (state.view === "summary") { renderSummaryPage(); return; }
   if (state.view === "network") { renderNetworkPage(); return; }
   const s = state.summary;
@@ -2046,6 +2063,10 @@ function render() {
   if (resetView) resetView.addEventListener("click", () => {
     if (state.viewer3d && state.viewer3d.viewer) fitStructure(state.viewer3d);
   });
+  document.querySelectorAll(".fullscreen-button").forEach((button) => button.addEventListener("click", () => {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else button.closest(".structure-panel").requestFullscreen().catch(() => {});
+  }));
   const moleculeSelect = $("#structure-molecule");
   if (moleculeSelect) moleculeSelect.addEventListener("change", (e) => {
     state.structureMolecule[s.id] = Number(e.target.value);
@@ -2404,6 +2425,16 @@ $("#main").addEventListener("toggle", (e) => {
   if (section.open) viewers().forEach(refreshViewer);
   if (section.open && name === "Binding site" && state.current) loadBindingSite(state.current);
 }, true);
+document.addEventListener("fullscreenchange", () => {
+  document.querySelectorAll(".fullscreen-button").forEach((button) => {
+    button.textContent = document.fullscreenElement ? "Exit full screen" : "Full screen";
+  });
+  viewers().forEach(refreshViewer);
+  if (!document.fullscreenElement && state.renderPending) {
+    state.renderPending = false;
+    render();
+  }
+});
 let resizeTimer = null;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
