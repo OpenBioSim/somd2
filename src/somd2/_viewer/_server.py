@@ -33,6 +33,7 @@ from http.server import BaseHTTPRequestHandler as _BaseHTTPRequestHandler
 from http.server import ThreadingHTTPServer as _ThreadingHTTPServer
 from pathlib import Path as _Path
 from urllib.parse import unquote as _unquote
+from urllib.parse import parse_qs as _parse_qs
 from urllib.parse import urlparse as _urlparse
 
 from ._data import Simulation as _Simulation
@@ -209,6 +210,9 @@ class _Handler(_BaseHTTPRequestHandler):
                     self._json(sim.depictions())
                 elif parts[3:] == ["conformers"]:
                     self._json(sim.conformers())
+                elif parts[3:] == ["binding-site"]:
+                    query = _parse_qs(_urlparse(self.path).query)
+                    self._json(sim.binding_site(query.get("known", [None])[0]))
                 elif len(parts) == 5 and parts[3] == "components":
                     try:
                         lam = float(parts[4])

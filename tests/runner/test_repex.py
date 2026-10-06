@@ -243,7 +243,7 @@ def test_repex_mixing_samples_boltzmann(slot_schedule, inverted):
     cache._update_constraints = True
     cache._states = np.arange(n)
     cache._time = None
-    cache._particle_offsets = None
+    cache._virtual_sites = None
     cache._gcmc_stats = None
     cache._terminal_flip_stats = [[0, 0] for _ in range(n)]
     cache._energy_trajectories = [None] * n

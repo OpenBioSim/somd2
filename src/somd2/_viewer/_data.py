@@ -1200,6 +1200,68 @@ class Simulation:
                     self._cache.pop("conformers", None)
             return result
 
+    def binding_site(self, known=None):
+        """
+        Return the protein and perturbed molecules at the latest saved
+        coordinates of the λ = 0 window. Each version has a key, and if the
+        caller already has the latest, only that is returned.
+        """
+        from ._binding_site import binding_site, has_binding_site
+        from ._coordinates import Mismatch
+
+        top0 = self.path / "system0.prm7"
+        top1 = self.path / "system1.prm7"
+        if not (top0.exists() and top1.exists()):
+            return {"status": "unavailable", "reason": "No end-state topologies yet."}
+        # Checked first, so that runs without a protein never show the view.
+        try:
+            if not has_binding_site(top0, top1):
+                return {"status": "none"}
+        except Exception as e:
+            return {"status": "error", "reason": self._report(e, "read the topology")}
+        path = self._positions_file()
+        if path is None:
+            return {
+                "status": "unavailable",
+                "reason": "Shown once the simulation has saved its coordinates.",
+            }
+        stamp = (_stamp(top0, top1), _stamp(path))
+        key = _hashlib.sha1(repr(stamp).encode()).hexdigest()[:16]
+        if known == key:
+            return {"status": "unchanged", "key": key}
+
+        def load():
+            try:
+                saved = self._positions()
+                if saved is None:
+                    return {
+                        "status": "unavailable",
+                        "reason": "No coordinates have been saved yet.",
+                    }
+                site = binding_site(top0, top1, saved)
+            except Mismatch:
+                return {
+                    "status": "unavailable",
+                    "reason": "The saved coordinates don't match the topology.",
+                }
+            except Exception as e:
+                return {
+                    "status": "error",
+                    "reason": self._report(e, "show the binding site"),
+                }
+            if site is None:
+                return {"status": "none"}
+            return dict(site, status="done", key=key)
+
+        with self._depict_lock:
+            result = self._cached("binding_site", stamp, load)
+            # Errors aren't kept, e.g. from a file caught part way through
+            # being written, so that they are retried.
+            if result["status"] == "error":
+                with self._lock:
+                    self._cache.pop("binding_site", None)
+            return _clean(result)
+
     def _positions_file(self):
         """
         The first file holding the system's coordinates: the checkpoint of
@@ -1215,51 +1277,13 @@ class Simulation:
 
     def _positions(self):
         """
-        The coordinates of the whole system in nm, from the first checkpoint
-        or replica exchange state, or None if there are none yet. Returned
-        with the OpenMM particle index of each perturbable molecule's first
-        atom, keyed by its atom index, since virtual sites are also particles.
-        This is None if it wasn't saved, and empty if the coordinates are of
-        the atoms alone.
+        The latest coordinates of the λ = 0 window, as SavedCoordinates, or
+        None if there are none yet.
         """
+        from ._coordinates import read_coordinates
+
         path = self._positions_file()
-        if path is None:
-            return None
-
-        def offsets(saved):
-            if saved is None:
-                return None
-            return {int(atom): int(particle) for atom, particle in saved}
-
-        if path.suffix == ".npz":
-            with _np.load(path) as checkpoint:
-                saved = checkpoint.get("particle_offsets")
-                return checkpoint["positions"], offsets(saved)
-        if path.suffix == ".s3":
-            import sire as _sr
-            from sire.io import get_coords_array
-
-            with sire_lock:
-                # Perturbable molecules only have coordinates for each end
-                # state until linked to one.
-                system = _sr.morph.link_to_reference(_sr.stream.load(str(path)))
-                return get_coords_array(system, units=_sr.units.nanometer), {}
-
-        with open(path, "rb") as f:
-            state = _RepexUnpickler(f).load()
-        for saved in getattr(state, "_openmm_states", None) or []:
-            if saved is None:
-                continue
-            import openmm.unit as _unit
-
-            # Older states are OpenMM State objects rather than dicts.
-            if isinstance(saved, dict):
-                positions = saved["positions"]
-            else:
-                positions = saved.getPositions(asNumpy=True)
-            positions = _np.asarray(positions.value_in_unit(_unit.nanometer))
-            return positions, offsets(getattr(state, "_particle_offsets", None))
-        return None
+        return read_coordinates(path) if path is not None else None
 
     def _unreadable(self, error):
         """

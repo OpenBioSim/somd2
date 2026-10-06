@@ -47,10 +47,8 @@ def conformers(topology0, topology1, has_positions, load_positions):
         Whether coordinates have been saved for the system.
 
     load_positions: callable
-        Returns the coordinates of the whole system in nm, with the particle
-        index of each perturbable molecule's first atom keyed by its atom
-        index, or None if there are none. Only called if a molecule has
-        stereochemistry to assign.
+        Returns the saved coordinates as SavedCoordinates, or None if there
+        are none. Only called if a molecule has stereochemistry to assign.
 
     Returns
     -------
@@ -107,26 +105,10 @@ def _generate(topology0, topology1, load_positions):
         n = len(p.dummy0)
 
         def coordinates(p=p, n=n):
-            loaded = system_positions()
-            if loaded is None:
+            saved = system_positions()
+            if saved is None:
                 return None
-            system, offsets = loaded
-            if offsets is None:
-                # Saved without the particle layout, so the molecule's atom
-                # index is only trusted where virtual sites can't have moved it.
-                if p.offset != 0 and len(system) != p.num_system_atoms:
-                    raise _Mismatch()
-                start = p.offset
-            elif offsets:
-                if p.offset not in offsets:
-                    raise _Mismatch()
-                start = offsets[p.offset]
-            else:
-                # The coordinates are of the atoms alone.
-                start = p.offset
-            if len(system) < start + n:
-                raise _Mismatch()
-            return system[start : start + n]
+            return saved.molecule(p.offset, n, p.num_system_atoms)
 
         mol0, stereo0 = _with_stereo(p.rdmol0, p.map0, coordinates)
         mol1, stereo1 = _with_stereo(p.rdmol1, p.map1, coordinates)
@@ -150,12 +132,6 @@ def _generate(topology0, topology1, load_positions):
     return results
 
 
-class _Mismatch(Exception):
-    """
-    The saved coordinates don't match the topology.
-    """
-
-
 def _with_stereo(rdmol, atoms, coordinates):
     """
     A copy of an end state with its stereochemistry assigned from the
@@ -165,6 +141,8 @@ def _with_stereo(rdmol, atoms, coordinates):
     """
     from rdkit import Chem
     from rdkit.Geometry import Point3D
+
+    from ._coordinates import Mismatch
 
     mol = Chem.Mol(rdmol)
     mol.RemoveAllConformers()
@@ -178,7 +156,7 @@ def _with_stereo(rdmol, atoms, coordinates):
     # Errors reading the coordinates are raised, so that they are retried.
     try:
         positions = coordinates()
-    except _Mismatch:
+    except Mismatch:
         return mol, "failed"
     if positions is None:
         return mol, "unknown"

@@ -326,8 +326,8 @@ class Runner(_RunnerBase):
             "time_ps": _np.array([time_ps]),
         }
         # Left out if unknown, since None can only be saved by pickling it.
-        if self._particle_offsets is not None:
-            save_kwargs["particle_offsets"] = self._particle_offsets
+        if self._virtual_sites is not None:
+            save_kwargs["virtual_sites"] = self._virtual_sites
 
         box = state.getPeriodicBoxVectors(asNumpy=True)
         if box is not None:

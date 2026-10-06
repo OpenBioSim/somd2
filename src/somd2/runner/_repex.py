@@ -135,9 +135,9 @@ class DynamicsCache:
         self._states = _np.array(range(num_replicas))
         self._time = None
         self._openmm_states = [None] * num_replicas
-        # Where the perturbable molecules' particles are in the saved states,
-        # set by the runner.
-        self._particle_offsets = None
+        # The molecules with virtual sites, so that each molecule's particles
+        # can be found in the saved states. Set by the runner.
+        self._virtual_sites = None
         self._gcmc_states = [None] * num_replicas
         # GCMC statistics for the whole simulation, keyed by lambda value.
         self._gcmc_stats = None
@@ -237,8 +237,8 @@ class DynamicsCache:
             self._num_slots = n
         if not hasattr(self, "_update_constraints"):
             self._update_constraints = True
-        if not hasattr(self, "_particle_offsets"):
-            self._particle_offsets = None
+        if not hasattr(self, "_virtual_sites"):
+            self._virtual_sites = None
 
         # Convert a legacy checkpoint to the current convention, in which the
         # stored state of a replica is its own, with the last mix already
@@ -281,7 +281,7 @@ class DynamicsCache:
             "_states": self._states,
             "_time": self._time,
             "_openmm_states": self._openmm_states,
-            "_particle_offsets": self._particle_offsets,
+            "_virtual_sites": self._virtual_sites,
             # Don't pickle the GCMC samplers since they need to be recreated.
             "_gcmc_samplers": len(self._gcmc_samplers) * [None],
             "_gcmc_states": self._gcmc_states,
@@ -1353,7 +1353,7 @@ class RepexRunner(_RunnerBase):
                 constraint_lambda_index=self._constraint_lambda_index,
                 gpu_devices=self._gpu_devices,
             )
-            self._dynamics_cache._particle_offsets = self._particle_offsets
+            self._dynamics_cache._virtual_sites = self._virtual_sites
 
         else:
             _logger.debug("Restarting from file")
@@ -1371,7 +1371,7 @@ class RepexRunner(_RunnerBase):
                 raise e
 
             # Set again, since states saved by older versions don't have it.
-            self._dynamics_cache._particle_offsets = self._particle_offsets
+            self._dynamics_cache._virtual_sites = self._virtual_sites
 
             # Derive the simulation time: prefer the value stored in the
             # pickle (_time is set by the new-format _write_checkpoint_system);

@@ -143,9 +143,6 @@ def _perturbed_molecules(topology0, topology1):
     system0 = _sr.load(str(topology0), show_warnings=False)
     system1 = _sr.load(str(topology1), show_warnings=False)
 
-    # Molecules are paired by index, since alchemical ions are only water at
-    # one end state.
-    candidates = sorted(_non_water(system0) & _non_water(system1))
     mols0 = system0.molecules()
     mols1 = system1.molecules()
 
@@ -153,19 +150,11 @@ def _perturbed_molecules(topology0, topology1):
     for mol in mols0:
         offsets.append(offsets[-1] + mol.num_atoms())
 
-    for index in candidates:
+    for index in _perturbed_indices(system0, system1):
         mol0 = mols0[index]
         mol1 = mols1[index]
-        if mol0.num_atoms() <= 3 or mol0.num_atoms() > _MAX_ATOMS:
-            continue
-        types0 = mol0.property("ambertype").to_list()
-        types1 = mol1.property("ambertype").to_list()
         charges0 = [q.value() for q in mol0.property("charge").to_list()]
         charges1 = [q.value() for q in mol1.property("charge").to_list()]
-        if types0 == types1 and all(
-            abs(a - b) < 1e-6 for a, b in zip(charges0, charges1)
-        ):
-            continue
 
         dummy0 = [e.num_protons() == 0 for e in mol0.property("element").to_list()]
         dummy1 = [e.num_protons() == 0 for e in mol1.property("element").to_list()]
@@ -204,6 +193,35 @@ def _perturbed_molecules(topology0, topology1):
             bond_orders0=bond_orders0,
             bond_orders1=bond_orders1,
         )
+
+
+def _perturbed_indices(system0, system1):
+    """
+    The indices of the molecules that change between the end-state systems,
+    leaving out ions and molecules too large to depict, e.g. proteins.
+    """
+    # Molecules are paired by index, since alchemical ions are only water at
+    # one end state.
+    candidates = sorted(_non_water(system0) & _non_water(system1))
+    mols0 = system0.molecules()
+    mols1 = system1.molecules()
+
+    indices = []
+    for index in candidates:
+        mol0 = mols0[index]
+        mol1 = mols1[index]
+        if mol0.num_atoms() <= 3 or mol0.num_atoms() > _MAX_ATOMS:
+            continue
+        types0 = mol0.property("ambertype").to_list()
+        types1 = mol1.property("ambertype").to_list()
+        charges0 = [q.value() for q in mol0.property("charge").to_list()]
+        charges1 = [q.value() for q in mol1.property("charge").to_list()]
+        if types0 == types1 and all(
+            abs(a - b) < 1e-6 for a, b in zip(charges0, charges1)
+        ):
+            continue
+        indices.append(index)
+    return indices
 
 
 def _non_water(system):

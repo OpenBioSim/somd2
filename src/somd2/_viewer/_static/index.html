@@ -307,7 +307,7 @@ function loadCollapsed(key = "somd2-viewer-collapsed") {
   try { return new Set(JSON.parse(localStorage.getItem(key) || "[]")); } catch (e) { return new Set(); }
 }
 
-const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "", problems: {}, requests: 0, latest: {}, shown: {}, group: null, repeatsOpen: new Map(), conformers: {}, conformersLoading: {}, structureMode: "0", structureMolecule: {}, viewer3d: null };
+const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "", problems: {}, requests: 0, latest: {}, shown: {}, group: null, repeatsOpen: new Map(), conformers: {}, conformersLoading: {}, structureMode: "0", structureMolecule: {}, viewer3d: null, bindingSites: {}, bindingSitesLoading: {}, viewerSite: null };
 const PALETTE = ["#2f6fdf", "#e0663b", "#2a9d6f", "#b04fc9", "#c9a227", "#3aa7c9", "#d64f7a", "#7a8699"];
 const LAMBDA = "λ";
 
@@ -850,7 +850,9 @@ async function attachStructure(s) {
   const el = document.createElement("div");
   el.className = "viewer";
   host.appendChild(el);
-  v = state.viewer3d = { key, el, viewer: null, molecule: c.molecules[index], absolute: isAbsolute(s) };
+  v = state.viewer3d = { key, el, viewer: null, molecule: c.molecules[index], absolute: isAbsolute(s), picture: "#structure-3d-print" };
+  // zoomTo() leaves a wide margin around the molecule, relative to its size.
+  v.fit = () => { v.viewer.zoomTo(); v.viewer.zoom(1.8); };
   let lib;
   try {
     lib = await load3Dmol();
@@ -878,7 +880,9 @@ function refreshViewer(v) {
   v.viewer.resize();
   if (!v.fitted && v.el.clientWidth > 0) {
     v.fitted = true;
-    fitStructure(v);
+    v.fit();
+    // Kept, so that resetting also undoes any rotation.
+    v.initialView = v.viewer.getView();
   }
   v.viewer.render();
 }
@@ -894,11 +898,93 @@ function disposeViewer(v) {
   v.el.remove();
 }
 
-// zoomTo() leaves a wide margin around the molecule, relative to its size.
-function fitStructure(v) {
-  v.viewer.zoomTo();
-  v.viewer.zoom(1.8);
+// Only shown once the server has said whether there is a protein.
+function renderBindingSite(s) {
+  const b = state.bindingSites[s.id];
+  if (!b || b.status === "none") return "";
+  if (b.status !== "done") return card("Binding site", `<div class="note">${esc(b.reason || "Unavailable.")}</div>`);
+  const time = b.time_ps !== null && b.time_ps !== undefined ? ` at ${fmt(b.time_ps / 1000, 2)} ns` : "";
+  let html = `<div class="structure-controls note" style="margin-bottom:8px"><button type="button" id="binding-site-reset">Reset view</button></div>`;
+  html += `<div id="binding-site-3d" class="structure-3d"></div><img id="binding-site-print" class="print-only" alt="Binding site">`;
+  html += `<div class="note">The latest saved coordinates of the ${LAMBDA} = 0 window${time}, updated as the simulation runs. Residues within 6 Å of the perturbed molecule are shown in detail, and the rest of the protein as a cartoon. Drag to rotate, scroll to zoom.</div>`;
+  return card("Binding site", html);
+}
+
+// Polled while the card is open, sending the version already shown so that an
+// unchanged structure isn't sent again.
+function loadBindingSite(id) {
+  const current = state.bindingSites[id];
+  if (state.bindingSitesLoading[id] || (current && (current.status === "none" || state.collapsed.has("Binding site")))) return;
+  const known = current && current.key ? `?known=${encodeURIComponent(current.key)}` : "";
+  state.bindingSitesLoading[id] = true;
+  getJSON(`/api/simulation/${id}/binding-site${known}`).then((b) => {
+    if (b.status === "unchanged") return;
+    state.bindingSites[id] = b;
+    if (id === state.current) render();
+  }).catch(() => {}).finally(() => { state.bindingSitesLoading[id] = false; });
+}
+
+async function attachBindingSite(s) {
+  const host = $("#binding-site-3d");
+  if (!host) return;
+  const site = state.bindingSites[s.id];
+  let v = state.viewerSite;
+  if (v && v.key === s.id) {
+    host.appendChild(v.el);
+    if (v.viewer) {
+      // A new frame keeps the current view.
+      if (v.site !== site) showSite(v, site);
+      refreshViewer(v);
+      v.viewer.render();
+    }
+    return;
+  }
+  disposeViewer(v);
+  const el = document.createElement("div");
+  el.className = "viewer";
+  host.appendChild(el);
+  v = state.viewerSite = { key: s.id, el, viewer: null, site: null, picture: "#binding-site-print" };
+  // Framed on the perturbed molecule and the residues around it.
+  v.fit = () => {
+    if (v.site) v.viewer.zoomTo({ within: { distance: 6, sel: { index: v.site.ligand } }, byres: true });
+  };
+  let lib;
+  try {
+    lib = await load3Dmol();
+  } catch (e) {
+    el.textContent = e.message;
+    return;
+  }
+  if (state.viewerSite !== v) return;
+  v.viewer = lib.createViewer(el, { backgroundColor: css("--surface") });
+  const latest = state.bindingSites[s.id];
+  if (!latest || latest.status !== "done") return;
+  showSite(v, latest);
+  refreshViewer(v);
+}
+
+function showSite(v, site) {
+  v.site = site;
+  v.viewer.removeAllModels();
+  const model = v.viewer.addModel(site.pdb, "pdb");
+  model.setStyle({}, { cartoon: { color: "lightgrey" } });
+  // Added to the cartoon, rather than replacing it.
+  model.setStyle({ index: site.pocket }, { stick: { radius: 0.15, colorscheme: "grayCarbon" } }, true);
+  const ligand = { colorscheme: "greenCarbon" };
+  model.setStyle({ index: site.ligand }, { stick: { radius: 0.14, ...ligand }, sphere: { scale: 0.22, ...ligand } });
   v.viewer.render();
+}
+
+// Restore a viewer's initial view, including its rotation.
+function fitStructure(v) {
+  if (v.initialView) v.viewer.setView(v.initialView);
+  else v.fit();
+  v.viewer.render();
+}
+
+// The 3D viewers that have been created.
+function viewers() {
+  return [state.viewer3d, state.viewerSite].filter((v) => v && v.viewer);
 }
 
 function styleStructure(v) {
@@ -1861,6 +1947,7 @@ function render() {
   html += renderOverview(s);
   html += renderEndStates(s);
   html += renderStructure(s);
+  html += renderBindingSite(s);
   html += renderFreeEnergy(s);
   html += renderRepex(s);
   html += renderWindows(s);
@@ -1881,6 +1968,11 @@ function render() {
     state.structureMode = e.target.value;
     if (state.viewer3d && state.viewer3d.viewer) styleStructure(state.viewer3d);
   }));
+  attachBindingSite(s);
+  const resetSite = $("#binding-site-reset");
+  if (resetSite) resetSite.addEventListener("click", () => {
+    if (state.viewerSite && state.viewerSite.viewer) fitStructure(state.viewerSite);
+  });
   const resetView = $("#structure-reset");
   if (resetView) resetView.addEventListener("click", () => {
     if (state.viewer3d && state.viewer3d.viewer) fitStructure(state.viewer3d);
@@ -2073,6 +2165,7 @@ async function loadCurrent(force = false) {
       if (id === state.current) render();
     }).catch(() => {}).finally(() => { state.conformersLoading[id] = false; });
   }
+  if (summary.progress) loadBindingSite(id);
   // Check again shortly while a run is starting up or an analysis is running.
   clearTimeout(state.quickTimer);
   if (pending) state.quickTimer = setTimeout(poll, 3000);
@@ -2192,8 +2285,9 @@ window.addEventListener("beforeprint", () => {
   });
   document.querySelectorAll("#config-table tr").forEach((tr) => { tr.hidden = false; });
   // A 3D view can't be printed, so a picture of it is printed instead.
-  const v = state.viewer3d, picture = $("#structure-3d-print");
-  if (v && v.viewer && picture) {
+  for (const v of viewers()) {
+    const picture = $(v.picture);
+    if (!picture) continue;
     // Its section may only just have been opened, giving it a size.
     refreshViewer(v);
     v.viewer.setBackgroundColor("#ffffff");
@@ -2238,14 +2332,15 @@ $("#main").addEventListener("toggle", (e) => {
   else state.collapsed.add(name);
   try { localStorage.setItem("somd2-viewer-collapsed", JSON.stringify([...state.collapsed])); } catch (err) {}
   if (section.open && state.summary) renderCharts(state.summary);
-  if (section.open && state.viewer3d && state.viewer3d.viewer) refreshViewer(state.viewer3d);
+  if (section.open) viewers().forEach(refreshViewer);
+  if (section.open && name === "Binding site" && state.current) loadBindingSite(state.current);
 }, true);
 let resizeTimer = null;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
     if (state.summary) renderCharts(state.summary);
-    if (state.viewer3d && state.viewer3d.viewer) refreshViewer(state.viewer3d);
+    viewers().forEach(refreshViewer);
   }, 150);
 });
 

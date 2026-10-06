@@ -743,6 +743,9 @@ The viewer shows:
   coordinates, and flagged as unknown until there are some. This uses
   [3Dmol.js](https://3dmol.org), which is included with the viewer under its
   BSD-3-Clause licence.
+- For a bound leg, the binding site from the latest saved coordinates of the
+  λ = 0 window, with the protein as a cartoon and the residues around the
+  perturbed molecule in detail. It is updated as the simulation runs.
 - The MBAR free energy, PMF, overlap matrix, and forward and backward
   convergence. These are updated in the background as new data is written. For
   ABFE simulations, the standard state correction for the Boresch restraint is

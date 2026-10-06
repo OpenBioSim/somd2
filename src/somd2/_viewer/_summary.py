@@ -45,8 +45,26 @@ _cache_lock = _threading.Lock()
 
 def _file_key(path):
     """
-    Hash a topology file, skipping its first line, which holds the date.
+    Hash a topology file, skipping its first line, which holds the date. The
+    hash is remembered until the file is modified.
     """
+    import os
+
+    stat = os.stat(path)
+    stamp = (str(path), stat.st_mtime_ns, stat.st_size)
+    with _cache_lock:
+        if stamp in _file_keys:
+            return _file_keys[stamp]
+    key = _hash_file(path)
+    with _cache_lock:
+        _file_keys[stamp] = key
+    return key
+
+
+_file_keys = {}
+
+
+def _hash_file(path):
     digest = _hashlib.sha1()
     with open(path, "rb") as f:
         f.readline()
