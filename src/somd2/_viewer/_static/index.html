@@ -860,7 +860,7 @@ async function attachStructure(s) {
     return;
   }
   if (state.viewer3d !== v) return;
-  v.viewer = lib.createViewer(el, { backgroundColor: css("--surface") });
+  v.viewer = createViewer(lib, el);
   v.models = [v.viewer.addModel(v.molecule.mol0, "sdf"), v.absolute ? null : v.viewer.addModel(v.molecule.mol1, "sdf")];
   styleStructure(v);
   refreshViewer(v);
@@ -896,6 +896,12 @@ function fitMolecule(v) {
   view[2] = -(lo.z + hi.z) / 2;
   view[3] = viewer.CAMERA_Z - distance;
   viewer.setView(view);
+}
+
+// A one-cell grid gives each viewer its own WebGL context. Otherwise they
+// share one, which fails for all of them once a hidden viewer draws.
+function createViewer(lib, el) {
+  return lib.createViewer(el, { backgroundColor: css("--surface"), rows: 1, cols: 1, row: 0, col: 0 });
 }
 
 // A plain scroll is kept from the viewer so that it scrolls the page. Zooming
@@ -945,7 +951,10 @@ function refreshViewer(v) {
 // Release a viewer's WebGL context, since browsers only allow a few at once.
 function disposeViewer(v) {
   if (!v) return;
-  if (v.viewer) v.viewer.clear();
+  // Clearing draws the viewer, which can fail, e.g. if it is hidden.
+  try {
+    if (v.viewer) v.viewer.clear();
+  } catch (e) {}
   const canvas = v.el.querySelector("canvas");
   const gl = canvas && (canvas.getContext("webgl2") || canvas.getContext("webgl"));
   const extension = gl && gl.getExtension("WEBGL_lose_context");
@@ -1009,7 +1018,7 @@ async function attachBindingSite(s) {
     return;
   }
   if (state.viewerSite !== v) return;
-  v.viewer = lib.createViewer(el, { backgroundColor: css("--surface") });
+  v.viewer = createViewer(lib, el);
   const latest = state.bindingSites[s.id];
   if (!latest || latest.status !== "done") return;
   showSite(v, latest);
