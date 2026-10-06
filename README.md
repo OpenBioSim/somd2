@@ -737,6 +737,12 @@ The viewer shows:
 - Depictions of the perturbed molecules at each end state, in the style of
   BioSimSpace's `viewMapping`, highlighting the atoms that are unique to each end
   state, i.e. ghosts at the other, or that change element.
+- An interactive 3D view of the same molecules, using a conformer generated with
+  RDKit. The end states are aligned on their mapped atoms, so switching between
+  them shows what changes. Stereochemistry is taken from the first saved
+  coordinates, and flagged as unknown until there are some. This uses
+  [3Dmol.js](https://3dmol.org), which is included with the viewer under its
+  BSD-3-Clause licence.
 - The MBAR free energy, PMF, overlap matrix, and forward and backward
   convergence. These are updated in the background as new data is written. For
   ABFE simulations, the standard state correction for the Boresch restraint is

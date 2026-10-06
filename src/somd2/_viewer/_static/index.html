@@ -130,6 +130,10 @@ nav .nav-repeats > summary a:hover { background: none; text-decoration: underlin
 nav .nav-repeats > a { padding-left: 32px; }
 nav .nav-group .nav-repeats > summary { padding-left: 28px; }
 nav .nav-group .nav-repeats > a { padding-left: 46px; }
+.structure-3d .viewer { position: relative; width: 100%; height: 400px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.structure-controls label { margin-right: 14px; white-space: nowrap; }
+.structure-controls button { font: inherit; color: var(--fg); background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+.print-only { display: none; }
 .repeats-table tr[data-repeat] { cursor: pointer; }
 .repeats-table tr.selected td { font-weight: 600; background: var(--surface-2); }
 nav .summary-link .name::before { content: "★"; color: var(--accent); margin-right: 6px; }
@@ -262,6 +266,8 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
   .multiples > div { display: inline-block; width: 48%; margin: 0 1% 10px 0; vertical-align: top; }
   .depiction { display: inline-block; width: 48%; margin: 0 1% 10px 0; vertical-align: top; }
   .depiction.mapping { display: block; width: auto; }
+  .structure-3d, .structure-controls { display: none !important; }
+  .print-only { display: block; max-width: 100%; border: 1px solid var(--border); border-radius: 8px; }
   .stats { display: flex; flex-wrap: wrap; gap: 10px 24px; }
   .card { break-inside: avoid; }
   .grid > div, .multiples > div, .chart, .chart svg, .depiction, .stats, tr, pre { break-inside: avoid; }
@@ -301,7 +307,7 @@ function loadCollapsed(key = "somd2-viewer-collapsed") {
   try { return new Set(JSON.parse(localStorage.getItem(key) || "[]")); } catch (e) { return new Set(); }
 }
 
-const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "", problems: {}, requests: 0, latest: {}, shown: {}, group: null, repeatsOpen: new Map() };
+const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "", problems: {}, requests: 0, latest: {}, shown: {}, group: null, repeatsOpen: new Map(), conformers: {}, conformersLoading: {}, structureMode: "0", structureMolecule: {}, viewer3d: null };
 const PALETTE = ["#2f6fdf", "#e0663b", "#2a9d6f", "#b04fc9", "#c9a227", "#3aa7c9", "#d64f7a", "#7a8699"];
 const LAMBDA = "λ";
 
@@ -772,6 +778,150 @@ function renderEndStates(s) {
     </div>`;
   }
   return card("End states", html);
+}
+
+function isAbsolute(s) {
+  return ["annihilate", "decouple"].includes(s.schedule && s.schedule.name);
+}
+
+function renderStructure(s) {
+  const c = state.conformers[s.id];
+  if (!c) return card("3D structure", `<div class="note">Loading 3D structures…</div>`);
+  if (c.status !== "done") return card("3D structure", `<div class="note">${esc(c.reason || "Unavailable.")}</div>`);
+  if (!c.molecules.length) return "";
+  const index = Math.min(state.structureMolecule[s.id] || 0, c.molecules.length - 1);
+  const m = c.molecules[index];
+  let controls = "";
+  if (c.molecules.length > 1) {
+    controls += `<label>Molecule <select id="structure-molecule">${c.molecules.map((mol, i) => `<option value="${i}"${i === index ? " selected" : ""}>${esc(mol.name)}</option>`).join("")}</select></label>`;
+  }
+  if (!isAbsolute(s)) {
+    const modes = [["0", `${LAMBDA} = 0`], ["1", `${LAMBDA} = 1`]];
+    controls += modes.map(([value, label]) => `<label><input type="radio" name="structure-mode" value="${value}"${state.structureMode === value ? " checked" : ""}> ${label}</label>`).join("");
+  }
+  controls += `<button type="button" id="structure-reset">Reset view</button>`;
+  let html = `<div class="structure-controls note" style="margin-bottom:8px">${controls}</div>`;
+  html += `<div id="structure-3d" class="structure-3d"></div><img id="structure-3d-print" class="print-only" alt="3D structure">`;
+  if (!isAbsolute(s)) {
+    html += `<div class="legend">
+      <span><i style="background:var(--unique)"></i>Unique, i.e. a ghost at the other end state</span>
+      <span><i style="background:var(--changed)"></i>Mapped, element changes</span>
+    </div>`;
+  }
+  html += `<div class="note">A generated conformer, for checking the molecule and mapping rather than the simulated pose. Drag to rotate, scroll to zoom.</div>`;
+  if (m.stereo === "simulation") html += `<div class="note">Stereochemistry is taken from the simulation.</div>`;
+  if (m.stereo === "unknown") html += `<div class="note" style="color:var(--warn)">No coordinates have been saved yet, so the stereochemistry isn't known, and stereocentres may be shown in the wrong configuration.</div>`;
+  if (m.stereo === "failed") html += `<div class="note" style="color:var(--warn)">The stereochemistry couldn't be taken from the simulation's coordinates, so stereocentres may be shown in the wrong configuration.</div>`;
+  return card("3D structure", html);
+}
+
+// 3Dmol.js is only loaded when a 3D structure is first shown.
+function load3Dmol() {
+  if (!state.threeDmol) {
+    state.threeDmol = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "/3Dmol-min.js";
+      script.onload = () => resolve(window.$3Dmol);
+      script.onerror = () => { state.threeDmol = null; reject(new Error("Couldn't load 3Dmol.js.")); };
+      document.head.appendChild(script);
+    });
+  }
+  return state.threeDmol;
+}
+
+// The viewer is kept between redraws, so that rotating or zooming isn't lost.
+async function attachStructure(s) {
+  const host = $("#structure-3d");
+  if (!host) return;
+  const c = state.conformers[s.id];
+  const index = Math.min(state.structureMolecule[s.id] || 0, c.molecules.length - 1);
+  const key = `${s.id}:${index}`;
+  let v = state.viewer3d;
+  if (v && v.key === key) {
+    host.appendChild(v.el);
+    if (v.viewer) {
+      refreshViewer(v);
+      // Drawn again, since moving the canvas may lose what it showed.
+      v.viewer.render();
+    }
+    return;
+  }
+  disposeViewer(v);
+  const el = document.createElement("div");
+  el.className = "viewer";
+  host.appendChild(el);
+  v = state.viewer3d = { key, el, viewer: null, molecule: c.molecules[index], absolute: isAbsolute(s) };
+  let lib;
+  try {
+    lib = await load3Dmol();
+  } catch (e) {
+    el.textContent = e.message;
+    return;
+  }
+  if (state.viewer3d !== v) return;
+  v.viewer = lib.createViewer(el, { backgroundColor: css("--surface") });
+  v.models = [v.viewer.addModel(v.molecule.mol0, "sdf"), v.absolute ? null : v.viewer.addModel(v.molecule.mol1, "sdf")];
+  styleStructure(v);
+  refreshViewer(v);
+}
+
+// Resize the viewer, and match the theme, only when they have changed. A
+// viewer created in a collapsed section has no size, so is only fitted to the
+// molecule once it has one.
+function refreshViewer(v) {
+  const background = css("--surface");
+  const size = `${v.el.clientWidth}x${v.el.clientHeight}`;
+  if (background === v.background && size === v.size) return;
+  v.background = background;
+  v.size = size;
+  v.viewer.setBackgroundColor(background);
+  v.viewer.resize();
+  if (!v.fitted && v.el.clientWidth > 0) {
+    v.fitted = true;
+    fitStructure(v);
+  }
+  v.viewer.render();
+}
+
+// Release a viewer's WebGL context, since browsers only allow a few at once.
+function disposeViewer(v) {
+  if (!v) return;
+  if (v.viewer) v.viewer.clear();
+  const canvas = v.el.querySelector("canvas");
+  const gl = canvas && (canvas.getContext("webgl2") || canvas.getContext("webgl"));
+  const extension = gl && gl.getExtension("WEBGL_lose_context");
+  if (extension) extension.loseContext();
+  v.el.remove();
+}
+
+// zoomTo() leaves a wide margin around the molecule, relative to its size.
+function fitStructure(v) {
+  v.viewer.zoomTo();
+  v.viewer.zoom(1.8);
+  v.viewer.render();
+}
+
+function styleStructure(v) {
+  // Only one end state is shown at a time, so switching keeps the view.
+  const one = v.absolute || state.structureMode !== "1";
+  const [model0, model1] = v.models;
+  const model = one ? model0 : model1;
+  const ballAndStick = { stick: { radius: 0.14 }, sphere: { scale: 0.22 } };
+  model0.setStyle({}, one ? ballAndStick : {});
+  if (model1) model1.setStyle({}, one ? {} : ballAndStick);
+  // Unique and changed atoms are shown with a translucent halo.
+  v.viewer.removeAllShapes();
+  const halo = (indices, colour) => {
+    const atoms = model.selectedAtoms({});
+    for (const i of indices) {
+      const a = atoms[i];
+      if (a) v.viewer.addSphere({ center: { x: a.x, y: a.y, z: a.z }, radius: 0.6, color: colour, opacity: 0.35 });
+    }
+  };
+  const m = v.molecule;
+  halo(one ? m.unique0 : m.unique1, css("--unique"));
+  halo(one ? m.changed0 : m.changed1, css("--changed"));
+  v.viewer.render();
 }
 
 function renderFreeEnergy(s) {
@@ -1710,6 +1860,7 @@ function render() {
   html += renderRepeats(s);
   html += renderOverview(s);
   html += renderEndStates(s);
+  html += renderStructure(s);
   html += renderFreeEnergy(s);
   html += renderRepex(s);
   html += renderWindows(s);
@@ -1725,6 +1876,20 @@ function render() {
   applyConfigFilter();
   const repeatSelect = $("#repeat-select");
   if (repeatSelect) repeatSelect.addEventListener("change", (e) => { location.hash = e.target.value; });
+  attachStructure(s);
+  document.querySelectorAll('input[name="structure-mode"]').forEach((input) => input.addEventListener("change", (e) => {
+    state.structureMode = e.target.value;
+    if (state.viewer3d && state.viewer3d.viewer) styleStructure(state.viewer3d);
+  }));
+  const resetView = $("#structure-reset");
+  if (resetView) resetView.addEventListener("click", () => {
+    if (state.viewer3d && state.viewer3d.viewer) fitStructure(state.viewer3d);
+  });
+  const moleculeSelect = $("#structure-molecule");
+  if (moleculeSelect) moleculeSelect.addEventListener("change", (e) => {
+    state.structureMolecule[s.id] = Number(e.target.value);
+    render();
+  });
   const lambdaSelect = $("#components-lambda");
   if (lambdaSelect) lambdaSelect.addEventListener("change", (e) => {
     state.componentsLambda[s.id] = parseFloat(e.target.value);
@@ -1893,6 +2058,21 @@ async function loadCurrent(force = false) {
       if (id === state.current) render();
     }).catch(() => {}).finally(() => { state.depictionsLoading[id] = false; });
   }
+  // Conformers are fetched again until their stereochemistry is known.
+  const conformer = state.conformers[id];
+  const stale = !conformer || conformer.status !== "done" || conformer.molecules.some((m) => m.stereo === "unknown");
+  if (summary.progress && !state.conformersLoading[id] && stale) {
+    state.conformersLoading[id] = true;
+    getJSON(`/api/simulation/${id}/conformers`).then((c) => {
+      if (JSON.stringify(c) === JSON.stringify(state.conformers[id])) return;
+      state.conformers[id] = c;
+      if (state.viewer3d && state.viewer3d.key.startsWith(`${id}:`)) {
+        disposeViewer(state.viewer3d);
+        state.viewer3d = null;
+      }
+      if (id === state.current) render();
+    }).catch(() => {}).finally(() => { state.conformersLoading[id] = false; });
+  }
   // Check again shortly while a run is starting up or an analysis is running.
   clearTimeout(state.quickTimer);
   if (pending) state.quickTimer = setTimeout(poll, 3000);
@@ -2011,6 +2191,15 @@ window.addEventListener("beforeprint", () => {
     d.open = true;
   });
   document.querySelectorAll("#config-table tr").forEach((tr) => { tr.hidden = false; });
+  // A 3D view can't be printed, so a picture of it is printed instead.
+  const v = state.viewer3d, picture = $("#structure-3d-print");
+  if (v && v.viewer && picture) {
+    // Its section may only just have been opened, giving it a size.
+    refreshViewer(v);
+    v.viewer.setBackgroundColor("#ffffff");
+    picture.src = v.viewer.pngURI();
+    v.viewer.setBackgroundColor(css("--surface"));
+  }
 });
 window.addEventListener("afterprint", () => {
   state.printing = false;
@@ -2049,11 +2238,15 @@ $("#main").addEventListener("toggle", (e) => {
   else state.collapsed.add(name);
   try { localStorage.setItem("somd2-viewer-collapsed", JSON.stringify([...state.collapsed])); } catch (err) {}
   if (section.open && state.summary) renderCharts(state.summary);
+  if (section.open && state.viewer3d && state.viewer3d.viewer) refreshViewer(state.viewer3d);
 }, true);
 let resizeTimer = null;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => state.summary && renderCharts(state.summary), 150);
+  resizeTimer = setTimeout(() => {
+    if (state.summary) renderCharts(state.summary);
+    if (state.viewer3d && state.viewer3d.viewer) refreshViewer(state.viewer3d);
+  }, 150);
 });
 
 // Show which directories this viewer is serving, with the full paths on hover.

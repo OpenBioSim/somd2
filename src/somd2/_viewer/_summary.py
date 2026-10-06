@@ -65,10 +65,13 @@ def topology_fingerprint(topology0, topology1):
     with _cache_lock:
         if key in _cache:
             return _cache[key]
-    fingerprint = _read_cached(key)
+    from ._cache import read_json, write_json
+
+    name = f"fingerprints/v{_FINGERPRINT_VERSION}-{key[0]}-{key[1]}.json"
+    fingerprint = read_json(name)
     if fingerprint is None:
         fingerprint = _fingerprint(topology0, topology1)
-        _write_cached(key, fingerprint)
+        write_json(name, fingerprint)
     with _cache_lock:
         _cache[key] = fingerprint
     return fingerprint
@@ -76,39 +79,6 @@ def topology_fingerprint(topology0, topology1):
 
 # Changed whenever the fingerprint does, so that cached ones are recomputed.
 _FINGERPRINT_VERSION = 1
-
-
-def _cached_path(key):
-    from ._cache import cache_dir
-
-    name = f"v{_FINGERPRINT_VERSION}-{key[0]}-{key[1]}.json"
-    return cache_dir() / "fingerprints" / name
-
-
-def _read_cached(key):
-    try:
-        return _json.loads(_cached_path(key).read_text())
-    except (OSError, ValueError):
-        return None
-
-
-def _write_cached(key, fingerprint):
-    import contextlib
-    import os
-
-    from ._log import report
-
-    path = _cached_path(key)
-    # Written then renamed, so that another viewer never reads part of it.
-    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary.write_text(_json.dumps(fingerprint))
-        os.replace(temporary, path)
-    except OSError as e:
-        with contextlib.suppress(OSError):
-            temporary.unlink()
-        report(e, f"Couldn't write to the cache in {path.parent}")
 
 
 def _fingerprint(topology0, topology1):

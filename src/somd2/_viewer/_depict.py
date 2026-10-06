@@ -91,6 +91,53 @@ def depict(topology0, topology1):
         An SVG depiction and SMILES string for each end state of each
         perturbed molecule, along with a summary of the mapping.
     """
+    from rdkit import Chem
+
+    results = []
+    for p in _perturbed_molecules(topology0, topology1):
+        num_atoms = max(p.rdmol0.GetNumAtoms(), p.rdmol1.GetNumAtoms())
+        pixels = _panel_size(num_atoms)
+        mapping_pixels = _mapping_panel_size(num_atoms)
+        results.append(
+            {
+                "name": p.name,
+                "num_atoms": len(p.dummy0),
+                "num_mapped": sum(
+                    1 for a, b in zip(p.dummy0, p.dummy1) if not a and not b
+                ),
+                "num_unique0": len(p.unique0),
+                "num_unique1": len(p.unique1),
+                "num_changed": len(p.changed),
+                "bond_orders0": p.bond_orders0,
+                "bond_orders1": p.bond_orders1,
+                "smiles0": Chem.MolToSmiles(Chem.RemoveHs(p.rdmol0, sanitize=False)),
+                "smiles1": Chem.MolToSmiles(Chem.RemoveHs(p.rdmol1, sanitize=False)),
+                "pixels": pixels,
+                "mapping_pixels": mapping_pixels,
+                "svg_mapping": _draw_mapping(
+                    p.rdmol0, p.rdmol1, p.mapping, p.map0, p.map1, mapping_pixels
+                ),
+                "svg0": _draw(p.rdmol0, pixels),
+                "svg1": _draw(p.rdmol1, pixels),
+            }
+        )
+
+    return results
+
+
+def _perturbed_molecules(topology0, topology1):
+    """
+    The perturbed molecules in a pair of end-state topologies, with each end
+    state converted to RDKit.
+
+    Each is a namespace holding its name, its index and first atom index in
+    the system, which atoms are dummies, unique or change element, the RDKit
+    molecule of each end state with the merged molecule index of each of its
+    atoms (map0, map1), the mapping between the two, and whether bond orders
+    could be assigned.
+    """
+    from types import SimpleNamespace
+
     import sire as _sr
 
     system0 = _sr.load(str(topology0), show_warnings=False)
@@ -102,7 +149,10 @@ def depict(topology0, topology1):
     mols0 = system0.molecules()
     mols1 = system1.molecules()
 
-    results = []
+    offsets = [0]
+    for mol in mols0:
+        offsets.append(offsets[-1] + mol.num_atoms())
+
     for index in candidates:
         mol0 = mols0[index]
         mol1 = mols1[index]
@@ -117,19 +167,10 @@ def depict(topology0, topology1):
         ):
             continue
 
-        name = f"{mol0.residues()[0].name().value()} (molecule {index})"
-
         dummy0 = [e.num_protons() == 0 for e in mol0.property("element").to_list()]
         dummy1 = [e.num_protons() == 0 for e in mol1.property("element").to_list()]
-        unique0 = {i for i in range(len(dummy0)) if not dummy0[i] and dummy1[i]}
-        unique1 = {i for i in range(len(dummy1)) if not dummy1[i] and dummy0[i]}
         elements0 = [e.num_protons() for e in mol0.property("element").to_list()]
         elements1 = [e.num_protons() for e in mol1.property("element").to_list()]
-        changed = {
-            i
-            for i in range(len(elements0))
-            if not dummy0[i] and not dummy1[i] and elements0[i] != elements1[i]
-        }
 
         # The total charge is needed to assign bond orders. Partial charges can
         # be zeroed at a decoupled end state, so also try the other end state.
@@ -140,36 +181,28 @@ def depict(topology0, topology1):
 
         # Map between the atoms of the two end states via the merged molecule.
         index1 = {orig: i for i, orig in enumerate(map1)}
-        mapping = {i: index1[orig] for i, orig in enumerate(map0) if orig in index1}
 
-        from rdkit import Chem
-
-        num_atoms = max(rdmol0.GetNumAtoms(), rdmol1.GetNumAtoms())
-        pixels = _panel_size(num_atoms)
-        mapping_pixels = _mapping_panel_size(num_atoms)
-        results.append(
-            {
-                "name": name,
-                "num_atoms": mol0.num_atoms(),
-                "num_mapped": sum(1 for a, b in zip(dummy0, dummy1) if not a and not b),
-                "num_unique0": len(unique0),
-                "num_unique1": len(unique1),
-                "num_changed": len(changed),
-                "bond_orders0": bond_orders0,
-                "bond_orders1": bond_orders1,
-                "smiles0": Chem.MolToSmiles(Chem.RemoveHs(rdmol0, sanitize=False)),
-                "smiles1": Chem.MolToSmiles(Chem.RemoveHs(rdmol1, sanitize=False)),
-                "pixels": pixels,
-                "mapping_pixels": mapping_pixels,
-                "svg_mapping": _draw_mapping(
-                    rdmol0, rdmol1, mapping, map0, map1, mapping_pixels
-                ),
-                "svg0": _draw(rdmol0, pixels),
-                "svg1": _draw(rdmol1, pixels),
-            }
+        yield SimpleNamespace(
+            name=f"{mol0.residues()[0].name().value()} (molecule {index})",
+            index=index,
+            offset=offsets[index],
+            dummy0=dummy0,
+            dummy1=dummy1,
+            unique0={i for i, d in enumerate(dummy0) if not d and dummy1[i]},
+            unique1={i for i, d in enumerate(dummy1) if not d and dummy0[i]},
+            changed={
+                i
+                for i in range(len(elements0))
+                if not dummy0[i] and not dummy1[i] and elements0[i] != elements1[i]
+            },
+            rdmol0=rdmol0,
+            rdmol1=rdmol1,
+            map0=map0,
+            map1=map1,
+            mapping={i: index1[o] for i, o in enumerate(map0) if o in index1},
+            bond_orders0=bond_orders0,
+            bond_orders1=bond_orders1,
         )
-
-    return results
 
 
 def _non_water(system):

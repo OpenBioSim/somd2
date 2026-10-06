@@ -1166,6 +1166,88 @@ class Simulation:
         with self._depict_lock:
             return self._cached("depictions", _stamp(top0, top1), load)
 
+    def conformers(self):
+        """
+        Return 3D conformers of the perturbed molecules at each end state.
+        """
+        from ._conformers import conformers
+
+        top0 = self.path / "system0.prm7"
+        top1 = self.path / "system1.prm7"
+        if not (top0.exists() and top1.exists()):
+            return {"status": "unavailable", "reason": "No end-state topologies yet."}
+        has_positions = self._positions_file() is not None
+
+        def load():
+            try:
+                molecules = conformers(top0, top1, has_positions, self._positions)
+                return {"status": "done", "molecules": molecules}
+            except Exception as e:
+                return {
+                    "status": "error",
+                    "reason": self._report(e, "generate the 3D structures"),
+                }
+
+        # Regenerated once coordinates appear, for their stereochemistry.
+        with self._depict_lock:
+            result = self._cached(
+                "conformers", (_stamp(top0, top1), has_positions), load
+            )
+            # Errors aren't kept, e.g. from a file caught part way through
+            # being written, so that they are retried.
+            if result["status"] == "error":
+                with self._lock:
+                    self._cache.pop("conformers", None)
+            return result
+
+    def _positions_file(self):
+        """
+        The first file holding the system's coordinates: the checkpoint of
+        the first λ window, or the replica exchange state.
+        """
+        checkpoints = sorted(self.path.glob("checkpoint_*.npz")) or sorted(
+            self.path.glob("checkpoint_*.s3")
+        )
+        if checkpoints:
+            return checkpoints[0]
+        repex = self.path / "repex_state.pkl"
+        return repex if repex.exists() else None
+
+    def _positions(self):
+        """
+        The coordinates of the whole system in nm, from the first checkpoint
+        or replica exchange state, or None if there are none yet.
+        """
+        path = self._positions_file()
+        if path is None:
+            return None
+        if path.suffix == ".npz":
+            return _np.load(path)["positions"]
+        if path.suffix == ".s3":
+            import sire as _sr
+            from sire.io import get_coords_array
+
+            with sire_lock:
+                # Perturbable molecules only have coordinates for each end
+                # state until linked to one.
+                system = _sr.morph.link_to_reference(_sr.stream.load(str(path)))
+                return get_coords_array(system, units=_sr.units.nanometer)
+
+        with open(path, "rb") as f:
+            state = _RepexUnpickler(f).load()
+        for saved in getattr(state, "_openmm_states", None) or []:
+            if saved is None:
+                continue
+            import openmm.unit as _unit
+
+            # Older states are OpenMM State objects rather than dicts.
+            if isinstance(saved, dict):
+                positions = saved["positions"]
+            else:
+                positions = saved.getPositions(asNumpy=True)
+            return _np.asarray(positions.value_in_unit(_unit.nanometer))
+        return None
+
     def _unreadable(self, error):
         """
         A placeholder for a run whose output can't be read.

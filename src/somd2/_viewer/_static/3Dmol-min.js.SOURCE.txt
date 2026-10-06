@@ -1,0 +1,7 @@
+3Dmol-min.js is the 3Dmol.js build served at https://3dmol.org/build/3Dmol-min.js
+(last modified 2026-09-12, when the latest release was 2.5.5), downloaded on
+2026-10-06. The build doesn't state its version.
+
+SHA-256: 4ab374e1830bccec950b280fd285a430e05e91bd13c9ef0097c611c66de6cb36
+
+It is distributed under the BSD-3-Clause licence in 3Dmol-min.js.LICENSE.txt.

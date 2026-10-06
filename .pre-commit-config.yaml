@@ -1,5 +1,6 @@
 files: ^(src|tests)/
-exclude: ^tests/(input|output)/
+# Vendored files are kept exactly as downloaded.
+exclude: ^(tests/(input|output)/|src/somd2/_viewer/_static/3Dmol)
 
 repos:
   # General file quality checks

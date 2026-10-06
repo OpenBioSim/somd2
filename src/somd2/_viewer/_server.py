@@ -163,6 +163,13 @@ class _Handler(_BaseHTTPRequestHandler):
                 self._json([str(_Path(p).resolve()) for p in registry.paths])
             elif parts == ["logo.png"]:
                 self._send((_static / "somd2.png").read_bytes(), "image/png")
+            elif parts == ["3Dmol-min.js"]:
+                # Shipped with the viewer, so that it works offline.
+                path = _static / "3Dmol-min.js"
+                if path.exists():
+                    self._send(path.read_bytes(), "text/javascript")
+                else:
+                    self.send_error(404)
             elif parts == ["api", "simulations"]:
                 self._json([sim.overview() for sim in registry.refresh()])
             elif parts == ["api", "network"] and self.server.network is None:
@@ -200,6 +207,8 @@ class _Handler(_BaseHTTPRequestHandler):
                     self._json(sim.summary())
                 elif parts[3:] == ["depictions"]:
                     self._json(sim.depictions())
+                elif parts[3:] == ["conformers"]:
+                    self._json(sim.conformers())
                 elif len(parts) == 5 and parts[3] == "components":
                     try:
                         lam = float(parts[4])

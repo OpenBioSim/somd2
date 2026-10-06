@@ -23,8 +23,9 @@
 The viewer's cache of results that are slow to compute, kept between runs.
 """
 
-__all__ = ["cache_dir", "clear_cache"]
+__all__ = ["cache_dir", "clear_cache", "read_json", "write_json"]
 
+import json as _json
 import os as _os
 from pathlib import Path as _Path
 
@@ -49,3 +50,34 @@ def clear_cache():
     path = cache_dir()
     shutil.rmtree(path, ignore_errors=True)
     return path
+
+
+def read_json(name):
+    """
+    Read a cached result, or None if there isn't one.
+    """
+    try:
+        return _json.loads((cache_dir() / name).read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def write_json(name, value):
+    """
+    Cache a result. Failures are logged, since the cache is optional.
+    """
+    import contextlib
+
+    from ._log import report
+
+    path = cache_dir() / name
+    # Written then renamed, so that another viewer never reads part of it.
+    temporary = path.with_name(f"{path.name}.{_os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(_json.dumps(value))
+        _os.replace(temporary, path)
+    except OSError as e:
+        with contextlib.suppress(OSError):
+            temporary.unlink()
+        report(e, f"Couldn't write to the cache in {path.parent}")
