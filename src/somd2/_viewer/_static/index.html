@@ -131,6 +131,8 @@ nav .nav-repeats > a { padding-left: 32px; }
 nav .nav-group .nav-repeats > summary { padding-left: 28px; }
 nav .nav-group .nav-repeats > a { padding-left: 46px; }
 .structure-3d .viewer { position: relative; width: 100%; height: 400px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.viewer-hint { position: absolute; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.45); color: #fff; font-size: 1.1em; pointer-events: none; opacity: 0; transition: opacity 0.3s; }
+.viewer-hint.visible { opacity: 1; }
 .structure-controls label { margin-right: 14px; white-space: nowrap; }
 .structure-controls button { font: inherit; color: var(--fg); background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
 .print-only { display: none; }
@@ -808,7 +810,7 @@ function renderStructure(s) {
       <span><i style="background:var(--changed)"></i>Mapped, element changes</span>
     </div>`;
   }
-  html += `<div class="note">A generated conformer, for checking the molecule and mapping rather than the simulated pose. Drag to rotate, scroll to zoom.</div>`;
+  html += `<div class="note">A generated conformer, for checking the molecule and mapping rather than the simulated pose. Drag to rotate, Ctrl + scroll to zoom.</div>`;
   if (m.stereo === "simulation") html += `<div class="note">Stereochemistry is taken from the simulation.</div>`;
   if (m.stereo === "unknown") html += `<div class="note" style="color:var(--warn)">No coordinates have been saved yet, so the stereochemistry isn't known, and stereocentres may be shown in the wrong configuration.</div>`;
   if (m.stereo === "failed") html += `<div class="note" style="color:var(--warn)">The stereochemistry couldn't be taken from the simulation's coordinates, so stereocentres may be shown in the wrong configuration.</div>`;
@@ -847,9 +849,7 @@ async function attachStructure(s) {
     return;
   }
   disposeViewer(v);
-  const el = document.createElement("div");
-  el.className = "viewer";
-  host.appendChild(el);
+  const el = viewerElement(host);
   v = state.viewer3d = { key, el, viewer: null, molecule: c.molecules[index], absolute: isAbsolute(s), picture: "#structure-3d-print" };
   // zoomTo() leaves a wide margin around the molecule, relative to its size.
   v.fit = () => { v.viewer.zoomTo(); v.viewer.zoom(1.8); };
@@ -865,6 +865,30 @@ async function attachStructure(s) {
   v.models = [v.viewer.addModel(v.molecule.mol0, "sdf"), v.absolute ? null : v.viewer.addModel(v.molecule.mol1, "sdf")];
   styleStructure(v);
   refreshViewer(v);
+}
+
+// A plain scroll is kept from the viewer so that it scrolls the page. Zooming
+// needs Ctrl or ⌘, which a trackpad pinch also sends.
+function viewerElement(host) {
+  const el = document.createElement("div");
+  el.className = "viewer";
+  let hint, timer;
+  el.addEventListener("wheel", (e) => {
+    if (e.ctrlKey || e.metaKey) return;
+    e.stopPropagation();
+    // Added on first use, so that it sits above the viewer's canvas.
+    if (!hint || !el.contains(hint)) {
+      hint = document.createElement("div");
+      hint.className = "viewer-hint";
+      hint.textContent = `Use ${/Mac/.test(navigator.platform) ? "⌘" : "Ctrl"} + scroll to zoom`;
+      el.appendChild(hint);
+    }
+    hint.classList.add("visible");
+    clearTimeout(timer);
+    timer = setTimeout(() => hint.classList.remove("visible"), 1200);
+  }, { capture: true });
+  host.appendChild(el);
+  return el;
 }
 
 // Resize the viewer, and match the theme, only when they have changed. A
@@ -906,7 +930,7 @@ function renderBindingSite(s) {
   const time = b.time_ps !== null && b.time_ps !== undefined ? ` at ${fmt(b.time_ps / 1000, 2)} ns` : "";
   let html = `<div class="structure-controls note" style="margin-bottom:8px"><button type="button" id="binding-site-reset">Reset view</button></div>`;
   html += `<div id="binding-site-3d" class="structure-3d"></div><img id="binding-site-print" class="print-only" alt="Binding site">`;
-  html += `<div class="note">The latest saved coordinates of the ${LAMBDA} = 0 window${time}, updated as the simulation runs. Residues within 6 Å of the perturbed molecule are shown in detail, and the rest of the protein as a cartoon. Drag to rotate, scroll to zoom.</div>`;
+  html += `<div class="note">The latest saved coordinates of the ${LAMBDA} = 0 window${time}, updated as the simulation runs. Residues within 6 Å of the perturbed molecule are shown in detail, and the rest of the protein as a cartoon. Drag to rotate, Ctrl + scroll to zoom.</div>`;
   return card("Binding site", html);
 }
 
@@ -940,9 +964,7 @@ async function attachBindingSite(s) {
     return;
   }
   disposeViewer(v);
-  const el = document.createElement("div");
-  el.className = "viewer";
-  host.appendChild(el);
+  const el = viewerElement(host);
   v = state.viewerSite = { key: s.id, el, viewer: null, site: null, picture: "#binding-site-print" };
   // Framed on the perturbed molecule and the residues around it.
   v.fit = () => {
