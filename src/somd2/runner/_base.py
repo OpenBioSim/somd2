@@ -919,6 +919,15 @@ class RunnerBase:
         _sr.save(mols0, self._filenames["topology0"])
         _sr.save(mols1, self._filenames["topology1"])
 
+        # Saved with checkpoints, so that the coordinates of the perturbable
+        # molecules can be found in them, e.g. by the viewer. It isn't needed
+        # to run the simulation, so a failure is only a warning.
+        try:
+            self._particle_offsets = self._find_particle_offsets(mols)
+        except Exception as e:
+            _logger.warning(f"Couldn't find the perturbable molecules' particles: {e}")
+            self._particle_offsets = None
+
         # Update the tajectory page size.
         if self._config.page_size is not None:
             # Convert from MB to bytes.
@@ -2653,6 +2662,53 @@ class RunnerBase:
         system.set_property("lambda", lam)
         system.delete_all_frames()
         _sr.stream.save(system, self._filenames[index]["checkpoint"])
+
+    @staticmethod
+    def _find_particle_offsets(system):
+        """
+        Find the first atom index and first OpenMM particle index of each
+        perturbable molecule, as rows of an array. OpenMM adds a molecule's
+        virtual sites as particles after its atoms, so every virtual site in
+        an earlier molecule moves the particles of later ones along.
+
+        Parameters
+        ----------
+
+        system: :class: `System <sire.system.System>`
+            The system, as written to the end-state topologies.
+
+        Returns
+        -------
+
+        offsets: numpy.ndarray
+            An integer array with a row of [atom index, particle index] for
+            each perturbable molecule.
+        """
+        import numpy as _np
+
+        atoms = system.atoms()
+
+        def first_atom(mol):
+            return atoms.find(mol.atoms()[0])
+
+        try:
+            sites = [
+                (first_atom(mol), mol.property("n_virtual_sites").as_integer())
+                for mol in system.molecules("property n_virtual_sites")
+            ]
+        except KeyError:
+            sites = []
+
+        try:
+            perturbable = system.molecules("property is_perturbable")
+        except KeyError:
+            perturbable = []
+
+        offsets = []
+        for mol in perturbable:
+            atom = first_atom(mol)
+            offsets.append([atom, atom + sum(n for a, n in sites if a < atom)])
+        return _np.array(offsets, dtype=_np.int64).reshape(-1, 2)
 
     @staticmethod
     def _is_legacy_gcmc_stats(stats):

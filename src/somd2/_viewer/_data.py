@@ -1216,13 +1216,25 @@ class Simulation:
     def _positions(self):
         """
         The coordinates of the whole system in nm, from the first checkpoint
-        or replica exchange state, or None if there are none yet.
+        or replica exchange state, or None if there are none yet. Returned
+        with the OpenMM particle index of each perturbable molecule's first
+        atom, keyed by its atom index, since virtual sites are also particles.
+        This is None if it wasn't saved, and empty if the coordinates are of
+        the atoms alone.
         """
         path = self._positions_file()
         if path is None:
             return None
+
+        def offsets(saved):
+            if saved is None:
+                return None
+            return {int(atom): int(particle) for atom, particle in saved}
+
         if path.suffix == ".npz":
-            return _np.load(path)["positions"]
+            with _np.load(path) as checkpoint:
+                saved = checkpoint.get("particle_offsets")
+                return checkpoint["positions"], offsets(saved)
         if path.suffix == ".s3":
             import sire as _sr
             from sire.io import get_coords_array
@@ -1231,7 +1243,7 @@ class Simulation:
                 # Perturbable molecules only have coordinates for each end
                 # state until linked to one.
                 system = _sr.morph.link_to_reference(_sr.stream.load(str(path)))
-                return get_coords_array(system, units=_sr.units.nanometer)
+                return get_coords_array(system, units=_sr.units.nanometer), {}
 
         with open(path, "rb") as f:
             state = _RepexUnpickler(f).load()
@@ -1245,7 +1257,8 @@ class Simulation:
                 positions = saved["positions"]
             else:
                 positions = saved.getPositions(asNumpy=True)
-            return _np.asarray(positions.value_in_unit(_unit.nanometer))
+            positions = _np.asarray(positions.value_in_unit(_unit.nanometer))
+            return positions, offsets(getattr(state, "_particle_offsets", None))
         return None
 
     def _unreadable(self, error):

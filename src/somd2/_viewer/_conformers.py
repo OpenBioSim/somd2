@@ -47,8 +47,9 @@ def conformers(topology0, topology1, has_positions, load_positions):
         Whether coordinates have been saved for the system.
 
     load_positions: callable
-        Returns the coordinates of the whole system in nm, in the order of the
-        topologies, or None if there are none. Only called if a molecule has
+        Returns the coordinates of the whole system in nm, with the particle
+        index of each perturbable molecule's first atom keyed by its atom
+        index, or None if there are none. Only called if a molecule has
         stereochemistry to assign.
 
     Returns
@@ -106,12 +107,26 @@ def _generate(topology0, topology1, load_positions):
         n = len(p.dummy0)
 
         def coordinates(p=p, n=n):
-            system = system_positions()
-            if system is None:
+            loaded = system_positions()
+            if loaded is None:
                 return None
-            if len(system) < p.offset + n:
+            system, offsets = loaded
+            if offsets is None:
+                # Saved without the particle layout, so the molecule's atom
+                # index is only trusted where virtual sites can't have moved it.
+                if p.offset != 0 and len(system) != p.num_system_atoms:
+                    raise _Mismatch()
+                start = p.offset
+            elif offsets:
+                if p.offset not in offsets:
+                    raise _Mismatch()
+                start = offsets[p.offset]
+            else:
+                # The coordinates are of the atoms alone.
+                start = p.offset
+            if len(system) < start + n:
                 raise _Mismatch()
-            return system[p.offset : p.offset + n]
+            return system[start : start + n]
 
         mol0, stereo0 = _with_stereo(p.rdmol0, p.map0, coordinates)
         mol1, stereo1 = _with_stereo(p.rdmol1, p.map1, coordinates)
@@ -224,6 +239,10 @@ def _relax(mol, fixed):
     coordinates are kept if neither works, since they are only for viewing.
     """
     from rdkit.Chem import AllChem
+
+    # There is nothing to relax, e.g. if both end states have the same atoms.
+    if len(fixed) >= mol.GetNumAtoms():
+        return
 
     def mmff():
         if AllChem.MMFFHasAllMoleculeParams(mol):

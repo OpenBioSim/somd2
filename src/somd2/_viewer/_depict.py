@@ -131,10 +131,10 @@ def _perturbed_molecules(topology0, topology1):
     state converted to RDKit.
 
     Each is a namespace holding its name, its index and first atom index in
-    the system, which atoms are dummies, unique or change element, the RDKit
-    molecule of each end state with the merged molecule index of each of its
-    atoms (map0, map1), the mapping between the two, and whether bond orders
-    could be assigned.
+    the system, the number of atoms in the system, which atoms are dummies,
+    unique or change element, the RDKit molecule of each end state with the
+    merged molecule index of each of its atoms (map0, map1), the mapping
+    between the two, and whether bond orders could be assigned.
     """
     from types import SimpleNamespace
 
@@ -186,6 +186,7 @@ def _perturbed_molecules(topology0, topology1):
             name=f"{mol0.residues()[0].name().value()} (molecule {index})",
             index=index,
             offset=offsets[index],
+            num_system_atoms=offsets[-1],
             dummy0=dummy0,
             dummy1=dummy1,
             unique0={i for i, d in enumerate(dummy0) if not d and dummy1[i]},
