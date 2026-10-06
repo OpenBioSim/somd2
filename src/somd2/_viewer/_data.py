@@ -1363,7 +1363,10 @@ class Simulation:
             )
             min_transition = None
             if matrix and len(matrix) > 1:
-                min_transition = min(matrix[i][i + 1] for i in range(len(matrix) - 1))
+                min_transition = min(
+                    min(matrix[i][i + 1], matrix[i + 1][i])
+                    for i in range(len(matrix) - 1)
+                )
 
             done = analysis.get("status") == "done"
             schedule = str(config.get("lambda_schedule") or "").lower()
