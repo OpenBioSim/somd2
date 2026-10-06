@@ -134,7 +134,12 @@ class RunnerBase:
             self._save_frames
             and self._config.frame_frequency > self._config.checkpoint_frequency
         ):
-            msg = "'frame_frequency' cannot be greater than 'checkpoint_frequency'."
+            msg = (
+                f"'frame_frequency' ({self._config.frame_frequency}) cannot be "
+                f"greater than 'checkpoint_frequency' "
+                f"({self._config.checkpoint_frequency}) when frames are saved, "
+                f"i.e. when 'frame_frequency' <= 'runtime' ({self._config.runtime})."
+            )
             _logger.error(msg)
             raise ValueError(msg)
 
