@@ -369,7 +369,9 @@ of GPUs, and no smaller than the number of GPUs multiplied by the
 oversubscription factor. SOMD2 will warn you if this isn't the case.
 
 Changing the λ value of a context requires it to be reinitialised whenever a
-constrained bond length actually perturbs with λ, which is slow. If this
+constrained bond length actually perturbs with λ, which is slow. This is a
+limitation of OpenMM rather than of the approach, and a fix is being discussed
+[here](https://github.com/openmm/openmm/issues/5439). In the meantime, if this
 overhead is significant, pass `--no-update-constraints` to freeze the
 constrained bond lengths at those of a single λ value, chosen with
 `--constraint-lambda-index`. Both options are ignored unless contexts are being
