@@ -364,13 +364,9 @@ def _topology(topology0, topology1):
             }
 
         proteins = sorted(_protein_indices(system0))
-        # Perturbable proteins too large to depict are shown as mutations.
-        # Smaller ones, e.g. peptides, are perturbed molecules like any other.
-        mutated = {
-            i: _mutated_residues(mols0[i], mols1[i])
-            for i in proteins
-            if mols0[i].num_atoms() > _MAX_ATOMS
-        }
+        # Perturbable proteins and peptides, e.g. a peptide ligand, are shown
+        # as mutations, along with any other protein, e.g. a receptor.
+        mutated = {i: _mutated_residues(mols0[i], mols1[i]) for i in proteins}
         mutated = {i: residues for i, residues in mutated.items() if residues}
 
         topology = None
@@ -401,15 +397,13 @@ def _topology(topology0, topology1):
             }
         else:
             ligands = _perturbed_indices(system0, system1)
-            # A perturbed peptide isn't also drawn as part of the protein.
-            receptors = [i for i in proteins if i not in ligands]
             # Nothing to centre on otherwise.
-            if ligands and receptors:
+            if ligands and proteins:
                 topology = {
                     "kind": "ligand",
                     "proteins": [
                         dict(entry(i, True), chain=chains[n % len(chains)])
-                        for n, i in enumerate(receptors)
+                        for n, i in enumerate(proteins)
                     ],
                     "others": [entry(i, False) for i in ligands],
                 }

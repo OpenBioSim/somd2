@@ -33,6 +33,10 @@ _MAX_ATOMS = 400
 # since a skeletal formula of e.g. methane is just a label.
 _MAX_HEAVY_WITH_HYDROGENS = 1
 
+# Assigning bond orders takes seconds at around 140 atoms, and minutes beyond,
+# so larger molecules are drawn from their connectivity alone.
+_MAX_BOND_ORDER_ATOMS = 120
+
 # The number of bonds of a positively charged N, O, P or S, by atomic number.
 _ONIUM_DEGREE = {7: 4, 8: 3, 15: 4, 16: 3}
 
@@ -201,12 +205,14 @@ def _perturbed_molecules(topology0, topology1):
 def _perturbed_indices(system0, system1):
     """
     The indices of the molecules that change between the end-state systems,
-    leaving out ions and molecules too large to depict, e.g. proteins, whose
-    mutations are shown in 3D instead.
+    leaving out ions, proteins and peptides, whose mutations are shown in 3D
+    instead, and molecules too large to depict.
     """
     # Molecules are paired by index, since alchemical ions are only water at
     # one end state.
-    candidates = sorted(_non_water(system0) & _non_water(system1))
+    candidates = sorted(
+        (_non_water(system0) & _non_water(system1)) - _protein_indices(system0)
+    )
     mols0 = system0.molecules()
     mols1 = system1.molecules()
 
@@ -270,7 +276,10 @@ def _assign_bond_orders(rdmol, charges):
         if atom.GetAtomicNum() > 1:
             atom.SetNoImplicit(True)
 
-    for charge in dict.fromkeys(charges + [0, 1, -1, 2, -2]):
+    candidates = charges + [0, 1, -1, 2, -2]
+    if rdmol.GetNumAtoms() > _MAX_BOND_ORDER_ATOMS:
+        candidates = []
+    for charge in dict.fromkeys(candidates):
         mol = Chem.Mol(template)
         try:
             rdDetermineBonds.DetermineBondOrders(
