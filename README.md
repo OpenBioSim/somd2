@@ -767,7 +767,9 @@ Sections can be collapsed by clicking their heading.
 Use the "Save as PDF" button to create a report of a simulation, e.g. to attach
 to a GitHub issue alongside the input needed to reproduce a problem. Collapsed
 sections are left out of the PDF, so sensitive content, such as the structures
-of proprietary molecules, can be hidden before saving.
+of proprietary molecules, can be hidden before saving. Each chart can also be
+saved on its own as SVG or PNG, and the 3D views as PNG, e.g. to use in another
+document.
 
 When the viewer finds related simulations, a summary page is added to the top
 of the list of runs. Repeats of the same simulation are grouped, using the

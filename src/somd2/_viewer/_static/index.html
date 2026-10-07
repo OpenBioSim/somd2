@@ -224,6 +224,8 @@ details.section:not([open]) > summary h3 { margin-bottom: 0; }
 .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
 .chart text { fill: var(--muted); font-size: 11px; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.chart-save { text-align: right; font-size: 12px; color: var(--muted); margin-top: 4px; }
+.chart-save button { font-size: 12px; padding: 1px 6px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
@@ -509,10 +511,13 @@ function lineChart(el, opts) {
   if (opts.yLabel) svg += `<text transform="translate(12 ${m.t + ph / 2}) rotate(-90)" text-anchor="middle">${esc(opts.yLabel)}</text>`;
   svg += "</svg>";
   let html = svg;
-  if (opts.legend && opts.series.length > 1) {
-    html += `<div class="legend">${opts.series.map((s) => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join("")}</div>`;
+  const legend = opts.legend && opts.series.length > 1 ? opts.series.map((s) => ({ name: s.name, color: s.color })) : [];
+  if (legend.length) {
+    html += `<div class="legend">${legend.map((s) => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join("")}</div>`;
   }
-  el.innerHTML = html;
+  el.innerHTML = html + SAVE_CHART;
+  el.chartDraw = (target) => lineChart(target, opts);
+  el.chartLegend = legend;
 }
 
 function heatmap(el, matrix, opts = {}) {
@@ -542,7 +547,109 @@ function heatmap(el, matrix, opts = {}) {
     svg += `<text x="${pad + i * cell + cell / 2}" y="${pad - 8}" text-anchor="middle">${i}</text>`;
   }
   svg += "</svg>";
-  el.innerHTML = svg;
+  el.innerHTML = svg + SAVE_CHART;
+  el.chartDraw = (target) => heatmap(target, matrix, opts);
+  el.chartLegend = [];
+}
+
+const SAVE_CHART = `<div class="chart-save no-print">Save as <button type="button" data-format="svg">SVG</button> <button type="button" data-format="png">PNG</button></div>`;
+
+// The title of a chart, from its heading, or else its card.
+function chartTitle(el) {
+  let node = el.previousElementSibling;
+  while (node && node.tagName !== "H4") node = node.previousElementSibling;
+  if (node) return node.textContent;
+  const section = el.closest("details.section");
+  return section ? section.dataset.section : "chart";
+}
+
+// A chart as a standalone SVG with its title and legend. It is drawn again in
+// the light theme, which suits documents, with the page's styles copied in.
+function chartSVG(el) {
+  const root = document.documentElement;
+  const theme = root.getAttribute("data-theme");
+  root.setAttribute("data-theme", "light");
+  const host = document.createElement("div");
+  host.className = "chart";
+  host.style.cssText = `position:fixed;left:-10000px;top:0;width:${el.clientWidth}px`;
+  document.body.appendChild(host);
+  try {
+    el.chartDraw(host);
+    const chart = host.querySelector("svg");
+    for (const text of chart.querySelectorAll("text")) {
+      const style = getComputedStyle(text);
+      text.setAttribute("style", `fill:${style.fill};font-size:${style.fontSize};font-family:${style.fontFamily}`);
+    }
+    chart.querySelectorAll("title").forEach((title) => title.remove());
+    const fg = css("--fg"), muted = css("--muted");
+    const font = esc(getComputedStyle(document.body).fontFamily);
+    const width = Number(chart.getAttribute("width")), height = Number(chart.getAttribute("height"));
+    const pad = 12, top = 30;
+    // Legend entries wrap at the width of the chart.
+    const measure = document.createElement("canvas").getContext("2d");
+    measure.font = `12px ${getComputedStyle(document.body).fontFamily}`;
+    let x = pad, y = top + height + 16, legend = "";
+    for (const item of el.chartLegend) {
+      const w = 29 + measure.measureText(item.name).width;
+      if (x > pad && x + w > width + pad) { x = pad; y += 18; }
+      legend += `<rect x="${x}" y="${y - 9}" width="10" height="10" rx="2" fill="${item.color}"/>`;
+      legend += `<text x="${x + 15}" y="${y}" style="fill:${muted};font-size:12px;font-family:${font}">${esc(item.name)}</text>`;
+      x += w;
+    }
+    const total = { width: width + 2 * pad, height: el.chartLegend.length ? y + 10 : top + height + pad };
+    chart.setAttribute("x", pad);
+    chart.setAttribute("y", top);
+    chart.removeAttribute("style");
+    let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${total.width}" height="${total.height}" viewBox="0 0 ${total.width} ${total.height}">`;
+    svg += `<rect width="100%" height="100%" fill="#ffffff"/>`;
+    svg += `<text x="${pad}" y="20" style="fill:${fg};font-size:14px;font-weight:600;font-family:${font}">${esc(chartTitle(el))}</text>`;
+    svg += new XMLSerializer().serializeToString(chart) + legend + "</svg>";
+    return { svg, ...total };
+  } finally {
+    host.remove();
+    if (theme === null) root.removeAttribute("data-theme");
+    else root.setAttribute("data-theme", theme);
+  }
+}
+
+// A file name from the run's name and a title.
+function fileName(title) {
+  const run = state.view === "run" && state.summary ? `${state.summary.name}-` : "";
+  return `${run}${title}`.replace(/[^\w.-]+/g, "_");
+}
+
+function saveChart(el, format) {
+  const { svg, width, height } = chartSVG(el);
+  const name = fileName(chartTitle(el));
+  if (format === "svg") return download(`${name}.svg`, svg, "image/svg+xml");
+  const blob = new Blob([svg], { type: "image/svg+xml" });
+  // Drawn at three times the size, so that it stays sharp in a document.
+  const scale = 3;
+  const url = URL.createObjectURL(blob);
+  const image = new Image();
+  image.onload = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    const context = canvas.getContext("2d");
+    context.scale(scale, scale);
+    context.drawImage(image, 0, 0, width, height);
+    URL.revokeObjectURL(url);
+    canvas.toBlob((png) => download(`${name}.png`, png, "image/png"), "image/png");
+  };
+  image.src = url;
+}
+
+// The current view of a 3D viewer, on a white background.
+function saveViewer(v, title) {
+  if (!v || !v.viewer) return;
+  v.viewer.setBackgroundColor("#ffffff");
+  v.viewer.render();
+  const uri = v.viewer.pngURI();
+  v.viewer.setBackgroundColor(css("--surface"));
+  v.viewer.render();
+  const bytes = Uint8Array.from(atob(uri.split(",")[1]), (c) => c.charCodeAt(0));
+  download(`${fileName(title)}.png`, new Blob([bytes], { type: "image/png" }), "image/png");
 }
 
 // ---------------------------------------------------------------- rendering
@@ -813,7 +920,7 @@ function renderStructure(s) {
     const modes = [["0", `${LAMBDA} = 0`], ["1", `${LAMBDA} = 1`]];
     controls += modes.map(([value, label]) => `<label><input type="radio" name="structure-mode" value="${value}"${state.structureMode === value ? " checked" : ""}> ${label}</label>`).join("");
   }
-  controls += `<button type="button" id="structure-reset">Reset view</button>`;
+  controls += `<button type="button" id="structure-reset">Reset view</button><button type="button" class="viewer-save">Save PNG</button>`;
   if (document.fullscreenEnabled) controls += fullScreenButton();
   let html = `<div class="structure-panel"><div class="structure-controls note" style="margin-bottom:8px">${controls}</div>`;
   html += `<div id="structure-3d" class="structure-3d"></div>`;
@@ -999,7 +1106,7 @@ function renderBindingSite(s) {
     const modes = [["0", `${LAMBDA} = 0`], ["1", `${LAMBDA} = 1`]];
     controls += modes.map(([value, label]) => `<label><input type="radio" name="site-mode" value="${value}"${state.siteMode === value ? " checked" : ""}> ${label}</label>`).join("");
   }
-  controls += `<button type="button" id="binding-site-reset">Reset view</button>`;
+  controls += `<button type="button" id="binding-site-reset">Reset view</button><button type="button" class="viewer-save">Save PNG</button>`;
   if (document.fullscreenEnabled) controls += fullScreenButton();
   let html = `<div class="structure-panel"><div class="structure-controls note" style="margin-bottom:8px">${controls}</div>`;
   html += `<div id="binding-site-3d" class="structure-3d"></div></div><img id="binding-site-print" class="print-only" alt="${title}">`;
@@ -1419,7 +1526,8 @@ function valueWithError(value, error) {
   return `${fmt(value, 2)} ± ${fmt(error, 2)}`;
 }
 
-// Use the browser's save dialog where available, otherwise ask for a name.
+// Use the browser's save dialog where available, otherwise ask for a name. The
+// content is text or a Blob.
 async function download(name, text, type) {
   if (window.showSaveFilePicker) {
     const extension = name.slice(name.lastIndexOf("."));
@@ -2494,6 +2602,16 @@ $("#main").addEventListener("toggle", (e) => {
   if (section.open) viewers().forEach(refreshViewer);
   if (section.open && state.current && name === siteTitle(state.bindingSites[state.current])) loadBindingSite(state.current);
 }, true);
+document.addEventListener("click", (e) => {
+  const chartButton = e.target.closest(".chart-save button");
+  if (chartButton) saveChart(chartButton.closest(".chart"), chartButton.dataset.format);
+  const viewerButton = e.target.closest(".viewer-save");
+  if (viewerButton) {
+    const section = viewerButton.closest("details.section");
+    const v = section.querySelector("#binding-site-3d") ? state.viewerSite : state.viewer3d;
+    saveViewer(v, section.dataset.section);
+  }
+});
 document.addEventListener("fullscreenchange", () => {
   document.querySelectorAll(".fullscreen-button").forEach((button) => {
     button.textContent = document.fullscreenElement ? "Exit full screen" : "Full screen";
