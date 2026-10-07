@@ -741,6 +741,9 @@ The viewer shows:
 - For a bound leg, the binding site from the latest saved coordinates of the
   λ = 0 window, with the protein as a cartoon and the residues around the
   perturbed molecule in detail. It is updated as the simulation runs.
+- For a protein mutation, in place of the above, the protein at each end state
+  from the latest saved coordinates of its window, with the mutated residues
+  and any ligand in detail.
 - The MBAR free energy, PMF, overlap matrix, and forward and backward
   convergence. These are updated in the background as new data is written. For
   ABFE simulations, the standard state correction for the Boresch restraint is

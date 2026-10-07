@@ -314,7 +314,7 @@ function loadCollapsed(key = "somd2-viewer-collapsed") {
   try { return new Set(JSON.parse(localStorage.getItem(key) || "[]")); } catch (e) { return new Set(); }
 }
 
-const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "", problems: {}, requests: 0, latest: {}, shown: {}, group: null, repeatsOpen: new Map(), conformers: {}, conformersLoading: {}, structureMode: "0", structureMolecule: {}, viewer3d: null, bindingSites: {}, bindingSitesLoading: {}, viewerSite: null };
+const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "", problems: {}, requests: 0, latest: {}, shown: {}, group: null, repeatsOpen: new Map(), conformers: {}, conformersLoading: {}, structureMode: "0", structureMolecule: {}, viewer3d: null, bindingSites: {}, bindingSitesLoading: {}, viewerSite: null, siteMode: "0" };
 const PALETTE = ["#2f6fdf", "#e0663b", "#2a9d6f", "#b04fc9", "#c9a227", "#3aa7c9", "#d64f7a", "#7a8699"];
 const LAMBDA = "λ";
 // The thresholds for poor overlap and replica mixing, as in the summary.
@@ -772,7 +772,7 @@ function renderEndStates(s) {
   const d = state.depictions[s.id];
   if (!d) return card("End states", `<div class="note">Loading depictions…</div>`);
   if (d.status !== "done") return card("End states", `<div class="note">${esc(d.reason || "Unavailable.")}</div>`);
-  if (!d.molecules.length) return card("End states", `<div class="note">No perturbed molecules found.</div>`);
+  if (!d.molecules.length) return d.mutation ? "" : card("End states", `<div class="note">No perturbed molecules found.</div>`);
   const absolute = ["annihilate", "decouple"].includes(s.schedule.name);
   let html = "";
   for (const m of d.molecules) {
@@ -982,28 +982,51 @@ function disposeViewer(v) {
   v.el.remove();
 }
 
+// The binding site of a perturbed molecule, or a mutated protein.
+function siteTitle(b) {
+  return b && b.kind === "mutation" ? "Mutation" : "Binding site";
+}
+
 // Only shown once the server has said whether there is a protein.
 function renderBindingSite(s) {
   const b = state.bindingSites[s.id];
   if (!b || b.status === "none") return "";
-  if (b.status !== "done") return card("Binding site", `<div class="note">${esc(b.reason || "Unavailable.")}</div>`);
+  const title = siteTitle(b);
+  if (b.status !== "done") return card(title, `<div class="note">${esc(b.reason || "Unavailable.")}</div>`);
   const time = b.time_ps !== null && b.time_ps !== undefined ? ` at ${fmt(b.time_ps / 1000, 2)} ns` : "";
-  const full = document.fullscreenEnabled ? fullScreenButton() : "";
-  let html = `<div class="structure-panel"><div class="structure-controls note" style="margin-bottom:8px"><button type="button" id="binding-site-reset">Reset view</button>${full}</div>`;
-  html += `<div id="binding-site-3d" class="structure-3d"></div></div><img id="binding-site-print" class="print-only" alt="Binding site">`;
-  html += `<div class="note">The latest saved coordinates of the ${LAMBDA} = 0 window${time}, updated as the simulation runs. Residues within 6 Å of the perturbed molecule are shown in detail, and the rest of the protein as a cartoon. Drag to rotate, Ctrl + scroll to zoom.</div>`;
-  return card("Binding site", html);
+  let controls = "";
+  if (b.kind === "mutation") {
+    const modes = [["0", `${LAMBDA} = 0`], ["1", `${LAMBDA} = 1`]];
+    controls += modes.map(([value, label]) => `<label><input type="radio" name="site-mode" value="${value}"${state.siteMode === value ? " checked" : ""}> ${label}</label>`).join("");
+  }
+  controls += `<button type="button" id="binding-site-reset">Reset view</button>`;
+  if (document.fullscreenEnabled) controls += fullScreenButton();
+  let html = `<div class="structure-panel"><div class="structure-controls note" style="margin-bottom:8px">${controls}</div>`;
+  html += `<div id="binding-site-3d" class="structure-3d"></div></div><img id="binding-site-print" class="print-only" alt="${title}">`;
+  if (b.kind === "mutation") {
+    const hasOthers = b.states[0].ligand.length > 0;
+    const others = hasOthers ? ", along with any other molecules nearby, e.g. a ligand" : "";
+    const frames = b.separate_frames
+      ? `Each end state is from the latest saved coordinates of its own window, with the ${LAMBDA} = 1 window superposed on the ${LAMBDA} = 0 window${time} by the protein's Cα atoms`
+      : `Both end states are from the latest saved coordinates of the ${LAMBDA} = 0 window${time}, since there are none for the ${LAMBDA} = 1 window, so atoms only present at ${LAMBDA} = 1 are where their ghosts are`;
+    html += `<div class="note">${frames}, updated as the simulation runs. The mutated residues (${esc(b.residues.join(", "))}) are shown in detail${others}. Residues within 6 Å of them${hasOthers ? ", or of the other molecules," : ""} are shown in grey, and the rest of the protein as a cartoon. Drag to rotate, Ctrl + scroll to zoom.</div>`;
+  } else {
+    html += `<div class="note">The latest saved coordinates of the ${LAMBDA} = 0 window${time}, updated as the simulation runs. Residues within 6 Å of the perturbed molecule are shown in detail, and the rest of the protein as a cartoon. Drag to rotate, Ctrl + scroll to zoom.</div>`;
+  }
+  return card(title, html);
 }
 
 // Polled while the card is open, sending the version already shown so that an
 // unchanged structure isn't sent again.
 function loadBindingSite(id) {
   const current = state.bindingSites[id];
-  if (state.bindingSitesLoading[id] || (current && (current.status === "none" || state.collapsed.has("Binding site")))) return;
+  if (state.bindingSitesLoading[id] || (current && (current.status === "none" || state.collapsed.has(siteTitle(current))))) return;
   const known = current && current.key ? `?known=${encodeURIComponent(current.key)}` : "";
   state.bindingSitesLoading[id] = true;
   getJSON(`/api/simulation/${id}/binding-site${known}`).then((b) => {
     if (b.status === "unchanged") return;
+    // Kept through e.g. a failed read, so that the card keeps its title.
+    if (!b.kind && current && current.kind) b.kind = current.kind;
     state.bindingSites[id] = b;
     if (id === state.current) render();
   }).catch(() => {}).finally(() => { state.bindingSitesLoading[id] = false; });
@@ -1027,9 +1050,18 @@ async function attachBindingSite(s) {
   disposeViewer(v);
   const el = viewerElement(host);
   v = state.viewerSite = { key: s.id, el, viewer: null, site: null, picture: "#binding-site-print" };
-  // Framed on the perturbed molecule and the residues around it.
+  // Framed on the perturbed molecule and the residues around it, or for a
+  // mutation, on any other molecules shown, or else the mutated residues.
   v.fit = () => {
-    if (v.site) v.viewer.zoomTo({ within: { distance: 6, sel: { serial: v.site.ligand } }, byres: true });
+    const site = v.site;
+    if (!site) return;
+    if (site.kind === "mutation") {
+      const atoms = site.states[0].ligand.length ? site.states[0].ligand : site.states[0].mutated;
+      const model = v.models[0];
+      v.viewer.zoomTo({ model, within: { distance: 6, sel: { model, serial: atoms } }, byres: true });
+    } else {
+      v.viewer.zoomTo({ within: { distance: 6, sel: { serial: site.ligand } }, byres: true });
+    }
   };
   let lib;
   try {
@@ -1049,12 +1081,44 @@ async function attachBindingSite(s) {
 function showSite(v, site) {
   v.site = site;
   v.viewer.removeAllModels();
+  if (site.kind === "mutation") {
+    v.models = site.states.map((s) => v.viewer.addModel(s.pdb, "pdb"));
+    styleSite(v);
+    return;
+  }
   const model = v.viewer.addModel(site.pdb, "pdb");
   model.setStyle({}, { cartoon: { color: "lightgrey" } });
   // Added to the cartoon, rather than replacing it.
-  model.setStyle({ serial: site.pocket }, { stick: { radius: 0.15, colorscheme: "grayCarbon" } }, true);
+  styleSideChains(model, site.pocket, { stick: { radius: 0.15, colorscheme: "grayCarbon" } });
   const ligand = { colorscheme: "greenCarbon" };
   model.setStyle({ serial: site.ligand }, { stick: { radius: 0.14, ...ligand }, sphere: { scale: 0.22, ...ligand } });
+  v.viewer.render();
+}
+
+// Draw residues over the cartoon from Cα outwards, so that their backbone
+// doesn't overlap it. A proline keeps its N to close its ring.
+const BACKBONE = new Set(["N", "C", "O", "OXT"]);
+function styleSideChains(model, serials, style) {
+  const sideChain = (a) => a.resn !== "GLY" && (!BACKBONE.has(a.atom) || (a.atom === "N" && a.resn === "PRO"));
+  model.setStyle({ serial: serials, predicate: sideChain }, style, true);
+}
+
+// Only one end state of a mutation is shown at a time, so switching keeps the
+// view.
+function styleSite(v) {
+  const shown = state.siteMode === "1" ? 1 : 0;
+  v.models.forEach((model, i) => {
+    if (i !== shown) {
+      model.setStyle({}, {});
+      return;
+    }
+    const s = v.site.states[i];
+    model.setStyle({}, { cartoon: { color: "lightgrey" } });
+    styleSideChains(model, s.nearby, { stick: { radius: 0.12, colorscheme: "grayCarbon" } });
+    model.setStyle({ serial: s.mutated }, { stick: { radius: 0.18, colorscheme: "magentaCarbon" } }, true);
+    const other = { colorscheme: "greenCarbon" };
+    model.setStyle({ serial: s.ligand }, { stick: { radius: 0.14, ...other }, sphere: { scale: 0.22, ...other } });
+  });
   v.viewer.render();
 }
 
@@ -2055,6 +2119,11 @@ function render() {
     if (state.viewer3d && state.viewer3d.viewer) styleStructure(state.viewer3d);
   }));
   attachBindingSite(s);
+  document.querySelectorAll('input[name="site-mode"]').forEach((input) => input.addEventListener("change", (e) => {
+    state.siteMode = e.target.value;
+    const v = state.viewerSite;
+    if (v && v.viewer && v.site && v.site.kind === "mutation") styleSite(v);
+  }));
   const resetSite = $("#binding-site-reset");
   if (resetSite) resetSite.addEventListener("click", () => {
     if (state.viewerSite && state.viewerSite.viewer) fitStructure(state.viewerSite);
@@ -2423,7 +2492,7 @@ $("#main").addEventListener("toggle", (e) => {
   try { localStorage.setItem("somd2-viewer-collapsed", JSON.stringify([...state.collapsed])); } catch (err) {}
   if (section.open && state.summary) renderCharts(state.summary);
   if (section.open) viewers().forEach(refreshViewer);
-  if (section.open && name === "Binding site" && state.current) loadBindingSite(state.current);
+  if (section.open && state.current && name === siteTitle(state.bindingSites[state.current])) loadBindingSite(state.current);
 }, true);
 document.addEventListener("fullscreenchange", () => {
   document.querySelectorAll(".fullscreen-button").forEach((button) => {

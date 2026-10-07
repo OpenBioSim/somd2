@@ -23,7 +23,12 @@
 The coordinates saved by a run, for the viewer.
 """
 
-__all__ = ["Mismatch", "SavedCoordinates", "read_coordinates"]
+__all__ = [
+    "Mismatch",
+    "SavedCoordinates",
+    "read_coordinates",
+    "read_repex_coordinates",
+]
 
 import numpy as _np
 
@@ -75,10 +80,11 @@ class SavedCoordinates:
         return self.positions[start : start + num_atoms]
 
 
-def read_coordinates(path):
+def read_coordinates(path, window=0):
     """
-    Read the coordinates of the λ = 0 window from a checkpoint, the replica
-    exchange state, or a legacy stream file.
+    Read the coordinates of a window from its checkpoint or a legacy stream
+    file, or from the replica exchange state, where the window is its index,
+    e.g. -1 for the last.
     """
     from pathlib import Path
 
@@ -106,10 +112,14 @@ def read_coordinates(path):
             positions = get_coords_array(system, units=_sr.units.nanometer)
         return SavedCoordinates(positions, atoms_only=True)
 
-    return _read_repex(path)
+    return read_repex_coordinates(path, [window])[0]
 
 
-def _read_repex(path):
+def read_repex_coordinates(path, windows):
+    """
+    Read the coordinates of several windows from the replica exchange state,
+    which is only loaded once. Each is None if it hasn't been saved.
+    """
     import openmm.unit as _unit
 
     from ._data import _RepexUnpickler
@@ -117,35 +127,40 @@ def _read_repex(path):
     with open(path, "rb") as f:
         state = _RepexUnpickler(f).load()
 
-    # The saved states move with the mixing, so the first is always the
-    # configuration in the λ = 0 window. Older states are stored the other
-    # way round, as the runner also allows for.
+    # The saved states move with the mixing, so each is always the
+    # configuration in its window. Older states are stored the other way
+    # round, as the runner also allows for.
     states = getattr(state, "_openmm_states", None) or []
     if not states:
-        return None
-    window = 0
+        return [None] * len(windows)
     if not hasattr(state, "_num_slots"):
-        window = int(_np.argsort(state._states)[0])
-    saved = states[window]
-    if saved is None:
-        return None
-
-    # Older states are OpenMM State objects rather than dicts.
-    if isinstance(saved, dict):
-        positions, box = saved["positions"], saved.get("box")
-    else:
-        positions = saved.getPositions(asNumpy=True)
-        box = saved.getPeriodicBoxVectors(asNumpy=True)
+        order = _np.argsort(state._states)
+        windows = [int(order[window]) for window in windows]
 
     def nanometres(value):
         return _np.asarray(value.value_in_unit(_unit.nanometer))
 
-    return SavedCoordinates(
-        nanometres(positions),
-        box=nanometres(box) if box is not None else None,
-        time_ps=_picoseconds(getattr(state, "_time", None)),
-        virtual_sites=getattr(state, "_virtual_sites", None),
-    )
+    result = []
+    for window in windows:
+        saved = states[window]
+        if saved is None:
+            result.append(None)
+            continue
+        # Older states are OpenMM State objects rather than dicts.
+        if isinstance(saved, dict):
+            positions, box = saved["positions"], saved.get("box")
+        else:
+            positions = saved.getPositions(asNumpy=True)
+            box = saved.getPeriodicBoxVectors(asNumpy=True)
+        result.append(
+            SavedCoordinates(
+                nanometres(positions),
+                box=nanometres(box) if box is not None else None,
+                time_ps=_picoseconds(getattr(state, "_time", None)),
+                virtual_sites=getattr(state, "_virtual_sites", None),
+            )
+        )
+    return result
 
 
 def _picoseconds(time):

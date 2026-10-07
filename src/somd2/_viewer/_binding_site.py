@@ -20,11 +20,11 @@
 #####################################################################
 
 """
-The protein and perturbed molecules from a run's saved coordinates, for the
-viewer.
+The protein and perturbed molecules, or a mutated protein, from a run's saved
+coordinates, for the viewer.
 """
 
-__all__ = ["binding_site", "has_binding_site"]
+__all__ = ["binding_site", "site_kind"]
 
 import threading as _threading
 from collections import OrderedDict as _OrderedDict
@@ -35,9 +35,14 @@ import numpy as _np
 # molecule are shown in detail.
 _CUTOFF = 0.6
 
-# Residue numbers for the perturbed molecules, which are given their own chain.
+# Residue numbers for the perturbed molecules, or the other molecules shown
+# with a mutated protein, which are given their own chain.
 _LIGAND_CHAIN = "L"
 _LIGAND_RESIDUE = 9999
+
+# With a mutated protein, other molecules, e.g. a ligand, are shown if they
+# are within this distance, in nm, of a mutated residue.
+_NEARBY = 1.2
 
 # The topologies read most recently, which are kept to a limited number.
 _topologies = _OrderedDict()
@@ -45,9 +50,10 @@ _topologies_lock = _threading.Lock()
 _MAX_TOPOLOGIES = 16
 
 
-def binding_site(topology0, topology1, saved):
+def binding_site(topology0, topology1, saved, saved1=None):
     """
-    The protein and perturbed molecules at the saved coordinates.
+    The protein and perturbed molecules, or a mutated protein, at the saved
+    coordinates.
 
     Parameters
     ----------
@@ -58,37 +64,32 @@ def binding_site(topology0, topology1, saved):
     saved: SavedCoordinates
         The coordinates, from the λ = 0 window.
 
+    saved1: SavedCoordinates
+        The coordinates from the λ = 1 window, for that end state of a mutated
+        protein. Those from the λ = 0 window are used if None.
+
     Returns
     -------
 
     site: dict
-        The protein, without hydrogens, and the λ = 0 end state of each
-        perturbed molecule, as PDB text, with the serial numbers of the atoms
-        of the protein residues near them, and of the perturbed molecules. None
-        if there isn't a protein and a perturbed molecule to show.
+        For perturbed molecules, the protein, without hydrogens, and the λ = 0
+        end state of each perturbed molecule, as PDB text, with the serial
+        numbers of the atoms of the protein residues near them, and of the
+        perturbed molecules. For a mutated protein, the protein, without
+        hydrogens, and any other molecules, e.g. a ligand, at each end state,
+        with the serial numbers of the atoms of the mutated residues, of the
+        residues near them or the other molecules, and of the other molecules.
+        None if there is nothing to show.
     """
     topology = _topology(topology0, topology1)
     if topology is None:
         return None
+    if topology["kind"] == "mutation":
+        return _mutation(topology, saved, saved1 or saved)
 
-    def coordinates(molecule):
-        positions = saved.molecule(
-            molecule["first"], molecule["num_atoms"], topology["num_system_atoms"]
-        )
-        return positions[molecule["atoms"]]
-
-    proteins = [coordinates(m) for m in topology["proteins"]]
-    ligands = [coordinates(m) for m in topology["ligands"]]
-
-    # Coordinates aren't wrapped into the box, so each perturbed molecule is
-    # moved into the periodic image nearest to the protein.
-    if _is_periodic(saved.box):
-        box = _np.asarray(saved.box, dtype=float)
-        inverse = _np.linalg.inv(box)
-        centre = _np.concatenate(proteins).mean(axis=0)
-        for positions in ligands:
-            shift = _np.round((positions.mean(axis=0) - centre) @ inverse) @ box
-            positions -= shift
+    proteins = [_coordinates(saved, topology, m) for m in topology["proteins"]]
+    ligands = [_coordinates(saved, topology, m) for m in topology["others"]]
+    _image(saved.box, proteins, ligands)
 
     near = _np.concatenate(ligands)
     lines = []
@@ -99,26 +100,25 @@ def binding_site(topology0, topology1, saved):
         distances = _np.linalg.norm(
             positions[:, None, :] - near[None, :, :], axis=-1
         ).min(axis=1)
-        records = molecule["records"]
-        residues = {records[i][2] for i in _np.where(distances < _CUTOFF)[0]}
-        for record, xyz in zip(records, positions):
+        state = molecule["states"][0]
+        residues = {state["residues"][i] for i in _np.where(distances < _CUTOFF)[0]}
+        for record, residue, xyz in zip(state["records"], state["residues"], positions):
             serial += 1
-            if record[2] in residues:
+            if residue in residues:
                 pocket.append(serial)
             lines.append(_atom("ATOM", serial, record, molecule["chain"], xyz))
         lines.append("TER")
 
     ligand_atoms = []
-    for i, (molecule, positions) in enumerate(zip(topology["ligands"], ligands)):
-        for record, xyz in zip(molecule["records"], positions):
-            name, residue, _, element = record
-            record = (name, residue, _LIGAND_RESIDUE - i, element)
+    for i, (molecule, positions) in enumerate(zip(topology["others"], ligands)):
+        for record, xyz in zip(molecule["states"][0]["records"], positions):
             serial += 1
             ligand_atoms.append(serial)
-            lines.append(_atom("HETATM", serial, record, _LIGAND_CHAIN, xyz))
+            lines.append(_ligand_atom(serial, record, i, xyz))
     lines.append("END")
 
     return {
+        "kind": "ligand",
         "pdb": "\n".join(lines) + "\n",
         "pocket": pocket,
         "ligand": ligand_atoms,
@@ -126,12 +126,170 @@ def binding_site(topology0, topology1, saved):
     }
 
 
-def has_binding_site(topology0, topology1):
+def site_kind(topology0, topology1):
     """
-    Whether the end-state topologies have a protein and a perturbed molecule
-    to show.
+    What the end-state topologies have to show: "ligand" for a protein and a
+    perturbed molecule, "mutation" for a mutated protein, or None.
     """
-    return _topology(topology0, topology1) is not None
+    topology = _topology(topology0, topology1)
+    return topology["kind"] if topology is not None else None
+
+
+def _mutation(topology, saved0, saved1):
+    """
+    The mutated protein and any other molecules at each end state, each from
+    its own window, with the λ = 1 window superposed on the λ = 0 window by
+    the protein's Cα atoms.
+    """
+
+    def ca(saved):
+        return _np.concatenate(
+            [
+                _coordinates(saved, topology, m, atoms=m["ca"])
+                for m in topology["proteins"]
+            ]
+        )
+
+    # At least three atoms are needed to superpose the windows.
+    if saved1 is not saved0 and len(ca(saved0)) < 3:
+        saved1 = saved0
+
+    frames = []
+    for state, saved in enumerate((saved0, saved1)):
+        proteins = [
+            _coordinates(saved, topology, m, state) for m in topology["proteins"]
+        ]
+        others = [_coordinates(saved, topology, m, state) for m in topology["others"]]
+        _image(saved.box, proteins, others)
+        frames.append((proteins, others))
+
+    if saved1 is not saved0:
+        fit = _superpose(ca(saved1), ca(saved0))
+        frames[1] = tuple([fit(x) for x in group] for group in frames[1])
+
+    def mutated_positions(state):
+        proteins = frames[state][0]
+        return _np.concatenate(
+            [
+                positions[[r in m["mutated"] for r in m["states"][state]["residues"]]]
+                for m, positions in zip(topology["proteins"], proteins)
+            ]
+        )
+
+    # Only the other molecules near the mutation are shown, e.g. so that a
+    # membrane or a distant cofactor isn't.
+    mutated = mutated_positions(0)
+    shown = [
+        i
+        for i, positions in enumerate(frames[0][1])
+        if _np.linalg.norm(positions[:, None, :] - mutated[None, :, :], axis=-1).min()
+        < _NEARBY
+    ]
+
+    # Residues near the mutated residues or the other molecules shown at
+    # either end state, so that the same ones are shown at both.
+    nearby = [set() for _ in topology["proteins"]]
+    for state, (proteins, others) in enumerate(frames):
+        near = _np.concatenate([mutated_positions(state)] + [others[i] for i in shown])
+        for residues, molecule, positions in zip(
+            nearby, topology["proteins"], proteins
+        ):
+            distances = _np.linalg.norm(
+                positions[:, None, :] - near[None, :, :], axis=-1
+            ).min(axis=1)
+            atoms = molecule["states"][state]
+            residues.update(
+                atoms["residues"][i] for i in _np.where(distances < _CUTOFF)[0]
+            )
+    for residues, molecule in zip(nearby, topology["proteins"]):
+        residues -= molecule["mutated"]
+
+    states = []
+    for state, (proteins, others) in enumerate(frames):
+        lines = []
+        mutated = []
+        neighbours = []
+        serial = 0
+        for residues, molecule, positions in zip(
+            nearby, topology["proteins"], proteins
+        ):
+            atoms = molecule["states"][state]
+            for record, residue, xyz in zip(
+                atoms["records"], atoms["residues"], positions
+            ):
+                serial += 1
+                if residue in molecule["mutated"]:
+                    mutated.append(serial)
+                elif residue in residues:
+                    neighbours.append(serial)
+                lines.append(_atom("ATOM", serial, record, molecule["chain"], xyz))
+            lines.append("TER")
+        ligand = []
+        for i in shown:
+            records = topology["others"][i]["states"][state]["records"]
+            for record, xyz in zip(records, others[i]):
+                serial += 1
+                ligand.append(serial)
+                lines.append(_ligand_atom(serial, record, i, xyz))
+        lines.append("END")
+        states.append(
+            {
+                "pdb": "\n".join(lines) + "\n",
+                "mutated": mutated,
+                "nearby": neighbours,
+                "ligand": ligand,
+            }
+        )
+
+    return {
+        "kind": "mutation",
+        "states": states,
+        "residues": topology["labels"],
+        "separate_frames": saved1 is not saved0,
+        "time_ps": saved0.time_ps,
+    }
+
+
+def _coordinates(saved, topology, molecule, state=0, atoms=None):
+    """
+    The coordinates of the atoms of a molecule shown at an end state, or of
+    the given atoms.
+    """
+    positions = saved.molecule(
+        molecule["first"], molecule["num_atoms"], topology["num_system_atoms"]
+    )
+    if atoms is None:
+        atoms = molecule["states"][state]["atoms"]
+    return positions[atoms]
+
+
+def _image(box, proteins, others):
+    """
+    Move each of the other molecules into the periodic image nearest to the
+    protein, since coordinates aren't wrapped into the box.
+    """
+    if not _is_periodic(box) or not proteins:
+        return
+    box = _np.asarray(box, dtype=float)
+    inverse = _np.linalg.inv(box)
+    centre = _np.concatenate(proteins).mean(axis=0)
+    for positions in others:
+        shift = _np.round((positions.mean(axis=0) - centre) @ inverse) @ box
+        positions -= shift
+
+
+def _superpose(mobile, target):
+    """
+    The function that best fits a set of coordinates onto another, by
+    rotation and translation.
+    """
+    mobile_centre = mobile.mean(axis=0)
+    target_centre = target.mean(axis=0)
+    u, _, vt = _np.linalg.svd((mobile - mobile_centre).T @ (target - target_centre))
+    # Avoids a reflection.
+    d = _np.sign(_np.linalg.det(vt.T @ u.T))
+    rotation = vt.T @ _np.diag([1.0, 1.0, d]) @ u.T
+    return lambda x: (x - mobile_centre) @ rotation.T + target_centre
 
 
 def _is_periodic(box):
@@ -157,11 +315,22 @@ def _atom(kind, serial, record, chain, xyz):
     )
 
 
+def _ligand_atom(serial, record, index, xyz):
+    """
+    A HETATM record for an atom of a perturbed or other molecule, which are
+    numbered as residues of their own chain.
+    """
+    name, residue, _, element = record
+    record = (name, residue, _LIGAND_RESIDUE - index, element)
+    return _atom("HETATM", serial, record, _LIGAND_CHAIN, xyz)
+
+
 def _topology(topology0, topology1):
     """
-    The atoms of the protein, without hydrogens, and of the λ = 0 end state of
-    each perturbed molecule, read once for each pair of topologies. None if
-    there isn't both a protein and a perturbed molecule.
+    The atoms of each protein, without hydrogens, and of each perturbed
+    molecule, or for a mutated protein, any other molecules, at each end
+    state, read once for each pair of topologies. None if there is nothing to
+    show.
     """
     from ._summary import _file_key
 
@@ -174,77 +343,160 @@ def _topology(topology0, topology1):
     import sire as _sr
 
     from ._data import sire_lock
-    from ._depict import _perturbed_indices
+    from ._depict import _MAX_ATOMS, _non_water, _perturbed_indices, _protein_indices
 
     with sire_lock:
         system0 = _sr.load(str(topology0), show_warnings=False)
         system1 = _sr.load(str(topology1), show_warnings=False)
         atoms = system0.atoms()
+        mols0 = system0.molecules()
+        mols1 = system1.molecules()
 
-        try:
-            protein = list(system0.molecules("protein"))
-        except KeyError:
-            protein = []
-
-        # Chains are only labels, but the perturbed molecules' is kept for them.
+        # Chains are only labels, but the other molecules' is kept for them.
         chains = [c for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" if c != _LIGAND_CHAIN]
 
+        def entry(index, protein):
+            mol0, mol1 = mols0[index], mols1[index]
+            return {
+                "first": atoms.find(mol0.atoms()[0]),
+                "num_atoms": mol0.num_atoms(),
+                "states": [_atoms(mol0, protein), _atoms(mol1, protein)],
+            }
+
+        proteins = sorted(_protein_indices(system0))
+        # Perturbable proteins too large to depict are shown as mutations.
+        # Smaller ones, e.g. peptides, are perturbed molecules like any other.
+        mutated = {
+            i: _mutated_residues(mols0[i], mols1[i])
+            for i in proteins
+            if mols0[i].num_atoms() > _MAX_ATOMS
+        }
+        mutated = {i: residues for i, residues in mutated.items() if residues}
+
         topology = None
-        if protein:
-            proteins = []
-            for i, mol in enumerate(protein):
-                records = [
-                    (
-                        a.name().value(),
-                        r.name().value(),
-                        r.number().value(),
-                        a.element().symbol(),
+        if mutated:
+            # Other molecules, but not water or ions, e.g. a ligand.
+            others = sorted(
+                i
+                for i in _non_water(system0) - set(proteins)
+                if 3 < mols0[i].num_atoms() <= _MAX_ATOMS
+            )
+            topology = {
+                "kind": "mutation",
+                "proteins": [
+                    dict(
+                        entry(i, True),
+                        chain=chains[n % len(chains)],
+                        mutated=mutated.get(i, set()),
+                        ca=_common_ca(mols0[i], mols1[i]),
                     )
-                    for r in mol.residues()
-                    for a in r.atoms()
-                ]
-                # Hydrogens, and dummies, e.g. of a mutated residue, are left out.
-                keep = [j for j, r in enumerate(records) if r[3] not in ("H", "Xx")]
-                proteins.append(
-                    {
-                        "first": atoms.find(mol.atoms()[0]),
-                        "num_atoms": mol.num_atoms(),
-                        "atoms": keep,
-                        "records": [records[j] for j in keep],
-                        "chain": chains[i % len(chains)],
-                    }
-                )
-
-            ligands = []
-            mols0 = system0.molecules()
-            for index in _perturbed_indices(system0, system1):
-                mol = mols0[index]
-                residue = mol.residues()[0].name().value()
-                records = [
-                    (a.name().value(), residue, 0, a.element().symbol())
-                    for a in mol.atoms()
-                ]
-                # Ghost atoms are dummies at λ = 0.
-                keep = [j for j, record in enumerate(records) if record[3] != "Xx"]
-                ligands.append(
-                    {
-                        "first": atoms.find(mol.atoms()[0]),
-                        "num_atoms": mol.num_atoms(),
-                        "atoms": keep,
-                        "records": [records[j] for j in keep],
-                    }
-                )
-
-            # Nothing to centre on otherwise, e.g. for a protein mutation.
-            if ligands:
+                    for n, i in enumerate(proteins)
+                ],
+                "others": [entry(i, False) for i in others],
+                "labels": [
+                    _label(mols0[i], mols1[i], r)
+                    for i in sorted(mutated)
+                    for r in sorted(mutated[i])
+                ],
+            }
+        else:
+            ligands = _perturbed_indices(system0, system1)
+            # A perturbed peptide isn't also drawn as part of the protein.
+            receptors = [i for i in proteins if i not in ligands]
+            # Nothing to centre on otherwise.
+            if ligands and receptors:
                 topology = {
-                    "proteins": proteins,
-                    "ligands": ligands,
-                    "num_system_atoms": len(atoms),
+                    "kind": "ligand",
+                    "proteins": [
+                        dict(entry(i, True), chain=chains[n % len(chains)])
+                        for n, i in enumerate(receptors)
+                    ],
+                    "others": [entry(i, False) for i in ligands],
                 }
+        if topology is not None:
+            topology["num_system_atoms"] = len(atoms)
 
     with _topologies_lock:
         _topologies[key] = topology
         while len(_topologies) > _MAX_TOPOLOGIES:
             _topologies.popitem(last=False)
     return topology
+
+
+def _atoms(mol, protein):
+    """
+    The atoms of an end state of a molecule that are shown: their indices in
+    the molecule, PDB records, and residue indices. Dummies are left out, as
+    are the hydrogens of a protein.
+    """
+    excluded = ("H", "Xx") if protein else ("Xx",)
+    indices, records, residues = [], [], []
+    for r, residue in enumerate(mol.residues()):
+        # A protein's residues keep their own names, but each other molecule
+        # is labelled as a whole.
+        name = (residue if protein else mol.residues()[0]).name().value()
+        number = residue.number().value() if protein else 0
+        for atom in residue.atoms():
+            element = atom.element().symbol()
+            if element in excluded:
+                continue
+            indices.append(atom.index().value())
+            records.append((atom.name().value(), name, number, element))
+            residues.append(r)
+    return {"atoms": indices, "records": records, "residues": residues}
+
+
+def _mutated_residues(mol0, mol1):
+    """
+    The indices of the residues of a protein whose atoms change type or
+    element between the end states, including ghosts. Unlike for a whole
+    molecule in _perturbed_indices, charges are only compared if nothing else
+    changes, since they can be spread over neighbouring residues.
+    """
+    types = zip(
+        mol0.property("ambertype").to_list(), mol1.property("ambertype").to_list()
+    )
+    elements = zip(
+        mol0.property("element").to_list(), mol1.property("element").to_list()
+    )
+    changed = [
+        t0 != t1 or e0.num_protons() != e1.num_protons()
+        for (t0, t1), (e0, e1) in zip(types, elements)
+    ]
+    if not any(changed):
+        charges0 = mol0.property("charge").to_list()
+        charges1 = mol1.property("charge").to_list()
+        changed = [
+            abs(a.value() - b.value()) > 1e-6 for a, b in zip(charges0, charges1)
+        ]
+
+    residues = set()
+    for r, residue in enumerate(mol0.residues()):
+        if any(changed[atom.index().value()] for atom in residue.atoms()):
+            residues.add(r)
+    return residues
+
+
+def _common_ca(mol0, mol1):
+    """
+    The indices of a protein's Cα atoms that are present at both end states.
+    """
+    elements1 = mol1.property("element").to_list()
+    return [
+        atom.index().value()
+        for atom in mol0.atoms()
+        if atom.name().value() == "CA"
+        and atom.element().symbol() == "C"
+        and elements1[atom.index().value()].symbol() == "C"
+    ]
+
+
+def _label(mol0, mol1, residue):
+    """
+    A label for a mutated residue, with its name at each end state.
+    """
+    r0 = mol0.residues()[residue]
+    r1 = mol1.residues()[residue]
+    name0, name1 = r0.name().value(), r1.name().value()
+    names = name0 if name0 == name1 else f"{name0} → {name1}"
+    return f"{names} {r0.number().value()}"

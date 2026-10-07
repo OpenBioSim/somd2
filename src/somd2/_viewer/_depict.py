@@ -201,7 +201,8 @@ def _perturbed_molecules(topology0, topology1):
 def _perturbed_indices(system0, system1):
     """
     The indices of the molecules that change between the end-state systems,
-    leaving out ions and molecules too large to depict, e.g. proteins.
+    leaving out ions and molecules too large to depict, e.g. proteins, whose
+    mutations are shown in 3D instead.
     """
     # Molecules are paired by index, since alchemical ions are only water at
     # one end state.
@@ -225,6 +226,17 @@ def _perturbed_indices(system0, system1):
             continue
         indices.append(index)
     return indices
+
+
+def _protein_indices(system):
+    """
+    Return the indices of the molecules in a system that are proteins.
+    """
+    try:
+        numbers = {mol.number() for mol in system.molecules("protein")}
+    except KeyError:
+        return set()
+    return {i for i, mol in enumerate(system.molecules()) if mol.number() in numbers}
 
 
 def _non_water(system):

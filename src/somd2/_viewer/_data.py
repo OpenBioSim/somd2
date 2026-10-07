@@ -163,6 +163,16 @@ def _stamp(*paths):
     return tuple(key)
 
 
+def _checkpoint_lambda(path):
+    """
+    The λ value of a window's checkpoint, from its name, or None.
+    """
+    try:
+        return float(_Path(path).stem.rsplit("_", 1)[-1])
+    except ValueError:
+        return None
+
+
 def _to_ns(value):
     """
     Convert a time string from the config, e.g. '2 ps', to nanoseconds.
@@ -1145,6 +1155,7 @@ class Simulation:
         """
         Return depictions of the perturbed molecules at each end state.
         """
+        from ._binding_site import site_kind
         from ._depict import depict
 
         top0 = self.path / "system0.prm7"
@@ -1155,7 +1166,12 @@ class Simulation:
         def load():
             try:
                 with sire_lock:
-                    return {"status": "done", "molecules": depict(top0, top1)}
+                    return {
+                        "status": "done",
+                        "molecules": depict(top0, top1),
+                        # Shown in 3D instead of the depictions.
+                        "mutation": site_kind(top0, top1) == "mutation",
+                    }
             except Exception as e:
                 return {
                     "status": "error",
@@ -1203,11 +1219,12 @@ class Simulation:
     def binding_site(self, known=None):
         """
         Return the protein and perturbed molecules at the latest saved
-        coordinates of the λ = 0 window. Each version has a key, and if the
-        caller already has the latest, only that is returned.
+        coordinates of the λ = 0 window, or a mutated protein at those of the
+        λ = 0 and λ = 1 windows. Each version has a key, and if the caller
+        already has the latest, only that is returned.
         """
-        from ._binding_site import binding_site, has_binding_site
-        from ._coordinates import Mismatch
+        from ._binding_site import binding_site, site_kind
+        from ._coordinates import Mismatch, read_coordinates, read_repex_coordinates
 
         top0 = self.path / "system0.prm7"
         top1 = self.path / "system1.prm7"
@@ -1215,7 +1232,8 @@ class Simulation:
             return {"status": "unavailable", "reason": "No end-state topologies yet."}
         # Checked first, so that runs without a protein never show the view.
         try:
-            if not has_binding_site(top0, top1):
+            kind = site_kind(top0, top1)
+            if kind is None:
                 return {"status": "none"}
         except Exception as e:
             return {"status": "error", "reason": self._report(e, "read the topology")}
@@ -1224,21 +1242,34 @@ class Simulation:
             return {
                 "status": "unavailable",
                 "reason": "Shown once the simulation has saved its coordinates.",
+                "kind": kind,
             }
-        stamp = (_stamp(top0, top1), _stamp(path))
+        # A mutation is shown at each end state from its own window, if the
+        # λ = 1 window has been run.
+        last = None
+        if kind == "mutation":
+            last = self._positions_file(last=True)
+            if last.suffix != ".pkl" and _checkpoint_lambda(last) != 1.0:
+                last = None
+        stamp = (_stamp(top0, top1), _stamp(path), _stamp(last) if last else None)
         key = _hashlib.sha1(repr(stamp).encode()).hexdigest()[:16]
         if known == key:
             return {"status": "unchanged", "key": key}
 
         def load():
             try:
-                saved = self._positions()
+                if last == path:
+                    # Both windows are in the replica exchange state.
+                    saved, saved1 = read_repex_coordinates(path, [0, -1])
+                else:
+                    saved = self._positions()
+                    saved1 = read_coordinates(last, -1) if last else None
                 if saved is None:
                     return {
                         "status": "unavailable",
                         "reason": "No coordinates have been saved yet.",
                     }
-                site = binding_site(top0, top1, saved)
+                site = binding_site(top0, top1, saved, saved1)
             except Mismatch:
                 return {
                     "status": "unavailable",
@@ -1260,30 +1291,33 @@ class Simulation:
             if result["status"] == "error":
                 with self._lock:
                     self._cache.pop("binding_site", None)
-            return _clean(result)
+            # So that the page can title the card before it is shown.
+            return _clean(dict(result, kind=kind))
 
-    def _positions_file(self):
+    def _positions_file(self, last=False):
         """
-        The first file holding the system's coordinates: the checkpoint of
-        the first λ window, or the replica exchange state.
+        The file holding the system's coordinates in the first, or last, λ
+        window: the window's checkpoint, or the replica exchange state.
         """
         checkpoints = sorted(self.path.glob("checkpoint_*.npz")) or sorted(
             self.path.glob("checkpoint_*.s3")
         )
         if checkpoints:
-            return checkpoints[0]
+            return checkpoints[-1 if last else 0]
         repex = self.path / "repex_state.pkl"
         return repex if repex.exists() else None
 
-    def _positions(self):
+    def _positions(self, last=False):
         """
-        The latest coordinates of the λ = 0 window, as SavedCoordinates, or
-        None if there are none yet.
+        The latest coordinates of the first, or last, λ window, as
+        SavedCoordinates, or None if there are none yet.
         """
         from ._coordinates import read_coordinates
 
-        path = self._positions_file()
-        return read_coordinates(path) if path is not None else None
+        path = self._positions_file(last)
+        if path is None:
+            return None
+        return read_coordinates(path, -1 if last else 0)
 
     def _unreadable(self, error):
         """
