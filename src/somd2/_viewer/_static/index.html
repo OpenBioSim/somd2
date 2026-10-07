@@ -622,22 +622,28 @@ function saveChart(el, format) {
   const { svg, width, height } = chartSVG(el);
   const name = fileName(chartTitle(el));
   if (format === "svg") return download(`${name}.svg`, svg, "image/svg+xml");
-  const blob = new Blob([svg], { type: "image/svg+xml" });
   // Drawn at three times the size, so that it stays sharp in a document.
   const scale = 3;
-  const url = URL.createObjectURL(blob);
-  const image = new Image();
-  image.onload = () => {
-    const canvas = document.createElement("canvas");
-    canvas.width = width * scale;
-    canvas.height = height * scale;
-    const context = canvas.getContext("2d");
-    context.scale(scale, scale);
-    context.drawImage(image, 0, 0, width, height);
-    URL.revokeObjectURL(url);
-    canvas.toBlob((png) => download(`${name}.png`, png, "image/png"), "image/png");
-  };
-  image.src = url;
+  const png = new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement("canvas");
+      canvas.width = width * scale;
+      canvas.height = height * scale;
+      const context = canvas.getContext("2d");
+      context.scale(scale, scale);
+      context.drawImage(image, 0, 0, width, height);
+      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("the image is too large"))), "image/png");
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("the chart couldn't be drawn"));
+    };
+    image.src = url;
+  });
+  download(`${name}.png`, png, "image/png");
 }
 
 // The current view of a 3D viewer, on a white background.
@@ -648,8 +654,7 @@ function saveViewer(v, title) {
   const uri = v.viewer.pngURI();
   v.viewer.setBackgroundColor(css("--surface"));
   v.viewer.render();
-  const bytes = Uint8Array.from(atob(uri.split(",")[1]), (c) => c.charCodeAt(0));
-  download(`${fileName(title)}.png`, new Blob([bytes], { type: "image/png" }), "image/png");
+  download(`${fileName(title)}.png`, fetch(uri).then((r) => r.blob()), "image/png");
 }
 
 // ---------------------------------------------------------------- rendering
@@ -1527,8 +1532,9 @@ function valueWithError(value, error) {
 }
 
 // Use the browser's save dialog where available, otherwise ask for a name. The
-// content is text or a Blob.
-async function download(name, text, type) {
+// content can still be being made, e.g. an image, since the dialog must open
+// straight after the click.
+async function download(name, content, type) {
   if (window.showSaveFilePicker) {
     const extension = name.slice(name.lastIndexOf("."));
     try {
@@ -1536,8 +1542,9 @@ async function download(name, text, type) {
         suggestedName: name,
         types: [{ description: extension.slice(1).toUpperCase(), accept: { [type]: [extension] } }],
       });
+      const data = await content;
       const file = await handle.createWritable();
-      await file.write(text);
+      await file.write(data);
       await file.close();
     } catch (e) {
       if (e.name !== "AbortError") window.alert(`Couldn't save the file: ${e.message}`);
@@ -1546,14 +1553,23 @@ async function download(name, text, type) {
   }
   name = window.prompt("Save as", name);
   if (!name) return;
-  const url = URL.createObjectURL(new Blob([text], { type }));
+  let data;
+  try {
+    data = await content;
+  } catch (e) {
+    window.alert(`Couldn't save the file: ${e.message}`);
+    return;
+  }
+  const url = URL.createObjectURL(new Blob([data], { type }));
   const link = document.createElement("a");
   link.href = url;
   link.download = name;
   document.body.appendChild(link);
   link.click();
   link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  // Kept for a while, since a browser that asks where to save only reads the
+  // file once that is answered.
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 function toCSV(header, rows) {
