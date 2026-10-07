@@ -343,7 +343,13 @@ def _topology(topology0, topology1):
     import sire as _sr
 
     from ._data import sire_lock
-    from ._depict import _MAX_ATOMS, _non_water, _perturbed_indices, _protein_indices
+    from ._depict import (
+        _MAX_ATOMS,
+        _mutations,
+        _non_water,
+        _perturbed_indices,
+        _protein_indices,
+    )
 
     with sire_lock:
         system0 = _sr.load(str(topology0), show_warnings=False)
@@ -364,10 +370,9 @@ def _topology(topology0, topology1):
             }
 
         proteins = sorted(_protein_indices(system0))
-        # Perturbable proteins and peptides, e.g. a peptide ligand, are shown
-        # as mutations, along with any other protein, e.g. a receptor.
-        mutated = {i: _mutated_residues(mols0[i], mols1[i]) for i in proteins}
-        mutated = {i: residues for i, residues in mutated.items() if residues}
+        # Mutated proteins and peptides, e.g. a peptide ligand, are shown with
+        # any other protein, e.g. a receptor.
+        mutated = _mutations(system0, system1, proteins)
 
         topology = None
         if mutated:
@@ -396,14 +401,16 @@ def _topology(topology0, topology1):
                 ],
             }
         else:
-            ligands = _perturbed_indices(system0, system1)
+            ligands = _perturbed_indices(system0, system1, mutated)
+            # E.g. a decoupled peptide isn't also drawn as part of the protein.
+            receptors = [i for i in proteins if i not in ligands]
             # Nothing to centre on otherwise.
-            if ligands and proteins:
+            if ligands and receptors:
                 topology = {
                     "kind": "ligand",
                     "proteins": [
                         dict(entry(i, True), chain=chains[n % len(chains)])
-                        for n, i in enumerate(proteins)
+                        for n, i in enumerate(receptors)
                     ],
                     "others": [entry(i, False) for i in ligands],
                 }
@@ -438,37 +445,6 @@ def _atoms(mol, protein):
             records.append((atom.name().value(), name, number, element))
             residues.append(r)
     return {"atoms": indices, "records": records, "residues": residues}
-
-
-def _mutated_residues(mol0, mol1):
-    """
-    The indices of the residues of a protein whose atoms change type or
-    element between the end states, including ghosts. Unlike for a whole
-    molecule in _perturbed_indices, charges are only compared if nothing else
-    changes, since they can be spread over neighbouring residues.
-    """
-    types = zip(
-        mol0.property("ambertype").to_list(), mol1.property("ambertype").to_list()
-    )
-    elements = zip(
-        mol0.property("element").to_list(), mol1.property("element").to_list()
-    )
-    changed = [
-        t0 != t1 or e0.num_protons() != e1.num_protons()
-        for (t0, t1), (e0, e1) in zip(types, elements)
-    ]
-    if not any(changed):
-        charges0 = mol0.property("charge").to_list()
-        charges1 = mol1.property("charge").to_list()
-        changed = [
-            abs(a.value() - b.value()) > 1e-6 for a, b in zip(charges0, charges1)
-        ]
-
-    residues = set()
-    for r, residue in enumerate(mol0.residues()):
-        if any(changed[atom.index().value()] for atom in residue.atoms()):
-            residues.add(r)
-    return residues
 
 
 def _common_ca(mol0, mol1):

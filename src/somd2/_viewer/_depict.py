@@ -33,9 +33,12 @@ _MAX_ATOMS = 400
 # since a skeletal formula of e.g. methane is just a label.
 _MAX_HEAVY_WITH_HYDROGENS = 1
 
-# Assigning bond orders takes seconds at around 140 atoms, and minutes beyond,
-# so larger molecules are drawn from their connectivity alone.
-_MAX_BOND_ORDER_ATOMS = 120
+# Bond orders are assigned in the viewer's own process for molecules of up to
+# this many atoms. Larger ones can take minutes, e.g. peptides with charged
+# residues, so are given up on after the timeout, in seconds, and drawn from
+# their connectivity alone.
+_MAX_INLINE_ATOMS = 100
+_BOND_ORDER_TIMEOUT = 15
 
 # The number of bonds of a positively charged N, O, P or S, by atomic number.
 _ONIUM_DEGREE = {7: 4, 8: 3, 15: 4, 16: 3}
@@ -117,6 +120,7 @@ def depict(topology0, topology1):
                 "num_changed": len(p.changed),
                 "bond_orders0": p.bond_orders0,
                 "bond_orders1": p.bond_orders1,
+                "bond_orders_too_slow": p.bond_orders_too_slow,
                 "smiles0": Chem.MolToSmiles(Chem.RemoveHs(p.rdmol0, sanitize=False)),
                 "smiles1": Chem.MolToSmiles(Chem.RemoveHs(p.rdmol1, sanitize=False)),
                 "pixels": pixels,
@@ -172,8 +176,11 @@ def _perturbed_molecules(topology0, topology1):
         # be zeroed at a decoupled end state, so also try the other end state.
         charge0 = round(sum(charges0))
         charge1 = round(sum(charges1))
-        rdmol0, map0, bond_orders0 = _to_rdkit(mol0, dummy0, [charge0, charge1])
-        rdmol1, map1, bond_orders1 = _to_rdkit(mol1, dummy1, [charge1, charge0])
+        rdmol0, map0 = _to_rdkit(mol0, dummy0)
+        rdmol1, map1 = _to_rdkit(mol1, dummy1)
+        (rdmol0, rdmol1), (bond_orders0, bond_orders1), too_slow = _assign_bond_orders(
+            [rdmol0, rdmol1], [[charge0, charge1], [charge1, charge0]]
+        )
 
         # Map between the atoms of the two end states via the merged molecule.
         index1 = {orig: i for i, orig in enumerate(map1)}
@@ -199,20 +206,22 @@ def _perturbed_molecules(topology0, topology1):
             mapping={i: index1[o] for i, o in enumerate(map0) if o in index1},
             bond_orders0=bond_orders0,
             bond_orders1=bond_orders1,
+            bond_orders_too_slow=too_slow,
         )
 
 
-def _perturbed_indices(system0, system1):
+def _perturbed_indices(system0, system1, mutations=None):
     """
     The indices of the molecules that change between the end-state systems,
-    leaving out ions, proteins and peptides, whose mutations are shown in 3D
-    instead, and molecules too large to depict.
+    leaving out ions, mutated proteins and peptides, which are shown in 3D
+    instead, and molecules too large to depict. The mutations are found if not
+    given.
     """
+    if mutations is None:
+        mutations = _mutations(system0, system1, _protein_indices(system0))
     # Molecules are paired by index, since alchemical ions are only water at
     # one end state.
-    candidates = sorted(
-        (_non_water(system0) & _non_water(system1)) - _protein_indices(system0)
-    )
+    candidates = sorted((_non_water(system0) & _non_water(system1)) - set(mutations))
     mols0 = system0.molecules()
     mols1 = system1.molecules()
 
@@ -234,6 +243,56 @@ def _perturbed_indices(system0, system1):
     return indices
 
 
+def _mutations(system0, system1, proteins):
+    """
+    The mutated residues of each of the proteins, by index, that have some.
+    A protein whose residues all change, e.g. a decoupled peptide, is a
+    perturbed molecule rather than a mutation.
+    """
+    mols0 = system0.molecules()
+    mols1 = system1.molecules()
+    mutations = {}
+    for index in proteins:
+        residues = _mutated_residues(mols0[index], mols1[index])
+        if residues and len(residues) < mols0[index].num_residues():
+            mutations[index] = residues
+    return mutations
+
+
+def _mutated_residues(mol0, mol1):
+    """
+    The indices of the residues of a protein whose atoms change type or
+    element between the end states, including ghosts. Unlike for a whole
+    molecule in _perturbed_indices, charges are only compared if nothing else
+    changes, since they can be spread over neighbouring residues.
+    """
+    types = zip(
+        mol0.property("ambertype").to_list(), mol1.property("ambertype").to_list()
+    )
+    elements = zip(
+        mol0.property("element").to_list(), mol1.property("element").to_list()
+    )
+    changed = [
+        t0 != t1 or e0.num_protons() != e1.num_protons()
+        for (t0, t1), (e0, e1) in zip(types, elements)
+    ]
+    if not any(changed):
+        charges0 = mol0.property("charge").to_list()
+        charges1 = mol1.property("charge").to_list()
+        changed = [
+            abs(a.value() - b.value()) > 1e-6 for a, b in zip(charges0, charges1)
+        ]
+    # E.g. a protein that isn't perturbed.
+    if not any(changed):
+        return set()
+
+    residues = set()
+    for r, residue in enumerate(mol0.residues()):
+        if any(changed[atom.index().value()] for atom in residue.atoms()):
+            residues.add(r)
+    return residues
+
+
 def _protein_indices(system):
     """
     Return the indices of the molecules in a system that are proteins.
@@ -253,17 +312,38 @@ def _non_water(system):
     return {i for i, mol in enumerate(system.molecules()) if mol.number() in numbers}
 
 
-def _assign_bond_orders(rdmol, charges):
+def _assign_bond_orders(rdmols, charges):
     """
-    Assign bond orders from connectivity alone, trying each candidate total
-    charge until a chemically sensible structure is found.
+    Assign bond orders to the end states of a molecule from connectivity
+    alone, trying each candidate total charge for each.
+
+    Returns each end state, whether its bond orders were assigned, and whether
+    that was given up on as too slow, in which case neither end state has
+    them, so that the two are drawn alike.
+    """
+    templates = [_bond_order_template(rdmol) for rdmol in rdmols]
+    if max(rdmol.GetNumAtoms() for rdmol in rdmols) <= _MAX_INLINE_ATOMS:
+        found = _search_bond_orders(templates, charges)
+    else:
+        found = _run_with_timeout(
+            _search_bond_orders, (templates, charges), _BOND_ORDER_TIMEOUT
+        )
+    too_slow = found is None
+    if too_slow:
+        found = [None] * len(templates)
+    mols = [
+        mol if mol is not None else _connectivity_only(template)
+        for mol, template in zip(found, templates)
+    ]
+    return mols, [mol is not None for mol in found], too_slow
+
+
+def _bond_order_template(rdmol):
+    """
+    A copy of a molecule with only single bonds and no charges, for its bond
+    orders to be assigned.
     """
     from rdkit import Chem
-    from rdkit import RDLogger
-    from rdkit.Chem import rdDetermineBonds
-
-    # Failed attempts are expected, so don't report them.
-    RDLogger.DisableLog("rdApp.*")
 
     template = Chem.RWMol(rdmol)
     for bond in template.GetBonds():
@@ -275,43 +355,94 @@ def _assign_bond_orders(rdmol, charges):
         atom.SetNumRadicalElectrons(0)
         if atom.GetAtomicNum() > 1:
             atom.SetNoImplicit(True)
+    return template.GetMol()
 
-    candidates = charges + [0, 1, -1, 2, -2]
-    if rdmol.GetNumAtoms() > _MAX_BOND_ORDER_ATOMS:
-        candidates = []
-    for charge in dict.fromkeys(candidates):
-        mol = Chem.Mol(template)
-        try:
-            rdDetermineBonds.DetermineBondOrders(
-                mol, charge=charge, allowChargedFragments=True, embedChiral=False
-            )
-            Chem.SanitizeMol(mol)
-        except Exception:
-            continue
-        if all(
-            atom.GetNumRadicalElectrons() == 0
-            and (atom.GetFormalCharge() == 0 or atom.GetAtomicNum() not in (6, 1))
-            for atom in mol.GetAtoms()
-        ):
-            return mol, True
 
-    # Fall back to the connectivity alone, charging atoms with an extra bond,
-    # e.g. a protonated amine, which RDKit would otherwise reject.
-    mol = template.GetMol()
+def _search_bond_orders(templates, charges):
+    """
+    Each template with bond orders, from the first of its candidate total
+    charges that gives a chemically sensible structure, or None.
+    """
+    from rdkit import Chem
+    from rdkit import RDLogger
+    from rdkit.Chem import rdDetermineBonds
+
+    # Failed attempts are expected, so don't report them.
+    RDLogger.DisableLog("rdApp.*")
+
+    def search(template, candidates):
+        for charge in dict.fromkeys(candidates + [0, 1, -1, 2, -2]):
+            mol = Chem.Mol(template)
+            try:
+                rdDetermineBonds.DetermineBondOrders(
+                    mol, charge=charge, allowChargedFragments=True, embedChiral=False
+                )
+                Chem.SanitizeMol(mol)
+            except Exception:
+                continue
+            if all(
+                atom.GetNumRadicalElectrons() == 0
+                and (atom.GetFormalCharge() == 0 or atom.GetAtomicNum() not in (6, 1))
+                for atom in mol.GetAtoms()
+            ):
+                return mol
+        return None
+
+    return [search(t, c) for t, c in zip(templates, charges)]
+
+
+def _connectivity_only(template):
+    """
+    A molecule drawn from its connectivity alone, charging atoms with an extra
+    bond, e.g. a protonated amine, which RDKit would otherwise reject.
+    """
+    from rdkit import Chem
+
+    mol = Chem.Mol(template)
     for atom in mol.GetAtoms():
         if atom.GetDegree() == _ONIUM_DEGREE.get(atom.GetAtomicNum()):
             atom.SetFormalCharge(1)
     mol.UpdatePropertyCache(strict=False)
     Chem.FastFindRings(mol)
-    return mol, False
+    return mol
 
 
-def _to_rdkit(mol, dummy, charges):
+def _run_with_timeout(func, args, timeout):
     """
-    Convert the real atoms of an end state to RDKit.
+    Call a function in a separate process, returning its result, or None if it
+    doesn't finish within the timeout, in seconds.
+    """
+    import multiprocessing
 
-    Returns the RDKit molecule, the merged molecule index of each atom, and
-    whether bond orders could be assigned.
+    # Spawned rather than forked, since the viewer runs several threads.
+    context = multiprocessing.get_context("spawn")
+    receiver, sender = context.Pipe(duplex=False)
+    process = context.Process(
+        target=_send_result, args=(sender, func, args), daemon=True
+    )
+    process.start()
+    sender.close()
+    try:
+        return receiver.recv() if receiver.poll(timeout) else None
+    except EOFError:
+        # The process ended without a result.
+        return None
+    finally:
+        receiver.close()
+        if process.is_alive():
+            process.terminate()
+        process.join()
+
+
+def _send_result(sender, func, args):
+    sender.send(func(*args))
+
+
+def _to_rdkit(mol, dummy):
+    """
+    Convert the real atoms of an end state to RDKit, without bond orders.
+
+    Returns the RDKit molecule, and the merged molecule index of each atom.
     """
     import sire as _sr
 
@@ -322,9 +453,7 @@ def _to_rdkit(mol, dummy, charges):
     if len(real) < len(dummy):
         mol = mol.atoms("not element Xx").extract()
 
-    rdmol = _sr.convert.to_rdkit(mol, determine_bond_orders=False)
-    rdmol, has_bond_orders = _assign_bond_orders(rdmol, charges)
-    return rdmol, real, has_bond_orders
+    return _sr.convert.to_rdkit(mol, determine_bond_orders=False), real
 
 
 def _draw_mapping(rdmol0, rdmol1, mapping, map0, map1, pixels):
