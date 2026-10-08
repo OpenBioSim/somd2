@@ -519,6 +519,13 @@ be run with either schedule:
 somd2 bound.s3 --lambda-schedule decouple
 ```
 
+> [!WARNING]
+> Always create the perturbable ligand with `sr.morph.decouple()`, even when
+> using the `annihilate` schedule. The λ schedule alone chooses between
+> decoupling and annihilation. `sr.morph.annihilate()` also removes the ligand's
+> bonded terms, so the ligand falls apart as λ increases unless every atom is
+> restrained.
+
 The ligand must be restrained within the binding site. If no restraints are
 passed, a Boresch restraint is generated automatically for the bound leg, i.e.
 when the system contains a protein as well as the ligand and water. This is
