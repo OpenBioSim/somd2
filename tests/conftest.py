@@ -113,3 +113,13 @@ def ring_break_mols():
     """
     mols = sr.load_test_files("6yngd_to_intgd.s3")
     return sr.morph.link_to_reference(mols)
+
+
+@pytest.fixture(scope="session")
+def abfe_charge_change_mols():
+    """
+    Load the bound leg of an ABFE calculation for a charged ligand, which
+    needs alchemical ions to keep the charge constant.
+    """
+    mols = sr.load_test_files("abfe_charge_change.s3")
+    return sr.morph.link_to_reference(mols)
