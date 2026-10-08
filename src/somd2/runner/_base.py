@@ -223,6 +223,24 @@ class RunnerBase:
                         _logger.warning(msg)
                         break
 
+        # The ABFE schedules expect the ligand's bonded terms to be retained, which
+        # sire.morph.annihilate() removes.
+        if self._config._lambda_schedule_name in ("annihilate", "decouple"):
+            for mol in self._system["property is_perturbable"].molecules():
+                if (
+                    mol.has_property("bond1")
+                    and mol.property("bond0").num_functions() > 0
+                    and mol.property("bond1").num_functions() == 0
+                ):
+                    msg = (
+                        "The perturbable molecule has no bonds at lambda = 1, as "
+                        "created by sire.morph.annihilate(). Create it with "
+                        "sire.morph.decouple() instead. The lambda schedule alone "
+                        "chooses between decoupling and annihilation."
+                    )
+                    _logger.error(msg)
+                    raise ValueError(msg)
+
         # Check for a periodic space.
         self._has_space = self._check_space()
 
@@ -1566,11 +1584,12 @@ class RunnerBase:
 
         mol_indices: [int]
             The absolute molecule index (position in `system.molecules()`) of
-            each water to convert into an alchemical ion. If provided, these
-            molecules are converted directly, bypassing the "furthest waters"
-            search. Used on restart to reproduce the exact same ion(s) chosen
-            in the original run, independent of any GCMC state or changes to
-            the search heuristic. Must have the same length as `abs(charge_diff)`.
+            each water, or free counter-ion, to convert into an alchemical ion.
+            If provided, these molecules are converted directly, bypassing the
+            "furthest molecules" search. Used on restart to reproduce the exact
+            same ion(s) chosen in the original run, independent of any GCMC
+            state or changes to the search heuristic. Must have the same length
+            as `abs(charge_diff)`.
 
         Returns
         -------
@@ -1591,6 +1610,15 @@ class RunnerBase:
             The absolute molecule index (position in `system.molecules()`,
             prior to any conversion) of each alchemical ion that was added.
             Suitable for passing back in as `mol_indices` on a restart.
+
+        Notes
+        -----
+
+        Existing ion parameters are preferred. A free ion of the required
+        type is used as a template to perturb the furthest water(s) into.
+        Failing that, the furthest free counter-ion(s) are perturbed into
+        water. Any remaining charge is balanced by perturbing the furthest
+        water(s) into a template ion for the water model.
         """
 
         from sire.legacy.IO import createChlorineIon as _createChlorineIon
@@ -1623,46 +1651,86 @@ class RunnerBase:
                 f"closest 1 atoms to {centre.x().value(), centre.y().value(), centre.z().value()}"
             ]
 
-        # The number of waters to convert is the absolute charge difference.
-        num_waters = abs(charge_diff)
+        def _free_ions(element):
+            try:
+                mols = system[f"element {element}"].molecules()
+            except KeyError:
+                return []
+            return [mol for mol in mols if mol.num_atoms() == 1]
 
-        # Make sure there are enough waters to convert. The charge difference should
-        # never be this large, but it prevents a crash if it is.
-        if num_waters > len(system["water"].molecules()):
-            raise ValueError(
-                f"Insufficient waters to convert to ions. {num_waters} required, "
-                f"{len(system['water'].molecules())} available."
-            )
+        # The number of alchemical ions is the absolute charge difference.
+        num_ions = abs(charge_diff)
+
+        # The ion that balances the charge, and its counter-ion.
+        if charge_diff > 0:
+            ion_str, ion_elem, counter_str, counter_elem = "Cl-", "Cl", "Na+", "Na"
+            create_ion = _createChlorineIon
+        else:
+            ion_str, ion_elem, counter_str, counter_elem = "Na+", "Na", "Cl-", "Cl"
+            create_ion = _createSodiumIon
+
+        # Use a free ion of the required type as a parameter template, if present.
+        ion_templates = _free_ions(ion_elem)
+        ion_template = ion_templates[0] if ion_templates else None
+        if ion_template is not None:
+            _logger.debug(f"Found {ion_str} ion in system.")
+
+        waters = system["water"].molecules()
+        water_template = waters[0]
 
         if mol_indices is not None:
-            if len(mol_indices) != num_waters:
+            if len(mol_indices) != num_ions:
                 raise ValueError(
                     f"Number of stored alchemical-ion molecule indices "
                     f"({len(mol_indices)}) does not match the current charge "
-                    f"difference ({num_waters} waters required)."
+                    f"difference ({num_ions} ions required)."
                 )
 
             # Reuse the exact molecules chosen in the original run.
             all_mols = system.molecules()
-            waters = [all_mols[idx] for idx in mol_indices]
+            mols = [all_mols[idx] for idx in mol_indices]
         else:
             # Reference coordinates.
             coords = system.molecules("property is_perturbable").coordinates()
-            coord_string = (
-                f"{coords[0].value()}, {coords[1].value()}, {coords[2].value()}"
-            )
 
-            # Find the furthest N waters from the perturbable molecule.
-            waters = system[
-                f"furthest {num_waters} waters from {coord_string}"
-            ].molecules()
+            # Without a template, perturb the furthest free counter-ions to water.
+            mols = []
+            if ion_template is None:
+                space = system.space()
+                counter_ions = sorted(
+                    _free_ions(counter_elem),
+                    key=lambda mol: float(space.calc_dist(coords, mol.coordinates())),
+                    reverse=True,
+                )
+                mols = counter_ions[:num_ions]
+
+            # Balance any remaining charge by perturbing the furthest waters.
+            num_waters = num_ions - len(mols)
+            if num_waters > 0:
+                # Make sure there are enough waters to convert. The charge
+                # difference should never be this large, but it prevents a
+                # crash if it is.
+                if num_waters > len(waters):
+                    raise ValueError(
+                        f"Insufficient waters to convert to ions. {num_waters} "
+                        f"required, {len(waters)} available."
+                    )
+
+                coord_string = (
+                    f"{coords[0].value()}, {coords[1].value()}, {coords[2].value()}"
+                )
+                mols += list(
+                    system[
+                        f"furthest {num_waters} waters from {coord_string}"
+                    ].molecules()
+                )
 
         # Determine the water model.
-        if waters[0].num_atoms() == 3:
+        if water_template.num_atoms() == 3:
             model = "tip3p"
-        elif waters[0].num_atoms() == 4:
+        elif water_template.num_atoms() == 4:
             model = "tip4p"
-        elif waters[0].num_atoms() == 5:
+        elif water_template.num_atoms() == 5:
             # Note that AMBER has no ion model for tip5p.
             model = "tip4p"
 
@@ -1680,102 +1748,34 @@ class RunnerBase:
         ion_mol_indices = []
 
         # Create the ions.
-        for water in waters:
-            # Flag to indicate whether we need to reverse the alchemical ion
-            # perturbation, i.e. ion to water, rather than water to ion.
-            is_reverse = False
-
-            # Create an ion to keep the charge constant throughout the
-            # perturbation.
-            if charge_diff > 0:
-                # Try to find a free chlorine ion so that we match parameters.
-                try:
-                    has_ion = False
-                    ions = system["element Cl"].molecules()
-                    for ion in ions:
-                        if ion.num_atoms() == 1:
-                            has_ion = True
-                            _logger.debug("Found Cl- ion in system.")
-                            break
-
-                    # If there isn't an ion, then try searching for a free sodium ion.
-                    if not has_ion:
-                        ions = system["element Na"].molecules()
-                        for ion in ions:
-                            if ion.num_atoms() == 1:
-                                has_ion = True
-                                is_reverse = True
-                                _logger.debug("Found Na+ ion in system.")
-                                break
-
-                    # If not found, create one using a template.
-                    if not has_ion:
-                        _logger.debug(f"Creating Cl- ion from {model} water template.")
-                        ion = _createChlorineIon(
-                            water["element O"].coordinates(), model
-                        )
-
-                # If not found, create one using a template.
-                except:
-                    _logger.debug(f"Creating Cl- ion from {model} water template.")
-                    ion = _createChlorineIon(water["element O"].coordinates(), model)
-
-                # Create the ion string.
-                if is_reverse:
-                    ion_str = "Na+"
-                else:
-                    ion_str = "Cl-"
-
-            else:
-                # Try to find a free sodium ion so that we match parameters.
-                try:
-                    has_ion = False
-                    ions = system["element Na"].molecules()
-                    for ion in ions:
-                        if ion.num_atoms() == 1:
-                            has_ion = True
-                            _logger.debug("Found Na+ ion in system.")
-                            break
-
-                    # If there isn't an ion, then try searching for a free chlorine ion.
-                    if not has_ion:
-                        ions = system["element Cl"].molecules()
-                        for ion in ions:
-                            if ion.num_atoms() == 1:
-                                has_ion = True
-                                is_reverse = True
-                                _logger.debug("Found Cl- ion in system.")
-                                break
-
-                    # If not found, create one using a template.
-                    if not has_ion:
-                        _logger.debug(f"Creating Na+ ion from {model} water template.")
-                        ion = _createSodiumIon(water["element O"].coordinates(), model)
-
-                # If not found, create one using a template.
-                except:
-                    _logger.debug(f"Creating Na+ ion from {model} water template.")
-                    ion = _createSodiumIon(water["element O"].coordinates(), model)
-
-                # Create the ion string.
-                if is_reverse:
-                    ion_str = "Cl-"
-                else:
-                    ion_str = "Na+"
+        for mol in mols:
+            # Free counter-ions are perturbed to water, everything else is a water.
+            is_reverse = mol.num_atoms() == 1
 
             # Create an alchemical ion: ion --> water.
             if is_reverse:
-                merged = _sr.morph.merge(ion, water, map={"as_new_molecule": False})
+                # Only the oxygen is aligned to the ion, so move the whole water there.
+                delta = mol.coordinates() - water_template["element O"].coordinates()
+                water = water_template.move().translate(delta).commit()
+                merged = _sr.morph.merge(mol, water, map={"as_new_molecule": False})
             # Create an alchemical ion: water --> ion.
             else:
-                merged = _sr.morph.merge(water, ion, map={"as_new_molecule": False})
+                if ion_template is None:
+                    _logger.debug(
+                        f"Creating {ion_str} ion from {model} water template."
+                    )
+                    ion = create_ion(mol["element O"].coordinates(), model)
+                else:
+                    ion = ion_template
+                merged = _sr.morph.merge(mol, ion, map={"as_new_molecule": False})
 
             # Flag that this an alchemical ion.
             merged = merged.edit().set_property("is_alchemical_ion", True).commit()
 
             # If necessary, add a restraint to keep the ion away from the
             # perturbable molecule. The ion always maps to the oxygen atom of the
-            # water, which is the first atom in the merged molecule.
+            # water, which is the first atom in the merged molecule in either
+            # direction.
             if restraint_distance is not None:
                 from sire.restraints import inverse_distance as _inverse_distance
 
@@ -1795,17 +1795,17 @@ class RunnerBase:
             system.update(merged)
 
             # Record the molecule number of the alchemical ion.
-            ion_numbers.append(water.number())
+            ion_numbers.append(mol.number())
 
-            # Get the index of the perturbed water.
-            index = numbers.index(water.number())
+            # Get the index of the perturbed molecule.
+            index = numbers.index(mol.number())
             ion_mol_indices.append(index)
 
             # Log that we are adding an alchemical ion.
             if is_reverse:
                 _logger.info(
-                    f"Water at molecule index {index} will be perturbed from a "
-                    f"{ion_str} ion to keep charge constant."
+                    f"{counter_str} ion at molecule index {index} will be perturbed "
+                    "to a water to keep charge constant."
                 )
             else:
                 _logger.info(
