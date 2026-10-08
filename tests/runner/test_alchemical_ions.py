@@ -8,6 +8,23 @@ from somd2.config import Config
 from somd2.runner import Runner
 
 
+def _assert_built_in_place(mols, new_mols, ion_mol_indices):
+    """
+    Each alchemical ion has the atoms of a water, all close to the original
+    water oxygen or counter-ion.
+    """
+    num_water_atoms = mols["water"].molecules()[0].num_atoms()
+    space = new_mols.space()
+    all_mols = mols.molecules()
+    for idx in ion_mol_indices:
+        old = all_mols[idx]
+        new = new_mols[old.number()]
+        assert new.num_atoms() == num_water_atoms
+        centre = old.atoms()[0].coordinates()
+        for atom in new.atoms():
+            assert float(space.calc_dist(centre, atom.coordinates())) < 1.5
+
+
 @pytest.mark.parametrize("mols", ["ethane_methanol", "ethane_methanol_ions"])
 def test_alchemical_ions(mols, request):
     """Ensure that alchemical ions are added correctly."""
@@ -24,6 +41,7 @@ def test_alchemical_ions(mols, request):
     # Make sure there is one perturbable-molecule index per ion.
     assert len(ion_indices) == 10
     assert len(ion_mol_indices) == 10
+    _assert_built_in_place(mols, new_mols, ion_mol_indices)
 
     # Add 10 Na+ ions.
     new_mols, _, ion_indices, ion_mol_indices = Runner._create_alchemical_ions(
@@ -34,6 +52,7 @@ def test_alchemical_ions(mols, request):
     assert math.isclose(Runner._get_charge_difference(new_mols), 10.0, rel_tol=1e-6)
     assert len(ion_indices) == 10
     assert len(ion_mol_indices) == 10
+    _assert_built_in_place(mols, new_mols, ion_mol_indices)
 
 
 @pytest.mark.parametrize("mols", ["ethane_methanol", "ethane_methanol_ions"])
@@ -117,12 +136,7 @@ def test_alchemical_ions_from_counter_ions(charge_diff, ethane_methanol_sodium):
     for idx in ion_indices:
         assert perturbable_mols[idx].has_property("is_alchemical_ion")
 
-    # Each new water is built around its counter-ion.
-    space = new_mols.space()
-    for number in sodium_numbers & set(ion_numbers):
-        centre = mols[number].coordinates()
-        for atom in new_mols[number].atoms():
-            assert float(space.calc_dist(centre, atom.coordinates())) < 1.5
+    _assert_built_in_place(mols, new_mols, ion_mol_indices)
 
     # Replaying the stored indices reproduces the same ions.
     _, _, _, replayed_mol_indices = Runner._create_alchemical_ions(
