@@ -16,10 +16,26 @@ def test_charged_bound_leg(schedule, abfe_charge_change_mols):
         )
         runner = Runner(abfe_charge_change_mols.clone(), config)
 
-    pert_mols = runner._system.molecules("property is_perturbable")
-    assert pert_mols.num_molecules() > 1
+        pert_mols = runner._system.molecules("property is_perturbable")
+        assert pert_mols.num_molecules() > 1
 
-    assert Runner._boresch_search_protocol(runner._system) in ("rxrx", "aldeghi")
+        assert Runner._boresch_search_protocol(runner._system) == "rxrx"
+
+
+def test_too_few_frames_raises(abfe_charge_change_mols):
+    """Too few restraint search frames is reported before the trajectory is run."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = Config(
+            output_directory=tmpdir,
+            platform="cpu",
+            lambda_schedule="decouple",
+            restraint_search_time="100 ps",
+            restraint_search_frequency="10 ps",
+        )
+        runner = Runner(abfe_charge_change_mols.clone(), config)
+
+        with pytest.raises(ValueError, match="only save 10 frames"):
+            runner._generate_boresch_restraint()
 
 
 def test_rxrx_unsuitable_falls_back(abfe_charge_change_mols):
