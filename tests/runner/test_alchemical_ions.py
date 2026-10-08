@@ -117,6 +117,13 @@ def test_alchemical_ions_from_counter_ions(charge_diff, ethane_methanol_sodium):
     for idx in ion_indices:
         assert perturbable_mols[idx].has_property("is_alchemical_ion")
 
+    # Each new water is built around its counter-ion.
+    space = new_mols.space()
+    for number in sodium_numbers & set(ion_numbers):
+        centre = mols[number].coordinates()
+        for atom in new_mols[number].atoms():
+            assert float(space.calc_dist(centre, atom.coordinates())) < 1.5
+
     # Replaying the stored indices reproduces the same ions.
     _, _, _, replayed_mol_indices = Runner._create_alchemical_ions(
         mols, charge_diff, mol_indices=ion_mol_indices

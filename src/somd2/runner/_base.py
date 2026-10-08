@@ -1657,6 +1657,9 @@ class RunnerBase:
         if ion_template is not None:
             _logger.debug(f"Found {ion_str} ion in system.")
 
+        waters = system["water"].molecules()
+        water_template = waters[0]
+
         if mol_indices is not None:
             if len(mol_indices) != num_ions:
                 raise ValueError(
@@ -1689,10 +1692,10 @@ class RunnerBase:
                 # Make sure there are enough waters to convert. The charge
                 # difference should never be this large, but it prevents a
                 # crash if it is.
-                if num_waters > len(system["water"].molecules()):
+                if num_waters > len(waters):
                     raise ValueError(
                         f"Insufficient waters to convert to ions. {num_waters} "
-                        f"required, {len(system['water'].molecules())} available."
+                        f"required, {len(waters)} available."
                     )
 
                 coord_string = (
@@ -1705,7 +1708,6 @@ class RunnerBase:
                 )
 
         # Determine the water model.
-        water_template = system["water"].molecules()[0]
         if water_template.num_atoms() == 3:
             model = "tip3p"
         elif water_template.num_atoms() == 4:
@@ -1734,9 +1736,10 @@ class RunnerBase:
 
             # Create an alchemical ion: ion --> water.
             if is_reverse:
-                merged = _sr.morph.merge(
-                    mol, water_template, map={"as_new_molecule": False}
-                )
+                # Only the oxygen is aligned to the ion, so move the whole water there.
+                delta = mol.coordinates() - water_template["element O"].coordinates()
+                water = water_template.move().translate(delta).commit()
+                merged = _sr.morph.merge(mol, water, map={"as_new_molecule": False})
             # Create an alchemical ion: water --> ion.
             else:
                 if ion_template is None:
@@ -1753,7 +1756,8 @@ class RunnerBase:
 
             # If necessary, add a restraint to keep the ion away from the
             # perturbable molecule. The ion always maps to the oxygen atom of the
-            # water, which is the first atom in the merged molecule.
+            # water, which is the first atom in the merged molecule in either
+            # direction.
             if restraint_distance is not None:
                 from sire.restraints import inverse_distance as _inverse_distance
 
