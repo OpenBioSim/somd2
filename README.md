@@ -387,6 +387,13 @@ intramolecular terms.
 somd2 perturbable_system.bss --lambda-schedule decouple
 ```
 
+> [!WARNING]
+> Always create the perturbable ligand with `sr.morph.decouple()`, even when
+> using the `annihilate` schedule. The lambda schedule alone chooses between
+> decoupling and annihilation. `sr.morph.annihilate()` also removes the
+> ligand's bonded terms, so the ligand falls apart as lambda increases unless
+> every atom is restrained.
+
 The ligand must be restrained within the binding site. If no restraints are
 passed, a Boresch restraint is generated automatically for the bound leg, i.e.
 when the system contains both a protein and water. This is done by minimising
