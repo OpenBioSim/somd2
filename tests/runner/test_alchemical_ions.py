@@ -72,6 +72,58 @@ def test_alchemical_ion_mol_indices_reproducible(mols, request):
     )
 
 
+@pytest.fixture(scope="module")
+def ethane_methanol_sodium(ethane_methanol):
+    """The ethane to methanol system with three waters replaced by Na+ ions."""
+    from sire.legacy.IO import createSodiumIon
+
+    mols = ethane_methanol.clone()
+    for water in mols["water"].molecules()[:3]:
+        mols.remove(water)
+        mols.add(createSodiumIon(water["element O"].coordinates(), "tip3p"))
+    return mols
+
+
+@pytest.mark.parametrize("charge_diff", [2, 5])
+def test_alchemical_ions_from_counter_ions(charge_diff, ethane_methanol_sodium):
+    """
+    With no free Cl- ion to use as a template, Na+ counter-ions are perturbed
+    to water, each one only once, with waters perturbed to Cl- for any charge
+    that remains.
+    """
+    mols = ethane_methanol_sodium.clone()
+    sodium_numbers = {mol.number() for mol in mols["element Na"].molecules()}
+
+    new_mols, _, ion_indices, ion_mol_indices = Runner._create_alchemical_ions(
+        mols, charge_diff
+    )
+
+    assert math.isclose(
+        Runner._get_charge_difference(new_mols), -charge_diff, rel_tol=1e-6
+    )
+
+    # Each alchemical ion is a distinct molecule.
+    all_mols = mols.molecules()
+    ion_numbers = [all_mols[idx].number() for idx in ion_mol_indices]
+    assert len(set(ion_numbers)) == charge_diff
+
+    # Counter-ions are used before waters.
+    num_counter_ions = min(charge_diff, len(sodium_numbers))
+    assert len(sodium_numbers & set(ion_numbers)) == num_counter_ions
+
+    # The perturbable-molecule indices point at the alchemical ions.
+    perturbable_mols = new_mols.molecules()["perturbable"].molecules()
+    assert {perturbable_mols[idx].number() for idx in ion_indices} == set(ion_numbers)
+    for idx in ion_indices:
+        assert perturbable_mols[idx].has_property("is_alchemical_ion")
+
+    # Replaying the stored indices reproduces the same ions.
+    _, _, _, replayed_mol_indices = Runner._create_alchemical_ions(
+        mols, charge_diff, mol_indices=ion_mol_indices
+    )
+    assert replayed_mol_indices == ion_mol_indices
+
+
 def test_alchemical_ion_mol_indices_mismatch_raises(ethane_methanol):
     """A stored index count that doesn't match the charge difference should
     raise a clear error, rather than silently converting the wrong number of
