@@ -1234,6 +1234,33 @@ class RunnerBase:
 
         return [hard_restraints, soft_restraints]
 
+    @staticmethod
+    def _boresch_search_protocol(system):
+        """
+        Return the Boresch restraint search protocol to use for the system:
+        "rxrx", or "aldeghi" if the system can't be used with RXRX.
+
+        Raises
+        ------
+
+        ValueError
+            If the system can't be used with either protocol.
+        """
+        from sire.restraints import check_boresch_search
+
+        try:
+            check_boresch_search(system, protocol="rxrx")
+        except ValueError as e:
+            # Raise failures that apply to both protocols.
+            check_boresch_search(system, protocol="aldeghi")
+            _logger.warning(
+                f"RXRX Boresch restraint search cannot be used for this system: {e} "
+                "Falling back to the Aldeghi protocol."
+            )
+            return "aldeghi"
+
+        return "rxrx"
+
     def _generate_boresch_restraint(self, device=None):
         """
         Return a Boresch restraint for the ABFE simulation, either by loading
@@ -1279,7 +1306,7 @@ class RunnerBase:
         crash on every restart, whereas a fresh search may pick a different frame
         or anchor, and re-seeds ``self._system`` naturally.
         """
-        from sire.restraints import boresch_search, check_boresch_search
+        from sire.restraints import boresch_search
 
         restraint_file = str(self._config.output_directory / "abfe_restraint.s3")
 
@@ -1315,15 +1342,25 @@ class RunnerBase:
             "No restraint supplied for ABFE. Running Boresch restraint search."
         )
 
-        protocol = "rxrx"
-        try:
-            check_boresch_search(self._system, protocol=protocol)
-        except ValueError as e:
-            _logger.warning(
-                f"RXRX Boresch restraint search cannot be used for this system: {e} "
-                "Falling back to the Aldeghi protocol."
+        # Both protocols need a minimum number of trajectory frames.
+        min_frames = 50
+        num_frames = int(
+            round(
+                float(
+                    self._config.restraint_search_time
+                    / self._config.restraint_search_frequency
+                ),
+                6,
             )
-            protocol = "aldeghi"
+        )
+        if num_frames < min_frames:
+            raise ValueError(
+                f"The restraint search trajectory would only save {num_frames} "
+                f"frames, but at least {min_frames} are required. Increase "
+                "'restraint_search_time' or decrease 'restraint_search_frequency'."
+            )
+
+        protocol = self._boresch_search_protocol(self._system)
 
         search_system = self._system
 
@@ -1373,6 +1410,7 @@ class RunnerBase:
         search_kwargs = {
             "temperature": self._config.temperature,
             "restraint_lever": "split",
+            "min_frames": min_frames,
         }
         if self._config.restraint_search_receptor_selection is not None:
             search_kwargs["receptor_selection"] = (
