@@ -223,6 +223,24 @@ class RunnerBase:
                         _logger.warning(msg)
                         break
 
+        # The ABFE schedules expect the ligand's bonded terms to be retained, which
+        # sire.morph.annihilate() removes.
+        if self._config._lambda_schedule_name in ("annihilate", "decouple"):
+            for mol in self._system["property is_perturbable"].molecules():
+                if (
+                    mol.has_property("bond1")
+                    and mol.property("bond0").num_functions() > 0
+                    and mol.property("bond1").num_functions() == 0
+                ):
+                    msg = (
+                        "The perturbable molecule has no bonds at lambda = 1, as "
+                        "created by sire.morph.annihilate(). Create it with "
+                        "sire.morph.decouple() instead. The lambda schedule alone "
+                        "chooses between decoupling and annihilation."
+                    )
+                    _logger.error(msg)
+                    raise ValueError(msg)
+
         # Check for a periodic space.
         self._has_space = self._check_space()
 
