@@ -2629,6 +2629,16 @@ window.addEventListener("beforeprint", () => {
     d.open = true;
   });
   document.querySelectorAll("#config-table tr").forEach((tr) => { tr.hidden = false; });
+  // Charts have the theme's colours drawn in, so are drawn again in the light
+  // ones used for printing, until the page is redrawn afterwards.
+  if (state.view === "run" && state.summary) {
+    const root = document.documentElement;
+    const theme = root.getAttribute("data-theme");
+    root.setAttribute("data-theme", "light");
+    renderCharts(state.summary);
+    if (theme === null) root.removeAttribute("data-theme");
+    else root.setAttribute("data-theme", theme);
+  }
   // A 3D view can't be printed, so a picture of it is printed instead.
   for (const v of viewers()) {
     const picture = $(v.picture);
