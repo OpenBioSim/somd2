@@ -515,7 +515,7 @@ function lineChart(el, opts) {
   if (legend.length) {
     html += `<div class="legend">${legend.map((s) => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join("")}</div>`;
   }
-  el.innerHTML = html + SAVE_CHART;
+  el.innerHTML = html + saveButtons();
   el.chartDraw = (target) => lineChart(target, opts);
   el.chartLegend = legend;
 }
@@ -547,12 +547,16 @@ function heatmap(el, matrix, opts = {}) {
     svg += `<text x="${pad + i * cell + cell / 2}" y="${pad - 8}" text-anchor="middle">${i}</text>`;
   }
   svg += "</svg>";
-  el.innerHTML = svg + SAVE_CHART;
+  el.innerHTML = svg + saveButtons();
   el.chartDraw = (target) => heatmap(target, matrix, opts);
   el.chartLegend = [];
 }
 
-const SAVE_CHART = `<div class="chart-save no-print">Save as <button type="button" data-format="svg">SVG</button> <button type="button" data-format="png">PNG</button></div>`;
+// Buttons to save the chart they're in, or the depiction just before them.
+function saveButtons(maxWidth) {
+  const style = maxWidth ? ` style="max-width:${maxWidth}px"` : "";
+  return `<div class="chart-save no-print"${style}>Save as <button type="button" data-format="svg">SVG</button> <button type="button" data-format="png">PNG</button></div>`;
+}
 
 // The title of a chart, from its heading, or else its card.
 function chartTitle(el) {
@@ -602,9 +606,10 @@ function chartSVG(el) {
     chart.removeAttribute("style");
     let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${total.width}" height="${total.height}" viewBox="0 0 ${total.width} ${total.height}">`;
     svg += `<rect width="100%" height="100%" fill="#ffffff"/>`;
-    svg += `<text x="${pad}" y="20" style="fill:${fg};font-size:14px;font-weight:600;font-family:${font}">${esc(chartTitle(el))}</text>`;
+    const title = chartTitle(el);
+    svg += `<text x="${pad}" y="20" style="fill:${fg};font-size:14px;font-weight:600;font-family:${font}">${esc(title)}</text>`;
     svg += new XMLSerializer().serializeToString(chart) + legend + "</svg>";
-    return { svg, ...total };
+    return { svg, title, ...total };
   } finally {
     host.remove();
     if (theme === null) root.removeAttribute("data-theme");
@@ -618,9 +623,40 @@ function fileName(title) {
   return `${run}${title}`.replace(/[^\w.-]+/g, "_");
 }
 
-function saveChart(el, format) {
-  const { svg, width, height } = chartSVG(el);
-  const name = fileName(chartTitle(el));
+// A 2D depiction as a standalone SVG, with its title and the captions of its
+// panels. The drawing has its own colours, on white, whatever the theme.
+function depictionSVG(el) {
+  const drawing = el.querySelector("svg").cloneNode(true);
+  const width = parseFloat(drawing.getAttribute("width"));
+  const height = parseFloat(drawing.getAttribute("height"));
+  let captions = [...el.querySelectorAll(".panel-captions span")].map((s) => s.textContent);
+  if (!captions.length) captions = [...el.querySelectorAll(".caption")].slice(0, 1).map((s) => s.textContent);
+  const title = `End states: ${chartTitle(el)}`;
+  const font = esc(getComputedStyle(document.body).fontFamily);
+  const pad = 12, top = 30;
+  const total = { width: width + 2 * pad, height: top + height + (captions.length ? 30 : pad) };
+  drawing.setAttribute("x", pad);
+  drawing.setAttribute("y", top);
+  drawing.setAttribute("width", width);
+  drawing.setAttribute("height", height);
+  drawing.removeAttribute("style");
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${total.width}" height="${total.height}" viewBox="0 0 ${total.width} ${total.height}">`;
+  svg += `<rect width="100%" height="100%" fill="#ffffff"/>`;
+  svg += `<text x="${pad}" y="20" style="fill:#1c2330;font-size:14px;font-weight:600;font-family:${font}">${esc(title)}</text>`;
+  svg += new XMLSerializer().serializeToString(drawing);
+  // Centred under each panel.
+  captions.forEach((text, i) => {
+    const x = pad + (width / captions.length) * (i + 0.5);
+    svg += `<text x="${x}" y="${top + height + 18}" text-anchor="middle" style="fill:#1c2330;font-size:14px;font-family:${font}">${esc(text)}</text>`;
+  });
+  svg += "</svg>";
+  return { svg, title, ...total };
+}
+
+// Save a chart or a 2D depiction as SVG or PNG.
+function saveFigure(el, format) {
+  const { svg, title, width, height } = el.matches(".depiction") ? depictionSVG(el) : chartSVG(el);
+  const name = fileName(title);
   if (format === "svg") return download(`${name}.svg`, svg, "image/svg+xml");
   // Drawn at three times the size, so that it stays sharp in a document.
   const scale = 3;
@@ -639,7 +675,7 @@ function saveChart(el, format) {
     };
     image.onerror = () => {
       URL.revokeObjectURL(url);
-      reject(new Error("the chart couldn't be drawn"));
+      reject(new Error("the image couldn't be drawn"));
     };
     image.src = url;
   });
@@ -892,9 +928,11 @@ function renderEndStates(s) {
     if (absolute) {
       const verb = s.schedule.name === "annihilate" ? "Annihilated" : "Decoupled";
       html += `<div class="depiction" style="max-width:${(m.pixels || 300) + 18}px">${m.svg0}<div class="caption">${verb} at ${LAMBDA} = 1</div><div class="smiles">${esc(m.smiles0)}</div></div>`;
+      html += saveButtons((m.pixels || 300) + 18);
       continue;
     }
     html += `<div class="depiction mapping" style="max-width:${2 * (m.mapping_pixels || m.pixels || 300) + 18}px">${m.svg_mapping}<div class="panel-captions"><span>${LAMBDA} = 0</span><span>${LAMBDA} = 1</span></div><div class="caption">Atoms are labelled with their index in the merged molecule.</div><div class="smiles">${esc(m.smiles0)} → ${esc(m.smiles1)}</div></div>`;
+    html += saveButtons(2 * (m.mapping_pixels || m.pixels || 300) + 18);
     const noOrders = [m.bond_orders0 ? null : `${LAMBDA} = 0`, m.bond_orders1 ? null : `${LAMBDA} = 1`].filter(Boolean);
     if (m.bond_orders_too_slow) html += `<div class="note">Bond orders weren't assigned, since the molecule is too large to do so quickly, so only the connectivity is shown.</div>`;
     else if (noOrders.length) html += `<div class="note">Bond orders couldn't be assigned at ${noOrders.join(" and ")}, so only the connectivity is shown.</div>`;
@@ -2620,8 +2658,12 @@ $("#main").addEventListener("toggle", (e) => {
   if (section.open && state.current && name === siteTitle(state.bindingSites[state.current])) loadBindingSite(state.current);
 }, true);
 document.addEventListener("click", (e) => {
-  const chartButton = e.target.closest(".chart-save button");
-  if (chartButton) saveChart(chartButton.closest(".chart"), chartButton.dataset.format);
+  // A chart's buttons are inside it, and a depiction's just after it.
+  const figureButton = e.target.closest(".chart-save button");
+  if (figureButton) {
+    const row = figureButton.closest(".chart-save");
+    saveFigure(row.closest(".chart") || row.previousElementSibling, figureButton.dataset.format);
+  }
   const viewerButton = e.target.closest(".viewer-save");
   if (viewerButton) {
     const section = viewerButton.closest("details.section");
