@@ -363,8 +363,9 @@ class Runner(_RunnerBase):
         """
 
         # Since this method is called in a separate process with the "spawn"
-        # method, we need to re-set the logger.
+        # method, we need to re-set the logger and silence the progress bar.
         self._config._reset_logger(_logger)
+        _sr.base.ProgressBar.set_silent()
 
         # Get the lambda value.
         lambda_value = self._lambda_values[index]
