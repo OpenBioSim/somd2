@@ -277,6 +277,8 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
   .print-only { display: block; max-width: 100%; border: 1px solid var(--border); border-radius: 8px; }
   .stats { display: flex; flex-wrap: wrap; gap: 10px 24px; }
   .card { break-inside: avoid; }
+  .figure { display: inline-block; width: 48%; margin: 0 1% 10px 0; vertical-align: top; }
+  .figure.wide { display: block; width: auto; }
   .grid > div, .multiples > div, .chart, .chart svg, .figure, .stats, tr, pre { break-inside: avoid; }
   h3, h4, .card > .note:first-of-type { break-after: avoid; }
   .table-wrap, .messages { max-height: none !important; overflow: visible !important; }
@@ -555,10 +557,6 @@ const SAVE_BUTTONS = `<div class="chart-save no-print">Save as <button type="but
 // The layout and colours of a saved figure, which is always on white.
 const FIGURE = { pad: 12, top: 30, text: "#1c2330", muted: "#5f6b7a" };
 
-function figureFont() {
-  return esc(getComputedStyle(document.body).fontFamily);
-}
-
 // A saved figure: a drawing, which is an SVG element, with a title above it
 // and anything else, e.g. a legend, below it, down to a height of end.
 function framedSVG(title, drawing, width, height, below = "", end = null) {
@@ -569,28 +567,50 @@ function framedSVG(title, drawing, width, height, below = "", end = null) {
   drawing.setAttribute("height", height);
   drawing.removeAttribute("style");
   const total = { width: width + 2 * pad, height: end ?? top + height + pad };
+  const font = esc(getComputedStyle(document.body).fontFamily);
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${total.width}" height="${total.height}" viewBox="0 0 ${total.width} ${total.height}">`;
   svg += `<rect width="100%" height="100%" fill="#ffffff"/>`;
-  svg += `<text x="${pad}" y="20" style="fill:${FIGURE.text};font-size:14px;font-weight:600;font-family:${figureFont()}">${esc(title)}</text>`;
+  svg += `<text x="${pad}" y="20" style="fill:${FIGURE.text};font-size:14px;font-weight:600;font-family:${font}">${esc(title)}</text>`;
   svg += new XMLSerializer().serializeToString(drawing) + below + "</svg>";
   return { svg, title, ...total };
 }
 
-// Legend entries from a height of y, wrapping at the width. Returns them and
-// the height they end at.
+// Legend entries, with a swatch if they have a colour, from a height of y,
+// wrapping at the width. Returns them and the height they end at, if any.
 function legendSVG(items, y, width) {
+  if (!items.length) return { svg: "", end: null };
   const { pad } = FIGURE;
+  const family = getComputedStyle(document.body).fontFamily;
+  const font = esc(family);
   const measure = document.createElement("canvas").getContext("2d");
-  measure.font = `12px ${getComputedStyle(document.body).fontFamily}`;
+  measure.font = `12px ${family}`;
   let x = pad, svg = "";
   for (const item of items) {
-    const w = 29 + measure.measureText(item.name).width;
+    const swatch = item.color ? 15 : 0;
+    const w = swatch + 14 + measure.measureText(item.name).width;
     if (x > pad && x + w > width + pad) { x = pad; y += 18; }
-    svg += `<rect x="${x}" y="${y - 9}" width="10" height="10" rx="2" fill="${item.color}"/>`;
-    svg += `<text x="${x + 15}" y="${y}" style="fill:${FIGURE.muted};font-size:12px;font-family:${figureFont()}">${esc(item.name)}</text>`;
+    if (item.color) svg += `<rect x="${x}" y="${y - 9}" width="10" height="10" rx="2" fill="${item.color}"/>`;
+    svg += `<text x="${x + swatch}" y="${y}" style="fill:${FIGURE.muted};font-size:12px;font-family:${font}">${esc(item.name)}</text>`;
     x += w;
   }
   return { svg, end: y + 10 };
+}
+
+// The key to a mapping's highlighting, with the colours as CSS variables.
+function mappingKey(m) {
+  const key = [
+    { name: "Unique, i.e. a ghost at the other end state", variable: "--unique" },
+    { name: "Mapped, element changes", variable: "--changed" },
+  ];
+  if (!m) return key;
+  key[0].name += ` (${m.num_unique0} at ${LAMBDA} = 0, ${m.num_unique1} at ${LAMBDA} = 1)`;
+  key[1].name += ` (${m.num_changed})`;
+  return [...key, { name: `${m.num_mapped} mapped atoms` }];
+}
+
+function keyHTML(key) {
+  const swatch = (item) => (item.variable ? `<i style="background:var(${item.variable})"></i>` : "");
+  return `<div class="legend">${key.map((item) => `<span>${swatch(item)}${esc(item.name)}</span>`).join("")}</div>`;
 }
 
 // The title of a chart, from its heading, or else its card.
@@ -621,7 +641,6 @@ function chartSVG(el) {
     }
     chart.querySelectorAll("title").forEach((title) => title.remove());
     const width = Number(chart.getAttribute("width")), height = Number(chart.getAttribute("height"));
-    if (!el.chartLegend.length) return framedSVG(chartTitle(el), chart, width, height);
     const legend = legendSVG(el.chartLegend, FIGURE.top + height + 16, width);
     return framedSVG(chartTitle(el), chart, width, height, legend.svg, legend.end);
   } finally {
@@ -637,9 +656,8 @@ function fileName(title) {
   return `${run}${title}`.replace(/[^\w.-]+/g, "_");
 }
 
-// A 2D depiction as a standalone SVG, with its title, the captions of its
-// panels and, for a mapping, the key to its highlighting. The drawing has its
-// own colours, whatever the theme.
+// A 2D depiction as a standalone SVG, with its title, panel captions and, for
+// a mapping, its key. The drawing has its own colours, whatever the theme.
 function depictionSVG(figure) {
   const depiction = figure.querySelector(".depiction");
   const drawing = depiction.querySelector("svg").cloneNode(true);
@@ -649,16 +667,15 @@ function depictionSVG(figure) {
   let captions = [...depiction.querySelectorAll(".panel-captions span")].map((s) => s.textContent);
   if (!captions.length) captions = [...depiction.querySelectorAll(".caption")].slice(0, 1).map((s) => s.textContent);
   const y = FIGURE.top + height + 18;
+  const font = esc(getComputedStyle(document.body).fontFamily);
   let below = captions.map((text, i) => {
     const x = FIGURE.pad + (width / captions.length) * (i + 0.5);
-    return `<text x="${x}" y="${y}" text-anchor="middle" style="fill:${FIGURE.text};font-size:14px;font-family:${figureFont()}">${esc(text)}</text>`;
+    return `<text x="${x}" y="${y}" text-anchor="middle" style="fill:${FIGURE.text};font-size:14px;font-family:${font}">${esc(text)}</text>`;
   }).join("");
   let end = captions.length ? y + 12 : null;
   if (depiction.matches(".mapping")) {
-    const key = [
-      { name: "Unique, i.e. a ghost at the other end state", color: css("--unique") },
-      { name: "Mapped, element changes", color: css("--changed") },
-    ];
+    const m = state.depictions[state.current].molecules[Number(figure.dataset.molecule)];
+    const key = mappingKey(m).map((item) => ({ name: item.name, color: item.variable && css(item.variable) }));
     const legend = legendSVG(key, y + 24, width);
     below += legend.svg;
     end = legend.end;
@@ -936,7 +953,7 @@ function renderEndStates(s) {
   if (!d.molecules.length) return d.mutation ? "" : card("End states", `<div class="note">No perturbed molecules found.</div>`);
   const absolute = ["annihilate", "decouple"].includes(s.schedule.name);
   let html = "";
-  for (const m of d.molecules) {
+  for (const [i, m] of d.molecules.entries()) {
     html += `<h4>${esc(m.name)}</h4>`;
     if (absolute) {
       const verb = s.schedule.name === "annihilate" ? "Annihilated" : "Decoupled";
@@ -945,15 +962,11 @@ function renderEndStates(s) {
       continue;
     }
     const width = 2 * (m.mapping_pixels || m.pixels || 300) + 18;
-    html += `<div class="figure" style="max-width:${width}px"><div class="depiction mapping">${m.svg_mapping}<div class="panel-captions"><span>${LAMBDA} = 0</span><span>${LAMBDA} = 1</span></div><div class="caption">Atoms are labelled with their index in the merged molecule.</div><div class="smiles">${esc(m.smiles0)} → ${esc(m.smiles1)}</div></div>${SAVE_BUTTONS}</div>`;
+    html += `<div class="figure wide" data-molecule="${i}" style="max-width:${width}px"><div class="depiction mapping">${m.svg_mapping}<div class="panel-captions"><span>${LAMBDA} = 0</span><span>${LAMBDA} = 1</span></div><div class="caption">Atoms are labelled with their index in the merged molecule.</div><div class="smiles">${esc(m.smiles0)} → ${esc(m.smiles1)}</div></div>${SAVE_BUTTONS}</div>`;
     const noOrders = [m.bond_orders0 ? null : `${LAMBDA} = 0`, m.bond_orders1 ? null : `${LAMBDA} = 1`].filter(Boolean);
     if (m.bond_orders_too_slow) html += `<div class="note">Bond orders weren't assigned, since the molecule is too large to do so quickly, so only the connectivity is shown.</div>`;
     else if (noOrders.length) html += `<div class="note">Bond orders couldn't be assigned at ${noOrders.join(" and ")}, so only the connectivity is shown.</div>`;
-    html += `<div class="legend">
-      <span><i style="background:var(--unique)"></i>Unique, i.e. a ghost at the other end state (${m.num_unique0} at ${LAMBDA} = 0, ${m.num_unique1} at ${LAMBDA} = 1)</span>
-      <span><i style="background:var(--changed)"></i>Mapped, element changes (${m.num_changed})</span>
-      <span>${m.num_mapped} mapped atoms</span>
-    </div>`;
+    html += keyHTML(mappingKey(m));
   }
   return card("End states", html);
 }
@@ -982,10 +995,7 @@ function renderStructure(s) {
   let html = `<div class="structure-panel"><div class="structure-controls note" style="margin-bottom:8px">${controls}</div>`;
   html += `<div id="structure-3d" class="structure-3d"></div>`;
   if (!isAbsolute(s)) {
-    html += `<div class="legend">
-      <span><i style="background:var(--unique)"></i>Unique, i.e. a ghost at the other end state</span>
-      <span><i style="background:var(--changed)"></i>Mapped, element changes</span>
-    </div>`;
+    html += keyHTML(mappingKey());
   }
   html += `</div><img id="structure-3d-print" class="print-only" alt="3D structure">`;
   html += `<div class="note">A generated conformer, for checking the molecule and mapping rather than the simulated pose. Drag to rotate, Ctrl + scroll to zoom.</div>`;
