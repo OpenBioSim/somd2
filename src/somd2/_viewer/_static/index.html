@@ -316,7 +316,7 @@ function loadCollapsed(key = "somd2-viewer-collapsed") {
   try { return new Set(JSON.parse(localStorage.getItem(key) || "[]")); } catch (e) { return new Set(); }
 }
 
-const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "", problems: {}, requests: 0, latest: {}, shown: {}, group: null, repeatsOpen: new Map(), conformers: {}, conformersLoading: {}, structureMode: "0", structureMolecule: {}, viewer3d: null, bindingSites: {}, bindingSitesLoading: {}, viewerSite: null, siteMode: "0", siteWaters: true };
+const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "", problems: {}, requests: 0, latest: {}, shown: {}, group: null, repeatsOpen: new Map(), conformers: {}, conformersLoading: {}, structureMode: "0", structureMolecule: {}, viewer3d: null, bindingSites: {}, bindingSitesLoading: {}, viewerSite: null, siteMode: "0", siteWaters: true, gcmcWatersLambda: {} };
 const PALETTE = ["#2f6fdf", "#e0663b", "#2a9d6f", "#b04fc9", "#c9a227", "#3aa7c9", "#d64f7a", "#7a8699"];
 const LAMBDA = "λ";
 // The thresholds for poor overlap and replica mixing, as in the summary.
@@ -1443,7 +1443,12 @@ function renderSamplers(s) {
     html += `</table></div>`;
     const settings = sm.gcmc_num_attempts ? ` This run used a batch size of ${sm.gcmc_batch_size} and ${sm.gcmc_num_attempts} attempts per move.` : "";
     html += `<div class="note">Each GCMC move runs its trials in parallel batches, so it can accept more than one insertion or deletion. More than one accepted per move, highlighted, means trials are wasted, so <code>gcmc_batch_size</code> and <code>gcmc_num_attempts</code> should be reduced, aiming for about one per move. The acceptance per attempt is for the approximate reaction-field potential used to choose candidates.${settings}</div>`;
-    if (sm.gcmc_waters) html += `<h4>Waters in the GCMC region</h4><div class="chart" id="gcmc-waters-chart"></div><div class="note">At each checkpoint, from the log.</div>`;
+    if (sm.gcmc_waters) {
+      const shown = state.gcmcWatersLambda[s.id] ?? "all";
+      const options = [`<option value="all">All windows</option>`, ...sm.gcmc_waters.map((w) => `<option value="${w.lambda}"${String(w.lambda) === String(shown) ? " selected" : ""}>${fmtLambda(w.lambda)}</option>`)].join("");
+      html += `<h4>Waters in the GCMC region</h4><label class="note">${LAMBDA} window <select id="gcmc-waters-lambda">${options}</select></label>`;
+      html += `<div class="chart" id="gcmc-waters-chart"></div><div class="note">At each checkpoint, from the log.</div>`;
+    }
   }
   if (sm.terminal_flip) {
     html += `<h4${sm.gcmc ? "" : ' style="margin-top:0"'}>Terminal flips</h4><div class="table-wrap"><table><tr><th>${LAMBDA}</th><th class="num">attempted</th><th class="num">accepted</th><th class="num">acceptance</th></tr>`;
@@ -1625,11 +1630,14 @@ function renderCharts(s) {
     });
   }
   const gw = $("#gcmc-waters-chart");
-  const waters = s.samplers && s.samplers.gcmc_waters;
-  if (gw && waters) {
+  const allWaters = s.samplers && s.samplers.gcmc_waters;
+  if (gw && allWaters) {
+    const shown = state.gcmcWatersLambda[s.id] ?? "all";
+    // Each window keeps its colour from the full set.
+    const waters = allWaters.map((w, i) => ({ ...w, colour: colour(i, allWaters.length) })).filter((w) => shown === "all" || String(w.lambda) === String(shown));
     lineChart(gw, {
-      series: waters.map((w, i) => ({
-        x: w.time, y: w.count, color: colour(i, waters.length), name: `${LAMBDA} = ${fmtLambda(w.lambda)}`,
+      series: waters.map((w) => ({
+        x: w.time, y: w.count, color: w.colour, name: `${LAMBDA} = ${fmtLambda(w.lambda)}`,
         points: w.count.length <= 50, title: (x, y) => `${LAMBDA} = ${fmtLambda(w.lambda)}, ${fmt(x, 3)} ns: ${y} waters`,
       })),
       xLabel: "time (ns)", yLabel: "waters in region", yMin: 0,
@@ -2385,6 +2393,11 @@ function render() {
   if (moleculeSelect) moleculeSelect.addEventListener("change", (e) => {
     state.structureMolecule[s.id] = Number(e.target.value);
     render();
+  });
+  const watersSelect = $("#gcmc-waters-lambda");
+  if (watersSelect) watersSelect.addEventListener("change", (e) => {
+    state.gcmcWatersLambda[s.id] = e.target.value;
+    renderCharts(s);
   });
   const lambdaSelect = $("#components-lambda");
   if (lambdaSelect) lambdaSelect.addEventListener("change", (e) => {
