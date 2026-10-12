@@ -147,6 +147,9 @@ def blender_script(site, name, state=0, show_waters=True, view=None, aspect=None
     height = 1080
     width = height if not aspect else 2 * round(height * aspect / 2)
 
+    # Shown with the waters, as in the viewer.
+    region = shown.get("gcmc") if show_waters else None
+
     what = "The mutation" if site["kind"] == "mutation" else "The binding site"
     return _SCRIPT.format(
         title=f"{what} of {name}",
@@ -161,6 +164,10 @@ def blender_script(site, name, state=0, show_waters=True, view=None, aspect=None
         fov=round(float(view["fov"]), 3),
         width=width,
         height=height,
+        gcmc_centre=(
+            [round(float(x), 3) for x in region["centre"]] if region else None
+        ),
+        gcmc_radius=round(float(region["radius"]), 3) if region else None,
     )
 
 
@@ -260,6 +267,7 @@ import tempfile
 from math import radians
 from pathlib import Path
 
+import bmesh
 import bpy
 from mathutils import Quaternion, Vector
 
@@ -272,6 +280,8 @@ except ModuleNotFoundError:
 # Settings that can be changed.
 RESOLUTION = ({width}, {height})
 TRANSPARENT = False
+# How the GCMC region is drawn: "wireframe", "shell" or None to leave it out.
+GCMC_STYLE = "wireframe"
 
 # The viewer's view: the point looked at and the camera's distance from it,
 # in Å, the scene's rotation as a quaternion (x, y, z, w), and the vertical
@@ -280,6 +290,10 @@ CENTRE = {centre}
 ROTATION = {rotation}
 DISTANCE = {distance}
 FOV = {fov}
+
+# The centre and radius of the GCMC region in Å, if there is one.
+GCMC_CENTRE = {gcmc_centre}
+GCMC_RADIUS = {gcmc_radius}
 
 PDB = """{pdb}"""
 
@@ -305,4 +319,35 @@ camera.data.sensor_fit = "VERTICAL"
 camera.data.angle = radians(FOV)
 camera.data.clip_start = DISTANCE * mol.world_scale / 100
 camera.data.clip_end = DISTANCE * mol.world_scale * 100
+
+if GCMC_RADIUS is not None and GCMC_STYLE is not None:
+    # Built from data, since operators need a context that scripts lack.
+    mesh = bpy.data.meshes.new("GCMC region")
+    shape = bmesh.new()
+    bmesh.ops.create_uvsphere(
+        shape, u_segments=32, v_segments=16, radius=GCMC_RADIUS * mol.world_scale
+    )
+    shape.to_mesh(mesh)
+    shape.free()
+    sphere = bpy.data.objects.new("GCMC region", mesh)
+    sphere.location = Vector(GCMC_CENTRE) * mol.world_scale
+    bpy.context.scene.collection.objects.link(sphere)
+    material = bpy.data.materials.new("GCMC region")
+    material.use_nodes = True
+    shader = material.node_tree.nodes["Principled BSDF"]
+    shader.inputs["Base Color"].default_value = (0.15, 0.39, 0.79, 1.0)
+    if GCMC_STYLE == "wireframe":
+        wireframe = sphere.modifiers.new("Wireframe", "WIREFRAME")
+        wireframe.thickness = 0.08 * mol.world_scale
+        shader.inputs["Alpha"].default_value = 0.6
+    else:
+        for polygon in sphere.data.polygons:
+            polygon.use_smooth = True
+        shader.inputs["Alpha"].default_value = 0.15
+    # Transparency is set differently before Blender 4.2.
+    if hasattr(material, "surface_render_method"):
+        material.surface_render_method = "BLENDED"
+    else:
+        material.blend_method = "BLEND"
+    sphere.data.materials.append(material)
 '''
