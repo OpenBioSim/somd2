@@ -77,7 +77,8 @@ def binding_site(topology0, topology1, saved, saved1=None, gcmc=None):
 
     gcmc: dict
         The GCMC region, as the "selection" of atoms at its centre and its
-        "radius" in nm, or None if GCMC wasn't used.
+        "radius" in nm, which are None if it is the whole box, or None if
+        GCMC wasn't used.
 
     Returns
     -------
@@ -602,16 +603,27 @@ def _water_layout(topology0, topology1, selection=None):
         system0 = _sr.load(str(topology0), show_warnings=False)
         system1 = _sr.load(str(topology1), show_warnings=False)
         mols0 = system0.molecules()
+        molecules0 = list(mols0)
+        molecules1 = list(system1.molecules())
 
         starts = []
         start = 0
-        for mol in mols0:
+        for mol in molecules0:
             starts.append(start)
             start += mol.num_atoms()
 
-        # Co-alchemical ions are only water at one end state, and aren't moved
-        # by GCMC.
-        indices = sorted(waters(system0) & waters(system1))
+        def unchanged(i):
+            mol0, mol1 = molecules0[i], molecules1[i]
+            charges0 = [q.value() for q in mol0.property("charge").to_list()]
+            charges1 = [q.value() for q in mol1.property("charge").to_list()]
+            types0 = mol0.property("ambertype").to_list()
+            return (
+                charges0 == charges1 and types0 == mol1.property("ambertype").to_list()
+            )
+
+        # GCMC leaves out perturbable waters, e.g. co-alchemical ions, which
+        # are only water at one end state.
+        indices = [i for i in sorted(waters(system0) & waters(system1)) if unchanged(i)]
 
         by_molecule = {}
         if indices and selection is not None:

@@ -2441,6 +2441,14 @@ class Config:
                 raise ValueError("'gcmc_batch_size' must be an integer")
         if gcmc_batch_size <= 0:
             raise ValueError("'gcmc_batch_size' must be greater than 0")
+        # Only set after the batch size on construction.
+        if (
+            hasattr(self, "_gcmc_num_attempts")
+            and gcmc_batch_size > self._gcmc_num_attempts
+        ):
+            raise ValueError(
+                "'gcmc_num_attempts' must be greater than or equal to 'gcmc_batch_size'"
+            )
         self._gcmc_batch_size = gcmc_batch_size
 
     @property

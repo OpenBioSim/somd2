@@ -1445,9 +1445,10 @@ function renderSamplers(s) {
     html += `<div class="note">Each GCMC move runs its trials in parallel batches, so it can accept more than one insertion or deletion. More than one accepted per move, highlighted, means trials are wasted, so <code>gcmc_batch_size</code> and <code>gcmc_num_attempts</code> should be reduced, aiming for about one per move. The acceptance per attempt is for the approximate reaction-field potential used to choose candidates.${settings}</div>`;
     if (sm.gcmc_waters) {
       const shown = state.gcmcWatersLambda[s.id] ?? "all";
-      const options = [`<option value="all">All windows</option>`, ...sm.gcmc_waters.map((w) => `<option value="${w.lambda}"${String(w.lambda) === String(shown) ? " selected" : ""}>${fmtLambda(w.lambda)}</option>`)].join("");
+      const options = [`<option value="all">All windows</option>`, ...sm.gcmc_waters.windows.map((w) => `<option value="${w.lambda}"${String(w.lambda) === String(shown) ? " selected" : ""}>${fmtLambda(w.lambda)}</option>`)].join("");
       html += `<h4>Waters in the GCMC region</h4><label class="note">${LAMBDA} window <select id="gcmc-waters-lambda">${options}</select></label>`;
-      html += `<div class="chart" id="gcmc-waters-chart"></div><div class="note">At each checkpoint, from the log.</div>`;
+      const timing = sm.gcmc_waters.timed ? "" : " This run's log doesn't record the time of each count, so they're shown by checkpoint.";
+      html += `<div class="chart" id="gcmc-waters-chart"></div><div class="note">At each checkpoint, from the log.${timing}</div>`;
     }
   }
   if (sm.terminal_flip) {
@@ -1630,17 +1631,19 @@ function renderCharts(s) {
     });
   }
   const gw = $("#gcmc-waters-chart");
-  const allWaters = s.samplers && s.samplers.gcmc_waters;
-  if (gw && allWaters) {
+  const gcmcWaters = s.samplers && s.samplers.gcmc_waters;
+  if (gw && gcmcWaters) {
+    const allWaters = gcmcWaters.windows;
+    const timed = gcmcWaters.timed;
     const shown = state.gcmcWatersLambda[s.id] ?? "all";
     // Each window keeps its colour from the full set.
     const waters = allWaters.map((w, i) => ({ ...w, colour: colour(i, allWaters.length) })).filter((w) => shown === "all" || String(w.lambda) === String(shown));
     lineChart(gw, {
       series: waters.map((w) => ({
         x: w.time, y: w.count, color: w.colour, name: `${LAMBDA} = ${fmtLambda(w.lambda)}`,
-        points: w.count.length <= 50, title: (x, y) => `${LAMBDA} = ${fmtLambda(w.lambda)}, ${fmt(x, 3)} ns: ${y} waters`,
+        points: w.count.length <= 50, title: (x, y) => `${LAMBDA} = ${fmtLambda(w.lambda)}, ${timed ? `${fmt(x, 4)} ns` : `checkpoint ${x}`}: ${y} waters`,
       })),
-      xLabel: "time (ns)", yLabel: "waters in region", yMin: 0,
+      xLabel: timed ? "time (ns)" : "checkpoint", yLabel: "waters in region", yMin: 0,
       yFormat: (v) => (Number.isInteger(v) ? String(v) : ""),
       legend: waters.length <= 16,
     });

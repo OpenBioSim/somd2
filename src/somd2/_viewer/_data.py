@@ -94,8 +94,10 @@ _states_re = _re.compile(r"^States: \[([\d\s]*)\]")
 _block_re = _re.compile(r"^Finished block (\d+) of (\d+) for \S+ = ([\d.]+)")
 _perf_re = _re.compile(r"^Overall performance: ([\d.]+) ns day-1")
 _correction_re = _re.compile(r"Standard state correction: (-?[\d.]+) kcal mol-1")
+# Older versions don't log the time.
 _waters_re = _re.compile(
-    r"^Current number of waters in GCMC volume at \S+ = ([\d.]+) is (\d+)"
+    r"^Current number of waters in GCMC volume at \S+ = ([\d.]+)"
+    r"(?: \(time = ([\d.]+) ns\))? is (\d+)"
 )
 
 
@@ -251,7 +253,8 @@ class _LogMonitor:
         self._saved_states = 0
         self.standard_state_correction = None
         self.messages = _deque(maxlen=20)
-        # The number of waters in the GCMC region at each checkpoint, by λ.
+        # The number of waters in the GCMC region at each checkpoint, by λ, as
+        # (time in ns, or None if not logged, count).
         self.gcmc_waters = {}
         self._new_session(None)
 
@@ -332,7 +335,17 @@ class _LogMonitor:
         elif m := _correction_re.search(message):
             self.standard_state_correction = float(m.group(1))
         elif m := _waters_re.match(message):
-            self.gcmc_waters.setdefault(float(m.group(1)), []).append(int(m.group(2)))
+            time = float(m.group(2)) if m.group(2) is not None else None
+            counts = self.gcmc_waters.setdefault(float(m.group(1)), [])
+            # A block run again after a restart replaces its earlier count.
+            while (
+                time is not None
+                and counts
+                and counts[-1][0] is not None
+                and counts[-1][0] >= time
+            ):
+                counts.pop()
+            counts.append((time, int(m.group(3))))
 
         if level in ("WARNING", "ERROR", "CRITICAL"):
             self.messages.append((_parse_timestamp(stamp), level, message))
@@ -413,6 +426,26 @@ class Simulation:
             return config
 
         return self._cached("config", _stamp(path), load)
+
+    def _config_values(self, key):
+        """
+        The values of an option in every config written for the run, e.g. by
+        restarts, with None where it wasn't recorded.
+        """
+        from ..io import yaml_to_dict
+
+        paths = sorted(self.path.glob("config*.yaml"))
+
+        def load():
+            values = set()
+            for path in paths:
+                try:
+                    values.add(yaml_to_dict(str(path)).get(key))
+                except Exception:
+                    values.add(None)
+            return values
+
+        return self._cached(f"config_values:{key}", _stamp(*paths), load)
 
     def _lambdas(self, config):
         """
@@ -994,8 +1027,12 @@ class Simulation:
 
         result = {}
         if config.get("gcmc") and gcmc:
-            # Only recorded in the config by versions that let it be set.
+            # The statistics cover the whole run, so this is only known if it
+            # was never changed on restart, and was recorded, which it is by
+            # versions that let it be set.
             attempts = config.get("gcmc_num_attempts")
+            if len(self._config_values("gcmc_num_attempts")) > 1:
+                attempts = None
             rows = []
             for lam in sorted(gcmc):
                 stats = gcmc[lam]
@@ -1019,21 +1056,21 @@ class Simulation:
             result["gcmc_batch_size"] = config.get("gcmc_batch_size")
             result["gcmc_num_attempts"] = attempts
         if config.get("gcmc") and log is not None and log.gcmc_waters:
-            # Logged at each checkpoint, so timed by them.
-            frequency = _to_ns(config.get("checkpoint_frequency"))
-            runtime = _to_ns(config.get("runtime"))
-            if frequency:
-                result["gcmc_waters"] = [
+            # Without logged times, counts are only known by checkpoint.
+            timed = all(t is not None for c in log.gcmc_waters.values() for t, _ in c)
+            result["gcmc_waters"] = {
+                "timed": timed,
+                "windows": [
                     {
                         "lambda": lam,
                         "time": [
-                            min((i + 1) * frequency, runtime or _np.inf)
-                            for i in range(len(counts))
+                            t if timed else i + 1 for i, (t, _) in enumerate(counts)
                         ],
-                        "count": counts,
+                        "count": [n for _, n in counts],
                     }
                     for lam, counts in sorted(log.gcmc_waters.items())
-                ]
+                ],
+            }
         if config.get("terminal_flip_frequency") and flips:
             result["terminal_flip"] = [
                 {
@@ -1338,19 +1375,30 @@ class Simulation:
 
     def _gcmc_region(self):
         """
-        The selection of atoms at the centre of the GCMC region and its radius
-        in nm, or None if GCMC wasn't used for a region.
+        With GCMC, the selection of atoms at the centre of its region and the
+        region's radius in nm, which are None if it samples the whole box.
+        None without GCMC.
         """
-        config = self.config() or {}
-        if not config.get("gcmc") or not config.get("gcmc_selection"):
+        path = _find_config(self.path)
+        if path is None:
             return None
-        import sire as _sr
 
-        try:
-            radius = _sr.u(str(config["gcmc_radius"])).to("nm")
-        except Exception:
-            return None
-        return {"selection": str(config["gcmc_selection"]), "radius": radius}
+        def load():
+            import sire as _sr
+
+            config = self.config() or {}
+            if not config.get("gcmc"):
+                return None
+            selection = config.get("gcmc_selection")
+            try:
+                radius = _sr.u(str(config["gcmc_radius"])).to("nm")
+            except Exception:
+                radius = None
+            if not selection or radius is None:
+                return {"selection": None, "radius": None}
+            return {"selection": str(selection), "radius": radius}
+
+        return self._cached("gcmc_region", _stamp(path), load)
 
     def _positions_file(self, last=False):
         """
