@@ -754,8 +754,10 @@ The viewer shows:
   end state from the latest saved coordinates of its window, with the mutated
   residues and any ligand in detail. Peptides with fewer than five amino acids
   are depicted like any other perturbed molecule.
-- For GCMC simulations, the GCMC region and the waters present in it are added
-  to either of the above, from the same saved coordinates.
+- In either of the above, the waters within 6 Å of the perturbed molecule or
+  mutated residues, which can be turned off. For GCMC simulations, the waters
+  in the GCMC region are also shown, along with the region itself, leaving out
+  ghost waters.
 - The MBAR free energy, PMF, overlap matrix, and forward and backward
   convergence. These are updated in the background as new data is written. For
   ABFE simulations, the standard state correction for the Boresch restraint is

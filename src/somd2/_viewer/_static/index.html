@@ -316,7 +316,7 @@ function loadCollapsed(key = "somd2-viewer-collapsed") {
   try { return new Set(JSON.parse(localStorage.getItem(key) || "[]")); } catch (e) { return new Set(); }
 }
 
-const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "", problems: {}, requests: 0, latest: {}, shown: {}, group: null, repeatsOpen: new Map(), conformers: {}, conformersLoading: {}, structureMode: "0", structureMolecule: {}, viewer3d: null, bindingSites: {}, bindingSitesLoading: {}, viewerSite: null, siteMode: "0" };
+const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "", problems: {}, requests: 0, latest: {}, shown: {}, group: null, repeatsOpen: new Map(), conformers: {}, conformersLoading: {}, structureMode: "0", structureMolecule: {}, viewer3d: null, bindingSites: {}, bindingSitesLoading: {}, viewerSite: null, siteMode: "0", siteWaters: true };
 const PALETTE = ["#2f6fdf", "#e0663b", "#2a9d6f", "#b04fc9", "#c9a227", "#3aa7c9", "#d64f7a", "#7a8699"];
 const LAMBDA = "λ";
 // The thresholds for poor overlap and replica mixing, as in the summary.
@@ -1173,6 +1173,7 @@ function renderBindingSite(s) {
     const modes = [["0", `${LAMBDA} = 0`], ["1", `${LAMBDA} = 1`]];
     controls += modes.map(([value, label]) => `<label><input type="radio" name="site-mode" value="${value}"${state.siteMode === value ? " checked" : ""}> ${label}</label>`).join("");
   }
+  controls += `<label><input type="checkbox" id="site-waters"${state.siteWaters ? " checked" : ""}> Waters</label>`;
   controls += `<button type="button" id="binding-site-reset">Reset view</button><button type="button" class="viewer-save">Save PNG</button>`;
   if (document.fullscreenEnabled) controls += fullScreenButton();
   let html = `<div class="structure-panel"><div class="structure-controls note" style="margin-bottom:8px">${controls}</div>`;
@@ -1187,17 +1188,19 @@ function renderBindingSite(s) {
   } else {
     html += `<div class="note">The latest saved coordinates of the ${LAMBDA} = 0 window${time}, updated as the simulation runs. Residues within 6 Å of the perturbed molecule are shown in detail, and the rest of the protein as a cartoon. Drag to rotate, Ctrl + scroll to zoom.</div>`;
   }
-  html += gcmcNote(b);
+  html += waterNote(b);
   return card(title, html);
 }
 
-// What is shown of the GCMC region, if anything.
-function gcmcNote(b) {
-  const regions = b.kind === "mutation" ? b.states.map((s) => s.gcmc && { ...s.gcmc, waters: s.waters.length }) : [b.gcmc && { ...b.gcmc, waters: b.waters.length }];
-  const region = regions.find(Boolean);
-  if (!region) return "";
-  const counts = regions.length > 1 ? regions.map((r, i) => `${r ? r.waters : "–"} at ${LAMBDA} = ${i}`).join(" and ") : `${region.waters}`;
-  return `<div class="note">The GCMC region, within ${fmt(region.radius, 1)} Å of the centre of <code>${esc(region.selection)}</code>, is shown as a wireframe sphere, with the waters present in it as red spheres (${counts}), from the same saved coordinates.</div>`;
+// Which waters are shown, and how many.
+function waterNote(b) {
+  const mutation = b.kind === "mutation";
+  const states = mutation ? b.states : [b];
+  const counts = states.map((s, i) => `${s.waters.length}${mutation ? ` at ${LAMBDA} = ${i}` : ""}`).join(" and ");
+  const near = mutation ? "the mutated residues" : "the perturbed molecule";
+  const region = states.map((s) => s.gcmc).find(Boolean);
+  if (!region) return `<div class="note">Waters within 6 Å of ${near} are shown as red spheres (${counts}).</div>`;
+  return `<div class="note">Waters within 6 Å of ${near}, or in the GCMC region, are shown as red spheres (${counts}), leaving out GCMC's ghost waters. The region, within ${fmt(region.radius, 1)} Å of the centre of <code>${esc(region.selection)}</code>, is shown as a wireframe sphere.</div>`;
 }
 
 // Polled while the card is open, sending the version already shown so that an
@@ -1280,12 +1283,13 @@ function showSite(v, site) {
   v.viewer.render();
 }
 
-// The waters in the GCMC region as oxygen spheres, and the region as a
-// wireframe sphere.
+// The waters shown as oxygen spheres, and any GCMC region as a wireframe
+// sphere, unless the waters are turned off.
 function styleWaters(v, model, waters, gcmc) {
   v.viewer.removeAllShapes();
-  if (!gcmc) return;
+  if (!state.siteWaters) return;
   model.setStyle({ serial: waters }, { sphere: { radius: 0.4, color: "#e8473b" } });
+  if (!gcmc) return;
   const [x, y, z] = gcmc.centre;
   v.viewer.addSphere({ center: { x, y, z }, radius: gcmc.radius, color: css("--accent"), wireframe: true, opacity: 0.3 });
 }
@@ -2332,6 +2336,14 @@ function render() {
     const v = state.viewerSite;
     if (v && v.viewer && v.site && v.site.kind === "mutation") styleSite(v);
   }));
+  const siteWaters = $("#site-waters");
+  if (siteWaters) siteWaters.addEventListener("change", (e) => {
+    state.siteWaters = e.target.checked;
+    const v = state.viewerSite;
+    if (!v || !v.viewer || !v.site) return;
+    if (v.site.kind === "mutation") styleSite(v);
+    else showSite(v, v.site);
+  });
   const resetSite = $("#binding-site-reset");
   if (resetSite) resetSite.addEventListener("click", () => {
     if (state.viewerSite && state.viewerSite.viewer) fitStructure(state.viewerSite);

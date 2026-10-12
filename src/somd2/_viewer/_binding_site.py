@@ -46,13 +46,13 @@ _LIGAND_RESIDUE = 9999
 # are within this distance, in nm, of a mutated residue.
 _NEARBY = 1.2
 
-# GCMC waters are given their own chain.
+# Waters are given their own chain.
 _WATER_CHAIN = "W"
 
-# The topologies read most recently, and the layouts of their GCMC waters,
-# which are kept to a limited number.
+# The topologies read most recently, and the layouts of their waters, which
+# are kept to a limited number.
 _topologies = _OrderedDict()
-_gcmc_layouts = _OrderedDict()
+_water_layouts = _OrderedDict()
 _topologies_lock = _threading.Lock()
 _MAX_TOPOLOGIES = 16
 
@@ -90,25 +90,26 @@ def binding_site(topology0, topology1, saved, saved1=None, gcmc=None):
         hydrogens, and any other molecules, e.g. a ligand, at each end state,
         with the serial numbers of the atoms of the mutated residues, of the
         residues near them or the other molecules, and of the other molecules.
-        With GCMC, the oxygens of the waters present in its region, with their
-        serial numbers, and the region's centre and radius in Å. None if there
-        is nothing to show.
+        Also the oxygens of the waters near the perturbed molecules or mutated
+        residues, with their serial numbers, and with GCMC, those in its
+        region, leaving out ghosts, and the region's centre and radius in Å.
+        None if there is nothing to show.
     """
     topology = _topology(topology0, topology1)
     if topology is None:
         return None
-    layout = None
-    if gcmc is not None:
-        layout = _gcmc_layout(topology0, topology1, gcmc["selection"])
+    layout = _water_layout(
+        topology0, topology1, gcmc["selection"] if gcmc is not None else None
+    )
     if topology["kind"] == "mutation":
         return _mutation(topology, saved, saved1 or saved, layout, gcmc)
 
     proteins = [_coordinates(saved, topology, m) for m in topology["proteins"]]
     ligands = [_coordinates(saved, topology, m) for m in topology["others"]]
     _image(saved.box, proteins, ligands)
-    region = _gcmc_region(layout, gcmc, topology, saved, proteins)
 
     near = _np.concatenate(ligands)
+    region = _waters(layout, gcmc, topology, saved, near)
     lines = []
     pocket = []
     serial = 0
@@ -157,7 +158,7 @@ def site_kind(topology0, topology1):
 
 def _mutation(topology, saved0, saved1, layout=None, gcmc=None):
     """
-    The mutated protein, any other molecules and any GCMC waters at each end
+    The mutated protein, any other molecules and nearby waters at each end
     state, each from its own window, with the λ = 1 window superposed on the
     λ = 0 window by the protein's Cα atoms.
     """
@@ -175,7 +176,6 @@ def _mutation(topology, saved0, saved1, layout=None, gcmc=None):
         saved1 = saved0
 
     frames = []
-    regions = []
     for state, saved in enumerate((saved0, saved1)):
         proteins = [
             _coordinates(saved, topology, m, state) for m in topology["proteins"]
@@ -183,14 +183,6 @@ def _mutation(topology, saved0, saved1, layout=None, gcmc=None):
         others = [_coordinates(saved, topology, m, state) for m in topology["others"]]
         _image(saved.box, proteins, others)
         frames.append((proteins, others))
-        regions.append(_gcmc_region(layout, gcmc, topology, saved, proteins))
-
-    if saved1 is not saved0:
-        fit = _superpose(ca(saved1), ca(saved0))
-        frames[1] = tuple([fit(x) for x in group] for group in frames[1])
-        if regions[1] is not None:
-            centre, oxygens = regions[1]
-            regions[1] = (fit(centre[None, :])[0], fit(oxygens))
 
     def mutated_positions(state):
         proteins = frames[state][0]
@@ -228,6 +220,28 @@ def _mutation(topology, saved0, saved1, layout=None, gcmc=None):
             )
     for residues, molecule in zip(nearby, topology["proteins"]):
         residues -= molecule["mutated"]
+
+    # Waters near the mutated residues, or the other molecules shown.
+    regions = [
+        _waters(
+            layout,
+            gcmc,
+            topology,
+            saved,
+            _np.concatenate([mutated_positions(state)] + [others[i] for i in shown]),
+        )
+        for state, (saved, (_, others)) in enumerate(zip((saved0, saved1), frames))
+    ]
+
+    if saved1 is not saved0:
+        fit = _superpose(ca(saved1), ca(saved0))
+        frames[1] = tuple([fit(x) for x in group] for group in frames[1])
+        if regions[1] is not None:
+            centre, oxygens = regions[1]
+            regions[1] = (
+                None if centre is None else fit(centre[None, :])[0],
+                fit(oxygens),
+            )
 
     states = []
     for state, (proteins, others) in enumerate(frames):
@@ -306,48 +320,64 @@ def _image(box, proteins, others):
         positions -= shift
 
 
-def _gcmc_region(layout, gcmc, topology, saved, proteins):
+def _waters(layout, gcmc, topology, saved, near):
     """
-    The centre of the GCMC region, in the image of the protein, and the
-    oxygens of the waters present within it, or None if they aren't known.
+    The oxygens of the waters near the given atoms, in their image, and with
+    GCMC, those in its region, leaving out ghosts, along with the centre of the
+    region. None if there are no waters, or with GCMC, the ghosts aren't known.
     """
-    if layout is None or saved.ghost_waters is None:
+    if layout is None or (gcmc is not None and saved.ghost_waters is None):
         return None
-    centre = _np.concatenate(
-        [
-            _coordinates(saved, topology, molecule, atoms=atoms)
-            for molecule, atoms in layout["selection"]
-        ]
-    ).mean(axis=0)
     starts = saved.molecule_starts(layout["waters"], topology["num_system_atoms"])
     indices = starts + layout["oxygen"]
     if len(indices) and indices.max() >= len(saved.positions):
         raise _Mismatch()
     oxygens = saved.positions[indices]
 
-    offsets = oxygens - centre
+    reference = near.mean(axis=0)
+    centre = None
+    if gcmc is not None and layout["selection"]:
+        centre = _np.concatenate(
+            [
+                _coordinates(saved, topology, molecule, atoms=atoms)
+                for molecule, atoms in layout["selection"]
+            ]
+        ).mean(axis=0)
+
     if _is_periodic(saved.box):
         box = _np.asarray(saved.box, dtype=float)
         inverse = _np.linalg.inv(box)
-        if proteins:
-            middle = _np.concatenate(proteins).mean(axis=0)
-            centre = centre - _np.round((centre - middle) @ inverse) @ box
-            offsets = oxygens - centre
-        offsets -= _np.round(offsets @ inverse) @ box
+        offsets = oxygens - reference
+        oxygens = reference + offsets - _np.round(offsets @ inverse) @ box
+        if centre is not None:
+            centre = centre - _np.round((centre - reference) @ inverse) @ box
 
-    # Ghosts beyond the waters in the topology are of one written before the
-    # additional GCMC waters were added to it.
     present = _np.ones(len(oxygens), dtype=bool)
-    ghosts = _np.asarray(saved.ghost_waters, dtype=int)
-    present[ghosts[ghosts < len(present)]] = False
-    inside = present & (_np.linalg.norm(offsets, axis=1) < gcmc["radius"])
-    return centre, centre + offsets[inside]
+    if saved.ghost_waters is not None:
+        # Ghosts beyond the waters in the topology are of one written before
+        # the additional GCMC waters were added to it.
+        ghosts = _np.asarray(saved.ghost_waters, dtype=int)
+        present[ghosts[ghosts < len(present)]] = False
+
+    # Only the waters that could be close enough are checked against each atom.
+    spread = _np.linalg.norm(near - reference, axis=1).max()
+    candidates = _np.where(
+        present & (_np.linalg.norm(oxygens - reference, axis=1) < spread + _CUTOFF)
+    )[0]
+    distances = _np.linalg.norm(
+        oxygens[candidates][:, None, :] - near[None, :, :], axis=-1
+    ).min(axis=1, initial=_np.inf)
+    shown = _np.zeros(len(oxygens), dtype=bool)
+    shown[candidates[distances < _CUTOFF]] = True
+    if centre is not None:
+        shown |= present & (_np.linalg.norm(oxygens - centre, axis=1) < gcmc["radius"])
+    return centre, oxygens[shown]
 
 
 def _water_records(region, serial, lines):
     """
-    Add HETATM records for the oxygens of the waters in a GCMC region to
-    lines, returning their serial numbers and the last serial number.
+    Add HETATM records for the oxygens of the waters shown to lines, returning
+    their serial numbers and the last serial number.
     """
     serials = []
     if region is not None:
@@ -365,7 +395,7 @@ def _region_summary(region, gcmc):
     The centre and radius of a GCMC region in Å, with the selection of atoms
     at its centre, or None.
     """
-    if region is None:
+    if region is None or region[0] is None:
         return None
     return {
         "centre": (10.0 * region[0]).tolist(),
@@ -520,21 +550,20 @@ def _topology(topology0, topology1):
     return topology
 
 
-def _gcmc_layout(topology0, topology1, selection):
+def _water_layout(topology0, topology1, selection=None):
     """
-    The waters that GCMC can move, as the index of each one's first atom in
-    the order that GCMC numbers them, the position of the oxygen within each,
-    and the atoms at the centre of the GCMC region, by molecule. Read once for
-    each pair of topologies and selection. None if there are no waters, or no
-    atoms match the selection.
+    The waters, as the index of each one's first atom, in the order that GCMC
+    numbers them, the position of the oxygen within each, and, given a GCMC
+    selection, the atoms at the centre of its region, by molecule. Read once
+    for each pair of topologies and selection. None if there are no waters.
     """
     from ._summary import _file_key
 
     key = (_file_key(topology0), _file_key(topology1), selection)
     with _topologies_lock:
-        if key in _gcmc_layouts:
-            _gcmc_layouts.move_to_end(key)
-            return _gcmc_layouts[key]
+        if key in _water_layouts:
+            _water_layouts.move_to_end(key)
+            return _water_layouts[key]
 
     import sire as _sr
 
@@ -565,18 +594,18 @@ def _gcmc_layout(topology0, topology1, selection):
         indices = sorted(waters(system0) & waters(system1))
 
         by_molecule = {}
-        try:
-            atoms = system0[selection].atoms()
-        except Exception:
-            atoms = []
-        if indices and len(atoms):
+        if indices and selection is not None:
+            try:
+                atoms = system0[selection].atoms()
+            except Exception:
+                atoms = []
             numbers = {mol.number(): i for i, mol in enumerate(mols0)}
             for atom in atoms:
                 index = numbers[atom.molecule().number()]
                 by_molecule.setdefault(index, []).append(atom.index().value())
 
         layout = None
-        if by_molecule:
+        if indices:
             water = mols0[indices[0]]
             layout = {
                 "waters": _np.array([starts[i] for i in indices]),
@@ -588,9 +617,9 @@ def _gcmc_layout(topology0, topology1, selection):
             }
 
     with _topologies_lock:
-        _gcmc_layouts[key] = layout
-        while len(_gcmc_layouts) > _MAX_TOPOLOGIES:
-            _gcmc_layouts.popitem(last=False)
+        _water_layouts[key] = layout
+        while len(_water_layouts) > _MAX_TOPOLOGIES:
+            _water_layouts.popitem(last=False)
     return layout
 
 
