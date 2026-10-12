@@ -119,6 +119,8 @@ class Config:
             "max_contexts",
             "restraint_search_time",
             "restraint_search_frequency",
+            "gcmc_batch_size",
+            "gcmc_num_attempts",
         ]
     )
 
@@ -199,6 +201,8 @@ class Config:
         gcmc_radius="4 A",
         gcmc_bulk_sampling_probability=0.1,
         gcmc_tolerance=0.0,
+        gcmc_batch_size=1000,
+        gcmc_num_attempts=10000,
         use_dispersion_correction=False,
         rest2_scale=1.0,
         rest2_selection=None,
@@ -558,6 +562,15 @@ class Config:
             of acceptance for a move. This can be used to exclude low probability candidates
             that can cause instabilities or crashes for the MD engine.
 
+        gcmc_batch_size: int
+            The number of GCMC insertion and deletion trials evaluated in parallel in each
+            batch. This should be tuned so that an average of about one trial is accepted
+            per batch, since the rest of the batch is wasted.
+
+        gcmc_num_attempts: int
+            The total number of GCMC trials per move, which must be at least
+            'gcmc_batch_size'.
+
         use_dispersion_correction: bool
             Whether to use the long-range dispersion correction for LJ interactions.
             When True, the correction is evaluated analytically via a CustomVolumeForce
@@ -786,6 +799,8 @@ class Config:
         self.gcmc_radius = gcmc_radius
         self.gcmc_bulk_sampling_probability = gcmc_bulk_sampling_probability
         self.gcmc_tolerance = gcmc_tolerance
+        self.gcmc_batch_size = gcmc_batch_size
+        self.gcmc_num_attempts = gcmc_num_attempts
         self.use_dispersion_correction = use_dispersion_correction
         self.rest2_scale = rest2_scale
         self.rest2_selection = rest2_selection
@@ -2412,6 +2427,38 @@ class Config:
         if gcmc_tolerance < 0.0:
             raise ValueError("'gcmc_tolerance' must be greater than or equal to 0.0")
         self._gcmc_tolerance = gcmc_tolerance
+
+    @property
+    def gcmc_batch_size(self):
+        return self._gcmc_batch_size
+
+    @gcmc_batch_size.setter
+    def gcmc_batch_size(self, gcmc_batch_size):
+        if not isinstance(gcmc_batch_size, int):
+            try:
+                gcmc_batch_size = int(gcmc_batch_size)
+            except Exception:
+                raise ValueError("'gcmc_batch_size' must be an integer")
+        if gcmc_batch_size <= 0:
+            raise ValueError("'gcmc_batch_size' must be greater than 0")
+        self._gcmc_batch_size = gcmc_batch_size
+
+    @property
+    def gcmc_num_attempts(self):
+        return self._gcmc_num_attempts
+
+    @gcmc_num_attempts.setter
+    def gcmc_num_attempts(self, gcmc_num_attempts):
+        if not isinstance(gcmc_num_attempts, int):
+            try:
+                gcmc_num_attempts = int(gcmc_num_attempts)
+            except Exception:
+                raise ValueError("'gcmc_num_attempts' must be an integer")
+        if gcmc_num_attempts < self._gcmc_batch_size:
+            raise ValueError(
+                "'gcmc_num_attempts' must be greater than or equal to 'gcmc_batch_size'"
+            )
+        self._gcmc_num_attempts = gcmc_num_attempts
 
     @property
     def use_dispersion_correction(self):

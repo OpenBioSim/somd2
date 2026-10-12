@@ -1021,6 +1021,8 @@ class RunnerBase:
                 "taylor_power": self._config.taylor_power,
                 "standard_volume": str(self._config.gcmc_standard_volume),
                 "tolerance": self._config.gcmc_tolerance,
+                "batch_size": self._config.gcmc_batch_size,
+                "num_attempts": self._config.gcmc_num_attempts,
             }
         else:
             self._gcmc_kwargs = None

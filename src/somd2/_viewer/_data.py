@@ -94,6 +94,9 @@ _states_re = _re.compile(r"^States: \[([\d\s]*)\]")
 _block_re = _re.compile(r"^Finished block (\d+) of (\d+) for \S+ = ([\d.]+)")
 _perf_re = _re.compile(r"^Overall performance: ([\d.]+) ns day-1")
 _correction_re = _re.compile(r"Standard state correction: (-?[\d.]+) kcal mol-1")
+_waters_re = _re.compile(
+    r"^Current number of waters in GCMC volume at \S+ = ([\d.]+) is (\d+)"
+)
 
 
 def discover(paths, strict=True):
@@ -248,6 +251,8 @@ class _LogMonitor:
         self._saved_states = 0
         self.standard_state_correction = None
         self.messages = _deque(maxlen=20)
+        # The number of waters in the GCMC region at each checkpoint, by λ.
+        self.gcmc_waters = {}
         self._new_session(None)
 
     def _new_session(self, timestamp):
@@ -326,6 +331,8 @@ class _LogMonitor:
             self.finished = True
         elif m := _correction_re.search(message):
             self.standard_state_correction = float(m.group(1))
+        elif m := _waters_re.match(message):
+            self.gcmc_waters.setdefault(float(m.group(1)), []).append(int(m.group(2)))
 
         if level in ("WARNING", "ERROR", "CRITICAL"):
             self.messages.append((_parse_timestamp(stamp), level, message))
@@ -943,7 +950,7 @@ class Simulation:
             "round_trips": round_trips,
         }
 
-    def _samplers(self, config, lambda_values, repex_state):
+    def _samplers(self, config, lambda_values, repex_state, log=None):
         gcmc = {}
         flips = {}
 
@@ -987,17 +994,46 @@ class Simulation:
 
         result = {}
         if config.get("gcmc") and gcmc:
+            # Only recorded in the config by versions that let it be set.
+            attempts = config.get("gcmc_num_attempts")
             rows = []
             for lam in sorted(gcmc):
-                row = {"lambda": lam}
-                row.update(
-                    {k: v for k, v in gcmc[lam].items() if isinstance(v, (int, float))}
-                )
-                moves = row.get("num_moves")
+                stats = gcmc[lam]
+                moves = stats.get("num_moves")
+                row = {
+                    "lambda": lam,
+                    "moves": moves,
+                    "insertions": stats.get("num_insertions"),
+                    "deletions": stats.get("num_deletions"),
+                    "accepted_per_move": None,
+                    "attempt_acceptance": None,
+                }
                 if moves:
-                    row["acceptance"] = row.get("num_accepted", 0) / moves
+                    row["accepted_per_move"] = stats.get("num_accepted", 0) / moves
+                    if attempts and "num_accepted_attempts" in stats:
+                        row["attempt_acceptance"] = stats["num_accepted_attempts"] / (
+                            moves * attempts
+                        )
                 rows.append(row)
             result["gcmc"] = rows
+            result["gcmc_batch_size"] = config.get("gcmc_batch_size")
+            result["gcmc_num_attempts"] = attempts
+        if config.get("gcmc") and log is not None and log.gcmc_waters:
+            # Logged at each checkpoint, so timed by them.
+            frequency = _to_ns(config.get("checkpoint_frequency"))
+            runtime = _to_ns(config.get("runtime"))
+            if frequency:
+                result["gcmc_waters"] = [
+                    {
+                        "lambda": lam,
+                        "time": [
+                            min((i + 1) * frequency, runtime or _np.inf)
+                            for i in range(len(counts))
+                        ],
+                        "count": counts,
+                    }
+                    for lam, counts in sorted(log.gcmc_waters.items())
+                ]
         if config.get("terminal_flip_frequency") and flips:
             result["terminal_flip"] = [
                 {
@@ -1638,7 +1674,7 @@ class Simulation:
                 ),
                 "samplers": self._section(
                     "summarise the Monte Carlo samplers",
-                    lambda: self._samplers(config, lambda_values, repex_state),
+                    lambda: self._samplers(config, lambda_values, repex_state, log),
                 ),
                 "schedule": self._section(
                     "summarise the λ schedule",

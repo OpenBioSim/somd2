@@ -1432,10 +1432,18 @@ function renderSamplers(s) {
   if (sm.error) return card("Monte Carlo samplers", `<div class="note">Couldn't summarise the samplers: ${esc(sm.error)}</div>`);
   let html = "";
   if (sm.gcmc) {
-    const keys = Object.keys(sm.gcmc[0]).filter((k) => k !== "lambda");
-    html += `<h4 style="margin-top:0">GCMC</h4><div class="table-wrap"><table><tr><th>${LAMBDA}</th>${keys.map((k) => `<th class="num">${esc(k.replace(/^num_/, "").replace(/_/g, " "))}</th>`).join("")}</tr>`;
-    for (const row of sm.gcmc) html += `<tr><td>${fmtLambda(row.lambda)}</td>${keys.map((k) => `<td class="num">${k === "acceptance" ? fmt(row[k], 3) : row[k] ?? "–"}</td>`).join("")}</tr>`;
+    const perMove = (value) => {
+      // More than one acceptance per move wastes the rest of each batch.
+      const wasteful = value > 1;
+      const style = wasteful ? ' style="color:var(--warn)" title="More than one accepted per move, so trials are wasted"' : "";
+      return `<td class="num"${style}>${fmt(value, 2)}</td>`;
+    };
+    html += `<h4 style="margin-top:0">GCMC</h4><div class="table-wrap"><table><tr><th>${LAMBDA}</th><th class="num">moves</th><th class="num">insertions</th><th class="num">deletions</th><th class="num">accepted per move</th><th class="num">acceptance per attempt</th></tr>`;
+    for (const row of sm.gcmc) html += `<tr><td>${fmtLambda(row.lambda)}</td><td class="num">${row.moves ?? "–"}</td><td class="num">${row.insertions ?? "–"}</td><td class="num">${row.deletions ?? "–"}</td>${perMove(row.accepted_per_move)}<td class="num">${fmt(row.attempt_acceptance, 4)}</td></tr>`;
     html += `</table></div>`;
+    const settings = sm.gcmc_num_attempts ? ` This run used a batch size of ${sm.gcmc_batch_size} and ${sm.gcmc_num_attempts} attempts per move.` : "";
+    html += `<div class="note">Each GCMC move runs its trials in parallel batches, so it can accept more than one insertion or deletion. More than one accepted per move, highlighted, means trials are wasted, so <code>gcmc_batch_size</code> and <code>gcmc_num_attempts</code> should be reduced, aiming for about one per move. The acceptance per attempt is for the approximate reaction-field potential used to choose candidates.${settings}</div>`;
+    if (sm.gcmc_waters) html += `<h4>Waters in the GCMC region</h4><div class="chart" id="gcmc-waters-chart"></div><div class="note">At each checkpoint, from the log.</div>`;
   }
   if (sm.terminal_flip) {
     html += `<h4${sm.gcmc ? "" : ' style="margin-top:0"'}>Terminal flips</h4><div class="table-wrap"><table><tr><th>${LAMBDA}</th><th class="num">attempted</th><th class="num">accepted</th><th class="num">acceptance</th></tr>`;
@@ -1614,6 +1622,19 @@ function renderCharts(s) {
     lineChart(r2, {
       series: [{ x: sc.rest2.lambda, y: sc.rest2.scale, color: css("--accent"), points: true, title: (x, y) => `${LAMBDA} = ${fmtLambda(x)}: ${fmt(y, 3)}` }],
       xLabel: LAMBDA, yLabel: "scale factor", xMin: 0, xMax: 1,
+    });
+  }
+  const gw = $("#gcmc-waters-chart");
+  const waters = s.samplers && s.samplers.gcmc_waters;
+  if (gw && waters) {
+    lineChart(gw, {
+      series: waters.map((w, i) => ({
+        x: w.time, y: w.count, color: colour(i, waters.length), name: `${LAMBDA} = ${fmtLambda(w.lambda)}`,
+        points: w.count.length <= 50, title: (x, y) => `${LAMBDA} = ${fmtLambda(w.lambda)}, ${fmt(x, 3)} ns: ${y} waters`,
+      })),
+      xLabel: "time (ns)", yLabel: "waters in region", yMin: 0,
+      yFormat: (v) => (Number.isInteger(v) ? String(v) : ""),
+      legend: waters.length <= 16,
     });
   }
 }
