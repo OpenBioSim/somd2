@@ -67,9 +67,8 @@ def _is_loopback(host):
 def _blender_options(query):
     """
     The options for a Blender script from a request's query: the end state,
-    whether waters are shown, the viewer's view as its centre, rotation,
-    distance and field of view, and its aspect ratio. Raises ValueError if any
-    are invalid.
+    whether waters are shown, and the viewer's view as its centre, rotation,
+    distance and field of view. Raises ValueError if any are invalid.
     """
     options = {
         "state": int(query.get("state", ["0"])[0]),
@@ -87,10 +86,6 @@ def _blender_options(query):
             "distance": values[7],
             "fov": values[8],
         }
-    if "aspect" in query:
-        options["aspect"] = float(query["aspect"][0])
-        if not 0.1 < options["aspect"] < 10.0:
-            raise ValueError("The aspect ratio is out of range.")
     return options
 
 

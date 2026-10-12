@@ -1316,7 +1316,6 @@ function saveBlender(s) {
     state: v.site.kind === "mutation" ? state.siteMode : "0",
     waters: state.siteWaters ? "1" : "0",
     view: values.join(","),
-    aspect: String(v.el.clientWidth / v.el.clientHeight),
   });
   const script = getJSON(`/api/simulation/${s.id}/blender?${params}`).then((r) => {
     if (r.status !== "done") throw new Error(r.reason);

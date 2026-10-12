@@ -1373,7 +1373,7 @@ class Simulation:
             # So that the page can title the card before it is shown.
             return _clean(dict(result, kind=kind))
 
-    def blender(self, state=0, waters=True, view=None, aspect=None):
+    def blender(self, state=0, waters=True, view=None):
         """
         Return a Blender script that sets up the binding site or mutation, as
         shown by the viewer, for rendering with Molecular Nodes.
@@ -1387,7 +1387,7 @@ class Simulation:
                 "reason": site.get("reason") or "There is no structure to export.",
             }
         try:
-            script = blender_script(site, self.name, state, waters, view, aspect)
+            script = blender_script(site, self.name, state, waters, view)
         except Exception as e:
             return {"status": "error", "reason": self._report(e, "export to Blender")}
         return {"status": "done", "script": script}

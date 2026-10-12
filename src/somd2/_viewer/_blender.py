@@ -45,7 +45,7 @@ _RADII = {
 }
 
 
-def blender_script(site, name, state=0, show_waters=True, view=None, aspect=None):
+def blender_script(site, name, state=0, show_waters=True, view=None):
     """
     A Blender script for the binding site or mutation.
 
@@ -68,11 +68,8 @@ def blender_script(site, name, state=0, show_waters=True, view=None, aspect=None
         The viewer's view: the "centre" it looks at and the camera's
         "distance" from it, in Å, the "rotation" of the scene as a quaternion
         (x, y, z, w), and the vertical field of view, "fov", in degrees. The
-        view is chosen from the structure if None.
-
-    aspect: float
-        The width of the view divided by its height, which sets that of the
-        render.
+        view is chosen from the structure if None. The render keeps its
+        vertical extent, so its width differs if its shape does.
 
     Returns
     -------
@@ -144,8 +141,9 @@ def blender_script(site, name, state=0, show_waters=True, view=None, aspect=None
             _np.array([position(s) for s in records if records[s].startswith("ATOM")]),
         )
 
-    height = 1080
-    width = height if not aspect else 2 * round(height * aspect / 2)
+    # A standard shape, rather than the viewer's, which is a wide strip
+    # outside full screen.
+    width, height = 1920, 1080
 
     # Shown with the waters, as in the viewer.
     region = shown.get("gcmc") if show_waters else None
