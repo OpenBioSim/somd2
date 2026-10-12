@@ -77,8 +77,6 @@ def blender_script(site, name, state=0, show_waters=True, view=None):
     script: str
         The script.
     """
-    import numpy as _np
-
     if site["kind"] == "mutation":
         shown = site["states"][state]
         detail = shown["nearby"]
@@ -90,19 +88,16 @@ def blender_script(site, name, state=0, show_waters=True, view=None):
         focus = site["ligand"]
         ligand = site["ligand"]
 
+    # Atoms are numbered by their position in the file, as by MDAnalysis, since
+    # serial numbers wrap. The waters come last, so leaving them out keeps it.
     lines = [
         line
         for line in shown["pdb"].splitlines()
         if line.startswith(("ATOM", "HETATM"))
     ]
-    serials = set(shown["waters"])
     if not show_waters:
-        lines = [line for line in lines if int(line[6:11]) not in serials]
-    records = {int(line[6:11]): line for line in lines}
-
-    def position(serial):
-        record = records[serial]
-        return _np.array([float(record[x : x + 8]) for x in (30, 38, 46)])
+        lines = lines[: len(lines) - len(shown["waters"])]
+    records = {i + 1: line for i, line in enumerate(lines)}
 
     # Residues drawn over the cartoon only from Cα outwards, as in the viewer.
     def side_chain(serial):
@@ -112,33 +107,35 @@ def blender_script(site, name, state=0, show_waters=True, view=None):
             return False
         return atom not in _BACKBONE or (atom == "N" and residue == "PRO")
 
-    detail = [s for s in detail if s in records and side_chain(s)]
+    detail = [s for s in detail if side_chain(s)]
     waters = [s for s in shown["waters"] if s in records]
     bonded = set(focus) | set(ligand) | set(waters)
 
     pdb = "\n".join(lines + _conect(records, bonded) + ["END"]) + "\n"
 
+    # The viewer hides the ligand's hydrogens.
+    heavy = [s for s in ligand if records[s][76:78].strip() != "H"]
+
     # A mutated residue's name, e.g. MUT, isn't recognised as protein, which
     # would break the cartoon.
     cartoon = "protein"
-    if site["kind"] == "mutation":
+    if site["kind"] == "mutation" and focus:
         cartoon = f"protein or {_bynum(focus)}"
     styles = [("cartoon", cartoon, "(0.8, 0.8, 0.8, 1.0)")]
-    if detail:
-        styles.append(("sticks", _bynum(detail), "None"))
-    if site["kind"] == "mutation":
-        styles.append(("ball_and_stick", _bynum(focus), "None"))
-        if ligand:
-            styles.append(("ball_and_stick", _bynum(ligand), "None"))
-    else:
-        styles.append(("ball_and_stick", _bynum(ligand), "None"))
-    if waters:
-        styles.append(("sticks", _bynum(waters), "None"))
+    for style, atoms in (
+        ("sticks", detail),
+        ("ball_and_stick", focus if site["kind"] == "mutation" else []),
+        ("ball_and_stick", heavy),
+        ("sticks", waters),
+    ):
+        if atoms:
+            styles.append((style, _bynum(atoms), "None"))
 
     if view is None:
+        protein = [s for s in records if records[s].startswith("ATOM")]
         view = _default_view(
-            _np.array([position(s) for s in focus]),
-            _np.array([position(s) for s in records if records[s].startswith("ATOM")]),
+            _xyz([records[s] for s in focus or protein]),
+            _xyz([records[s] for s in protein or records]),
         )
 
     # A standard shape, rather than the viewer's, which is a wide strip
@@ -149,8 +146,9 @@ def blender_script(site, name, state=0, show_waters=True, view=None):
     region = shown.get("gcmc") if show_waters else None
 
     what = "The mutation" if site["kind"] == "mutation" else "The binding site"
+    title = f"{what} of {name}".replace("\\", "\\\\").replace('"', '\\"')
     return _SCRIPT.format(
-        title=f"{what} of {name}",
+        title=title,
         pdb=pdb,
         styles="\n".join(
             f'mol.add_style("{style}", selection="{selection}", color={color})'
@@ -198,16 +196,7 @@ def _conect(records, serials):
 
     bonds = {}
     for members in residues.values():
-        xyz = _np.array(
-            [
-                [
-                    float(records[s][30:38]),
-                    float(records[s][38:46]),
-                    float(records[s][46:54]),
-                ]
-                for s in members
-            ]
-        )
+        xyz = _xyz([records[s] for s in members])
         radii = _np.array([_RADII.get(records[s][76:78].strip(), 0.8) for s in members])
         distances = _np.linalg.norm(xyz[:, None, :] - xyz[None, :, :], axis=-1)
         limit = 1.25 * (radii[:, None] + radii[None, :])
@@ -226,6 +215,17 @@ def _conect(records, serials):
     return lines
 
 
+def _xyz(records):
+    """
+    The coordinates of the atoms of PDB records.
+    """
+    import numpy as _np
+
+    return _np.array(
+        [[float(record[x : x + 8]) for x in (30, 38, 46)] for record in records]
+    )
+
+
 def _default_view(focus, protein):
     """
     A view of the focus atoms from outside the protein, along the line from
@@ -235,7 +235,9 @@ def _default_view(focus, protein):
 
     centre = focus.mean(axis=0)
     direction = centre - protein.mean(axis=0)
-    direction /= _np.linalg.norm(direction)
+    length = _np.linalg.norm(direction)
+    # Viewed along z if the focus is at the protein's centre.
+    direction = direction / length if length > 1e-8 else _np.array([0.0, 0.0, 1.0])
     radius = _np.linalg.norm(focus - centre, axis=1).max() + 6.0
     distance = radius / _np.tan(_np.radians(10.0))
 
@@ -296,7 +298,7 @@ GCMC_RADIUS = {gcmc_radius}
 PDB = """{pdb}"""
 
 # Written to a temporary file, since Molecular Nodes loads from files.
-path = Path(tempfile.mkdtemp()) / "structure.pdb"
+path = Path(tempfile.gettempdir()) / "somd2_structure.pdb"
 path.write_text(PDB)
 
 canvas = mn.Canvas(resolution=RESOLUTION, transparent=TRANSPARENT)
@@ -317,6 +319,11 @@ camera.data.sensor_fit = "VERTICAL"
 camera.data.angle = radians(FOV)
 camera.data.clip_start = DISTANCE * mol.world_scale / 100
 camera.data.clip_end = DISTANCE * mol.world_scale * 100
+
+# Removed from a previous run, in case clearing the canvas left it.
+for data in (bpy.data.objects, bpy.data.meshes, bpy.data.materials):
+    if "GCMC region" in data:
+        data.remove(data["GCMC region"])
 
 if GCMC_RADIUS is not None and GCMC_STYLE is not None:
     # Built from data, since operators need a context that scripts lack.

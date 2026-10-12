@@ -1373,10 +1373,12 @@ class Simulation:
             # So that the page can title the card before it is shown.
             return _clean(dict(result, kind=kind))
 
-    def blender(self, state=0, waters=True, view=None):
+    def blender(self, state=0, waters=True, view=None, known=None):
         """
         Return a Blender script that sets up the binding site or mutation, as
-        shown by the viewer, for rendering with Molecular Nodes.
+        shown by the viewer, for rendering with Molecular Nodes. If known, the
+        key of the structure shown, has been superseded, the status is
+        "changed", so that a different structure isn't exported.
         """
         from ._blender import blender_script
 
@@ -1385,6 +1387,12 @@ class Simulation:
             return {
                 "status": "unavailable",
                 "reason": site.get("reason") or "There is no structure to export.",
+            }
+        if known is not None and site.get("key") != known:
+            return {
+                "status": "changed",
+                "reason": "The structure has been updated since it was shown. "
+                "Try again once the view has updated.",
             }
         try:
             script = blender_script(site, self.name, state, waters, view)

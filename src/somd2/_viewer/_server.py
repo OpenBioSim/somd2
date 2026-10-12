@@ -67,12 +67,16 @@ def _is_loopback(host):
 def _blender_options(query):
     """
     The options for a Blender script from a request's query: the end state,
-    whether waters are shown, and the viewer's view as its centre, rotation,
-    distance and field of view. Raises ValueError if any are invalid.
+    whether waters are shown, the viewer's view as its centre, rotation,
+    distance and field of view, and the key of the structure shown. Raises
+    ValueError if any are invalid.
     """
+    import math
+
     options = {
         "state": int(query.get("state", ["0"])[0]),
         "waters": query.get("waters", ["1"])[0] != "0",
+        "known": query.get("known", [None])[0],
     }
     if options["state"] not in (0, 1):
         raise ValueError("The state must be 0 or 1.")
@@ -80,6 +84,10 @@ def _blender_options(query):
         values = [float(x) for x in query["view"][0].split(",")]
         if len(values) != 9:
             raise ValueError("The view must have nine values.")
+        if not all(math.isfinite(x) for x in values):
+            raise ValueError("The view must be finite.")
+        if not any(values[3:7]) or values[7] <= 0 or not 0 < values[8] < 180:
+            raise ValueError("The view's rotation, distance or angle is invalid.")
         options["view"] = {
             "centre": values[0:3],
             "rotation": values[3:7],

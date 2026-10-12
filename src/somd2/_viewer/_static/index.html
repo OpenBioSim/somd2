@@ -1316,6 +1316,7 @@ function saveBlender(s) {
     state: v.site.kind === "mutation" ? state.siteMode : "0",
     waters: state.siteWaters ? "1" : "0",
     view: values.join(","),
+    known: v.site.key,
   });
   const script = getJSON(`/api/simulation/${s.id}/blender?${params}`).then((r) => {
     if (r.status !== "done") throw new Error(r.reason);
@@ -1678,6 +1679,8 @@ function valueWithError(value, error) {
 // content can still be being made, e.g. an image, since the dialog must open
 // straight after the click.
 async function download(name, content, type) {
+  // Failures are reported only once the file is being saved.
+  Promise.resolve(content).catch(() => {});
   if (window.showSaveFilePicker) {
     const extension = name.slice(name.lastIndexOf("."));
     try {
