@@ -1196,11 +1196,11 @@ function renderBindingSite(s) {
 function waterNote(b) {
   const mutation = b.kind === "mutation";
   const states = mutation ? b.states : [b];
-  const counts = states.map((s, i) => `${s.waters.length}${mutation ? ` at ${LAMBDA} = ${i}` : ""}`).join(" and ");
+  const counts = states.map((s, i) => `${s.num_waters}${mutation ? ` at ${LAMBDA} = ${i}` : ""}`).join(" and ");
   const near = mutation ? "the mutated residues" : "the perturbed molecule";
   const region = states.map((s) => s.gcmc).find(Boolean);
-  if (!region) return `<div class="note">Waters within 6 Å of ${near} are shown as red spheres (${counts}).</div>`;
-  return `<div class="note">Waters within 6 Å of ${near}, or in the GCMC region, are shown as red spheres (${counts}), leaving out GCMC's ghost waters. The region, within ${fmt(region.radius, 1)} Å of the centre of <code>${esc(region.selection)}</code>, is shown as a wireframe sphere.</div>`;
+  if (!region) return `<div class="note">Waters within 6 Å of ${near} are shown (${counts}).</div>`;
+  return `<div class="note">Waters within 6 Å of ${near}, or in the GCMC region, are shown (${counts}), leaving out GCMC's ghost waters. The region, within ${fmt(region.radius, 1)} Å of the centre of <code>${esc(region.selection)}</code>, is shown as a wireframe sphere.</div>`;
 }
 
 // Polled while the card is open, sending the version already shown so that an
@@ -1269,26 +1269,28 @@ function showSite(v, site) {
   v.site = site;
   v.viewer.removeAllModels();
   if (site.kind === "mutation") {
-    v.models = site.states.map((s) => v.viewer.addModel(s.pdb, "pdb"));
+    v.models = site.states.map((s) => v.viewer.addModel(s.pdb, "pdb", { keepH: true }));
     styleSite(v);
     return;
   }
-  const model = v.viewer.addModel(site.pdb, "pdb");
+  // Hydrogens are kept for the waters, but only they have them drawn.
+  const model = v.viewer.addModel(site.pdb, "pdb", { keepH: true });
   model.setStyle({}, { cartoon: { color: "lightgrey" } });
   // Added to the cartoon, rather than replacing it.
   styleSideChains(model, site.pocket, { stick: { radius: 0.15, colorscheme: "grayCarbon" } });
   const ligand = { colorscheme: "greenCarbon" };
   model.setStyle({ serial: site.ligand }, { stick: { radius: 0.14, ...ligand }, sphere: { scale: 0.22, ...ligand } });
+  model.setStyle({ serial: site.ligand, elem: "H" }, {});
   styleWaters(v, model, site.waters, site.gcmc);
   v.viewer.render();
 }
 
-// The waters shown as oxygen spheres, and any GCMC region as a wireframe
-// sphere, unless the waters are turned off.
+// The waters, in ball-and-stick, and any GCMC region as a wireframe sphere,
+// unless the waters are turned off.
 function styleWaters(v, model, waters, gcmc) {
   v.viewer.removeAllShapes();
   if (!state.siteWaters) return;
-  model.setStyle({ serial: waters }, { sphere: { radius: 0.4, color: "#e8473b" } });
+  model.setStyle({ serial: waters }, { stick: { radius: 0.1 }, sphere: { scale: 0.2 } });
   if (!gcmc) return;
   const [x, y, z] = gcmc.centre;
   v.viewer.addSphere({ center: { x, y, z }, radius: gcmc.radius, color: css("--accent"), wireframe: true, opacity: 0.3 });
@@ -1317,6 +1319,7 @@ function styleSite(v) {
     model.setStyle({ serial: s.mutated }, { stick: { radius: 0.18, colorscheme: "magentaCarbon" } }, true);
     const other = { colorscheme: "greenCarbon" };
     model.setStyle({ serial: s.ligand }, { stick: { radius: 0.14, ...other }, sphere: { scale: 0.22, ...other } });
+    model.setStyle({ serial: s.ligand, elem: "H" }, {});
     styleWaters(v, model, s.waters, s.gcmc);
   });
   v.viewer.render();

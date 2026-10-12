@@ -90,10 +90,10 @@ def binding_site(topology0, topology1, saved, saved1=None, gcmc=None):
         hydrogens, and any other molecules, e.g. a ligand, at each end state,
         with the serial numbers of the atoms of the mutated residues, of the
         residues near them or the other molecules, and of the other molecules.
-        Also the oxygens of the waters near the perturbed molecules or mutated
-        residues, with their serial numbers, and with GCMC, those in its
-        region, leaving out ghosts, and the region's centre and radius in Å.
-        None if there is nothing to show.
+        Also the waters near the perturbed molecules or mutated residues, with
+        their serial numbers, and with GCMC, those in its region, leaving out
+        ghosts, and the region's centre and radius in Å. None if there is
+        nothing to show.
     """
     topology = _topology(topology0, topology1)
     if topology is None:
@@ -142,6 +142,7 @@ def binding_site(topology0, topology1, saved, saved1=None, gcmc=None):
         "pocket": pocket,
         "ligand": ligand_atoms,
         "waters": waters,
+        "num_waters": 0 if region is None else len(region[1]),
         "gcmc": _region_summary(region, gcmc),
         "time_ps": saved.time_ps,
     }
@@ -237,10 +238,11 @@ def _mutation(topology, saved0, saved1, layout=None, gcmc=None):
         fit = _superpose(ca(saved1), ca(saved0))
         frames[1] = tuple([fit(x) for x in group] for group in frames[1])
         if regions[1] is not None:
-            centre, oxygens = regions[1]
+            centre, waters, atoms = regions[1]
             regions[1] = (
                 None if centre is None else fit(centre[None, :])[0],
-                fit(oxygens),
+                fit(waters.reshape(-1, 3)).reshape(waters.shape),
+                atoms,
             )
 
     states = []
@@ -279,6 +281,7 @@ def _mutation(topology, saved0, saved1, layout=None, gcmc=None):
                 "nearby": neighbours,
                 "ligand": ligand,
                 "waters": waters,
+                "num_waters": 0 if regions[state] is None else len(regions[state][1]),
                 "gcmc": _region_summary(regions[state], gcmc),
             }
         )
@@ -322,17 +325,20 @@ def _image(box, proteins, others):
 
 def _waters(layout, gcmc, topology, saved, near):
     """
-    The oxygens of the waters near the given atoms, in their image, and with
-    GCMC, those in its region, leaving out ghosts, along with the centre of the
-    region. None if there are no waters, or with GCMC, the ghosts aren't known.
+    The centre of any GCMC region, and the atoms, by water, of the waters near
+    the given atoms, in their image, and with GCMC, those in its region,
+    leaving out ghosts, with the names and elements of each water's atoms.
+    None if there are no waters, or with GCMC, the ghosts aren't known.
     """
     if layout is None or (gcmc is not None and saved.ghost_waters is None):
         return None
     starts = saved.molecule_starts(layout["waters"], topology["num_system_atoms"])
-    indices = starts + layout["oxygen"]
-    if len(indices) and indices.max() >= len(saved.positions):
+    atom_indices = starts[:, None] + _np.array([a[0] for a in layout["atoms"]])
+    if atom_indices.size and atom_indices.max() >= len(saved.positions):
         raise _Mismatch()
-    oxygens = saved.positions[indices]
+    indices = starts + layout["oxygen"]
+    unwrapped = saved.positions[indices]
+    oxygens = unwrapped
 
     reference = near.mean(axis=0)
     centre = None
@@ -371,22 +377,27 @@ def _waters(layout, gcmc, topology, saved, near):
     shown[candidates[distances < _CUTOFF]] = True
     if centre is not None:
         shown |= present & (_np.linalg.norm(oxygens - centre, axis=1) < gcmc["radius"])
-    return centre, oxygens[shown]
+
+    # Each water's atoms are moved into the image of its oxygen.
+    shifts = (oxygens - unwrapped)[shown]
+    atoms = saved.positions[atom_indices[shown]] + shifts[:, None, :]
+    return centre, atoms, layout["atoms"]
 
 
 def _water_records(region, serial, lines):
     """
-    Add HETATM records for the oxygens of the waters shown to lines, returning
+    Add HETATM records for the atoms of the waters shown to lines, returning
     their serial numbers and the last serial number.
     """
     serials = []
     if region is not None:
-        for i, xyz in enumerate(region[1]):
-            serial += 1
-            serials.append(serial)
-            lines.append(
-                _atom("HETATM", serial, ("O", "HOH", i + 1, "O"), _WATER_CHAIN, xyz)
-            )
+        _, waters, atoms = region
+        for i, positions in enumerate(waters):
+            for (_, name, element), xyz in zip(atoms, positions):
+                serial += 1
+                serials.append(serial)
+                record = (name, "HOH", i + 1, element)
+                lines.append(_atom("HETATM", serial, record, _WATER_CHAIN, xyz))
     return serials, serial
 
 
@@ -553,9 +564,10 @@ def _topology(topology0, topology1):
 def _water_layout(topology0, topology1, selection=None):
     """
     The waters, as the index of each one's first atom, in the order that GCMC
-    numbers them, the position of the oxygen within each, and, given a GCMC
-    selection, the atoms at the centre of its region, by molecule. Read once
-    for each pair of topologies and selection. None if there are no waters.
+    numbers them, the position, name and element of each one's oxygen and
+    hydrogens, and, given a GCMC selection, the atoms at the centre of its
+    region, by molecule. Read once for each pair of topologies and selection.
+    None if there are no waters.
     """
     from ._summary import _file_key
 
@@ -607,9 +619,16 @@ def _water_layout(topology0, topology1, selection=None):
         layout = None
         if indices:
             water = mols0[indices[0]]
+            elements = [a.element().symbol() for a in water.atoms()]
             layout = {
                 "waters": _np.array([starts[i] for i in indices]),
-                "oxygen": [a.element().symbol() for a in water.atoms()].index("O"),
+                "oxygen": elements.index("O"),
+                # Any massless site, e.g. of TIP4P, isn't shown.
+                "atoms": [
+                    (i, a.name().value(), e)
+                    for i, (a, e) in enumerate(zip(water.atoms(), elements))
+                    if e in ("O", "H")
+                ],
                 "selection": [
                     ({"first": starts[i], "num_atoms": mols0[i].num_atoms()}, atoms)
                     for i, atoms in sorted(by_molecule.items())
