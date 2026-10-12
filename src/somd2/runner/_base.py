@@ -1097,7 +1097,9 @@ class RunnerBase:
             if pme_file.exists():
                 with open(pme_file) as f:
                     params = _yaml.safe_load(f)
-                _logger.info(f"Using PME parameters from {pme_file}: {params}")
+                _logger.info(
+                    f"Using PME parameters from {pme_file}: {self._describe_pme(params)}"
+                )
                 self._config._extra_args["pme_alpha"] = params["pme_alpha"]
                 self._config._extra_args["pme_grid"] = params["pme_grid"]
             elif self._config.tune_pme and not has_pme_options:
@@ -1148,14 +1150,34 @@ class RunnerBase:
             _logger.info(f"The default PME parameters are already the fastest, {error}")
             return
 
-        _logger.info(
-            f"Using tuned PME parameters: alpha={params['pme_alpha']:.4f} nm^-1, "
-            f"grid={params['pme_grid']}, {error}"
-        )
+        _logger.info(f"Using tuned PME parameters: {self._describe_pme(params)}")
 
         _dict_to_yaml(params, str(pme_file))
         self._config._extra_args["pme_alpha"] = params["pme_alpha"]
         self._config._extra_args["pme_grid"] = params["pme_grid"]
+
+    @staticmethod
+    def _describe_pme(params):
+        """
+        A description of tuned PME parameters for the log.
+
+        Parameters
+        ----------
+
+        params : dict
+            The tuned PME parameters, with their relative force errors.
+
+        Returns
+        -------
+
+        description : str
+            The parameters, rounded for reading.
+        """
+        return (
+            f"alpha={params['pme_alpha']:.4f} nm^-1, grid={params['pme_grid']}, "
+            f"relative force error {params['pme_error']:.2e} "
+            f"(target {params['pme_target_error']:.2e})"
+        )
 
     @property
     def _is_abfe_bound(self):
