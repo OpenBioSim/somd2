@@ -1165,7 +1165,7 @@ class RunnerBase:
         ----------
 
         params : dict
-            The tuned PME parameters, with their relative force errors.
+            The tuned PME parameters, and their relative force errors if known.
 
         Returns
         -------
@@ -1173,11 +1173,15 @@ class RunnerBase:
         description : str
             The parameters, rounded for reading.
         """
-        return (
-            f"alpha={params['pme_alpha']:.4f} nm^-1, grid={params['pme_grid']}, "
-            f"relative force error {params['pme_error']:.2e} "
-            f"(target {params['pme_target_error']:.2e})"
+        description = (
+            f"alpha={params['pme_alpha']:.4f} nm^-1, grid={params['pme_grid']}"
         )
+        if "pme_error" in params and "pme_target_error" in params:
+            description += (
+                f", relative force error {params['pme_error']:.2e} "
+                f"(target {params['pme_target_error']:.2e})"
+            )
+        return description
 
     @property
     def _is_abfe_bound(self):
