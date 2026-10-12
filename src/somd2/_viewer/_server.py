@@ -64,6 +64,36 @@ def _is_loopback(host):
         return False
 
 
+def _blender_options(query):
+    """
+    The options for a Blender script from a request's query: the end state,
+    whether waters are shown, the viewer's view as its centre, rotation,
+    distance and field of view, and its aspect ratio. Raises ValueError if any
+    are invalid.
+    """
+    options = {
+        "state": int(query.get("state", ["0"])[0]),
+        "waters": query.get("waters", ["1"])[0] != "0",
+    }
+    if options["state"] not in (0, 1):
+        raise ValueError("The state must be 0 or 1.")
+    if "view" in query:
+        values = [float(x) for x in query["view"][0].split(",")]
+        if len(values) != 9:
+            raise ValueError("The view must have nine values.")
+        options["view"] = {
+            "centre": values[0:3],
+            "rotation": values[3:7],
+            "distance": values[7],
+            "fov": values[8],
+        }
+    if "aspect" in query:
+        options["aspect"] = float(query["aspect"][0])
+        if not 0.1 < options["aspect"] < 10.0:
+            raise ValueError("The aspect ratio is out of range.")
+    return options
+
+
 class _Registry:
     """
     The runs found below the requested paths, re-discovered periodically so
@@ -213,6 +243,14 @@ class _Handler(_BaseHTTPRequestHandler):
                 elif parts[3:] == ["binding-site"]:
                     query = _parse_qs(_urlparse(self.path).query)
                     self._json(sim.binding_site(query.get("known", [None])[0]))
+                elif parts[3:] == ["blender"]:
+                    query = _parse_qs(_urlparse(self.path).query)
+                    try:
+                        options = _blender_options(query)
+                    except ValueError:
+                        self.send_error(400)
+                        return
+                    self._json(sim.blender(**options))
                 elif len(parts) == 5 and parts[3] == "components":
                     try:
                         lam = float(parts[4])

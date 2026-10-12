@@ -789,7 +789,11 @@ to a GitHub issue alongside the input needed to reproduce a problem. Collapsed
 sections are left out of the PDF, so sensitive content, such as the structures
 of proprietary molecules, can be hidden before saving. Each chart can also be
 saved on its own as SVG or PNG, and the 3D views as PNG, e.g. to use in another
-document.
+document. For a higher quality image, "Save for Blender" saves a script that
+sets up the binding site or mutation in [Blender](https://www.blender.org), as
+shown and from the same view, for rendering with the
+[Molecular Nodes](https://github.com/BradyAJohnston/MolecularNodes) extension.
+Run it from Blender's Scripting tab, then render with F12.
 
 When the viewer finds related simulations, a summary page is added to the top
 of the list of runs. Repeats of the same simulation are grouped, using the

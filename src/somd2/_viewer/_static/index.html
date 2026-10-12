@@ -1175,7 +1175,7 @@ function renderBindingSite(s) {
     controls += modes.map(([value, label]) => `<label><input type="radio" name="site-mode" value="${value}"${state.siteMode === value ? " checked" : ""}> ${label}</label>`).join("");
   }
   controls += `<label><input type="checkbox" id="site-waters"${state.siteWaters ? " checked" : ""}> Waters</label>`;
-  controls += `<button type="button" id="binding-site-reset">Reset view</button><button type="button" class="viewer-save">Save PNG</button>`;
+  controls += `<button type="button" id="binding-site-reset">Reset view</button><button type="button" class="viewer-save">Save PNG</button><button type="button" id="binding-site-blender" title="A script that sets up this view in Blender, for rendering with Molecular Nodes">Save for Blender</button>`;
   if (document.fullscreenEnabled) controls += fullScreenButton();
   let html = `<div class="structure-panel"><div class="structure-controls note" style="margin-bottom:8px">${controls}</div>`;
   html += `<div id="binding-site-3d" class="structure-3d"></div></div><img id="binding-site-print" class="print-only" alt="${title}">`;
@@ -1303,6 +1303,26 @@ const BACKBONE = new Set(["N", "C", "O", "OXT"]);
 function styleSideChains(model, serials, style) {
   const sideChain = (a) => a.resn !== "GLY" && (!BACKBONE.has(a.atom) || (a.atom === "N" && a.resn === "PRO"));
   model.setStyle({ serial: serials, predicate: sideChain }, style, true);
+}
+
+// A script that sets up the binding site or mutation in Blender, as shown,
+// with the viewer's camera.
+function saveBlender(s) {
+  const v = state.viewerSite;
+  if (!v || !v.viewer || !v.site) return;
+  const view = v.viewer.getView();
+  const values = [-view[0], -view[1], -view[2], ...view.slice(4, 8), v.viewer.CAMERA_Z - view[3], v.viewer.camera.fov];
+  const params = new URLSearchParams({
+    state: v.site.kind === "mutation" ? state.siteMode : "0",
+    waters: state.siteWaters ? "1" : "0",
+    view: values.join(","),
+    aspect: String(v.el.clientWidth / v.el.clientHeight),
+  });
+  const script = getJSON(`/api/simulation/${s.id}/blender?${params}`).then((r) => {
+    if (r.status !== "done") throw new Error(r.reason);
+    return r.script;
+  });
+  download(`${fileName(siteTitle(v.site))}.py`, script, "text/x-python");
 }
 
 // Only one end state of a mutation is shown at a time, so switching keeps the
@@ -2380,6 +2400,8 @@ function render() {
     if (v.site.kind === "mutation") styleSite(v);
     else showSite(v, v.site);
   });
+  const blender = $("#binding-site-blender");
+  if (blender) blender.addEventListener("click", () => saveBlender(s));
   const resetSite = $("#binding-site-reset");
   if (resetSite) resetSite.addEventListener("click", () => {
     if (state.viewerSite && state.viewerSite.viewer) fitStructure(state.viewerSite);

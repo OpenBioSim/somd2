@@ -1373,6 +1373,25 @@ class Simulation:
             # So that the page can title the card before it is shown.
             return _clean(dict(result, kind=kind))
 
+    def blender(self, state=0, waters=True, view=None, aspect=None):
+        """
+        Return a Blender script that sets up the binding site or mutation, as
+        shown by the viewer, for rendering with Molecular Nodes.
+        """
+        from ._blender import blender_script
+
+        site = self.binding_site()
+        if site.get("status") != "done":
+            return {
+                "status": "unavailable",
+                "reason": site.get("reason") or "There is no structure to export.",
+            }
+        try:
+            script = blender_script(site, self.name, state, waters, view, aspect)
+        except Exception as e:
+            return {"status": "error", "reason": self._report(e, "export to Blender")}
+        return {"status": "done", "script": script}
+
     def _gcmc_region(self):
         """
         With GCMC, the selection of atoms at the centre of its region and the
