@@ -109,7 +109,9 @@ def blender_script(site, name, state=0, show_waters=True, view=None):
 
     detail = [s for s in detail if side_chain(s)]
     waters = [s for s in shown["waters"] if s in records]
-    bonded = set(focus) | set(ligand) | set(waters)
+    # Includes the detail, since Amber residue names, e.g. CYX or HIE, have no
+    # templates.
+    bonded = set(detail) | set(focus) | set(ligand) | set(waters)
 
     pdb = "\n".join(lines + _conect(records, bonded) + ["END"]) + "\n"
 
