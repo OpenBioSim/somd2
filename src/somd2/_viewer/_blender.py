@@ -324,8 +324,9 @@ if GCMC_RADIUS is not None and GCMC_STYLE is not None:
     # Built from data, since operators need a context that scripts lack.
     mesh = bpy.data.meshes.new("GCMC region")
     shape = bmesh.new()
-    bmesh.ops.create_uvsphere(
-        shape, u_segments=32, v_segments=16, radius=GCMC_RADIUS * mol.world_scale
+    # Even triangles, so that the wireframe has no poles.
+    bmesh.ops.create_icosphere(
+        shape, subdivisions=3, radius=GCMC_RADIUS * mol.world_scale
     )
     shape.to_mesh(mesh)
     shape.free()
