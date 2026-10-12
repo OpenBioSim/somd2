@@ -125,11 +125,17 @@ def depict(topology0, topology1):
                 "smiles1": Chem.MolToSmiles(Chem.RemoveHs(p.rdmol1, sanitize=False)),
                 "pixels": pixels,
                 "mapping_pixels": mapping_pixels,
-                "svg_mapping": _draw_mapping(
-                    p.rdmol0, p.rdmol1, p.mapping, p.map0, p.map1, mapping_pixels
+                # Only drawn for end states with atoms, which an absolute run
+                # needn't have at λ = 1.
+                "svg_mapping": (
+                    _draw_mapping(
+                        p.rdmol0, p.rdmol1, p.mapping, p.map0, p.map1, mapping_pixels
+                    )
+                    if p.rdmol0.GetNumAtoms() and p.rdmol1.GetNumAtoms()
+                    else None
                 ),
-                "svg0": _draw(p.rdmol0, pixels),
-                "svg1": _draw(p.rdmol1, pixels),
+                "svg0": _draw(p.rdmol0, pixels) if p.rdmol0.GetNumAtoms() else None,
+                "svg1": _draw(p.rdmol1, pixels) if p.rdmol1.GetNumAtoms() else None,
             }
         )
 
@@ -445,8 +451,13 @@ def _to_rdkit(mol, dummy):
     Returns the RDKit molecule, and the merged molecule index of each atom.
     """
     import sire as _sr
+    from rdkit import Chem
 
     real = [i for i, d in enumerate(dummy) if not d]
+
+    # E.g. a molecule decoupled by turning all of its atoms into dummies.
+    if not real:
+        return Chem.Mol(), real
 
     # Drop the parameters, which can't be carried over to a subset of atoms.
     mol = mol.edit().remove_property("parameters").commit()

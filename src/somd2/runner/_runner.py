@@ -1176,7 +1176,7 @@ class Runner(_RunnerBase):
                             )
                             _logger.info(
                                 f"Current number of waters in GCMC volume at {_lam_sym} = {lambda_value:.5f} "
-                                f"is {num_waters}{acc_str}"
+                                f"(time = {system.time().to('ns'):.4f} ns) is {num_waters}{acc_str}"
                             )
                         finally:
                             gcmc_sampler.pop()

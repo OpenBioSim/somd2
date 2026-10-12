@@ -112,8 +112,11 @@ def _generate(topology0, topology1, load_positions):
 
         mol0, stereo0 = _with_stereo(p.rdmol0, p.map0, coordinates)
         mol1, stereo1 = _with_stereo(p.rdmol1, p.map1, coordinates)
-        _embed(mol0)
-        _embed(mol1, mol0, p.mapping)
+        # An end state needn't have any atoms, e.g. of an absolute run.
+        if mol0.GetNumAtoms():
+            _embed(mol0)
+        if mol1.GetNumAtoms():
+            _embed(mol1, mol0 if mol0.GetNumAtoms() else None, p.mapping)
 
         index0 = {merged: i for i, merged in enumerate(p.map0)}
         index1 = {merged: i for i, merged in enumerate(p.map1)}

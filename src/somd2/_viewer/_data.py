@@ -94,6 +94,11 @@ _states_re = _re.compile(r"^States: \[([\d\s]*)\]")
 _block_re = _re.compile(r"^Finished block (\d+) of (\d+) for \S+ = ([\d.]+)")
 _perf_re = _re.compile(r"^Overall performance: ([\d.]+) ns day-1")
 _correction_re = _re.compile(r"Standard state correction: (-?[\d.]+) kcal mol-1")
+# Older versions don't log the time.
+_waters_re = _re.compile(
+    r"^Current number of waters in GCMC volume at \S+ = ([\d.]+)"
+    r"(?: \(time = ([\d.]+) ns\))? is (\d+)"
+)
 
 
 def discover(paths, strict=True):
@@ -248,6 +253,9 @@ class _LogMonitor:
         self._saved_states = 0
         self.standard_state_correction = None
         self.messages = _deque(maxlen=20)
+        # The number of waters in the GCMC region at each checkpoint, by λ, as
+        # (time in ns, or None if not logged, count).
+        self.gcmc_waters = {}
         self._new_session(None)
 
     def _new_session(self, timestamp):
@@ -326,6 +334,18 @@ class _LogMonitor:
             self.finished = True
         elif m := _correction_re.search(message):
             self.standard_state_correction = float(m.group(1))
+        elif m := _waters_re.match(message):
+            time = float(m.group(2)) if m.group(2) is not None else None
+            counts = self.gcmc_waters.setdefault(float(m.group(1)), [])
+            # A block run again after a restart replaces its earlier count.
+            while (
+                time is not None
+                and counts
+                and counts[-1][0] is not None
+                and counts[-1][0] >= time
+            ):
+                counts.pop()
+            counts.append((time, int(m.group(3))))
 
         if level in ("WARNING", "ERROR", "CRITICAL"):
             self.messages.append((_parse_timestamp(stamp), level, message))
@@ -406,6 +426,26 @@ class Simulation:
             return config
 
         return self._cached("config", _stamp(path), load)
+
+    def _config_values(self, key):
+        """
+        The values of an option in every config written for the run, e.g. by
+        restarts, with None where it wasn't recorded.
+        """
+        from ..io import yaml_to_dict
+
+        paths = sorted(self.path.glob("config*.yaml"))
+
+        def load():
+            values = set()
+            for path in paths:
+                try:
+                    values.add(yaml_to_dict(str(path)).get(key))
+                except Exception:
+                    values.add(None)
+            return values
+
+        return self._cached(f"config_values:{key}", _stamp(*paths), load)
 
     def _lambdas(self, config):
         """
@@ -943,7 +983,7 @@ class Simulation:
             "round_trips": round_trips,
         }
 
-    def _samplers(self, config, lambda_values, repex_state):
+    def _samplers(self, config, lambda_values, repex_state, log=None):
         gcmc = {}
         flips = {}
 
@@ -987,17 +1027,50 @@ class Simulation:
 
         result = {}
         if config.get("gcmc") and gcmc:
+            # The statistics cover the whole run, so this is only known if it
+            # was never changed on restart, and was recorded, which it is by
+            # versions that let it be set.
+            attempts = config.get("gcmc_num_attempts")
+            if len(self._config_values("gcmc_num_attempts")) > 1:
+                attempts = None
             rows = []
             for lam in sorted(gcmc):
-                row = {"lambda": lam}
-                row.update(
-                    {k: v for k, v in gcmc[lam].items() if isinstance(v, (int, float))}
-                )
-                moves = row.get("num_moves")
+                stats = gcmc[lam]
+                moves = stats.get("num_moves")
+                row = {
+                    "lambda": lam,
+                    "moves": moves,
+                    "insertions": stats.get("num_insertions"),
+                    "deletions": stats.get("num_deletions"),
+                    "accepted_per_move": None,
+                    "attempt_acceptance": None,
+                }
                 if moves:
-                    row["acceptance"] = row.get("num_accepted", 0) / moves
+                    row["accepted_per_move"] = stats.get("num_accepted", 0) / moves
+                    if attempts and "num_accepted_attempts" in stats:
+                        row["attempt_acceptance"] = stats["num_accepted_attempts"] / (
+                            moves * attempts
+                        )
                 rows.append(row)
             result["gcmc"] = rows
+            result["gcmc_batch_size"] = config.get("gcmc_batch_size")
+            result["gcmc_num_attempts"] = attempts
+        if config.get("gcmc") and log is not None and log.gcmc_waters:
+            # Without logged times, counts are only known by checkpoint.
+            timed = all(t is not None for c in log.gcmc_waters.values() for t, _ in c)
+            result["gcmc_waters"] = {
+                "timed": timed,
+                "windows": [
+                    {
+                        "lambda": lam,
+                        "time": [
+                            t if timed else i + 1 for i, (t, _) in enumerate(counts)
+                        ],
+                        "count": [n for _, n in counts],
+                    }
+                    for lam, counts in sorted(log.gcmc_waters.items())
+                ],
+            }
         if config.get("terminal_flip_frequency") and flips:
             result["terminal_flip"] = [
                 {
@@ -1251,7 +1324,13 @@ class Simulation:
             last = self._positions_file(last=True)
             if last.suffix != ".pkl" and _checkpoint_lambda(last) != 1.0:
                 last = None
-        stamp = (_stamp(top0, top1), _stamp(path), _stamp(last) if last else None)
+        gcmc = self._gcmc_region()
+        stamp = (
+            _stamp(top0, top1),
+            _stamp(path),
+            _stamp(last) if last else None,
+            repr(gcmc),
+        )
         key = _hashlib.sha1(repr(stamp).encode()).hexdigest()[:16]
         if known == key:
             return {"status": "unchanged", "key": key}
@@ -1269,7 +1348,7 @@ class Simulation:
                         "status": "unavailable",
                         "reason": "No coordinates have been saved yet.",
                     }
-                site = binding_site(top0, top1, saved, saved1)
+                site = binding_site(top0, top1, saved, saved1, gcmc)
             except Mismatch:
                 return {
                     "status": "unavailable",
@@ -1293,6 +1372,33 @@ class Simulation:
                     self._cache.pop("binding_site", None)
             # So that the page can title the card before it is shown.
             return _clean(dict(result, kind=kind))
+
+    def _gcmc_region(self):
+        """
+        With GCMC, the selection of atoms at the centre of its region and the
+        region's radius in nm, which are None if it samples the whole box.
+        None without GCMC.
+        """
+        path = _find_config(self.path)
+        if path is None:
+            return None
+
+        def load():
+            import sire as _sr
+
+            config = self.config() or {}
+            if not config.get("gcmc"):
+                return None
+            selection = config.get("gcmc_selection")
+            try:
+                radius = _sr.u(str(config["gcmc_radius"])).to("nm")
+            except Exception:
+                radius = None
+            if not selection or radius is None:
+                return {"selection": None, "radius": None}
+            return {"selection": str(selection), "radius": radius}
+
+        return self._cached("gcmc_region", _stamp(path), load)
 
     def _positions_file(self, last=False):
         """
@@ -1616,7 +1722,7 @@ class Simulation:
                 ),
                 "samplers": self._section(
                     "summarise the Monte Carlo samplers",
-                    lambda: self._samplers(config, lambda_values, repex_state),
+                    lambda: self._samplers(config, lambda_values, repex_state, log),
                 ),
                 "schedule": self._section(
                     "summarise the λ schedule",

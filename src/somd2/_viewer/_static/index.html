@@ -316,7 +316,7 @@ function loadCollapsed(key = "somd2-viewer-collapsed") {
   try { return new Set(JSON.parse(localStorage.getItem(key) || "[]")); } catch (e) { return new Set(); }
 }
 
-const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "", problems: {}, requests: 0, latest: {}, shown: {}, group: null, repeatsOpen: new Map(), conformers: {}, conformersLoading: {}, structureMode: "0", structureMolecule: {}, viewer3d: null, bindingSites: {}, bindingSitesLoading: {}, viewerSite: null, siteMode: "0" };
+const state = { view: ["#summary", "#network"].includes(location.hash) ? location.hash.slice(1) : "run", summaryData: null, summaryAvailable: false, summaryTimer: null, networkData: null, networkAvailable: false, runs: [], current: null, summary: null, depictions: {}, timer: null, quickTimer: null, depictionsLoading: {}, collapsed: loadCollapsed(), navCollapsed: loadCollapsed("somd2-viewer-nav-collapsed"), components: {}, componentsLambda: {}, configFilter: "", problems: {}, requests: 0, latest: {}, shown: {}, group: null, repeatsOpen: new Map(), conformers: {}, conformersLoading: {}, structureMode: "0", structureMolecule: {}, viewer3d: null, bindingSites: {}, bindingSitesLoading: {}, viewerSite: null, siteMode: "0", siteWaters: true, gcmcWatersLambda: {} };
 const PALETTE = ["#2f6fdf", "#e0663b", "#2a9d6f", "#b04fc9", "#c9a227", "#3aa7c9", "#d64f7a", "#7a8699"];
 const LAMBDA = "λ";
 // The thresholds for poor overlap and replica mixing, as in the summary.
@@ -955,7 +955,8 @@ function renderEndStates(s) {
   let html = "";
   for (const [i, m] of d.molecules.entries()) {
     html += `<h4>${esc(m.name)}</h4>`;
-    if (absolute) {
+    // Without a mapping, e.g. if an end state has no atoms, only λ = 0 is drawn.
+    if (absolute || !m.svg_mapping) {
       const verb = s.schedule.name === "annihilate" ? "Annihilated" : "Decoupled";
       const width = (m.pixels || 300) + 18;
       html += `<div class="figure" style="max-width:${width}px"><div class="depiction">${m.svg0}<div class="caption">${verb} at ${LAMBDA} = 1</div><div class="smiles">${esc(m.smiles0)}</div></div>${SAVE_BUTTONS}</div>`;
@@ -1173,6 +1174,7 @@ function renderBindingSite(s) {
     const modes = [["0", `${LAMBDA} = 0`], ["1", `${LAMBDA} = 1`]];
     controls += modes.map(([value, label]) => `<label><input type="radio" name="site-mode" value="${value}"${state.siteMode === value ? " checked" : ""}> ${label}</label>`).join("");
   }
+  controls += `<label><input type="checkbox" id="site-waters"${state.siteWaters ? " checked" : ""}> Waters</label>`;
   controls += `<button type="button" id="binding-site-reset">Reset view</button><button type="button" class="viewer-save">Save PNG</button>`;
   if (document.fullscreenEnabled) controls += fullScreenButton();
   let html = `<div class="structure-panel"><div class="structure-controls note" style="margin-bottom:8px">${controls}</div>`;
@@ -1187,7 +1189,19 @@ function renderBindingSite(s) {
   } else {
     html += `<div class="note">The latest saved coordinates of the ${LAMBDA} = 0 window${time}, updated as the simulation runs. Residues within 6 Å of the perturbed molecule are shown in detail, and the rest of the protein as a cartoon. Drag to rotate, Ctrl + scroll to zoom.</div>`;
   }
+  html += waterNote(b);
   return card(title, html);
+}
+
+// Which waters are shown, and how many.
+function waterNote(b) {
+  const mutation = b.kind === "mutation";
+  const states = mutation ? b.states : [b];
+  const counts = states.map((s, i) => `${s.num_waters}${mutation ? ` at ${LAMBDA} = ${i}` : ""}`).join(" and ");
+  const near = mutation ? "the mutated residues" : "the perturbed molecule";
+  const region = states.map((s) => s.gcmc).find(Boolean);
+  if (!region) return `<div class="note">Waters within 6 Å of ${near} are shown (${counts}).</div>`;
+  return `<div class="note">Waters within 6 Å of ${near}, or in the GCMC region, are shown (${counts}), leaving out GCMC's ghost waters. The region, within ${fmt(region.radius, 1)} Å of the centre of <code>${esc(region.selection)}</code>, is shown as a wireframe sphere.</div>`;
 }
 
 // Polled while the card is open, sending the version already shown so that an
@@ -1256,17 +1270,31 @@ function showSite(v, site) {
   v.site = site;
   v.viewer.removeAllModels();
   if (site.kind === "mutation") {
-    v.models = site.states.map((s) => v.viewer.addModel(s.pdb, "pdb"));
+    v.models = site.states.map((s) => v.viewer.addModel(s.pdb, "pdb", { keepH: true }));
     styleSite(v);
     return;
   }
-  const model = v.viewer.addModel(site.pdb, "pdb");
+  // Hydrogens are kept for the waters, but only they have them drawn.
+  const model = v.viewer.addModel(site.pdb, "pdb", { keepH: true });
   model.setStyle({}, { cartoon: { color: "lightgrey" } });
   // Added to the cartoon, rather than replacing it.
   styleSideChains(model, site.pocket, { stick: { radius: 0.15, colorscheme: "grayCarbon" } });
   const ligand = { colorscheme: "greenCarbon" };
   model.setStyle({ serial: site.ligand }, { stick: { radius: 0.14, ...ligand }, sphere: { scale: 0.22, ...ligand } });
+  model.setStyle({ serial: site.ligand, elem: "H" }, {});
+  styleWaters(v, model, site.waters, site.gcmc);
   v.viewer.render();
+}
+
+// The waters, in ball-and-stick, and any GCMC region as a wireframe sphere,
+// unless the waters are turned off.
+function styleWaters(v, model, waters, gcmc) {
+  v.viewer.removeAllShapes();
+  if (!state.siteWaters) return;
+  model.setStyle({ serial: waters }, { stick: { radius: 0.1 }, sphere: { scale: 0.2 } });
+  if (!gcmc) return;
+  const [x, y, z] = gcmc.centre;
+  v.viewer.addSphere({ center: { x, y, z }, radius: gcmc.radius, color: css("--accent"), wireframe: true, opacity: 0.3 });
 }
 
 // Draw residues over the cartoon from Cα outwards, so that their backbone
@@ -1292,6 +1320,8 @@ function styleSite(v) {
     model.setStyle({ serial: s.mutated }, { stick: { radius: 0.18, colorscheme: "magentaCarbon" } }, true);
     const other = { colorscheme: "greenCarbon" };
     model.setStyle({ serial: s.ligand }, { stick: { radius: 0.14, ...other }, sphere: { scale: 0.22, ...other } });
+    model.setStyle({ serial: s.ligand, elem: "H" }, {});
+    styleWaters(v, model, s.waters, s.gcmc);
   });
   v.viewer.render();
 }
@@ -1402,10 +1432,24 @@ function renderSamplers(s) {
   if (sm.error) return card("Monte Carlo samplers", `<div class="note">Couldn't summarise the samplers: ${esc(sm.error)}</div>`);
   let html = "";
   if (sm.gcmc) {
-    const keys = Object.keys(sm.gcmc[0]).filter((k) => k !== "lambda");
-    html += `<h4 style="margin-top:0">GCMC</h4><div class="table-wrap"><table><tr><th>${LAMBDA}</th>${keys.map((k) => `<th class="num">${esc(k.replace(/^num_/, "").replace(/_/g, " "))}</th>`).join("")}</tr>`;
-    for (const row of sm.gcmc) html += `<tr><td>${fmtLambda(row.lambda)}</td>${keys.map((k) => `<td class="num">${k === "acceptance" ? fmt(row[k], 3) : row[k] ?? "–"}</td>`).join("")}</tr>`;
+    const perMove = (value) => {
+      // More than one acceptance per move wastes the rest of each batch.
+      const wasteful = value > 1;
+      const style = wasteful ? ' style="color:var(--warn)" title="More than one accepted per move, so trials are wasted"' : "";
+      return `<td class="num"${style}>${fmt(value, 2)}</td>`;
+    };
+    html += `<h4 style="margin-top:0">GCMC</h4><div class="table-wrap"><table><tr><th>${LAMBDA}</th><th class="num">moves</th><th class="num">insertions</th><th class="num">deletions</th><th class="num">accepted per move</th><th class="num">acceptance per attempt</th></tr>`;
+    for (const row of sm.gcmc) html += `<tr><td>${fmtLambda(row.lambda)}</td><td class="num">${row.moves ?? "–"}</td><td class="num">${row.insertions ?? "–"}</td><td class="num">${row.deletions ?? "–"}</td>${perMove(row.accepted_per_move)}<td class="num">${fmt(row.attempt_acceptance, 4)}</td></tr>`;
     html += `</table></div>`;
+    const settings = sm.gcmc_num_attempts ? ` This run used a batch size of ${sm.gcmc_batch_size} and ${sm.gcmc_num_attempts} attempts per move.` : "";
+    html += `<div class="note">Each GCMC move runs its trials in parallel batches, so it can accept more than one insertion or deletion. More than one accepted per move, highlighted, means trials are wasted, so <code>gcmc_batch_size</code> and <code>gcmc_num_attempts</code> should be reduced, aiming for about one per move. The acceptance per attempt is for the approximate reaction-field potential used to choose candidates.${settings}</div>`;
+    if (sm.gcmc_waters) {
+      const shown = state.gcmcWatersLambda[s.id] ?? "all";
+      const options = [`<option value="all">All windows</option>`, ...sm.gcmc_waters.windows.map((w) => `<option value="${w.lambda}"${String(w.lambda) === String(shown) ? " selected" : ""}>${fmtLambda(w.lambda)}</option>`)].join("");
+      html += `<h4>Waters in the GCMC region</h4><label class="note">${LAMBDA} window <select id="gcmc-waters-lambda">${options}</select></label>`;
+      const timing = sm.gcmc_waters.timed ? "" : " This run's log doesn't record the time of each count, so they're shown by checkpoint.";
+      html += `<div class="chart" id="gcmc-waters-chart"></div><div class="note">At each checkpoint, from the log.${timing}</div>`;
+    }
   }
   if (sm.terminal_flip) {
     html += `<h4${sm.gcmc ? "" : ' style="margin-top:0"'}>Terminal flips</h4><div class="table-wrap"><table><tr><th>${LAMBDA}</th><th class="num">attempted</th><th class="num">accepted</th><th class="num">acceptance</th></tr>`;
@@ -1584,6 +1628,24 @@ function renderCharts(s) {
     lineChart(r2, {
       series: [{ x: sc.rest2.lambda, y: sc.rest2.scale, color: css("--accent"), points: true, title: (x, y) => `${LAMBDA} = ${fmtLambda(x)}: ${fmt(y, 3)}` }],
       xLabel: LAMBDA, yLabel: "scale factor", xMin: 0, xMax: 1,
+    });
+  }
+  const gw = $("#gcmc-waters-chart");
+  const gcmcWaters = s.samplers && s.samplers.gcmc_waters;
+  if (gw && gcmcWaters) {
+    const allWaters = gcmcWaters.windows;
+    const timed = gcmcWaters.timed;
+    const shown = state.gcmcWatersLambda[s.id] ?? "all";
+    // Each window keeps its colour from the full set.
+    const waters = allWaters.map((w, i) => ({ ...w, colour: colour(i, allWaters.length) })).filter((w) => shown === "all" || String(w.lambda) === String(shown));
+    lineChart(gw, {
+      series: waters.map((w) => ({
+        x: w.time, y: w.count, color: w.colour, name: `${LAMBDA} = ${fmtLambda(w.lambda)}`,
+        points: w.count.length <= 50, title: (x, y) => `${LAMBDA} = ${fmtLambda(w.lambda)}, ${timed ? `${fmt(x, 4)} ns` : `checkpoint ${x}`}: ${y} waters`,
+      })),
+      xLabel: timed ? "time (ns)" : "checkpoint", yLabel: "waters in region", yMin: 0,
+      yFormat: (v) => (Number.isInteger(v) ? String(v) : ""),
+      legend: waters.length <= 16,
     });
   }
 }
@@ -2310,6 +2372,14 @@ function render() {
     const v = state.viewerSite;
     if (v && v.viewer && v.site && v.site.kind === "mutation") styleSite(v);
   }));
+  const siteWaters = $("#site-waters");
+  if (siteWaters) siteWaters.addEventListener("change", (e) => {
+    state.siteWaters = e.target.checked;
+    const v = state.viewerSite;
+    if (!v || !v.viewer || !v.site) return;
+    if (v.site.kind === "mutation") styleSite(v);
+    else showSite(v, v.site);
+  });
   const resetSite = $("#binding-site-reset");
   if (resetSite) resetSite.addEventListener("click", () => {
     if (state.viewerSite && state.viewerSite.viewer) fitStructure(state.viewerSite);
@@ -2326,6 +2396,11 @@ function render() {
   if (moleculeSelect) moleculeSelect.addEventListener("change", (e) => {
     state.structureMolecule[s.id] = Number(e.target.value);
     render();
+  });
+  const watersSelect = $("#gcmc-waters-lambda");
+  if (watersSelect) watersSelect.addEventListener("change", (e) => {
+    state.gcmcWatersLambda[s.id] = e.target.value;
+    renderCharts(s);
   });
   const lambdaSelect = $("#components-lambda");
   if (lambdaSelect) lambdaSelect.addEventListener("change", (e) => {

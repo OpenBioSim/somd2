@@ -419,6 +419,13 @@ related options, run:
 somd2 --help | grep -A2 '  --gcmc'
 ```
 
+Each GCMC move evaluates its trials in parallel batches, set with
+`--gcmc-batch-size`, up to a total of `--gcmc-num-attempts`. Only the first
+accepted trial of a batch is used, so if more than one trial is accepted per
+move on average, the rest of each batch is wasted, and the batch size should be
+reduced. The [viewer](#viewer) shows the number accepted per move for each λ
+window. These options can be changed on restart.
+
 > [!IMPORTANT]
 > GCMC is only supported when using the CUDA or OpenCL platforms.
 
@@ -754,6 +761,10 @@ The viewer shows:
   end state from the latest saved coordinates of its window, with the mutated
   residues and any ligand in detail. Peptides with fewer than five amino acids
   are depicted like any other perturbed molecule.
+- In either of the above, the waters within 6 Å of the perturbed molecule or
+  mutated residues, which can be turned off. For GCMC simulations, the waters
+  in the GCMC region are also shown, along with the region itself, leaving out
+  ghost waters.
 - The MBAR free energy, PMF, overlap matrix, and forward and backward
   convergence. These are updated in the background as new data is written. For
   ABFE simulations, the standard state correction for the Boresch restraint is
@@ -763,7 +774,8 @@ The viewer shows:
 - Energy components as a function of time for each λ window. These are
   written at each checkpoint, or at every energy sample when using
   `--save-energy-components`.
-- GCMC and terminal flip Monte Carlo statistics, if active.
+- GCMC and terminal flip Monte Carlo statistics, if active, including the
+  number of waters in the GCMC region over time.
 - Any restraints, e.g. a Boresch restraint for an ABFE simulation, or Morse
   restraints for a ring-breaking perturbation.
 - The λ schedule, REST2 scale factors, configuration options, and tuned PME

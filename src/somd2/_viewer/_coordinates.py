@@ -47,7 +47,13 @@ class SavedCoordinates:
     """
 
     def __init__(
-        self, positions, box=None, time_ps=None, virtual_sites=None, atoms_only=False
+        self,
+        positions,
+        box=None,
+        time_ps=None,
+        virtual_sites=None,
+        atoms_only=False,
+        ghost_waters=None,
     ):
         self.positions = positions
         self.box = box
@@ -56,6 +62,9 @@ class SavedCoordinates:
         # unknown. Not needed if the coordinates are of the atoms alone.
         self.virtual_sites = virtual_sites
         self.atoms_only = atoms_only
+        # The indices of the GCMC waters that are ghosts, among all of the
+        # waters that GCMC can move, or None if unknown.
+        self.ghost_waters = ghost_waters
 
     def molecule(self, first_atom, num_atoms, num_system_atoms):
         """
@@ -79,6 +88,25 @@ class SavedCoordinates:
             raise Mismatch()
         return self.positions[start : start + num_atoms]
 
+    def molecule_starts(self, first_atoms, num_system_atoms):
+        """
+        The indices among the coordinates of the first atoms of molecules,
+        given the indices of those atoms in a topology of num_system_atoms
+        atoms.
+        """
+        first_atoms = _np.asarray(first_atoms, dtype=int)
+        if self.atoms_only:
+            return first_atoms
+        if self.virtual_sites is not None and len(self.virtual_sites):
+            # Shifted by the virtual sites of the molecules before each.
+            rows = _np.asarray(self.virtual_sites, dtype=int)
+            rows = rows[_np.argsort(rows[:, 0])]
+            shifts = _np.concatenate([[0], _np.cumsum(rows[:, 1])])
+            return first_atoms + shifts[_np.searchsorted(rows[:, 0], first_atoms)]
+        if self.virtual_sites is not None or len(self.positions) == num_system_atoms:
+            return first_atoms
+        raise Mismatch()
+
 
 def read_coordinates(path, window=0):
     """
@@ -97,6 +125,7 @@ def read_coordinates(path, window=0):
                 box=checkpoint.get("box"),
                 time_ps=float(time_ps[0]) if time_ps is not None else None,
                 virtual_sites=checkpoint.get("virtual_sites"),
+                ghost_waters=checkpoint.get("ghost_water_indices"),
             )
 
     if path.suffix == ".s3":
@@ -136,6 +165,9 @@ def read_repex_coordinates(path, windows):
     if not hasattr(state, "_num_slots"):
         order = _np.argsort(state._states)
         windows = [int(order[window]) for window in windows]
+    # Stored in the same order as the OpenMM states, with 1 for a water that is
+    # present and 0 for a ghost.
+    water_states = getattr(state, "_gcmc_states", None) or [None] * len(states)
 
     def nanometres(value):
         return _np.asarray(value.value_in_unit(_unit.nanometer))
@@ -158,6 +190,11 @@ def read_repex_coordinates(path, windows):
                 box=nanometres(box) if box is not None else None,
                 time_ps=_picoseconds(getattr(state, "_time", None)),
                 virtual_sites=getattr(state, "_virtual_sites", None),
+                ghost_waters=(
+                    None
+                    if water_states[window] is None
+                    else _np.where(_np.asarray(water_states[window]) == 0)[0]
+                ),
             )
         )
     return result
