@@ -1187,7 +1187,17 @@ function renderBindingSite(s) {
   } else {
     html += `<div class="note">The latest saved coordinates of the ${LAMBDA} = 0 window${time}, updated as the simulation runs. Residues within 6 Å of the perturbed molecule are shown in detail, and the rest of the protein as a cartoon. Drag to rotate, Ctrl + scroll to zoom.</div>`;
   }
+  html += gcmcNote(b);
   return card(title, html);
+}
+
+// What is shown of the GCMC region, if anything.
+function gcmcNote(b) {
+  const regions = b.kind === "mutation" ? b.states.map((s) => s.gcmc && { ...s.gcmc, waters: s.waters.length }) : [b.gcmc && { ...b.gcmc, waters: b.waters.length }];
+  const region = regions.find(Boolean);
+  if (!region) return "";
+  const counts = regions.length > 1 ? regions.map((r, i) => `${r ? r.waters : "–"} at ${LAMBDA} = ${i}`).join(" and ") : `${region.waters}`;
+  return `<div class="note">The GCMC region, within ${fmt(region.radius, 1)} Å of the centre of <code>${esc(region.selection)}</code>, is shown as a wireframe sphere, with the waters present in it as red spheres (${counts}), from the same saved coordinates.</div>`;
 }
 
 // Polled while the card is open, sending the version already shown so that an
@@ -1266,7 +1276,18 @@ function showSite(v, site) {
   styleSideChains(model, site.pocket, { stick: { radius: 0.15, colorscheme: "grayCarbon" } });
   const ligand = { colorscheme: "greenCarbon" };
   model.setStyle({ serial: site.ligand }, { stick: { radius: 0.14, ...ligand }, sphere: { scale: 0.22, ...ligand } });
+  styleWaters(v, model, site.waters, site.gcmc);
   v.viewer.render();
+}
+
+// The waters in the GCMC region as oxygen spheres, and the region as a
+// wireframe sphere.
+function styleWaters(v, model, waters, gcmc) {
+  v.viewer.removeAllShapes();
+  if (!gcmc) return;
+  model.setStyle({ serial: waters }, { sphere: { radius: 0.4, color: "#e8473b" } });
+  const [x, y, z] = gcmc.centre;
+  v.viewer.addSphere({ center: { x, y, z }, radius: gcmc.radius, color: css("--accent"), wireframe: true, opacity: 0.3 });
 }
 
 // Draw residues over the cartoon from Cα outwards, so that their backbone
@@ -1292,6 +1313,7 @@ function styleSite(v) {
     model.setStyle({ serial: s.mutated }, { stick: { radius: 0.18, colorscheme: "magentaCarbon" } }, true);
     const other = { colorscheme: "greenCarbon" };
     model.setStyle({ serial: s.ligand }, { stick: { radius: 0.14, ...other }, sphere: { scale: 0.22, ...other } });
+    styleWaters(v, model, s.waters, s.gcmc);
   });
   v.viewer.render();
 }

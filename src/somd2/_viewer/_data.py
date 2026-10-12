@@ -1251,7 +1251,13 @@ class Simulation:
             last = self._positions_file(last=True)
             if last.suffix != ".pkl" and _checkpoint_lambda(last) != 1.0:
                 last = None
-        stamp = (_stamp(top0, top1), _stamp(path), _stamp(last) if last else None)
+        gcmc = self._gcmc_region()
+        stamp = (
+            _stamp(top0, top1),
+            _stamp(path),
+            _stamp(last) if last else None,
+            repr(gcmc),
+        )
         key = _hashlib.sha1(repr(stamp).encode()).hexdigest()[:16]
         if known == key:
             return {"status": "unchanged", "key": key}
@@ -1269,7 +1275,7 @@ class Simulation:
                         "status": "unavailable",
                         "reason": "No coordinates have been saved yet.",
                     }
-                site = binding_site(top0, top1, saved, saved1)
+                site = binding_site(top0, top1, saved, saved1, gcmc)
             except Mismatch:
                 return {
                     "status": "unavailable",
@@ -1293,6 +1299,22 @@ class Simulation:
                     self._cache.pop("binding_site", None)
             # So that the page can title the card before it is shown.
             return _clean(dict(result, kind=kind))
+
+    def _gcmc_region(self):
+        """
+        The selection of atoms at the centre of the GCMC region and its radius
+        in nm, or None if GCMC wasn't used for a region.
+        """
+        config = self.config() or {}
+        if not config.get("gcmc") or not config.get("gcmc_selection"):
+            return None
+        import sire as _sr
+
+        try:
+            radius = _sr.u(str(config["gcmc_radius"])).to("nm")
+        except Exception:
+            return None
+        return {"selection": str(config["gcmc_selection"]), "radius": radius}
 
     def _positions_file(self, last=False):
         """
