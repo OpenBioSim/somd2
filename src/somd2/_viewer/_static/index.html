@@ -955,7 +955,8 @@ function renderEndStates(s) {
   let html = "";
   for (const [i, m] of d.molecules.entries()) {
     html += `<h4>${esc(m.name)}</h4>`;
-    if (absolute) {
+    // Without a mapping, e.g. if an end state has no atoms, only λ = 0 is drawn.
+    if (absolute || !m.svg_mapping) {
       const verb = s.schedule.name === "annihilate" ? "Annihilated" : "Decoupled";
       const width = (m.pixels || 300) + 18;
       html += `<div class="figure" style="max-width:${width}px"><div class="depiction">${m.svg0}<div class="caption">${verb} at ${LAMBDA} = 1</div><div class="smiles">${esc(m.smiles0)}</div></div>${SAVE_BUTTONS}</div>`;
