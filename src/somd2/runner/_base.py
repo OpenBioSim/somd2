@@ -927,15 +927,21 @@ class RunnerBase:
         # Create the lock file name.
         self._lock_file = str(self._config.output_directory / "somd2.lock")
 
-        # Write the end-state topologies to the output directory.
+        # Write the end-state topologies. A GCMC restart keeps those already
+        # written, since they include the additional waters.
         if isinstance(self._system, list):
             mols = self._system[0]
         else:
             mols = self._system
-        mols0 = _sr.morph.link_to_reference(mols)
-        mols1 = _sr.morph.link_to_perturbed(mols)
-        _sr.save(mols0, self._filenames["topology0"])
-        _sr.save(mols1, self._filenames["topology1"])
+        topologies = (self._filenames["topology0"], self._filenames["topology1"])
+        if not (
+            self._config.restart
+            and self._config.gcmc
+            and all(_Path(t).exists() for t in topologies)
+        ):
+            _sr.save(_sr.morph.link_to_reference(mols), topologies[0])
+            _sr.save(_sr.morph.link_to_perturbed(mols), topologies[1])
+        self._gcmc_topology_saved = False
 
         # Saved with checkpoints for the viewer, so a failure is only a warning.
         try:
@@ -2538,28 +2544,13 @@ class RunnerBase:
                         f"{self._standard_state_correction:.6f}"
                     )
 
+            # Saved at the first checkpoint of each run, and the final one for the
+            # final coordinates in the PDB files.
+            if self._config.gcmc and (is_final_block or not self._gcmc_topology_saved):
+                self._save_gcmc_topology(system)
+                self._gcmc_topology_saved = True
+
             if is_final_block:
-                # Save the end-state GCMC topologies for trajectory analysis and visualisation.
-                # This topology contains additional water molecules that are used for GCMC
-                # insertion moves.
-                if self._config.gcmc:
-                    mols0 = _sr.morph.link_to_reference(system)
-                    mols1 = _sr.morph.link_to_perturbed(system)
-
-                    # Save to AMBER format.
-                    _sr.save(mols0, self._filenames["topology0"])
-                    _sr.save(mols1, self._filenames["topology1"])
-
-                    # Save to PDB format.
-                    _sr.save(
-                        mols0,
-                        self._filenames["topology0"].replace(".prm7", ".pdb"),
-                    )
-                    _sr.save(
-                        mols1,
-                        self._filenames["topology1"].replace(".prm7", ".pdb"),
-                    )
-
                 # Assemble and save the final trajectory.
                 if self._config.save_trajectories:
                     # Save the final trajectory chunk to file.
@@ -2947,6 +2938,27 @@ class RunnerBase:
                 {b"somd2": meta, **table.schema.metadata}
             )
             _pq_local.write_table(table, filepath)
+
+    def _save_gcmc_topology(self, system):
+        """
+        Save the end-state topologies, including the additional waters used for
+        GCMC insertion moves, in AMBER and PDB format.
+
+        Parameters
+        ----------
+
+        system : :class: `System <sr.system.System>`
+            The system being simulated.
+        """
+        mols0 = _sr.morph.link_to_reference(system)
+        mols1 = _sr.morph.link_to_perturbed(system)
+
+        for mols, topology in (
+            (mols0, self._filenames["topology0"]),
+            (mols1, self._filenames["topology1"]),
+        ):
+            _sr.save(mols, topology)
+            _sr.save(mols, topology.replace(".prm7", ".pdb"))
 
     def _save_ghost_residues(self, index, gcmc_sampler):
         """
