@@ -341,18 +341,26 @@ def _waters(layout, gcmc, topology, saved, near):
     oxygens = unwrapped
 
     reference = near.mean(axis=0)
+    periodic = _is_periodic(saved.box)
+    if periodic:
+        box = _np.asarray(saved.box, dtype=float)
+        inverse = _np.linalg.inv(box)
+
     centre = None
     if gcmc is not None and layout["selection"]:
-        centre = _np.concatenate(
+        selected = _np.concatenate(
             [
                 _coordinates(saved, topology, molecule, atoms=atoms)
                 for molecule, atoms in layout["selection"]
             ]
-        ).mean(axis=0)
+        )
+        # As in GCMC, each atom is taken in the image nearest to the first.
+        if periodic:
+            offsets = selected - selected[0]
+            selected = selected[0] + offsets - _np.round(offsets @ inverse) @ box
+        centre = selected.mean(axis=0)
 
-    if _is_periodic(saved.box):
-        box = _np.asarray(saved.box, dtype=float)
-        inverse = _np.linalg.inv(box)
+    if periodic:
         offsets = oxygens - reference
         oxygens = reference + offsets - _np.round(offsets @ inverse) @ box
         if centre is not None:
