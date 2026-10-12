@@ -22,10 +22,10 @@ simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and
   [absolute binding free energies](#absolute-binding-free-energies),
   [ring-breaking](#ring-breaking-perturbations),
   [charge-change](#charge-change-perturbations), and protein mutations.
-- 💧 **[GCMC](#gcmc)**: grand canonical Monte Carlo water sampling.
 - 🔁 **[Replica exchange](#replica-exchange)**: Hamiltonian replica exchange
   between λ windows.
 - 🌡️ **[REST2](#rest2)**: replica exchange with solute scaling.
+- 💧 **[GCMC](#gcmc)**: grand canonical Monte Carlo water sampling.
 - 🔄 **[Terminal ring flips](#terminal-ring-flip-monte-carlo)**: Monte Carlo
   moves to improve sampling of terminal aromatic rings.
 - 👻 **[Ghost atom modifications](#ghost-atom-modifications)**: modification of
@@ -266,6 +266,25 @@ The λ windows are distributed across all of the listed devices automatically.
 To use fewer of them, set `--max-gpus`, e.g. `--max-gpus 2` with
 `CUDA_VISIBLE_DEVICES` set as above restricts SOMD2 to GPUs 0 and 1.
 
+<a id="gpu-oversubscription"></a>
+
+### 🖥️ GPU oversubscription
+
+If you have an NVIDIA GPU that supports the multi-process service (MPS), you can
+oversubscribe the GPU to run multiple OpenMM contexts on the same GPU at once,
+increasing the throughput of your simulation. To do this, you will need to first
+enable MPS by running the following command:
+
+```
+nvidia-cuda-mps-control -d
+```
+
+The number of contexts that can be run in parallel is then controlled by the
+`--oversubscription-factor` option, which defaults to 1.
+
+More details on MPS, including tuning options, can be found in the following
+[technical blog](https://developer.nvidia.com/blog/maximizing-openmm-molecular-dynamics-throughput-with-nvidia-multi-process-service/).
+
 <a id="restarting"></a>
 
 ## 💾 Restarting
@@ -351,7 +370,7 @@ best suited to multi-GPU nodes.
 The GPUs can also be oversubscribed, i.e. run more than one replica at a time,
 using the `--oversubscription-factor` option, e.g. a value of 2 runs 2 replicas
 on each GPU at once. This requires the NVIDIA multi-process service (MPS) to be
-enabled. See [GPU oversubscription](#gpu-oversubscription) below.
+enabled. See [GPU oversubscription](#gpu-oversubscription) above.
 
 If the replicas you want don't fit in GPU memory, use the `--max-contexts`
 option to cap the number of contexts that are created. Each context is then
@@ -381,6 +400,19 @@ The swap frequency for replica exchange is controlled by the
 `--energy-frequency` option: the energies of all replicas are computed at this
 frequency, then swaps between them are attempted. A larger value improves
 performance, but may reduce the efficiency of the exchange.
+
+<a id="truncated-mbar-analysis"></a>
+
+### ✂️ Truncated MBAR analysis
+
+When running HREX with a large number of replicas, computing the energy of each
+replica at every λ value can become expensive. As a shortcut, energies can be
+computed for a neighbourhood of windows only, with a large null energy used for
+the rest. The size of the neighbourhood is set with `--num-energy-neighbours`,
+e.g. a value of 2 computes energies for the current window and the two windows
+on either side of it, and the null energy with `--null-energy`. The number of
+neighbours is a trade-off between accuracy and computational cost, and around
+20% of the number of replicas has been found to be a good starting point.
 
 <a id="rest2"></a>
 
@@ -899,19 +931,6 @@ unless `NO_COLOR` is set. Each table can also be written as a CSV file with
 standard output in place of the tables with `--json -`. The JSON has a `version`
 field, which changes whenever its structure does.
 
-<a id="truncated-mbar-analysis"></a>
-
-## ✂️ Truncated MBAR analysis
-
-When running HREX with a large number of replicas, computing the energy of each
-replica at every λ value can become expensive. As a shortcut, energies can be
-computed for a neighbourhood of windows only, with a large null energy used for
-the rest. The size of the neighbourhood is set with `--num-energy-neighbours`,
-e.g. a value of 2 computes energies for the current window and the two windows
-on either side of it, and the null energy with `--null-energy`. The number of
-neighbours is a trade-off between accuracy and computational cost, and around
-20% of the number of replicas has been found to be a good starting point.
-
 <a id="note-for-somd1-users"></a>
 
 ## 📝 Note for SOMD1 users
@@ -947,25 +966,6 @@ can be set as usual.
 To use the SOMD2
 [ghost atom bonded-term modifications](https://github.com/OpenBioSim/ghostly)
 instead, omit the `--somd1-compatibility` option.
-
-<a id="gpu-oversubscription"></a>
-
-## 🖥️ GPU oversubscription
-
-If you have an NVIDIA GPU that supports the multi-process service (MPS), you can
-oversubscribe the GPU to run multiple OpenMM contexts on the same GPU at once,
-increasing the throughput of your simulation. To do this, you will need to first
-enable MPS by running the following command:
-
-```
-nvidia-cuda-mps-control -d
-```
-
-The number of contexts that can be run in parallel is then controlled by the
-`--oversubscription-factor` option, which defaults to 1.
-
-More details on MPS, including tuning options, can be found in the following
-[technical blog](https://developer.nvidia.com/blog/maximizing-openmm-molecular-dynamics-throughput-with-nvidia-multi-process-service/).
 
 <a id="python-api"></a>
 
