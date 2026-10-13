@@ -120,7 +120,6 @@ class Config:
             "adaptive_repex",
             "adaptive_mix_interval",
             "adaptive_burn_in",
-            "adaptive_coverage",
             "adaptive_min_samples",
             "restraint_search_time",
             "restraint_search_frequency",
@@ -195,7 +194,6 @@ class Config:
         adaptive_repex=False,
         adaptive_mix_interval=4,
         adaptive_burn_in="500 ps",
-        adaptive_coverage=0.8,
         adaptive_min_samples=50,
         randomise_velocities=False,
         perturbed_system=None,
@@ -523,11 +521,6 @@ class Config:
             The simulation time of standard replica exchange to run before windows are
             first ranked when using adaptive replica exchange.
 
-        adaptive_coverage: float
-            The fraction of the total uncertainty, summed over neighbouring pairs of
-            lambda windows, that the hot windows must account for when using adaptive
-            replica exchange.
-
         adaptive_min_samples: int
             The minimum number of statistically independent energy samples that a
             window must have collected since the burn-in before it can stop being hot
@@ -828,7 +821,6 @@ class Config:
         self.adaptive_repex = adaptive_repex
         self.adaptive_mix_interval = adaptive_mix_interval
         self.adaptive_burn_in = adaptive_burn_in
-        self.adaptive_coverage = adaptive_coverage
         self.adaptive_min_samples = adaptive_min_samples
         self.randomise_velocities = randomise_velocities
         self.perturbed_system = perturbed_system
@@ -2228,21 +2220,6 @@ class Config:
             raise ValueError("'adaptive_burn_in' units are invalid.")
 
         self._adaptive_burn_in = t
-
-    @property
-    def adaptive_coverage(self):
-        return self._adaptive_coverage
-
-    @adaptive_coverage.setter
-    def adaptive_coverage(self, adaptive_coverage):
-        if not isinstance(adaptive_coverage, float):
-            try:
-                adaptive_coverage = float(adaptive_coverage)
-            except Exception:
-                raise ValueError("'adaptive_coverage' must be of type 'float'")
-        if not 0.0 < adaptive_coverage <= 1.0:
-            raise ValueError("'adaptive_coverage' must be in the range (0, 1]")
-        self._adaptive_coverage = adaptive_coverage
 
     @property
     def adaptive_min_samples(self):

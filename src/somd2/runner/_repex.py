@@ -3217,16 +3217,18 @@ class RepexRunner(_RunnerBase):
 
         Each pair of neighbouring windows is weighted by sigma * sqrt(g) of
         its reduced energy differences, which sets the uncertainty of its free
-        energy difference for a fixed amount of sampling. Pairs are taken in
-        order of weight until they cover 'adaptive_coverage' of the total.
-        Pairs with signs of poor sampling are always taken, as are windows with
-        fewer than 'adaptive_min_samples' independent samples of either the
-        energy differences or, for a perturbation that breaks or makes a single
-        bond, the bond distance, and the windows either side of each one taken,
-        so that exchange carries configurations into and out of them. A window
-        only stops being hot once it has been found cold at two consecutive
-        rankings. The hot replicas are padded to a multiple of the number of
-        workers, so that the GPUs are evenly loaded.
+        energy difference for a fixed amount of sampling. Pairs are added in
+        order of weight, and the hot windows chosen are those that minimise the
+        variance of the free energy multiplied by the cost, i.e. the variance
+        for a fixed amount of compute. Pairs with signs of poor sampling are
+        always hot, as are windows with fewer than 'adaptive_min_samples'
+        independent samples of either the energy differences or, for a
+        perturbation that breaks or makes a single bond, the bond distance, and
+        the windows either side of each hot one, so that exchange carries
+        configurations into and out of them. A window only stops being hot
+        once it has been found cold at two consecutive rankings. The hot
+        replicas are padded to a multiple of the number of workers, so that the
+        GPUs are evenly loaded.
 
         The ranking uses all of the data since the burn-in, since the slowest
         windows decorrelate over far longer than a checkpoint interval.
@@ -3291,22 +3293,39 @@ class RepexRunner(_RunnerBase):
             ) or self._is_unconverged(fwd, rev, g_upper[k], g_lower[k + 1]):
                 flagged.append(k)
 
-        # Take pairs in order of weight until they cover enough of the total.
-        hot = set()
-        covered = 0.0
-        for k in _np.argsort(-weights):
-            if covered >= self._config.adaptive_coverage * weights.sum():
-                break
-            hot.update((int(k), int(k) + 1))
-            covered += weights[k]
-
+        forced = set(undersampled) | set(slow_distance)
         for k in flagged:
-            hot.update((k, k + 1))
+            forced.update((k, k + 1))
 
-        hot.update(undersampled)
-        hot.update(slow_distance)
+        def pad(windows):
+            return windows | {
+                r + d for r in windows for d in (-1, 1) if 0 <= r + d < num_replicas
+            }
 
-        hot.update([r + d for r in hot for d in (-1, 1) if 0 <= r + d < num_replicas])
+        # A cold window costs 1 / 'adaptive_mix_interval' of a hot one, and
+        # multiplies the variance of its pairs by 'adaptive_mix_interval'.
+        interval = self._config.adaptive_mix_interval
+        total_variance = (weights**2).sum() or 1.0
+
+        def cost_and_variance(windows):
+            cost = len(windows) + (num_replicas - len(windows)) / interval
+            variance = sum(
+                w**2 * (1 if k in windows and k + 1 in windows else interval)
+                for k, w in enumerate(weights)
+            )
+            return cost / num_replicas, variance / total_variance
+
+        # Add pairs in order of weight, keeping the hot windows that minimise
+        # the variance for a fixed amount of compute.
+        candidate = set(forced)
+        hot = pad(candidate)
+        best = _np.prod(cost_and_variance(hot))
+        for k in _np.argsort(-weights):
+            candidate.update((int(k), int(k) + 1))
+            windows = pad(candidate)
+            efficiency = _np.prod(cost_and_variance(windows))
+            if efficiency < best:
+                hot, best = windows, efficiency
 
         # Keep windows hot until they have been found cold twice in a row.
         previous = self._dynamics_cache._hot_replicas
@@ -3344,6 +3363,11 @@ class RepexRunner(_RunnerBase):
             _logger.info(f"Windows with a slow bond distance: {slow_distance}")
         _logger.info(
             f"Hot replicas: {hot}" if len(hot) < num_replicas else "All replicas hot"
+        )
+        cost, variance = cost_and_variance(set(hot))
+        _logger.info(
+            f"Estimated cost {cost:.2f} and variance {variance:.2f} relative to "
+            "standard replica exchange"
         )
 
     def _check_restart(self):

@@ -1451,7 +1451,7 @@ def test_rank_windows():
     the largest uncertainty, padded by a window each side, and that windows
     only go cold after being found cold at two consecutive rankings.
     """
-    runner = _ranking_runner(8, adaptive_coverage=0.5, adaptive_min_samples=10)
+    runner = _ranking_runner(8, adaptive_min_samples=10)
     cache = runner._dynamics_cache
 
     _fill_ranking_data(runner, hard_pair=3)
@@ -1474,7 +1474,7 @@ def test_rank_windows_pads_to_workers():
     Validate that the hot replicas are padded to a multiple of the number of
     workers, and that every replica being hot is recorded as None.
     """
-    runner = _ranking_runner(8, adaptive_coverage=0.5, adaptive_min_samples=10)
+    runner = _ranking_runner(8, adaptive_min_samples=10)
 
     _fill_ranking_data(runner, hard_pair=3)
     runner._rank_windows(num_workers=3)
@@ -1484,6 +1484,25 @@ def test_rank_windows_pads_to_workers():
     _fill_ranking_data(runner, hard_pair=3)
     runner._rank_windows(num_workers=8)
     assert runner._dynamics_cache._hot_replicas is None
+
+
+def test_rank_windows_minimises_variance_for_compute():
+    """
+    Validate that a pair with a large uncertainty is made hot without being
+    flagged, and that pairs which add more cost than they remove variance are
+    left cold.
+    """
+    runner = _ranking_runner(8, adaptive_min_samples=10)
+
+    _fill_ranking_data(runner, hard_pair=-1)
+
+    # Forward and reverse estimates that agree, so the pair isn't flagged.
+    rng = np.random.default_rng(11)
+    runner._adaptive_upper[3] = list(rng.normal(1.0, 1.0, 200))
+    runner._adaptive_lower[4] = list(rng.normal(0.0, 1.0, 200))
+    runner._rank_windows(num_workers=2)
+
+    assert runner._dynamics_cache._hot_replicas == [2, 3, 4, 5]
 
 
 def test_rank_windows_without_uncertainty():
@@ -1531,7 +1550,7 @@ def test_rank_windows_needs_enough_samples():
     Validate that windows aren't ranked until every one has enough samples,
     and that the data keeps accumulating until they do.
     """
-    runner = _ranking_runner(8, adaptive_coverage=0.5, adaptive_min_samples=50)
+    runner = _ranking_runner(8, adaptive_min_samples=50)
 
     _fill_ranking_data(runner, hard_pair=3, num_samples=20)
     runner._rank_windows(num_workers=2)
@@ -1545,7 +1564,7 @@ def test_rank_windows_keeps_undersampled_windows_hot():
     Validate that a window with too few independent samples stays hot, even
     though its uncertainty is small.
     """
-    runner = _ranking_runner(8, adaptive_coverage=0.5, adaptive_min_samples=50)
+    runner = _ranking_runner(8, adaptive_min_samples=50)
 
     _fill_ranking_data(runner, hard_pair=3)
 
@@ -1565,7 +1584,7 @@ def test_rank_windows_keeps_slow_bond_distance_hot():
     Validate that a window in which the distance of the bond that is broken
     decorrelates slowly stays hot, even though its energies are converged.
     """
-    runner = _ranking_runner(8, adaptive_coverage=0.5, adaptive_min_samples=50)
+    runner = _ranking_runner(8, adaptive_min_samples=50)
     runner._ring_pair = (0, 1)
 
     _fill_ranking_data(runner, hard_pair=3)
@@ -1659,7 +1678,7 @@ def test_rank_windows_flags_unconverged_pairs():
     Validate that a pair whose forward and reverse estimates disagree is made
     hot, even though its uncertainty is small.
     """
-    runner = _ranking_runner(8, adaptive_coverage=0.5, adaptive_min_samples=10)
+    runner = _ranking_runner(8, adaptive_min_samples=10)
 
     _fill_ranking_data(runner, hard_pair=3)
     rng = np.random.default_rng(3)
