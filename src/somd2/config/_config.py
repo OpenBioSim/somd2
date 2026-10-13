@@ -117,6 +117,11 @@ class Config:
             "timeout",
             "oversubscription_factor",
             "max_contexts",
+            "adaptive_repex",
+            "adaptive_mix_interval",
+            "adaptive_burn_in",
+            "adaptive_coverage",
+            "adaptive_min_samples",
             "restraint_search_time",
             "restraint_search_frequency",
             "gcmc_batch_size",
@@ -187,6 +192,11 @@ class Config:
         max_contexts=None,
         update_constraints=True,
         constraint_lambda_index=0,
+        adaptive_repex=False,
+        adaptive_mix_interval=4,
+        adaptive_burn_in="500 ps",
+        adaptive_coverage=0.8,
+        adaptive_min_samples=50,
         randomise_velocities=False,
         perturbed_system=None,
         terminal_flip_frequency=None,
@@ -494,6 +504,36 @@ class Config:
             number of replicas, 'update_constraints' is False, and a constrained bond
             length actually perturbs with lambda.
 
+        adaptive_repex: bool
+            Whether to concentrate sampling on the lambda windows that are slowest to
+            converge in a replica exchange simulation. After a burn-in period of
+            standard replica exchange, the windows are periodically ranked by the
+            statistical uncertainty that they contribute to the free energy. Only the
+            highest ranked ("hot") windows are propagated and exchanged every cycle,
+            with the remaining windows joining in every 'adaptive_mix_interval'
+            cycles. The 'runtime' is the simulation time of the hot windows, so the
+            other windows are sampled for less time. Checkpoint and frame cycles always
+            include every window.
+
+        adaptive_mix_interval: int
+            The number of cycles between those that propagate and exchange every
+            window when using adaptive replica exchange.
+
+        adaptive_burn_in: str
+            The simulation time of standard replica exchange to run before windows are
+            first ranked when using adaptive replica exchange.
+
+        adaptive_coverage: float
+            The fraction of the total uncertainty, summed over neighbouring pairs of
+            lambda windows, that the hot windows must account for when using adaptive
+            replica exchange.
+
+        adaptive_min_samples: int
+            The minimum number of statistically independent energy samples that a
+            window must have collected since the burn-in before it can stop being hot
+            when using adaptive replica exchange. Windows are not ranked until each has
+            collected this many samples.
+
         randomise_velocities: bool
             Whether to randomise velocities at the start of each replica exchange cycle
             or following a terminal flip Monte Carlo move.
@@ -785,6 +825,11 @@ class Config:
         self.max_contexts = max_contexts
         self.update_constraints = update_constraints
         self.constraint_lambda_index = constraint_lambda_index
+        self.adaptive_repex = adaptive_repex
+        self.adaptive_mix_interval = adaptive_mix_interval
+        self.adaptive_burn_in = adaptive_burn_in
+        self.adaptive_coverage = adaptive_coverage
+        self.adaptive_min_samples = adaptive_min_samples
         self.randomise_velocities = randomise_velocities
         self.perturbed_system = perturbed_system
         self.terminal_flip_frequency = terminal_flip_frequency
@@ -2135,6 +2180,84 @@ class Config:
                 "'constraint_lambda_index' must be greater than or equal to 0"
             )
         self._constraint_lambda_index = constraint_lambda_index
+
+    @property
+    def adaptive_repex(self):
+        return self._adaptive_repex
+
+    @adaptive_repex.setter
+    def adaptive_repex(self, adaptive_repex):
+        if not isinstance(adaptive_repex, bool):
+            raise ValueError("'adaptive_repex' must be of type 'bool'")
+        self._adaptive_repex = adaptive_repex
+
+    @property
+    def adaptive_mix_interval(self):
+        return self._adaptive_mix_interval
+
+    @adaptive_mix_interval.setter
+    def adaptive_mix_interval(self, adaptive_mix_interval):
+        if not isinstance(adaptive_mix_interval, int):
+            try:
+                adaptive_mix_interval = int(adaptive_mix_interval)
+            except Exception:
+                raise ValueError("'adaptive_mix_interval' must be of type 'int'")
+        if adaptive_mix_interval < 1:
+            raise ValueError("'adaptive_mix_interval' must be greater than 0")
+        self._adaptive_mix_interval = adaptive_mix_interval
+
+    @property
+    def adaptive_burn_in(self):
+        return self._adaptive_burn_in
+
+    @adaptive_burn_in.setter
+    def adaptive_burn_in(self, adaptive_burn_in):
+        if not isinstance(adaptive_burn_in, str):
+            raise TypeError("'adaptive_burn_in' must be of type 'str'")
+
+        from sire.units import picosecond
+
+        try:
+            t = _sr.u(adaptive_burn_in)
+        except:
+            raise ValueError(
+                f"Unable to parse 'adaptive_burn_in' as a Sire GeneralUnit: {adaptive_burn_in}"
+            )
+
+        if t.value() != 0 and not t.has_same_units(picosecond):
+            raise ValueError("'adaptive_burn_in' units are invalid.")
+
+        self._adaptive_burn_in = t
+
+    @property
+    def adaptive_coverage(self):
+        return self._adaptive_coverage
+
+    @adaptive_coverage.setter
+    def adaptive_coverage(self, adaptive_coverage):
+        if not isinstance(adaptive_coverage, float):
+            try:
+                adaptive_coverage = float(adaptive_coverage)
+            except Exception:
+                raise ValueError("'adaptive_coverage' must be of type 'float'")
+        if not 0.0 < adaptive_coverage <= 1.0:
+            raise ValueError("'adaptive_coverage' must be in the range (0, 1]")
+        self._adaptive_coverage = adaptive_coverage
+
+    @property
+    def adaptive_min_samples(self):
+        return self._adaptive_min_samples
+
+    @adaptive_min_samples.setter
+    def adaptive_min_samples(self, adaptive_min_samples):
+        if not isinstance(adaptive_min_samples, int):
+            try:
+                adaptive_min_samples = int(adaptive_min_samples)
+            except Exception:
+                raise ValueError("'adaptive_min_samples' must be of type 'int'")
+        if adaptive_min_samples < 1:
+            raise ValueError("'adaptive_min_samples' must be greater than 0")
+        self._adaptive_min_samples = adaptive_min_samples
 
     @property
     def randomise_velocities(self):

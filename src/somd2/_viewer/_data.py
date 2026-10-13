@@ -517,12 +517,25 @@ class Simulation:
         total = runtime * len(lambda_values) if runtime else None
         completed = sum(done.get(lam, 0.0) for lam in lambda_values)
 
+        # Adaptive replica exchange samples cold windows less, so progress is
+        # the simulation time of the hot windows rather than the samples.
+        is_adaptive = bool(
+            config.get("replica_exchange") and config.get("adaptive_repex")
+        )
+        if is_adaptive:
+            state = self._repex_state()
+            time = state.get("time_ns") if state else None
+            if time is None:
+                time = max(done.values(), default=0.0)
+            time = min(time, runtime) if runtime else time
+            completed = time * len(lambda_values)
+
         now = _time.time()
         progress = {
             "runtime_ns": runtime,
             "expected_samples": (
                 round(runtime / energy_frequency)
-                if runtime and energy_frequency
+                if runtime and energy_frequency and not is_adaptive
                 else None
             ),
             "completed_ns": completed,
@@ -566,7 +579,9 @@ class Simulation:
                 progress["eta_seconds"] = max(remaining, 0.0)
                 if energy_frequency is not None and interval > 0:
                     progress["throughput_ns_day"] = energy_frequency / interval * 86400
-                    progress["throughput_label"] = "per replica"
+                    progress["throughput_label"] = (
+                        "per hot replica" if is_adaptive else "per replica"
+                    )
         elif log.blocks and log.production_start is not None:
             elapsed = log.blocks[-1][0] - log.production_start
             if elapsed > 0 and checkpoint_frequency is not None:
@@ -878,7 +893,9 @@ class Simulation:
                 try:
                     with open(p, "rb") as f:
                         state = _RepexUnpickler(f).load()
+                    time = getattr(state, "_time", None)
                     return {
+                        "time_ns": time.to("ns") if time is not None else None,
                         "proposed": _np.asarray(state._num_proposed),
                         "accepted": _np.asarray(state._num_accepted),
                         "gcmc_stats": getattr(state, "_gcmc_stats", None),

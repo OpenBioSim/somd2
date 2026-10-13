@@ -6,6 +6,7 @@ import tempfile
 
 from somd2.runner import RepexRunner
 from somd2.runner._base import RunnerBase
+from somd2.runner._repex import _mix_subset
 from somd2.config import Config
 
 from tests.conftest import has_cuda
@@ -53,7 +54,7 @@ def test_repex_mixing():
     accepted = np.zeros((10, 10), dtype=np.int32)
 
     # Perform the mixing.
-    states = RepexRunner._mix_replicas(10, energy_matrix, proposed, accepted)
+    states = _mix_subset(np.arange(10), energy_matrix, proposed, accepted)
 
     # Make sure that exchanges are always accepted.
     assert (proposed == accepted).all()
@@ -68,7 +69,7 @@ def test_repex_mixing():
     accepted = np.zeros((10, 10), dtype=np.int32)
 
     # Perform the mixing.
-    states = RepexRunner._mix_replicas(10, energy_matrix, proposed, accepted)
+    states = _mix_subset(np.arange(10), energy_matrix, proposed, accepted)
 
     # Get the off-diagonal elements of the accepted matrix.
     off_diagonal = accepted - np.diag(np.diag(accepted))
@@ -95,7 +96,7 @@ def test_repex_mixing_moves_configurations():
     accepted = np.zeros((num_replicas, num_replicas), dtype=np.int32)
 
     np.random.seed(42)
-    states = RepexRunner._mix_replicas(num_replicas, energy_matrix, proposed, accepted)
+    states = _mix_subset(np.arange(num_replicas), energy_matrix, proposed, accepted)
 
     cache = object.__new__(DynamicsCache)
     cache._openmm_states = list(range(num_replicas))
@@ -163,6 +164,9 @@ class _FakeDynamics:
 
     def set_lambda(self, lam, rest2_scale=None, update_constraints=None):
         self._context.lam = lam
+
+    def _get_clock(self):
+        return None
 
     def _set_clock(self, clock):
         pass
@@ -241,8 +245,13 @@ def test_repex_mixing_samples_boltzmann(slot_schedule, inverted):
     cache._rest2_scale_factors = [1.0] * n
     cache._num_replicas = n
     cache._update_constraints = True
+    cache._strided = False
     cache._states = np.arange(n)
     cache._time = None
+    cache._clocks = [None] * n
+    cache._hot_replicas = None
+    cache._cold_votes = [0] * n
+    cache._adaptive_data = None
     cache._virtual_sites = None
     cache._gcmc_stats = None
     cache._terminal_flip_stats = [[0, 0] for _ in range(n)]
@@ -294,8 +303,8 @@ def test_repex_mixing_samples_boltzmann(slot_schedule, inverted):
                 energies[replica] = U[:, config]
                 cache.store_replica(replica)
 
-        states = RepexRunner._mix_replicas(
-            n, energies, cache._num_proposed, cache._num_accepted
+        states = _mix_subset(
+            np.arange(n), energies, cache._num_proposed, cache._num_accepted
         )
         if inverted:
             states = np.argsort(states)
@@ -1319,3 +1328,456 @@ def test_repex_perturbed_system_seeding(ethane_methanol, swap_end_states):
                 f"group {group} has {len(wrong)} replicas seeded from the "
                 f"wrong end state: {wrong}"
             )
+
+
+@pytest.mark.parametrize(
+    "last_cycle, cycle, cycles_per_move, expected",
+    [
+        (2, 3, 4, True),
+        (1, 2, 4, False),
+        # A move that fell due while the replica wasn't propagated.
+        (0, 5, 4, True),
+        (4, 5, 4, False),
+        (-1, 0, 1, True),
+    ],
+)
+def test_is_due(last_cycle, cycle, cycles_per_move, expected):
+    """
+    Validate that periodic moves fall due on schedule, and that a replica
+    catches up on one that fell due while it wasn't propagated.
+    """
+    assert RepexRunner._is_due(last_cycle, cycle, cycles_per_move) == expected
+
+
+def test_mix_subset_leaves_others_in_place():
+    """
+    Validate that mixing a subset of the replicas only swaps between them.
+    """
+    n = 6
+    subset = np.array([1, 2, 4])
+    energy_matrix = np.zeros((n, n))
+    proposed = np.zeros((n, n))
+    accepted = np.zeros((n, n))
+
+    # Every swap is accepted, so the subset is thoroughly shuffled.
+    states = _mix_subset(subset, energy_matrix, proposed, accepted)
+
+    for r in set(range(n)) - set(subset):
+        assert states[r] == r
+    assert sorted(states[subset]) == sorted(subset)
+
+    # Only swaps between members of the subset are recorded.
+    outside = [r for r in range(n) if r not in subset]
+    assert proposed[outside, :].sum() == 0
+    assert proposed[:, outside].sum() == 0
+
+
+def test_strided_slot_layout():
+    """
+    Validate that a strided layout spreads any contiguous range of replicas
+    evenly over the slots.
+    """
+    from somd2.runner._repex import DynamicsCache
+
+    cache = object.__new__(DynamicsCache)
+    cache._num_replicas = 10
+    cache._num_slots = 4
+    cache._strided = True
+    cache._build_slot_layout()
+
+    assert cache._groups == [[0, 4, 8], [1, 5, 9], [2, 6], [3, 7]]
+
+    for start in range(7):
+        slots = [cache.slot_for(r) for r in range(start, start + 4)]
+        assert sorted(slots) == [0, 1, 2, 3]
+
+
+def test_statistical_inefficiency():
+    """
+    Validate the statistical inefficiency against an AR(1) process, for which
+    it is (1 + phi) / (1 - phi).
+    """
+    rng = np.random.default_rng(42)
+
+    x = rng.normal(size=20000)
+    assert RepexRunner._statistical_inefficiency(x) == pytest.approx(1.0, abs=0.1)
+
+    phi = 0.8
+    y = np.zeros(20000)
+    for i in range(1, len(y)):
+        y[i] = phi * y[i - 1] + rng.normal()
+    expected = (1 + phi) / (1 - phi)
+    assert RepexRunner._statistical_inefficiency(y) == pytest.approx(expected, rel=0.15)
+
+
+def _ranking_runner(num_lambda, **config):
+    """
+    Create a runner holding only what is needed to rank windows.
+    """
+    from types import SimpleNamespace
+
+    runner = object.__new__(RepexRunner)
+    runner._config = Config(num_lambda=num_lambda, **config)
+    runner._lambda_values = list(np.linspace(0, 1, num_lambda))
+    runner._ring_pair = None
+    zeros = np.zeros((num_lambda, num_lambda))
+    runner._dynamics_cache = SimpleNamespace(
+        get_proposed=lambda: zeros,
+        get_accepted=lambda: zeros,
+        _hot_replicas=None,
+        _cold_votes=[0] * num_lambda,
+    )
+    runner._reset_adaptive_data()
+    return runner
+
+
+def _fill_ranking_data(runner, hard_pair, num_samples=200, seed=7):
+    """
+    Record converged energy differences between every pair of neighbouring
+    windows, apart from one pair with a large spread.
+    """
+    rng = np.random.default_rng(seed)
+    num_lambda = runner._config.num_lambda
+
+    for k in range(num_lambda - 1):
+        sigma = 1.5 if k == hard_pair else 0.1
+        runner._adaptive_upper[k] = list(rng.normal(0.5, sigma, num_samples))
+        runner._adaptive_lower[k + 1] = list(rng.normal(-0.5, sigma, num_samples))
+
+
+def test_rank_windows():
+    """
+    Validate that the hot replicas are the windows either side of the pair with
+    the largest uncertainty, padded by a window each side, and that windows
+    only go cold after being found cold at two consecutive rankings.
+    """
+    runner = _ranking_runner(8, adaptive_coverage=0.5, adaptive_min_samples=10)
+    cache = runner._dynamics_cache
+
+    _fill_ranking_data(runner, hard_pair=3)
+    runner._rank_windows(num_workers=2)
+    assert cache._hot_replicas == [2, 3, 4, 5]
+
+    # Windows 2 and 3 are found cold once, so stay hot.
+    _fill_ranking_data(runner, hard_pair=5)
+    runner._rank_windows(num_workers=2)
+    assert cache._hot_replicas == [2, 3, 4, 5, 6, 7]
+
+    # Found cold a second time.
+    _fill_ranking_data(runner, hard_pair=5)
+    runner._rank_windows(num_workers=2)
+    assert cache._hot_replicas == [4, 5, 6, 7]
+
+
+def test_rank_windows_pads_to_workers():
+    """
+    Validate that the hot replicas are padded to a multiple of the number of
+    workers, and that every replica being hot is recorded as None.
+    """
+    runner = _ranking_runner(8, adaptive_coverage=0.5, adaptive_min_samples=10)
+
+    _fill_ranking_data(runner, hard_pair=3)
+    runner._rank_windows(num_workers=3)
+    assert len(runner._dynamics_cache._hot_replicas) == 6
+
+    runner._dynamics_cache._hot_replicas = None
+    _fill_ranking_data(runner, hard_pair=3)
+    runner._rank_windows(num_workers=8)
+    assert runner._dynamics_cache._hot_replicas is None
+
+
+def test_rank_windows_without_uncertainty():
+    """
+    Validate that every replica stays hot when no window contributes any
+    uncertainty, rather than none of them.
+    """
+    runner = _ranking_runner(4, adaptive_min_samples=10)
+
+    for k in range(3):
+        runner._adaptive_upper[k] = [0.5] * 100
+        runner._adaptive_lower[k + 1] = [-0.5] * 100
+    runner._rank_windows(num_workers=1)
+
+    assert runner._dynamics_cache._hot_replicas is None
+
+
+def test_adaptive_data_is_restored():
+    """
+    Validate that the data used to rank the windows survives being stored in
+    the dynamics cache and restored, as it is across a restart.
+    """
+    import pickle
+
+    runner = _ranking_runner(8, adaptive_min_samples=10)
+    runner._dynamics_cache._adaptive_data = None
+    _fill_ranking_data(runner, hard_pair=3)
+    runner._adaptive_distance[2] = [1.0, 2.0]
+
+    expected = (runner._adaptive_lower, runner._adaptive_upper)
+    runner._store_adaptive_data()
+    data = pickle.loads(pickle.dumps(runner._dynamics_cache._adaptive_data))
+
+    runner._reset_adaptive_data()
+    runner._dynamics_cache._adaptive_data = data
+    runner._restore_adaptive_data()
+
+    assert runner._adaptive_lower == expected[0]
+    assert runner._adaptive_upper == expected[1]
+    assert runner._adaptive_distance[2] == [1.0, 2.0]
+
+
+def test_rank_windows_needs_enough_samples():
+    """
+    Validate that windows aren't ranked until every one has enough samples,
+    and that the data keeps accumulating until they do.
+    """
+    runner = _ranking_runner(8, adaptive_coverage=0.5, adaptive_min_samples=50)
+
+    _fill_ranking_data(runner, hard_pair=3, num_samples=20)
+    runner._rank_windows(num_workers=2)
+
+    assert runner._dynamics_cache._hot_replicas is None
+    assert len(runner._adaptive_upper[0]) == 20
+
+
+def test_rank_windows_keeps_undersampled_windows_hot():
+    """
+    Validate that a window with too few independent samples stays hot, even
+    though its uncertainty is small.
+    """
+    runner = _ranking_runner(8, adaptive_coverage=0.5, adaptive_min_samples=50)
+
+    _fill_ranking_data(runner, hard_pair=3)
+
+    # A slowly decorrelating series with a small spread.
+    rng = np.random.default_rng(5)
+    y = np.zeros(200)
+    for i in range(1, len(y)):
+        y[i] = 0.95 * y[i - 1] + rng.normal(0.0, 0.01)
+    runner._adaptive_upper[6] = list(0.5 + y)
+    runner._rank_windows(num_workers=2)
+
+    assert 6 in runner._dynamics_cache._hot_replicas
+
+
+def test_rank_windows_keeps_slow_bond_distance_hot():
+    """
+    Validate that a window in which the distance of the bond that is broken
+    decorrelates slowly stays hot, even though its energies are converged.
+    """
+    runner = _ranking_runner(8, adaptive_coverage=0.5, adaptive_min_samples=50)
+    runner._ring_pair = (0, 1)
+
+    _fill_ranking_data(runner, hard_pair=3)
+
+    rng = np.random.default_rng(9)
+    for k in range(8):
+        runner._adaptive_distance[k] = list(rng.normal(1.5, 0.05, 200))
+
+    y = np.zeros(200)
+    for i in range(1, len(y)):
+        y[i] = 0.95 * y[i - 1] + rng.normal()
+    runner._adaptive_distance[7] = list(10.0 + y)
+    runner._rank_windows(num_workers=2)
+
+    assert 7 in runner._dynamics_cache._hot_replicas
+    assert 0 not in runner._dynamics_cache._hot_replicas
+
+
+def _ring_pair_runner(system, virtual_sites=None):
+    """
+    Create a runner holding only what is needed to find the ring pair.
+    """
+    runner = object.__new__(RepexRunner)
+    runner._system = system
+    runner._virtual_sites = virtual_sites
+    return runner
+
+
+def test_find_ring_pair(syk_ring_break_mols):
+    """
+    Validate that the bond that is broken is found from the perturbable
+    molecule, and isn't shifted by its own virtual sites, which come after its
+    atoms, or by those of later molecules.
+    """
+    runner = _ring_pair_runner(syk_ring_break_mols)
+    assert runner._find_ring_pair() == (1, 7)
+
+    runner = _ring_pair_runner(syk_ring_break_mols, np.array([[0, 3], [100, 4]]))
+    assert runner._find_ring_pair() == (1, 7)
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+def test_adaptive_repex_records_bond_distance(syk_ring_break_mols):
+    """
+    Validate that the distance of the bond that is broken is recorded in each
+    window during an adaptive replica exchange simulation.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "40fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "40fs",
+            "frame_frequency": "40fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": 3,
+            "replica_exchange": True,
+            "lambda_schedule": "ring_break_morph",
+            "adaptive_repex": True,
+            "adaptive_burn_in": "0 ps",
+        }
+
+        runner = RepexRunner(syk_ring_break_mols, Config(**config))
+        assert runner._ring_pair == (1, 7)
+        runner.run()
+
+        for distances in runner._adaptive_distance:
+            assert len(distances) == 10
+
+        # The S-C bond is intact at lambda = 0.
+        assert np.mean(runner._adaptive_distance[0]) == pytest.approx(1.8, abs=0.2)
+
+
+def test_find_ring_pair_needs_a_single_bond(syk_ring_break_mols):
+    """
+    Validate that the distance isn't used when more than one bond is broken or
+    made.
+    """
+    mols = syk_ring_break_mols.clone()
+    mol = mols["property is_perturbable"].molecules()[0]
+    mol = mol.edit().set_property("ring_making_bonds", [2, 8]).molecule().commit()
+    mols.update(mol)
+
+    assert _ring_pair_runner(mols)._find_ring_pair() is None
+
+
+def test_rank_windows_flags_unconverged_pairs():
+    """
+    Validate that a pair whose forward and reverse estimates disagree is made
+    hot, even though its uncertainty is small.
+    """
+    runner = _ranking_runner(8, adaptive_coverage=0.5, adaptive_min_samples=10)
+
+    _fill_ranking_data(runner, hard_pair=3)
+    rng = np.random.default_rng(3)
+    runner._adaptive_lower[1] = list(rng.normal(-3.0, 0.1, 200))
+    runner._rank_windows(num_workers=2)
+
+    assert {0, 1, 2}.issubset(runner._dynamics_cache._hot_replicas)
+
+
+def test_checkpoint_without_adaptive_state():
+    """
+    Validate that a checkpoint written before adaptive replica exchange was
+    added restores with every replica hot and no clocks of its own.
+    """
+    from somd2.runner._repex import DynamicsCache
+    from tests.runner.test_gcmc_stats import TestLegacyRepexCheckpoint
+
+    cache = object.__new__(DynamicsCache)
+    cache.__setstate__(TestLegacyRepexCheckpoint.make_state(None))
+
+    assert cache._hot_replicas is None
+    assert cache._clocks == [None] * 3
+    assert cache._cold_votes == [0] * 3
+    assert cache._adaptive_data is None
+    assert cache._strided is False
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+@pytest.mark.parametrize("max_contexts", [None, 2])
+def test_adaptive_repex_hot_replicas(ethane_methanol, max_contexts):
+    """
+    Validate that only the hot replicas are propagated between full cycles,
+    that each replica records energies against its own clock without gaps or
+    repeats, that frames are saved for every replica on the same cycles, and
+    that a restart carries on with the same hot replicas.
+    """
+    import pandas as pd
+    import sire as sr
+
+    num_lambda = 4
+    hot = [0, 1]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "48fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "16fs",
+            "frame_frequency": "16fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": num_lambda,
+            "replica_exchange": True,
+            "max_contexts": max_contexts,
+            "adaptive_repex": True,
+            "adaptive_mix_interval": 2,
+            # Never rank, so that the hot replicas stay as set.
+            "adaptive_burn_in": "1 ns",
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+
+        # Not a ring-breaking perturbation, so there is no bond distance.
+        assert runner._ring_pair is None
+
+        runner._dynamics_cache._hot_replicas = hot
+        runner.run()
+
+        # Hot replicas run every cycle. The others only run on even cycles,
+        # which are every 'adaptive_mix_interval', or a checkpoint.
+        def expected_times(num_hot, num_cold, r):
+            num = num_hot if r in hot else num_cold
+            return [round(0.004 * (k + 1), 6) for k in range(num)]
+
+        for i in range(num_lambda):
+            records = pd.read_parquet(runner._filenames[i]["energy_traj"])
+            times = [round(t, 6) for t in records.index.get_level_values(0)]
+            assert times == expected_times(12, 6, i), f"replica {i}: {times}"
+
+            # A frame on every checkpoint cycle, for every replica.
+            mols = sr.load(
+                [runner._filenames["topology0"], runner._filenames[i]["trajectory"]]
+            )
+            assert mols.num_frames() == 3
+
+        assert runner._dynamics_cache._time.to("fs") == pytest.approx(48)
+
+        # Restart, extending the runtime.
+        config["runtime"] = "64fs"
+        config["restart"] = True
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+        assert runner._dynamics_cache._hot_replicas == hot
+        runner.run()
+
+        for i in range(num_lambda):
+            records = pd.read_parquet(runner._filenames[i]["energy_traj"])
+            times = [round(t, 6) for t in records.index.get_level_values(0)]
+            assert times == expected_times(16, 8, i), f"replica {i}: {times}"
+
+        # Restart with adaptive replica exchange switched off, so that every
+        # replica is propagated every cycle.
+        config["runtime"] = "80fs"
+        config["adaptive_repex"] = False
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+        runner.run()
+
+        assert runner._dynamics_cache._hot_replicas is None
+
+        for i in range(num_lambda):
+            records = pd.read_parquet(runner._filenames[i]["energy_traj"])
+            times = [round(t, 6) for t in records.index.get_level_values(0)]
+            assert times == expected_times(20, 12, i), f"replica {i}: {times}"
+
+            # Frames are scheduled by each replica's own clock again.
+            mols = sr.load(
+                [runner._filenames["topology0"], runner._filenames[i]["trajectory"]]
+            )
+            assert mols.num_frames() == 5
