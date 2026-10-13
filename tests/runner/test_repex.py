@@ -1627,6 +1627,53 @@ def test_find_ring_pair(syk_ring_break_mols):
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+def test_adaptive_repex_frames_every_cycle(ethane_methanol):
+    """
+    Validate that frequent frames don't stop cold replicas being skipped, and
+    that a cold replica saves the frame it missed when it is next propagated.
+    """
+    import pandas as pd
+    import sire as sr
+
+    num_lambda = 4
+    hot = [0, 1]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "48fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "16fs",
+            "frame_frequency": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": num_lambda,
+            "replica_exchange": True,
+            "adaptive_repex": True,
+            "adaptive_mix_interval": 2,
+            # Never rank, so that the hot replicas stay as set.
+            "adaptive_burn_in": "1 ns",
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+        runner._dynamics_cache._hot_replicas = hot
+        runner.run()
+
+        # Cold replicas only run on even cycles, saving a frame each time.
+        for i in range(num_lambda):
+            expected = 12 if i in hot else 6
+
+            records = pd.read_parquet(runner._filenames[i]["energy_traj"])
+            assert len(records) == expected, f"replica {i}"
+
+            mols = sr.load(
+                [runner._filenames["topology0"], runner._filenames[i]["trajectory"]]
+            )
+            assert mols.num_frames() == expected, f"replica {i}"
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
 def test_adaptive_repex_records_bond_distance(syk_ring_break_mols):
     """
     Validate that the distance of the bond that is broken is recorded in each

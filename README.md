@@ -427,7 +427,8 @@ little as the simulation is extended. Adaptive replica exchange, enabled with
 burn-in period of standard replica exchange, set with `--adaptive-burn-in`, the
 windows are ranked at each checkpoint. Only the highest ranked ("hot") windows
 are propagated and exchanged every cycle, with every window joining in every
-`--adaptive-mix-interval` cycles, as well as on checkpoint and frame cycles.
+`--adaptive-mix-interval` cycles, as well as on checkpoint cycles. A window that
+misses a frame cycle saves its frame the next time it is propagated.
 
 Each pair of neighbouring windows is ranked by σ√g of the reduced energy
 differences between them, where σ is the standard deviation and g the

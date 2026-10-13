@@ -510,8 +510,9 @@ class Config:
             highest ranked ("hot") windows are propagated and exchanged every cycle,
             with the remaining windows joining in every 'adaptive_mix_interval'
             cycles. The 'runtime' is the simulation time of the hot windows, so the
-            other windows are sampled for less time. Checkpoint and frame cycles always
-            include every window.
+            other windows are sampled for less time. Checkpoint cycles always include
+            every window, and a window that misses a frame cycle saves its frame the
+            next time it is propagated.
 
         adaptive_mix_interval: int
             The number of cycles between those that propagate and exchange every

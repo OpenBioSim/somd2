@@ -1645,6 +1645,9 @@ class RepexRunner(_RunnerBase):
             self._start_block = 0
             self._start_time = _sr.u("0 ps")
 
+        if self._config.adaptive_repex:
+            self._check_adaptive_config()
+
         # Create a terminal flip sampler per replica (if terminal groups were detected).
         if self._terminal_groups:
             from ._samplers import TerminalFlipSampler
@@ -2122,35 +2125,6 @@ class RepexRunner(_RunnerBase):
         if is_adaptive:
             self._reset_adaptive_data()
             self._restore_adaptive_data()
-
-            end_time = self._start_time + self._config.runtime
-            if end_time <= self._config.adaptive_burn_in:
-                _logger.warning(
-                    "The 'runtime' is no longer than 'adaptive_burn_in', so the "
-                    "windows will never be ranked. Every window will be "
-                    "propagated every cycle."
-                )
-            elif checkpoint_frequency.value() == 0.0:
-                _logger.warning(
-                    "Adaptive replica exchange ranks the windows at checkpoints, "
-                    "but 'checkpoint_frequency' is zero. Every window will be "
-                    "propagated every cycle."
-                )
-            elif cycles_per_checkpoint <= self._config.adaptive_mix_interval:
-                _logger.warning(
-                    "Every window is propagated on checkpoint cycles, which are "
-                    "no further apart than 'adaptive_mix_interval'. Adaptive "
-                    "replica exchange will have little effect."
-                )
-
-            if (
-                self._save_frames or self._config.gcmc
-            ) and cycles_per_frame <= self._config.adaptive_mix_interval:
-                _logger.warning(
-                    "Every window is propagated on frame cycles, which are no "
-                    "further apart than 'adaptive_mix_interval'. Adaptive "
-                    "replica exchange will have little effect."
-                )
         else:
             # Adaptive replica exchange may have been switched off on restart.
             self._dynamics_cache._hot_replicas = None
@@ -2175,31 +2149,22 @@ class RepexRunner(_RunnerBase):
             # non-integer ratios between the checkpoint and energy frequencies.
             is_checkpoint = (i + 1) >= next_checkpoint - 1e-10
 
-            # Whether a frame is saved at the end of the cycle.
-            write_gcmc_ghosts = (i + 1) % cycles_per_frame == 0
-
             # Whether the checkpoint files are written at the end of this cycle.
             do_checkpoint = is_checkpoint or i == cycles - 1
 
-            # Only the hot replicas are propagated, except on mix cycles and
-            # cycles that write output for every replica.
+            # Only the hot replicas are propagated, except on mix and checkpoint
+            # cycles, and frame cycles when frames are held in shared contexts.
             hot = self._dynamics_cache._hot_replicas
             is_full = (
                 hot is None
                 or (i + 1) % self._config.adaptive_mix_interval == 0
                 or do_checkpoint
-                or (write_gcmc_ghosts and (self._save_frames or self._config.gcmc))
+                or (self._is_cached and (i + 1) % cycles_per_frame == 0)
             )
             active = list(range(num_replicas)) if is_full else hot
 
             if not is_full:
                 _logger.info(f"Propagating {len(active)} hot replicas: {active}")
-
-            # Frames are scheduled by the cycle rather than by each replica's
-            # own clock, which falls behind while the replica is cold.
-            save_frame = (
-                write_gcmc_ghosts if is_adaptive and self._save_frames else None
-            )
 
             # Capture the simulation clock at the start of the cycle. This seeds
             # any replica that doesn't yet have a clock of its own.
@@ -2226,17 +2191,30 @@ class RepexRunner(_RunnerBase):
                         for r in replicas
                     ]
 
+                    # Whether each replica saves a frame and writes its ghost
+                    # waters, scheduled by the cycle since a cold replica's own
+                    # clock falls behind.
+                    is_frame = [
+                        self._is_due(last_cycle[r], i, cycles_per_frame)
+                        for r in replicas
+                    ]
+                    save_frame = (
+                        is_frame
+                        if is_adaptive and self._save_frames
+                        else [None] * len(replicas)
+                    )
+
                     try:
                         for result, index, energies in dynamics_executor.map(
                             self._run_block,
                             replicas,
                             repeat(self._lambda_values),
                             is_gcmc,
-                            repeat(write_gcmc_ghosts),
+                            is_frame,
                             is_terminal_flip,
                             repeat(self._config.save_energy_components),
                             repeat(clock),
-                            repeat(save_frame),
+                            save_frame,
                         ):
                             if not result:
                                 _logger.error(
@@ -2944,6 +2922,35 @@ class RepexRunner(_RunnerBase):
                 matrix[i, j] = self._beta * energy
 
         return matrix
+
+    def _check_adaptive_config(self):
+        """
+        Warn about settings that stop adaptive replica exchange having an
+        effect, before any time is spent on minimisation and equilibration.
+        """
+        checkpoint_frequency = self._config.checkpoint_frequency
+        end_time = self._start_time + self._config.runtime
+
+        if end_time <= self._config.adaptive_burn_in:
+            _logger.warning(
+                "The 'runtime' is no longer than 'adaptive_burn_in', so the "
+                "windows will never be ranked. Every window will be propagated "
+                "every cycle."
+            )
+        elif checkpoint_frequency.value() == 0.0:
+            _logger.warning(
+                "Adaptive replica exchange ranks the windows at checkpoints, but "
+                "'checkpoint_frequency' is zero. Every window will be propagated "
+                "every cycle."
+            )
+        elif (
+            checkpoint_frequency / self._config.energy_frequency
+        ).value() <= self._config.adaptive_mix_interval:
+            _logger.warning(
+                "Every window is propagated on checkpoint cycles, which are no "
+                "further apart than 'adaptive_mix_interval'. Adaptive replica "
+                "exchange will have little effect."
+            )
 
     def _find_ring_pair(self):
         """
