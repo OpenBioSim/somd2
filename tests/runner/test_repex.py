@@ -1486,6 +1486,47 @@ def test_rank_windows_pads_to_workers():
     assert runner._dynamics_cache._hot_replicas is None
 
 
+@pytest.mark.parametrize(
+    "runtime, checkpoint_frequency, burn_in, warns",
+    [
+        ("5 ns", "100 ps", "500 ps", False),
+        # The only checkpoint is the end of the run.
+        ("1 ns", "2 ns", "0 ps", True),
+        # The first checkpoint after the burn-in is the end of the run.
+        ("12 ns", "4 ns", "9 ns", True),
+        ("5 ns", "0 ps", "500 ps", True),
+        # Checkpoints are no further apart than 'adaptive_mix_interval'.
+        ("5 ns", "4 ps", "500 ps", True),
+    ],
+)
+def test_check_adaptive_config(
+    monkeypatch, runtime, checkpoint_frequency, burn_in, warns
+):
+    """
+    Validate that settings which stop adaptive replica exchange having an
+    effect are warned about.
+    """
+    import sire as sr
+
+    from somd2.runner import _repex
+
+    warnings = []
+    monkeypatch.setattr(_repex._logger, "warning", warnings.append)
+
+    runner = object.__new__(RepexRunner)
+    runner._config = Config(
+        runtime=runtime,
+        energy_frequency="1 ps",
+        checkpoint_frequency=checkpoint_frequency,
+        adaptive_burn_in=burn_in,
+        adaptive_mix_interval=4,
+    )
+    runner._start_time = sr.u("0 ps")
+    runner._check_adaptive_config()
+
+    assert bool(warnings) == warns
+
+
 def test_rank_windows_minimises_variance_for_compute():
     """
     Validate that a pair with a large uncertainty is made hot without being

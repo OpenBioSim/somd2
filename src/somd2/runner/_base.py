@@ -802,6 +802,15 @@ class RunnerBase:
                 _logger.error(msg)
                 raise ValueError(msg)
 
+            # Ghost waters are written by GCMC moves, so frames must coincide
+            # with them.
+            ratio = (self._config.frame_frequency / self._config.gcmc_frequency).value()
+
+            if not isclose(ratio, round(ratio), abs_tol=1e-4):
+                msg = "'frame_frequency' must be a multiple of 'gcmc_frequency'."
+                _logger.error(msg)
+                raise ValueError(msg)
+
             # Make sure the checkpoint frequency is a multiple of the frame frequency.
 
             # Get the ratio.

@@ -2153,13 +2153,12 @@ class RepexRunner(_RunnerBase):
             do_checkpoint = is_checkpoint or i == cycles - 1
 
             # Only the hot replicas are propagated, except on mix and checkpoint
-            # cycles, and frame cycles when frames are held in shared contexts.
+            # cycles.
             hot = self._dynamics_cache._hot_replicas
             is_full = (
                 hot is None
                 or (i + 1) % self._config.adaptive_mix_interval == 0
                 or do_checkpoint
-                or (self._is_cached and (i + 1) % cycles_per_frame == 0)
             )
             active = list(range(num_replicas)) if is_full else hot
 
@@ -2198,11 +2197,6 @@ class RepexRunner(_RunnerBase):
                         self._is_due(last_cycle[r], i, cycles_per_frame)
                         for r in replicas
                     ]
-                    save_frame = (
-                        is_frame
-                        if is_adaptive and self._save_frames
-                        else [None] * len(replicas)
-                    )
 
                     try:
                         for result, index, energies in dynamics_executor.map(
@@ -2214,7 +2208,11 @@ class RepexRunner(_RunnerBase):
                             is_terminal_flip,
                             repeat(self._config.save_energy_components),
                             repeat(clock),
-                            save_frame,
+                            (
+                                is_frame
+                                if is_adaptive and self._save_frames
+                                else repeat(None)
+                            ),
                         ):
                             if not result:
                                 _logger.error(
@@ -2928,24 +2926,29 @@ class RepexRunner(_RunnerBase):
         Warn about settings that stop adaptive replica exchange having an
         effect, before any time is spent on minimisation and equilibration.
         """
-        checkpoint_frequency = self._config.checkpoint_frequency
-        end_time = self._start_time + self._config.runtime
+        from math import floor
 
-        if end_time <= self._config.adaptive_burn_in:
-            _logger.warning(
-                "The 'runtime' is no longer than 'adaptive_burn_in', so the "
-                "windows will never be ranked. Every window will be propagated "
-                "every cycle."
-            )
-        elif checkpoint_frequency.value() == 0.0:
+        checkpoint = self._config.checkpoint_frequency.to("ps")
+        burn_in = self._config.adaptive_burn_in.to("ps")
+        end_time = (self._start_time + self._config.runtime).to("ps")
+
+        if checkpoint == 0.0:
             _logger.warning(
                 "Adaptive replica exchange ranks the windows at checkpoints, but "
                 "'checkpoint_frequency' is zero. Every window will be propagated "
                 "every cycle."
             )
+        # The first ranking is at the first checkpoint after the burn-in.
+        elif (floor(burn_in / checkpoint + 1e-9) + 1) * checkpoint >= end_time - 1e-6:
+            _logger.warning(
+                "There is no checkpoint after 'adaptive_burn_in' and before the "
+                "end of the run, so the windows will never be ranked in time to "
+                "be used. Every window will be propagated every cycle."
+            )
         elif (
-            checkpoint_frequency / self._config.energy_frequency
-        ).value() <= self._config.adaptive_mix_interval:
+            checkpoint / self._config.energy_frequency.to("ps")
+            <= self._config.adaptive_mix_interval
+        ):
             _logger.warning(
                 "Every window is propagated on checkpoint cycles, which are no "
                 "further apart than 'adaptive_mix_interval'. Adaptive replica "
