@@ -1431,6 +1431,15 @@ def _ranking_runner(num_lambda, **config):
     return runner
 
 
+def _rank_twice(runner, num_workers):
+    """
+    Rank the windows at two consecutive checkpoints, so that the windows found
+    cold at both stop being hot.
+    """
+    runner._rank_windows(num_workers=num_workers)
+    runner._rank_windows(num_workers=num_workers)
+
+
 def _fill_ranking_data(runner, hard_pair, num_samples=200, seed=7):
     """
     Record converged energy differences between every pair of neighbouring
@@ -1454,7 +1463,11 @@ def test_rank_windows():
     runner = _ranking_runner(8, adaptive_min_samples=10)
     cache = runner._dynamics_cache
 
+    # Starting from every window hot, those found cold once stay hot.
     _fill_ranking_data(runner, hard_pair=3)
+    runner._rank_windows(num_workers=2)
+    assert cache._hot_replicas is None
+
     runner._rank_windows(num_workers=2)
     assert cache._hot_replicas == [2, 3, 4, 5]
 
@@ -1477,7 +1490,7 @@ def test_rank_windows_pads_to_workers():
     runner = _ranking_runner(8, adaptive_min_samples=10)
 
     _fill_ranking_data(runner, hard_pair=3)
-    runner._rank_windows(num_workers=3)
+    _rank_twice(runner, num_workers=3)
     assert len(runner._dynamics_cache._hot_replicas) == 6
 
     runner._dynamics_cache._hot_replicas = None
@@ -1541,7 +1554,7 @@ def test_rank_windows_minimises_variance_for_compute():
     rng = np.random.default_rng(11)
     runner._adaptive_upper[3] = list(rng.normal(1.0, 1.0, 200))
     runner._adaptive_lower[4] = list(rng.normal(0.0, 1.0, 200))
-    runner._rank_windows(num_workers=2)
+    _rank_twice(runner, num_workers=2)
 
     assert runner._dynamics_cache._hot_replicas == [2, 3, 4, 5]
 
@@ -1554,6 +1567,7 @@ def test_rank_windows_without_gain():
     """
     runner = _ranking_runner(8, adaptive_min_samples=10)
     runner._dynamics_cache._hot_replicas = [2, 3, 4, 5]
+    runner._dynamics_cache._cold_votes = [1, 1, 0, 0, 0, 0, 1, 1]
 
     # Every pair has the same uncertainty.
     _fill_ranking_data(runner, hard_pair=-1)
@@ -1632,7 +1646,7 @@ def test_rank_windows_keeps_undersampled_windows_hot():
     for i in range(1, len(y)):
         y[i] = 0.95 * y[i - 1] + rng.normal(0.0, 0.01)
     runner._adaptive_upper[6] = list(0.5 + y)
-    runner._rank_windows(num_workers=2)
+    _rank_twice(runner, num_workers=2)
 
     assert 6 in runner._dynamics_cache._hot_replicas
 
@@ -1655,7 +1669,7 @@ def test_rank_windows_keeps_slow_bond_distance_hot():
     for i in range(1, len(y)):
         y[i] = 0.95 * y[i - 1] + rng.normal()
     runner._adaptive_distance[7] = list(10.0 + y)
-    runner._rank_windows(num_workers=2)
+    _rank_twice(runner, num_workers=2)
 
     assert 7 in runner._dynamics_cache._hot_replicas
     assert 0 not in runner._dynamics_cache._hot_replicas
@@ -1788,9 +1802,10 @@ def test_rank_windows_flags_unconverged_pairs():
     _fill_ranking_data(runner, hard_pair=3)
     rng = np.random.default_rng(3)
     runner._adaptive_lower[1] = list(rng.normal(-3.0, 0.1, 200))
-    runner._rank_windows(num_workers=2)
+    _rank_twice(runner, num_workers=2)
 
-    assert {0, 1, 2}.issubset(runner._dynamics_cache._hot_replicas)
+    hot = runner._dynamics_cache._hot_replicas
+    assert hot is not None and {0, 1, 2}.issubset(hot)
 
 
 def test_checkpoint_without_adaptive_state():

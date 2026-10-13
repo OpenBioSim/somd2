@@ -3233,12 +3233,13 @@ class RepexRunner(_RunnerBase):
         differences or, for a perturbation that breaks or makes a single bond,
         the bond distance. The remaining pairs are added in order of weight,
         with the windows either side of each so that exchange carries
-        configurations into and out of them, and of the sets this gives, the
-        one with the lowest variance of the free energy multiplied by the cost
-        is chosen. If none is better than every window being hot, every window
-        is hot. A window only stops being hot once it has been found cold at
-        two consecutive rankings, and the cold windows with the highest weights
-        are made hot to fill the workers, so that the GPUs are evenly loaded.
+        configurations into and out of them. Each set this gives is filled to a
+        multiple of the number of workers with the cold windows owning the most
+        variance, so that the GPUs are evenly loaded, and the set with the
+        lowest variance of the free energy multiplied by the cost is chosen. A
+        window only stops being hot once it has been found cold at two
+        consecutive rankings. Every window is hot if no set, including the
+        windows kept hot, is better than that.
 
         The ranking uses all of the data since the burn-in, since the slowest
         windows decorrelate over far longer than a checkpoint interval.
@@ -3318,61 +3319,75 @@ class RepexRunner(_RunnerBase):
                 r + d for r in windows for d in (-1, 1) if 0 <= r + d < num_replicas
             }
 
+        all_hot = set(range(num_replicas))
+
+        # The variance owned by each window: the forward side of the pair above
+        # it and the reverse side of the pair below it.
+        owned = _np.zeros(num_replicas)
+        owned[:-1] += fwd_variance
+        owned[1:] += rev_variance
+
+        def fill(windows):
+            # Make the cold windows owning the most variance hot, until the hot
+            # windows are a multiple of the number of workers.
+            target = min(num_replicas, ceil(len(windows) / num_workers) * num_workers)
+            cold = sorted(all_hot - windows, key=lambda r: -owned[r])
+            return windows | set(cold[: target - len(windows)])
+
         # A cold window costs 1 / 'adaptive_mix_interval' of a hot one, and
-        # multiplies the variance of its side of each pair by the same factor.
+        # multiplies the variance it owns by the same factor.
         interval = self._config.adaptive_mix_interval
-        total_variance = (fwd_variance + rev_variance).sum()
+        total_variance = owned.sum()
 
         def cost_and_variance(windows):
-            # The hot windows are padded to a multiple of the number of workers.
-            num_hot = min(num_replicas, ceil(len(windows) / num_workers) * num_workers)
-            cost = num_hot + (num_replicas - num_hot) / interval
+            cost = len(windows) + (num_replicas - len(windows)) / interval
             variance = sum(
-                fwd_variance[k] * (1 if k in windows else interval)
-                + rev_variance[k] * (1 if k + 1 in windows else interval)
-                for k in range(num_replicas - 1)
+                v * (1 if r in windows else interval) for r, v in enumerate(owned)
             )
             return cost / num_replicas, variance / (total_variance or 1.0)
+
+        baseline = _np.prod(cost_and_variance(all_hot))
 
         # Add pairs in order of weight, keeping the hot windows that give the
         # lowest variance for a fixed amount of compute, if better than all hot.
         candidate = set(forced)
-        hot = None
-        best = 1.0 - 1e-6
+        chosen = None
+        best = baseline
         order = list(_np.argsort(-weights)) if total_variance > 0 else []
         for k in [None] + order:
             if k is not None:
+                if k in candidate and k + 1 in candidate:
+                    continue
                 candidate.update((int(k), int(k) + 1))
             windows = pad(candidate)
+            if not windows:
+                continue
+            windows = fill(windows)
             efficiency = _np.prod(cost_and_variance(windows))
-            if windows and efficiency < best:
-                hot, best = windows, efficiency
+            if efficiency < best:
+                chosen, best = windows, efficiency
 
         votes = self._dynamics_cache._cold_votes
-        if hot is None:
-            hot = set(range(num_replicas))
+        if chosen is None:
+            hot = all_hot
             votes[:] = [0] * num_replicas
         else:
             # Keep windows hot until they have been found cold twice in a row.
             previous = self._dynamics_cache._hot_replicas
+            previous = all_hot if previous is None else set(previous)
+            hot = set(chosen)
             for r in range(num_replicas):
-                if r in hot:
+                if r in chosen:
                     votes[r] = 0
-                elif previous is not None and r in previous:
+                elif r in previous:
                     votes[r] += 1
                     if votes[r] < 2:
                         hot.add(r)
 
-            # Fill the workers with the highest weighted of the cold windows.
-            window_weights = [
-                max(weights[k] for k in (r - 1, r) if 0 <= k < num_replicas - 1)
-                for r in range(num_replicas)
-            ]
-            target = min(num_replicas, ceil(len(hot) / num_workers) * num_workers)
-            cold = sorted(
-                set(range(num_replicas)) - hot, key=lambda r: -window_weights[r]
-            )
-            hot.update(cold[: target - len(hot)])
+            # Windows kept hot can leave no gain over all hot.
+            hot = fill(hot)
+            if _np.prod(cost_and_variance(hot)) >= baseline:
+                hot = all_hot
 
         hot = sorted(hot)
         self._dynamics_cache._hot_replicas = None if len(hot) == num_replicas else hot
