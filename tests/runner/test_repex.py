@@ -1507,6 +1507,10 @@ def test_rank_windows_pads_to_workers():
         ("1 ns", "2 ns", "0 ps", True),
         # The first checkpoint after the burn-in is the end of the run.
         ("12 ns", "4 ns", "9 ns", True),
+        # The second checkpoint after the burn-in is the end of the run, so
+        # no window goes cold.
+        ("1 ns", "500 ps", "400 ps", True),
+        ("1.2 ns", "500 ps", "400 ps", False),
         ("5 ns", "0 ps", "500 ps", True),
         # Checkpoints are no further apart than 'adaptive_mix_interval'.
         ("5 ns", "4 ps", "500 ps", True),
@@ -1557,6 +1561,23 @@ def test_rank_windows_minimises_variance_for_compute():
     _rank_twice(runner, num_workers=2)
 
     assert runner._dynamics_cache._hot_replicas == [2, 3, 4, 5]
+
+
+def test_rank_windows_fill_windows_stay_cold_candidates():
+    """
+    Validate that a window made hot only to fill the workers keeps counting
+    as found cold, rather than as chosen.
+    """
+    runner = _ranking_runner(8, adaptive_min_samples=10)
+
+    # The flagged pair 0 gives windows 0, 1 and 2, so one window is filled.
+    _fill_ranking_data(runner, hard_pair=0)
+    _rank_twice(runner, num_workers=2)
+
+    hot = runner._dynamics_cache._hot_replicas
+    assert hot is not None and len(hot) == 4
+    (filler,) = set(hot) - {0, 1, 2}
+    assert runner._dynamics_cache._cold_votes[filler] == 2
 
 
 def test_rank_windows_without_gain():

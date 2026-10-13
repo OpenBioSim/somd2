@@ -450,11 +450,13 @@ ones. The following are always hot:
 
 The windows either side of each hot window are also made hot, so that exchange
 carries configurations into and out of them, and a window only stops being hot
-after it has been found cold at two consecutive checkpoints. The number of hot
-windows is rounded up to a multiple of the number of GPUs multiplied by the
-oversubscription factor, so that the GPUs are evenly loaded. When contexts are
-re-used, replicas are assigned to them in a strided rather than contiguous
-pattern, so that the hot windows are spread evenly over the GPUs.
+after it has been found cold at two consecutive checkpoints, so no window is
+cold until the second checkpoint after the burn-in. The number of hot windows
+is rounded up to a multiple of the number of GPUs multiplied by the
+oversubscription factor, using the cold windows that contribute the most
+uncertainty, so that the GPUs are evenly loaded. When contexts are re-used,
+replicas are assigned to them in a strided rather than contiguous pattern, so
+that the hot windows are spread evenly over the GPUs.
 
 The `--runtime` is the simulation time of the hot windows, so the remaining
 windows are sampled for less time and the windows have different numbers of

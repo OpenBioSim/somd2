@@ -2128,6 +2128,7 @@ class RepexRunner(_RunnerBase):
         else:
             # Adaptive replica exchange may have been switched off on restart.
             self._dynamics_cache._hot_replicas = None
+            self._dynamics_cache._cold_votes = [0] * num_replicas
 
         # Perform the replica exchange simulation.
         for i in range(cycles):
@@ -2938,12 +2939,12 @@ class RepexRunner(_RunnerBase):
                 "'checkpoint_frequency' is zero. Every window will be propagated "
                 "every cycle."
             )
-        # The first ranking is at the first checkpoint after the burn-in.
-        elif (floor(burn_in / checkpoint + 1e-9) + 1) * checkpoint >= end_time - 1e-6:
+        # Windows first go cold at the second checkpoint after the burn-in.
+        elif (floor(burn_in / checkpoint + 1e-9) + 2) * checkpoint >= end_time - 1e-6:
             _logger.warning(
-                "There is no checkpoint after 'adaptive_burn_in' and before the "
-                "end of the run, so the windows will never be ranked in time to "
-                "be used. Every window will be propagated every cycle."
+                "There are fewer than two checkpoints after 'adaptive_burn_in' "
+                "and before the end of the run, so no window will stop being "
+                "hot. Every window will be propagated every cycle."
             )
         elif (
             checkpoint / self._config.energy_frequency.to("ps")
@@ -3346,13 +3347,15 @@ class RepexRunner(_RunnerBase):
             )
             return cost / num_replicas, variance / (total_variance or 1.0)
 
-        baseline = _np.prod(cost_and_variance(all_hot))
+        # A set must beat all hot by more than rounding error.
+        threshold = _np.prod(cost_and_variance(all_hot)) * (1 - 1e-9)
 
         # Add pairs in order of weight, keeping the hot windows that give the
         # lowest variance for a fixed amount of compute, if better than all hot.
+        # Sets are scored with the windows that will fill the workers.
         candidate = set(forced)
         chosen = None
-        best = baseline
+        best = threshold
         order = list(_np.argsort(-weights)) if total_variance > 0 else []
         for k in [None] + order:
             if k is not None:
@@ -3362,8 +3365,7 @@ class RepexRunner(_RunnerBase):
             windows = pad(candidate)
             if not windows:
                 continue
-            windows = fill(windows)
-            efficiency = _np.prod(cost_and_variance(windows))
+            efficiency = _np.prod(cost_and_variance(fill(windows)))
             if efficiency < best:
                 chosen, best = windows, efficiency
 
@@ -3386,7 +3388,7 @@ class RepexRunner(_RunnerBase):
 
             # Windows kept hot can leave no gain over all hot.
             hot = fill(hot)
-            if _np.prod(cost_and_variance(hot)) >= baseline:
+            if _np.prod(cost_and_variance(hot)) >= threshold:
                 hot = all_hot
 
         hot = sorted(hot)
