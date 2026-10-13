@@ -192,6 +192,7 @@ def _embed(mol, template=None, mapping=None):
     mapped onto it are placed and kept at its coordinates, so that the two
     overlay.
     """
+    from rdkit import rdBase
     from rdkit.Chem import AllChem, rdMolAlign, rdMolTransforms
 
     coord_map = None
@@ -202,7 +203,10 @@ def _embed(mol, template=None, mapping=None):
     kwargs = {"randomSeed": _SEED}
     if coord_map:
         kwargs["coordMap"] = coord_map
-    if AllChem.EmbedMolecule(mol, **kwargs) < 0:
+    # The template's coordinates may not fit, which the fallback below handles.
+    with rdBase.BlockLogs():
+        embedded = AllChem.EmbedMolecule(mol, **kwargs) >= 0
+    if not embedded:
         kwargs.pop("coordMap", None)
         if AllChem.EmbedMolecule(mol, useRandomCoords=True, **kwargs) < 0:
             raise RuntimeError("Couldn't generate 3D coordinates.")
