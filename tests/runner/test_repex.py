@@ -1546,6 +1546,23 @@ def test_rank_windows_minimises_variance_for_compute():
     assert runner._dynamics_cache._hot_replicas == [2, 3, 4, 5]
 
 
+def test_rank_windows_without_gain():
+    """
+    Validate that every replica is made hot straight away when no subset is
+    better than every replica being hot, rather than keeping the previous hot
+    replicas for another ranking.
+    """
+    runner = _ranking_runner(8, adaptive_min_samples=10)
+    runner._dynamics_cache._hot_replicas = [2, 3, 4, 5]
+
+    # Every pair has the same uncertainty.
+    _fill_ranking_data(runner, hard_pair=-1)
+    runner._rank_windows(num_workers=2)
+
+    assert runner._dynamics_cache._hot_replicas is None
+    assert runner._dynamics_cache._cold_votes == [0] * 8
+
+
 def test_rank_windows_without_uncertainty():
     """
     Validate that every replica stays hot when no window contributes any
