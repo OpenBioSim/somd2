@@ -474,11 +474,13 @@ sampled for longer. It doesn't help a window that is stuck to escape.
 
 The windows are ranked at checkpoints, so the `--checkpoint-frequency` should
 be several times the `--adaptive-mix-interval` multiplied by the
-`--energy-frequency`. The default burn-in of 500 ps also allows for
-equilibration, which is off by default. If the system has been equilibrated
-with `--equilibration-time`, a burn-in of around 200 ps is enough. The saving
-is largest when few windows are slow. If most of the windows are hot, adaptive
-replica exchange costs almost as much as standard replica exchange.
+`--energy-frequency`, which can't be changed on restart. The default burn-in of
+500 ps also allows for equilibration, which is off by default. If the system has
+been equilibrated with `--equilibration-time`, a burn-in of around 200 ps is
+enough. Raising the burn-in on restart beyond the current time makes every
+window hot again until it is reached. The saving is largest when few windows
+are slow. If most of the windows are hot, adaptive replica exchange costs almost
+as much as standard replica exchange.
 
 A larger `--adaptive-mix-interval` saves more compute on the cold windows, but
 samples them less and exchanges configurations between hot and cold windows less

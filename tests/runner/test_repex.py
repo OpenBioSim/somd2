@@ -2206,7 +2206,7 @@ def test_adaptive_repex_ranking_arguments(ethane_methanol, monkeypatch):
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
-def test_adaptive_repex_frames_every_cycle(ethane_methanol):
+def test_adaptive_repex_frames_every_cycle(ethane_methanol, monkeypatch):
     """
     Validate that frequent frames don't stop cold replicas being skipped, and
     that a cold replica saves the frame it missed when it is next propagated.
@@ -2231,9 +2231,11 @@ def test_adaptive_repex_frames_every_cycle(ethane_methanol):
             "replica_exchange": True,
             "adaptive_repex": True,
             "adaptive_mix_interval": 2,
-            # Never rank, so that the hot replicas stay as set.
-            "adaptive_burn_in": "1 ns",
+            "adaptive_burn_in": "0 ps",
         }
+
+        # Never rank, so that the hot replicas stay as set.
+        monkeypatch.setattr(RepexRunner, "_rank_windows", lambda *args: None)
 
         runner = RepexRunner(ethane_methanol, Config(**config))
         runner._dynamics_cache._hot_replicas = hot
@@ -2335,12 +2337,14 @@ def test_checkpoint_without_adaptive_state():
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
 @pytest.mark.parametrize("max_contexts", [None, 2])
-def test_adaptive_repex_hot_replicas(ethane_methanol, max_contexts):
+def test_adaptive_repex_hot_replicas(ethane_methanol, max_contexts, monkeypatch):
     """
     Validate that only the hot replicas are propagated between full cycles,
     that each replica records energies against its own clock without gaps or
-    repeats, that frames are saved for every replica on the same cycles, and
-    that a restart carries on with the same hot replicas.
+    repeats, that frames are saved for every replica on the same cycles, that
+    a restart carries on with the same hot replicas, that a restart can't
+    change the energy frequency, and that raising the burn-in on restart makes
+    every replica hot again.
     """
     import pandas as pd
     import sire as sr
@@ -2363,9 +2367,11 @@ def test_adaptive_repex_hot_replicas(ethane_methanol, max_contexts):
             "max_contexts": max_contexts,
             "adaptive_repex": True,
             "adaptive_mix_interval": 2,
-            # Never rank, so that the hot replicas stay as set.
-            "adaptive_burn_in": "1 ns",
+            "adaptive_burn_in": "0 ps",
         }
+
+        # Never rank, so that the hot replicas stay as set.
+        monkeypatch.setattr(RepexRunner, "_rank_windows", lambda *args: None)
 
         runner = RepexRunner(ethane_methanol, Config(**config))
 
@@ -2407,10 +2413,15 @@ def test_adaptive_repex_hot_replicas(ethane_methanol, max_contexts):
             times = [round(t, 6) for t in records.index.get_level_values(0)]
             assert times == expected_times(16, 8, i), f"replica {i}: {times}"
 
-        # Restart with adaptive replica exchange switched off, so that every
-        # replica is propagated every cycle.
+        # The sample counts depend on the energy frequency.
         config["runtime"] = "80fs"
-        config["adaptive_repex"] = False
+        changed = {**config, "energy_frequency": "8fs"}
+        with pytest.raises(ValueError, match="'energy_frequency' can't be changed"):
+            RepexRunner(ethane_methanol, Config(**changed))
+
+        # Restart with a burn-in that hasn't been reached, so that every
+        # replica is propagated every cycle.
+        config["adaptive_burn_in"] = "1 ns"
 
         runner = RepexRunner(ethane_methanol, Config(**config))
         runner.run()
@@ -2422,8 +2433,22 @@ def test_adaptive_repex_hot_replicas(ethane_methanol, max_contexts):
             times = [round(t, 6) for t in records.index.get_level_values(0)]
             assert times == expected_times(20, 12, i), f"replica {i}: {times}"
 
+        # Restart with adaptive replica exchange switched off.
+        config["runtime"] = "96fs"
+        config["adaptive_repex"] = False
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+        runner.run()
+
+        assert runner._dynamics_cache._hot_replicas is None
+
+        for i in range(num_lambda):
+            records = pd.read_parquet(runner._filenames[i]["energy_traj"])
+            times = [round(t, 6) for t in records.index.get_level_values(0)]
+            assert times == expected_times(24, 16, i), f"replica {i}: {times}"
+
             # Frames are scheduled by each replica's own clock again.
             mols = sr.load(
                 [runner._filenames["topology0"], runner._filenames[i]["trajectory"]]
             )
-            assert mols.num_frames() == 5
+            assert mols.num_frames() == 6

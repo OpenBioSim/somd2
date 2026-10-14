@@ -2178,7 +2178,12 @@ class RepexRunner(_RunnerBase):
 
         if is_adaptive:
             self._reset_adaptive_data()
-            self._restore_adaptive_data()
+            # A burn-in raised on restart starts the adaptation again.
+            if self._start_time >= self._config.adaptive_burn_in:
+                self._restore_adaptive_data()
+            else:
+                self._dynamics_cache._hot_replicas = None
+                self._dynamics_cache._cold_votes = [0] * num_replicas
         else:
             # Adaptive replica exchange may have been switched off on restart.
             self._dynamics_cache._hot_replicas = None

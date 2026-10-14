@@ -2285,6 +2285,23 @@ class RunnerBase:
 
         self._compare_configs(self._last_config, config)
 
+        # Adaptive replica exchange derives each window's sample count from its
+        # clock and the energy frequency, so the frequency can't change.
+        if self._config.adaptive_repex:
+            from math import isclose
+
+            last = self._last_config.get("energy_frequency")
+            if last and not isclose(
+                _sr.u(str(last)).to("ps"), self._config.energy_frequency.to("ps")
+            ):
+                msg = (
+                    "'energy_frequency' can't be changed on restart when using "
+                    f"'adaptive_repex'. Set energy_frequency='{last}' to continue "
+                    "the run."
+                )
+                _logger.error(msg)
+                raise ValueError(msg)
+
     @staticmethod
     def _systems_are_same(system0, system1, num_gcmc_waters=0):
         """
