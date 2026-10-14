@@ -1980,40 +1980,40 @@ class RepexRunner(_RunnerBase):
         # Minimise at each lambda value. Don't minimise on restart.
         if self._config.minimise and not self._is_restart:
             for batch in self._dynamics_batches(replica_devices):
-                with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                    try:
-                        for success, index, e in executor.map(
-                            self._minimise,
-                            batch,
-                        ):
-                            if not success:
-                                msg = f"Minimisation failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
-                                if self._config.minimisation_errors:
-                                    _logger.error(msg)
-                                    raise e
-                                else:
-                                    _logger.warning(msg)
-                    except KeyboardInterrupt:
-                        _logger.error("Minimisation cancelled. Exiting.")
-                        _sys.exit(1)
+                try:
+                    for success, index, e in dynamics_executor.map(
+                        self._minimise,
+                        batch,
+                    ):
+                        if not success:
+                            msg = f"Minimisation failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
+                            if self._config.minimisation_errors:
+                                _logger.error(msg)
+                                raise e
+                            else:
+                                _logger.warning(msg)
+                except KeyboardInterrupt:
+                    dynamics_executor.shutdown(wait=False, cancel_futures=True)
+                    _logger.error("Minimisation cancelled. Exiting.")
+                    _sys.exit(1)
 
         # Equilibrate the system.
         if self._is_equilibration and not self._is_restart:
             for batch in self._dynamics_batches(replica_devices):
-                with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                    try:
-                        for success, index, e in executor.map(
-                            self._equilibrate,
-                            batch,
-                        ):
-                            if not success:
-                                _logger.error(
-                                    f"Equilibration failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
-                                )
-                                raise e
-                    except KeyboardInterrupt:
-                        _logger.error("Equilibration cancelled. Exiting.")
-                        _sys.exit(1)
+                try:
+                    for success, index, e in dynamics_executor.map(
+                        self._equilibrate,
+                        batch,
+                    ):
+                        if not success:
+                            _logger.error(
+                                f"Equilibration failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
+                            )
+                            raise e
+                except KeyboardInterrupt:
+                    dynamics_executor.shutdown(wait=False, cancel_futures=True)
+                    _logger.error("Equilibration cancelled. Exiting.")
+                    _sys.exit(1)
 
         # Write a checkpoint immediately after equilibration so that a restart
         # after an early production crash doesn't need to re-equilibrate.
@@ -2308,6 +2308,7 @@ class RepexRunner(_RunnerBase):
                     )
                     self._rank_windows(
                         replica_devices,
+                        self._device_capacity(),
                         self._window_samples(),
                         cycles - (i + 1),
                         cold_rate,
@@ -3021,11 +3022,30 @@ class RepexRunner(_RunnerBase):
             for r in range(self._num_replicas)
         ]
 
+    def _device_capacity(self):
+        """
+        The number of replicas each GPU can propagate at once: the
+        oversubscription factor, or fewer if the GPU has fewer contexts.
+
+        Returns
+        -------
+
+        list of int
+            The capacity of each device.
+        """
+        contexts = [0] * self._num_gpus
+        for slot in range(self._num_slots):
+            contexts[slot % self._num_gpus] += 1
+        return [max(1, min(self._config.oversubscription_factor, n)) for n in contexts]
+
     def _device_batches(self, replicas, devices):
         """
         Split replicas into batches that are propagated concurrently, each with
         at most 'oversubscription_factor' replicas on any GPU, so that every
         batch spreads its work over the GPUs.
+
+        Two replicas that share a slot can't be propagated at once, so the
+        replicas must come from a single pass, i.e. at most one per slot.
 
         Parameters
         ----------
@@ -3057,7 +3077,7 @@ class RepexRunner(_RunnerBase):
             batches.append(sorted(batch))
         return batches
 
-    def _dynamics_batches(self, devices, cycle=0):
+    def _dynamics_batches(self, devices):
         """
         Yield batches of every replica that can be propagated concurrently: at
         most one per slot, and at most 'oversubscription_factor' per GPU.
@@ -3068,16 +3088,13 @@ class RepexRunner(_RunnerBase):
         devices: list of int
             The GPU that propagates each replica.
 
-        cycle: int
-            The index of the current cycle, which sets the traversal order.
-
         Yields
         ------
 
         list of int
             A batch of replicas.
         """
-        for batch in self._replica_passes(cycle):
+        for batch in self._replica_passes(0):
             yield from self._device_batches(batch, devices)
 
     def _window_samples(self):
@@ -3092,9 +3109,11 @@ class RepexRunner(_RunnerBase):
         """
         energy_frequency = self._config.energy_frequency.to("ps")
         return [
-            0
-            if clock is None
-            else round(clock["_current_time"].to("ps") / energy_frequency)
+            (
+                0
+                if clock is None
+                else round(clock["_current_time"].to("ps") / energy_frequency)
+            )
             for clock in self._dynamics_cache._clocks
         ]
 
@@ -3397,7 +3416,9 @@ class RepexRunner(_RunnerBase):
         drift = abs(estimates[0] - estimates[1])
         return drift > 0.25 and drift > 2.0 * _np.hypot(*errors)
 
-    def _rank_windows(self, window_devices, window_samples, cycles_left, cold_rate):
+    def _rank_windows(
+        self, window_devices, device_capacity, window_samples, cycles_left, cold_rate
+    ):
         """
         Rank the windows by the uncertainty they contribute to the free energy
         and choose the hot replicas for adaptive replica exchange.
@@ -3411,15 +3432,15 @@ class RepexRunner(_RunnerBase):
         the bond distance. The remaining pairs are added in order of weight,
         with the windows either side of each so that exchange carries
         configurations into and out of them. Each set this gives is filled with
-        the cold windows owning the most variance, until every GPU has as many
-        hot windows as the busiest, rounded up to whole batches of
-        'oversubscription_factor', since those take no extra time. It is then
-        scored by the variance of the final free energy, given the samples each
-        window has and will collect in the cycles left, multiplied by the
-        compute of the whole run. The set with the lowest score is chosen. A
-        window only stops being hot once it has been found cold at two
-        consecutive rankings. Every window is hot if no set, including the
-        windows kept hot, is better than that.
+        the cold windows owning the most variance, until every GPU runs as many
+        full batches as the busiest needs, since those windows take no extra
+        time. A GPU's batches hold as many replicas as it can propagate at once.
+        The set is then scored by the variance of the final free energy, given
+        the samples each window has and will collect in the cycles left,
+        multiplied by the compute of the whole run. The set with the lowest
+        score is chosen. A window only stops being hot once it has been found
+        cold at two consecutive rankings. Every window is hot if no set,
+        including the windows kept hot, is better than that.
 
         The ranking uses all of the data since the burn-in, since the slowest
         windows decorrelate over far longer than a checkpoint interval.
@@ -3429,6 +3450,9 @@ class RepexRunner(_RunnerBase):
 
         window_devices: list of int
             The GPU that propagates each window.
+
+        device_capacity: list of int
+            The number of replicas each GPU can propagate at once.
 
         window_samples: list of int
             The number of energy samples each window has collected.
@@ -3522,20 +3546,19 @@ class RepexRunner(_RunnerBase):
         owned[:-1] += fwd_variance
         owned[1:] += rev_variance
 
-        per_device = self._config.oversubscription_factor
-
         def fill(windows):
             # Make the cold windows owning the most variance hot, until each GPU
-            # has as many hot windows as a whole number of batches on the busiest.
+            # fills as many batches as the busiest needs.
             counts = {d: 0 for d in window_devices}
             for r in windows:
                 counts[window_devices[r]] += 1
-            target = ceil(max(counts.values()) / per_device) * per_device
+            batches = max(ceil(n / device_capacity[d]) for d, n in counts.items())
             filled = set(windows)
             for r in sorted(all_hot - windows, key=lambda r: -owned[r]):
-                if counts[window_devices[r]] < target:
+                d = window_devices[r]
+                if counts[d] < batches * device_capacity[d]:
                     filled.add(r)
-                    counts[window_devices[r]] += 1
+                    counts[d] += 1
             return filled
 
         total_variance = owned.sum()

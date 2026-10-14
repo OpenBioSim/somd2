@@ -902,9 +902,8 @@ def test_repex_concurrent_slots(ethane_methanol):
         assert not runner._config.minimisation_constraints
         assert runner._config.equilibration_constraints
 
-        # Every batch must contain at most one replica per slot.
-        num_workers = runner._num_gpus * config["oversubscription_factor"]
-        for batch in runner._safe_batches(num_workers):
+        # Every batch of dynamics must contain at most one replica per slot.
+        for batch in runner._dynamics_batches(runner._replica_devices()):
             slots = [runner._dynamics_cache.slot_for(r) for r in batch]
             assert len(slots) == len(set(slots)), f"batch {batch} shares a slot"
 
@@ -1431,27 +1430,32 @@ def _ranking_runner(num_lambda, **config):
     return runner
 
 
-def _rank(runner, num_gpus, window_samples=None, cycles_left=10**6):
+def _rank(runner, num_gpus, window_samples=None, cycles_left=10**6, capacity=None):
     """
     Rank the windows, with window r on GPU r % num_gpus. By default every
-    window has the same samples and the run is far from its end, so that only
-    the sampling rates matter.
+    window has the same samples, the run is far from its end, so that only
+    the sampling rates matter, and each GPU can propagate as many replicas at
+    once as the oversubscription factor.
     """
     num_lambda = runner._config.num_lambda
     if window_samples is None:
         window_samples = [200] * num_lambda
+    if capacity is None:
+        capacity = runner._config.oversubscription_factor
     devices = [r % num_gpus for r in range(num_lambda)]
     cold_rate = 1.0 / runner._config.adaptive_mix_interval
-    runner._rank_windows(devices, window_samples, cycles_left, cold_rate)
+    runner._rank_windows(
+        devices, [capacity] * num_gpus, window_samples, cycles_left, cold_rate
+    )
 
 
-def _rank_twice(runner, num_gpus):
+def _rank_twice(runner, num_gpus, capacity=None):
     """
     Rank the windows at two consecutive checkpoints, so that the windows found
     cold at both stop being hot.
     """
-    _rank(runner, num_gpus=num_gpus)
-    _rank(runner, num_gpus=num_gpus)
+    _rank(runner, num_gpus=num_gpus, capacity=capacity)
+    _rank(runner, num_gpus=num_gpus, capacity=capacity)
 
 
 def _fill_ranking_data(runner, hard_pair, num_samples=200, seed=7):
@@ -1835,11 +1839,19 @@ def test_rank_windows_keeps_slow_bond_distance_hot():
     assert 0 not in runner._dynamics_cache._hot_replicas
 
 
-@pytest.mark.parametrize("oversubscription_factor, num_hot", [(1, 4), (2, 8)])
-def test_rank_windows_fills_whole_batches(oversubscription_factor, num_hot):
+@pytest.mark.parametrize(
+    "oversubscription_factor, capacity, num_hot",
+    [
+        (1, 1, 4),
+        (2, 2, 8),
+        # Two replicas per GPU at once, but only one context on each.
+        (2, 1, 4),
+    ],
+)
+def test_rank_windows_fills_whole_batches(oversubscription_factor, capacity, num_hot):
     """
-    Validate that the hot replicas fill whole batches on every GPU, so that
-    with two replicas per GPU at once, each GPU gets two hot windows.
+    Validate that the hot replicas fill whole batches on every GPU, of as many
+    replicas as the GPU can propagate at once.
     """
     runner = _ranking_runner(
         8, adaptive_min_samples=10, oversubscription_factor=oversubscription_factor
@@ -1847,13 +1859,35 @@ def test_rank_windows_fills_whole_batches(oversubscription_factor, num_hot):
 
     # The flagged pair 0 gives windows 0, 1 and 2, one on each of three GPUs.
     _fill_ranking_data(runner, hard_pair=0)
-    _rank_twice(runner, num_gpus=4)
+    _rank_twice(runner, num_gpus=4, capacity=capacity)
 
     hot = runner._dynamics_cache._hot_replicas
     hot = list(range(8)) if hot is None else hot
     assert len(hot) == num_hot
     assert {0, 1, 2}.issubset(hot)
     assert sorted(r % 4 for r in hot) == sorted(list(range(4)) * (num_hot // 4))
+
+
+@pytest.mark.parametrize(
+    "num_slots, num_gpus, oversubscription_factor, expected",
+    [
+        (25, 3, 2, [2, 2, 2]),
+        # One context per GPU, so only one replica at once.
+        (4, 4, 2, [1, 1, 1, 1]),
+        (5, 4, 2, [2, 1, 1, 1]),
+    ],
+)
+def test_device_capacity(num_slots, num_gpus, oversubscription_factor, expected):
+    """
+    Validate that a GPU propagates no more replicas at once than it has
+    contexts.
+    """
+    runner = object.__new__(RepexRunner)
+    runner._config = Config(oversubscription_factor=oversubscription_factor)
+    runner._num_slots = num_slots
+    runner._num_gpus = num_gpus
+
+    assert runner._device_capacity() == expected
 
 
 def test_replica_devices_with_shared_contexts():
@@ -1959,10 +1993,11 @@ def test_adaptive_repex_ranking_arguments(ethane_methanol, monkeypatch):
         runner.run()
 
     # 12 cycles with a checkpoint every 4, and every window always hot.
-    assert [c[2] for c in calls] == [8, 4, 0]
-    for devices, samples, cycles_left, cold_rate in calls:
+    assert [c[3] for c in calls] == [8, 4, 0]
+    for devices, capacity, samples, cycles_left, cold_rate in calls:
         # A context per replica, assigned to the GPUs in turn.
         assert devices == [r % runner._num_gpus for r in range(num_lambda)]
+        assert capacity == [1] * runner._num_gpus
         first = 12 - cycles_left
         assert samples == [first] * num_lambda
         if cycles_left > 0:
