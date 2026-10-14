@@ -1974,9 +1974,12 @@ class RepexRunner(_RunnerBase):
         # Create the replica list.
         replica_list = list(range(self._config.num_lambda))
 
+        # The GPU that propagates each replica, which is fixed for the run.
+        replica_devices = self._replica_devices()
+
         # Minimise at each lambda value. Don't minimise on restart.
         if self._config.minimise and not self._is_restart:
-            for batch in self._safe_batches(num_workers):
+            for batch in self._dynamics_batches(replica_devices):
                 with ThreadPoolExecutor(max_workers=num_workers) as executor:
                     try:
                         for success, index, e in executor.map(
@@ -1996,7 +1999,7 @@ class RepexRunner(_RunnerBase):
 
         # Equilibrate the system.
         if self._is_equilibration and not self._is_restart:
-            for batch in self._safe_batches(num_workers):
+            for batch in self._dynamics_batches(replica_devices):
                 with ThreadPoolExecutor(max_workers=num_workers) as executor:
                     try:
                         for success, index, e in executor.map(
@@ -2176,7 +2179,7 @@ class RepexRunner(_RunnerBase):
                 # Run a dynamics block for each replica in the pass, making sure
                 # each GPU is only oversubscribed by a factor of
                 # self._config.oversubscription_factor.
-                for replicas in self._device_batches(batch):
+                for replicas in self._device_batches(batch, replica_devices):
                     # Whether each replica is due a GCMC or terminal flip move,
                     # including any that fell due while it wasn't propagated.
                     is_gcmc = [
@@ -2304,7 +2307,7 @@ class RepexRunner(_RunnerBase):
                         self._config.adaptive_mix_interval,
                     )
                     self._rank_windows(
-                        self._replica_devices(),
+                        replica_devices,
                         self._window_samples(),
                         cycles - (i + 1),
                         cold_rate,
@@ -3018,7 +3021,7 @@ class RepexRunner(_RunnerBase):
             for r in range(self._num_replicas)
         ]
 
-    def _device_batches(self, replicas):
+    def _device_batches(self, replicas, devices):
         """
         Split replicas into batches that are propagated concurrently, each with
         at most 'oversubscription_factor' replicas on any GPU, so that every
@@ -3030,13 +3033,15 @@ class RepexRunner(_RunnerBase):
         replicas: list of int
             The replicas to propagate, at most one per slot.
 
+        devices: list of int
+            The GPU that propagates each replica.
+
         Returns
         -------
 
         list of list of int
             The batches.
         """
-        devices = self._replica_devices()
         per_device = self._config.oversubscription_factor
 
         queues = {}
@@ -3051,6 +3056,29 @@ class RepexRunner(_RunnerBase):
                 del queue[:per_device]
             batches.append(sorted(batch))
         return batches
+
+    def _dynamics_batches(self, devices, cycle=0):
+        """
+        Yield batches of every replica that can be propagated concurrently: at
+        most one per slot, and at most 'oversubscription_factor' per GPU.
+
+        Parameters
+        ----------
+
+        devices: list of int
+            The GPU that propagates each replica.
+
+        cycle: int
+            The index of the current cycle, which sets the traversal order.
+
+        Yields
+        ------
+
+        list of int
+            A batch of replicas.
+        """
+        for batch in self._replica_passes(cycle):
+            yield from self._device_batches(batch, devices)
 
     def _window_samples(self):
         """
@@ -3384,13 +3412,14 @@ class RepexRunner(_RunnerBase):
         with the windows either side of each so that exchange carries
         configurations into and out of them. Each set this gives is filled with
         the cold windows owning the most variance, until every GPU has as many
-        hot windows as the busiest, since those take no extra time, and scored
-        by the variance of the final free energy, given the samples each window
-        has and will collect in the cycles left, multiplied by the compute of
-        the whole run. The set with the lowest score is chosen. A window only
-        stops being hot once it has been found cold at two consecutive
-        rankings. Every window is hot if no set, including the windows kept
-        hot, is better than that.
+        hot windows as the busiest, rounded up to whole batches of
+        'oversubscription_factor', since those take no extra time. It is then
+        scored by the variance of the final free energy, given the samples each
+        window has and will collect in the cycles left, multiplied by the
+        compute of the whole run. The set with the lowest score is chosen. A
+        window only stops being hot once it has been found cold at two
+        consecutive rankings. Every window is hot if no set, including the
+        windows kept hot, is better than that.
 
         The ranking uses all of the data since the burn-in, since the slowest
         windows decorrelate over far longer than a checkpoint interval.

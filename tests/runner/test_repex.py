@@ -1496,7 +1496,7 @@ def test_rank_windows():
     assert cache._hot_replicas == [4, 5, 6, 7]
 
 
-def test_rank_windows_pads_to_workers():
+def test_rank_windows_balances_gpus():
     """
     Validate that the hot replicas are padded so that every GPU has the same
     number, and that every replica being hot is recorded as None.
@@ -1835,6 +1835,43 @@ def test_rank_windows_keeps_slow_bond_distance_hot():
     assert 0 not in runner._dynamics_cache._hot_replicas
 
 
+@pytest.mark.parametrize("oversubscription_factor, num_hot", [(1, 4), (2, 8)])
+def test_rank_windows_fills_whole_batches(oversubscription_factor, num_hot):
+    """
+    Validate that the hot replicas fill whole batches on every GPU, so that
+    with two replicas per GPU at once, each GPU gets two hot windows.
+    """
+    runner = _ranking_runner(
+        8, adaptive_min_samples=10, oversubscription_factor=oversubscription_factor
+    )
+
+    # The flagged pair 0 gives windows 0, 1 and 2, one on each of three GPUs.
+    _fill_ranking_data(runner, hard_pair=0)
+    _rank_twice(runner, num_gpus=4)
+
+    hot = runner._dynamics_cache._hot_replicas
+    hot = list(range(8)) if hot is None else hot
+    assert len(hot) == num_hot
+    assert {0, 1, 2}.issubset(hot)
+    assert sorted(r % 4 for r in hot) == sorted(list(range(4)) * (num_hot // 4))
+
+
+def test_replica_devices_with_shared_contexts():
+    """
+    Validate that a replica runs on the GPU of the context it shares.
+    """
+    from types import SimpleNamespace
+
+    runner = object.__new__(RepexRunner)
+    runner._num_gpus = 2
+    runner._num_replicas = 10
+
+    # A strided layout over 4 contexts.
+    runner._dynamics_cache = SimpleNamespace(slot_for=lambda r: r % 4)
+
+    assert runner._replica_devices() == [(r % 4) % 2 for r in range(10)]
+
+
 def test_device_batches():
     """
     Validate that a batch never has more replicas on a GPU than the
@@ -1848,14 +1885,15 @@ def test_device_batches():
     runner._num_gpus = 3
     runner._num_replicas = 25
     runner._dynamics_cache = SimpleNamespace(slot_for=lambda r: r)
+    devices = runner._replica_devices()
 
     # Every replica is batched as consecutive groups of three.
-    assert runner._device_batches(list(range(25))) == [
+    assert runner._device_batches(list(range(25)), devices) == [
         list(range(i, min(i + 3, 25))) for i in range(0, 25, 3)
     ]
 
     hot = [6, 7, 8, 9, 10, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24]
-    batches = runner._device_batches(hot)
+    batches = runner._device_batches(hot, devices)
     assert sorted(r for batch in batches for r in batch) == hot
     assert len(batches) == 5
     for batch in batches:
