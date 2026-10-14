@@ -1431,13 +1431,23 @@ def _ranking_runner(num_lambda, **config):
     return runner
 
 
+def _rank(runner, num_workers, window_samples=None, cycles_left=10**6):
+    """
+    Rank the windows. By default every window has the same samples and the run
+    is far from its end, so that only the sampling rates matter.
+    """
+    if window_samples is None:
+        window_samples = [200] * runner._config.num_lambda
+    runner._rank_windows(num_workers, window_samples, cycles_left)
+
+
 def _rank_twice(runner, num_workers):
     """
     Rank the windows at two consecutive checkpoints, so that the windows found
     cold at both stop being hot.
     """
-    runner._rank_windows(num_workers=num_workers)
-    runner._rank_windows(num_workers=num_workers)
+    _rank(runner, num_workers=num_workers)
+    _rank(runner, num_workers=num_workers)
 
 
 def _fill_ranking_data(runner, hard_pair, num_samples=200, seed=7):
@@ -1465,20 +1475,20 @@ def test_rank_windows():
 
     # Starting from every window hot, those found cold once stay hot.
     _fill_ranking_data(runner, hard_pair=3)
-    runner._rank_windows(num_workers=2)
+    _rank(runner, num_workers=2)
     assert cache._hot_replicas is None
 
-    runner._rank_windows(num_workers=2)
+    _rank(runner, num_workers=2)
     assert cache._hot_replicas == [2, 3, 4, 5]
 
     # Windows 2 and 3 are found cold once, so stay hot.
     _fill_ranking_data(runner, hard_pair=5)
-    runner._rank_windows(num_workers=2)
+    _rank(runner, num_workers=2)
     assert cache._hot_replicas == [2, 3, 4, 5, 6, 7]
 
     # Found cold a second time.
     _fill_ranking_data(runner, hard_pair=5)
-    runner._rank_windows(num_workers=2)
+    _rank(runner, num_workers=2)
     assert cache._hot_replicas == [4, 5, 6, 7]
 
 
@@ -1495,7 +1505,7 @@ def test_rank_windows_pads_to_workers():
 
     runner._dynamics_cache._hot_replicas = None
     _fill_ranking_data(runner, hard_pair=3)
-    runner._rank_windows(num_workers=8)
+    _rank(runner, num_workers=8)
     assert runner._dynamics_cache._hot_replicas is None
 
 
@@ -1580,6 +1590,34 @@ def test_rank_windows_fill_windows_stay_cold_candidates():
     assert runner._dynamics_cache._cold_votes[filler] == 2
 
 
+def test_rank_windows_accounts_for_samples_collected():
+    """
+    Validate that, of two pairs with the same uncertainty per sample, only the
+    one with fewer samples so far is made hot, since more sampling of the
+    other would barely change the final free energy.
+    """
+
+    def rank(samples):
+        runner = _ranking_runner(8, adaptive_min_samples=10)
+        _fill_ranking_data(runner, hard_pair=-1)
+
+        # Forward and reverse estimates that agree, so neither pair is flagged.
+        rng = np.random.default_rng(11)
+        for k in (1, 5):
+            runner._adaptive_upper[k] = list(rng.normal(1.0, 1.0, 200))
+            runner._adaptive_lower[k + 1] = list(rng.normal(0.0, 1.0, 200))
+
+        for _ in range(2):
+            _rank(runner, 2, window_samples=samples, cycles_left=1000)
+        return runner._dynamics_cache._hot_replicas
+
+    # With the same samples, both pairs are worth sampling, i.e. every window.
+    assert rank([1000] * 8) is None
+
+    # Pair 1 has been sampled more, so only pair 5 is.
+    assert rank([1000, 4000, 4000, 1000, 1000, 1000, 1000, 1000]) == [4, 5, 6, 7]
+
+
 def test_rank_windows_without_gain():
     """
     Validate that every replica is made hot straight away when no subset is
@@ -1592,7 +1630,7 @@ def test_rank_windows_without_gain():
 
     # Every pair has the same uncertainty.
     _fill_ranking_data(runner, hard_pair=-1)
-    runner._rank_windows(num_workers=2)
+    _rank(runner, num_workers=2)
 
     assert runner._dynamics_cache._hot_replicas is None
     assert runner._dynamics_cache._cold_votes == [0] * 8
@@ -1608,7 +1646,7 @@ def test_rank_windows_without_uncertainty():
     for k in range(3):
         runner._adaptive_upper[k] = [0.5] * 100
         runner._adaptive_lower[k + 1] = [-0.5] * 100
-    runner._rank_windows(num_workers=1)
+    _rank(runner, num_workers=1)
 
     assert runner._dynamics_cache._hot_replicas is None
 
@@ -1646,7 +1684,7 @@ def test_rank_windows_needs_enough_samples():
     runner = _ranking_runner(8, adaptive_min_samples=50)
 
     _fill_ranking_data(runner, hard_pair=3, num_samples=20)
-    runner._rank_windows(num_workers=2)
+    _rank(runner, num_workers=2)
 
     assert runner._dynamics_cache._hot_replicas is None
     assert len(runner._adaptive_upper[0]) == 20

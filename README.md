@@ -434,9 +434,10 @@ Each pair of neighbouring windows is ranked by σ√g of the reduced energy
 differences between them, where σ is the standard deviation and g the
 statistical inefficiency, which sets the uncertainty of its free energy
 difference. Pairs are made hot in order of rank for as long as doing so reduces
-the variance of the free energy for a fixed amount of compute, accounting for
-cold windows costing and sampling `--adaptive-mix-interval` times less than hot
-ones. The following are always hot:
+the variance of the final free energy for the compute of the whole run,
+accounting for the samples each window has already collected and for cold
+windows costing and sampling `--adaptive-mix-interval` times less than hot ones.
+The following are always hot:
 
 - pairs whose forward and reverse free energy estimates disagree, or whose
   estimate drifts during the simulation,
