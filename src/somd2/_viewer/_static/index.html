@@ -725,6 +725,25 @@ function saveViewer(v, title) {
 
 // ---------------------------------------------------------------- rendering
 
+// Which details are open and how far lists are scrolled, for elements marked
+// with data-keep, so that redrawing the page keeps them.
+function keptState(root) {
+  const kept = {};
+  root.querySelectorAll("[data-keep]").forEach((el) => {
+    kept[el.dataset.keep] = { open: el.open, scroll: el.scrollTop };
+  });
+  return kept;
+}
+
+function restoreState(root, kept) {
+  root.querySelectorAll("[data-keep]").forEach((el) => {
+    const k = kept[el.dataset.keep];
+    if (!k) return;
+    if (el.tagName === "DETAILS") el.open = k.open;
+    el.scrollTop = k.scroll;
+  });
+}
+
 function card(title, body) {
   const open = state.collapsed.has(title) ? "" : " open";
   return `<details class="card section" data-section="${esc(title)}"${open}><summary><h3>${esc(title)}</h3></summary>${body}</details>`;
@@ -941,7 +960,8 @@ function renderOverview(s) {
   html += `</div>`;
   if (p.messages && p.messages.length) {
     const msgs = p.messages.slice().reverse().map((m) => `<div class="lvl-${m.level}">${esc(new Date(m.time * 1000).toLocaleString())} · ${esc(m.level)} · ${esc(m.message)}</div>`).join("");
-    html += `<details class="log-messages"${p.status === "error" ? " open" : ""}><summary>Recent warnings and errors (${p.messages.length})</summary><div class="messages">${msgs}</div></details>`;
+    // Keyed by status, so that an error still opens it.
+    html += `<details class="log-messages" data-keep="log-${esc(p.status)}"${p.status === "error" ? " open" : ""}><summary>Recent warnings and errors (${p.messages.length})</summary><div class="messages" data-keep="log-scroll">${msgs}</div></details>`;
   }
   return card("Progress", html);
 }
@@ -1566,19 +1586,19 @@ function renderSchedule(s) {
     html += `</div>`;
   }
   html += `</div>`;
-  if (sc.description) html += `<details><summary>Schedule definition</summary><pre>${esc(sc.description)}</pre></details>`;
+  if (sc.description) html += `<details data-keep="schedule"><summary>Schedule definition</summary><pre>${esc(sc.description)}</pre></details>`;
   return card(`${LAMBDA} schedule`, html);
 }
 
 function renderConfig(s) {
   let html = `<input type="search" id="config-filter" placeholder="Filter options" value="${esc(state.configFilter)}" style="width:100%;margin-bottom:8px">`;
-  html += `<div class="table-wrap" style="max-height:420px;overflow-y:auto"><table class="config" id="config-table">`;
+  html += `<div class="table-wrap" data-keep="config-table" style="max-height:420px;overflow-y:auto"><table class="config" id="config-table">`;
   for (const [k, v] of Object.entries(s.config)) {
     const value = v === null ? "null" : typeof v === "object" ? JSON.stringify(v) : String(v);
     html += `<tr data-key="${esc(k)}"><td>${esc(k)}</td><td>${esc(value)}</td></tr>`;
   }
   html += `</table></div>`;
-  if (s.pme) html += `<details><summary>Tuned PME parameters</summary>${renderPME(s.pme)}</details>`;
+  if (s.pme) html += `<details data-keep="pme"><summary>Tuned PME parameters</summary>${renderPME(s.pme)}</details>`;
   return card("Configuration", html);
 }
 
@@ -2438,9 +2458,12 @@ function render() {
   html += renderConfig(s);
   html += `</div>`;
   const focused = document.activeElement && document.activeElement.id === "config-filter" ? document.activeElement.selectionStart : null;
+  const kept = main.dataset.run === s.id ? keptState(main) : null;
   main.innerHTML = html;
+  main.dataset.run = s.id;
   renderCharts(s);
   applyConfigFilter();
+  if (kept) restoreState(main, kept);
   const repeatSelect = $("#repeat-select");
   if (repeatSelect) repeatSelect.addEventListener("change", (e) => { location.hash = e.target.value; });
   attachStructure(s);
