@@ -1446,34 +1446,38 @@ function renderAdaptive(s, a) {
   } else if (a.ranked_cycle === undefined && (!a.hot || a.hot.length === n)) {
     html += `<div class="note">The windows haven't been ranked yet, so every window is hot until the burn-in is complete.</div>`;
   }
-  if (a.history) html += `<h4>Hot windows at each ranking</h4><div class="chart" id="hot-chart"></div>`;
+  if (a.history) html += `<h4>Hot windows at each ranking</h4><div class="chart" id="hot-chart"></div><div class="note">Filled cells are hot windows, propagated every cycle. The others are cold, propagated every adaptive mix interval.</div>`;
   return html;
 }
 
 // Which windows were hot (filled) at each ranking, by cycle.
 function hotChart(el, history, numStates) {
   const cols = history.cycle.length;
-  const pad = 34;
-  const width = Math.max(240, el.clientWidth || 520);
-  const cellW = (width - pad) / cols;
+  const m = { l: 54, r: 14, t: 10, b: 40 };
+  const width = Math.max(280, el.clientWidth || 560);
+  const pw = width - m.l - m.r;
+  const cellW = pw / cols;
   const cellH = Math.max(6, Math.min(16, 240 / numStates));
-  const height = pad + cellH * numStates;
+  const ph = cellH * numStates;
+  const height = m.t + ph + m.b;
   const rgb = css("--accent-rgb"), border = css("--border");
-  let svg = `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">`;
+  let svg = `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" style="max-width:${width}px" role="img">`;
   for (let k = 0; k < numStates; k++) {
     for (let j = 0; j < cols; j++) {
       const hot = history.hot[k][j];
-      svg += `<rect x="${pad + j * cellW}" y="${pad + k * cellH}" width="${cellW}" height="${cellH}" fill="rgba(${rgb},${hot ? 0.85 : 0.08})" stroke="${border}" stroke-width="0.3"><title>window ${k}, cycle ${history.cycle[j]}: ${hot ? "hot" : "cold"}</title></rect>`;
+      svg += `<rect x="${m.l + j * cellW}" y="${m.t + k * cellH}" width="${cellW}" height="${cellH}" fill="rgba(${rgb},${hot ? 0.85 : 0.08})" stroke="${border}" stroke-width="0.3"><title>window ${k}, cycle ${history.cycle[j]}: ${hot ? "hot" : "cold"}</title></rect>`;
     }
   }
-  const rowStep = Math.ceil(numStates / Math.floor((height - pad) / 14));
+  const rowStep = Math.ceil(numStates / Math.max(1, Math.floor(ph / 14)));
   for (let k = 0; k < numStates; k += rowStep) {
-    svg += `<text x="${pad - 6}" y="${pad + k * cellH + cellH / 2 + 4}" text-anchor="end">${k}</text>`;
+    svg += `<text x="${m.l - 6}" y="${m.t + k * cellH + cellH / 2 + 4}" text-anchor="end">${k}</text>`;
   }
-  const colStep = Math.ceil(cols / Math.floor((width - pad) / 60));
+  const colStep = Math.ceil(cols / Math.max(1, Math.floor(pw / 60)));
   for (let j = 0; j < cols; j += colStep) {
-    svg += `<text x="${pad + j * cellW + cellW / 2}" y="${pad - 8}" text-anchor="middle">${history.cycle[j]}</text>`;
+    svg += `<text x="${m.l + j * cellW + cellW / 2}" y="${m.t + ph + 16}" text-anchor="middle">${history.cycle[j]}</text>`;
   }
+  svg += `<text x="${m.l + pw / 2}" y="${height - 4}" text-anchor="middle">cycle</text>`;
+  svg += `<text transform="translate(12 ${m.t + ph / 2}) rotate(-90)" text-anchor="middle">window</text>`;
   svg += "</svg>";
   el.innerHTML = svg + SAVE_BUTTONS;
   el.chartDraw = (target) => hotChart(target, history, numStates);
