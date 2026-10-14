@@ -477,7 +477,7 @@ class DynamicsCache:
 
         # The device of each slot. Slots are assigned round-robin.
         self._slot_devices = [i % num_gpus for i in range(self._num_slots)]
-        contexts_per_device = [self._slot_devices.count(d) for d in range(num_gpus)]
+        contexts_per_device = [self.contexts_on(d) for d in range(num_gpus)]
 
         # Record the ghost file for each replica. A slot writes to the file of
         # whichever replica it currently hosts.
@@ -755,6 +755,42 @@ class DynamicsCache:
             The index of the slot.
         """
         return self._replica_slot[replica]
+
+    def device_for(self, slot):
+        """
+        Return the index of the GPU that a slot's context is on.
+
+        Parameters
+        ----------
+
+        slot: int
+            The index of the slot.
+
+        Returns
+        -------
+
+        int
+            The device index.
+        """
+        return self._slot_devices[slot]
+
+    def contexts_on(self, device):
+        """
+        Return the number of contexts (slots) on a GPU.
+
+        Parameters
+        ----------
+
+        device: int
+            The device index.
+
+        Returns
+        -------
+
+        int
+            The number of contexts.
+        """
+        return self._slot_devices.count(device)
 
     def get(self, slot):
         """
@@ -1896,25 +1932,52 @@ class RepexRunner(_RunnerBase):
         """
         Run the replica exchange simulation.
         """
-        self._executors = []
+        from concurrent.futures import ThreadPoolExecutor
+
+        # Store the number of concurrent workers.
+        num_workers = self._num_gpus * self._config.oversubscription_factor
+
+        # Store the number of workers to use for checkpointing.
+        if self._config.num_checkpoint_workers is None:
+            num_checkpoint_workers = num_workers
+        else:
+            num_checkpoint_workers = min(
+                self._config.num_checkpoint_workers, num_workers
+            )
+
+        # Persistent thread pools, reused across every batch and cycle.
+        dynamics_executor = ThreadPoolExecutor(max_workers=num_workers)
+        checkpoint_executor = ThreadPoolExecutor(max_workers=num_checkpoint_workers)
+
         try:
-            self._run()
+            self._run(dynamics_executor, checkpoint_executor, num_checkpoint_workers)
         except Exception:
             # Wait for running blocks, so that nothing still uses the contexts.
-            for executor in self._executors:
+            for executor in (dynamics_executor, checkpoint_executor):
                 executor.shutdown(wait=True, cancel_futures=True)
             raise
 
-    def _run(self):
+    def _run(self, dynamics_executor, checkpoint_executor, num_checkpoint_workers):
         """
-        Run the replica exchange simulation, using thread pools that run()
-        shuts down if an error is raised.
+        Run the replica exchange simulation.
+
+        Parameters
+        ----------
+
+        dynamics_executor: concurrent.futures.ThreadPoolExecutor
+            The thread pool for dynamics, with a worker for each replica that
+            can be propagated at once.
+
+        checkpoint_executor: concurrent.futures.ThreadPoolExecutor
+            The thread pool for writing checkpoint files.
+
+        num_checkpoint_workers: int
+            The number of workers in the checkpoint thread pool.
         """
 
         from math import ceil
         from time import time
 
-        from concurrent.futures import ThreadPoolExecutor
         from itertools import repeat
 
         # Record the start time.
@@ -1962,24 +2025,8 @@ class RepexRunner(_RunnerBase):
             num_blocks = 1
             rem = 0
 
-        # Store the number of concurrent workers.
-        num_workers = self._num_gpus * self._config.oversubscription_factor
-
-        # Store the number of workers to use for checkpointing.
-        if self._config.num_checkpoint_workers is None:
-            num_checkpoint_workers = num_workers
-        else:
-            num_checkpoint_workers = min(
-                self._config.num_checkpoint_workers, num_workers
-            )
-
         # Work out the required number of batches.
         num_checkpoint_batches = ceil(self._config.num_lambda / num_checkpoint_workers)
-
-        # Persistent thread pools, reused across every batch and cycle.
-        dynamics_executor = ThreadPoolExecutor(max_workers=num_workers)
-        checkpoint_executor = ThreadPoolExecutor(max_workers=num_checkpoint_workers)
-        self._executors = [dynamics_executor, checkpoint_executor]
 
         # Create the replica list.
         replica_list = list(range(self._config.num_lambda))
@@ -2058,27 +2105,31 @@ class RepexRunner(_RunnerBase):
                     replicas = replica_list[
                         j * num_checkpoint_workers : (j + 1) * num_checkpoint_workers
                     ]
+                    # Let every write finish under the lock before raising.
                     try:
-                        for index, error in checkpoint_executor.map(
-                            self._checkpoint,
-                            replicas,
-                            repeat(self._lambda_values),
-                            repeat(-1),
-                            repeat(cycles),
-                        ):
-                            if error is not None:
-                                msg = (
-                                    f"Post-equilibration checkpoint failed for {_lam_sym} = "
-                                    f"{self._lambda_values[index]:.5f}:\n{error}"
-                                )
-                                _logger.error(msg)
-                                raise error
+                        results = list(
+                            checkpoint_executor.map(
+                                self._checkpoint,
+                                replicas,
+                                repeat(self._lambda_values),
+                                repeat(-1),
+                                repeat(cycles),
+                            )
+                        )
                     except KeyboardInterrupt:
                         checkpoint_executor.shutdown(wait=False, cancel_futures=True)
                         _logger.error(
                             "Post-equilibration checkpoint cancelled. Exiting."
                         )
                         _sys.exit(1)
+                    for index, error in results:
+                        if error is not None:
+                            msg = (
+                                f"Post-equilibration checkpoint failed for {_lam_sym} = "
+                                f"{self._lambda_values[index]:.5f}:\n{error}"
+                            )
+                            _logger.error(msg)
+                            raise error
 
         # Current block number.
         block = self._start_block
@@ -2339,23 +2390,27 @@ class RepexRunner(_RunnerBase):
                             j * num_checkpoint_workers : (j + 1)
                             * num_checkpoint_workers
                         ]
+                        # Let every write finish under the lock before raising.
                         try:
-                            for index, error in checkpoint_executor.map(
-                                self._backup_checkpoint,
-                                replicas,
-                            ):
-                                if error:
-                                    _logger.error(
-                                        f"Backup failed for {_lam_sym} = "
-                                        f"{self._lambda_values[index]:.5f}: {error}"
-                                    )
-                                    raise error
+                            results = list(
+                                checkpoint_executor.map(
+                                    self._backup_checkpoint,
+                                    replicas,
+                                )
+                            )
                         except KeyboardInterrupt:
                             checkpoint_executor.shutdown(
                                 wait=False, cancel_futures=True
                             )
                             _logger.error("Backup cancelled. Exiting.")
                             _sys.exit(1)
+                        for index, error in results:
+                            if error:
+                                _logger.error(
+                                    f"Backup failed for {_lam_sym} = "
+                                    f"{self._lambda_values[index]:.5f}: {error}"
+                                )
+                                raise error
 
                     # Now write the new checkpoint files.
                     for j in range(num_checkpoint_batches):
@@ -2364,28 +2419,32 @@ class RepexRunner(_RunnerBase):
                             j * num_checkpoint_workers : (j + 1)
                             * num_checkpoint_workers
                         ]
+                        # Let every write finish under the lock before raising.
                         try:
-                            for index, error in checkpoint_executor.map(
-                                self._checkpoint,
-                                replicas,
-                                repeat(self._lambda_values),
-                                repeat(block),
-                                repeat(num_blocks + int(rem > 0)),
-                                repeat(i == cycles - 1),
-                                [num_samples[r] for r in replicas],
-                            ):
-                                if error:
-                                    _logger.error(
-                                        f"Checkpoint failed for {_lam_sym} = "
-                                        f"{self._lambda_values[index]:.5f}: {error}"
-                                    )
-                                    raise error
+                            results = list(
+                                checkpoint_executor.map(
+                                    self._checkpoint,
+                                    replicas,
+                                    repeat(self._lambda_values),
+                                    repeat(block),
+                                    repeat(num_blocks + int(rem > 0)),
+                                    repeat(i == cycles - 1),
+                                    [num_samples[r] for r in replicas],
+                                )
+                            )
                         except KeyboardInterrupt:
                             checkpoint_executor.shutdown(
                                 wait=False, cancel_futures=True
                             )
                             _logger.error("Checkpoint cancelled. Exiting.")
                             _sys.exit(1)
+                        for index, error in results:
+                            if error:
+                                _logger.error(
+                                    f"Checkpoint failed for {_lam_sym} = "
+                                    f"{self._lambda_values[index]:.5f}: {error}"
+                                )
+                                raise error
 
                     num_samples = [0] * num_replicas
 
@@ -2677,7 +2736,7 @@ class RepexRunner(_RunnerBase):
                     self._dynamics_cache.delete(slot)
 
                     # Work out the device index.
-                    device = self._dynamics_cache._slot_devices[slot]
+                    device = self._dynamics_cache.device_for(slot)
 
                     # Copy the dynamics keyword arguments.
                     dynamics_kwargs = self._dynamics_kwargs.copy()
@@ -2787,7 +2846,7 @@ class RepexRunner(_RunnerBase):
                     self._dynamics_cache.delete(slot)
 
                     # Work out the device index.
-                    device = self._dynamics_cache._slot_devices[slot]
+                    device = self._dynamics_cache.device_for(slot)
 
                     # Copy the dynamics keyword arguments.
                     dynamics_kwargs = self._dynamics_kwargs.copy()
@@ -2833,7 +2892,7 @@ class RepexRunner(_RunnerBase):
             self._dynamics_cache.delete(slot)
 
             # Work out the device index.
-            device = self._dynamics_cache._slot_devices[slot]
+            device = self._dynamics_cache.device_for(slot)
 
             # Copy the dynamics keyword arguments.
             dynamics_kwargs = self._dynamics_kwargs.copy()
@@ -3029,11 +3088,8 @@ class RepexRunner(_RunnerBase):
         list of int
             The device index for each replica.
         """
-        slot_devices = self._dynamics_cache._slot_devices
-        return [
-            slot_devices[self._dynamics_cache.slot_for(r)]
-            for r in range(self._num_replicas)
-        ]
+        cache = self._dynamics_cache
+        return [cache.device_for(cache.slot_for(r)) for r in range(self._num_replicas)]
 
     def _device_capacity(self):
         """
@@ -3046,9 +3102,14 @@ class RepexRunner(_RunnerBase):
         list of int
             The capacity of each device.
         """
-        slot_devices = self._dynamics_cache._slot_devices
         return [
-            max(1, min(self._config.oversubscription_factor, slot_devices.count(d)))
+            max(
+                1,
+                min(
+                    self._config.oversubscription_factor,
+                    self._dynamics_cache.contexts_on(d),
+                ),
+            )
             for d in range(self._num_gpus)
         ]
 

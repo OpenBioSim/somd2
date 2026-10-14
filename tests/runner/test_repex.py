@@ -719,6 +719,58 @@ def test_repex_checkpoint_single_lock(ethane_methanol, max_contexts):
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+def test_repex_checkpoint_failure_keeps_lock(ethane_methanol, monkeypatch):
+    """
+    Validate that when one replica's checkpoint fails, the others finish
+    writing while the file lock is still held, before the error is raised.
+    """
+    import time
+
+    from filelock import FileLock, Timeout
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "4fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": 4,
+            "replica_exchange": True,
+            # Enough workers to checkpoint every replica at once.
+            "oversubscription_factor": 4,
+            "num_checkpoint_workers": 4,
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+
+        held = []
+
+        def checkpoint(index, *args, **kwargs):
+            if index == 0:
+                return index, RuntimeError("checkpoint failed")
+            time.sleep(0.5)
+            lock = FileLock(runner._lock_file)
+            try:
+                lock.acquire(timeout=0)
+                lock.release()
+                held.append(False)
+            except Timeout:
+                held.append(True)
+            return index, None
+
+        monkeypatch.setattr(runner, "_checkpoint", checkpoint)
+
+        with pytest.raises(RuntimeError, match="checkpoint failed"):
+            runner.run()
+
+    assert held == [True, True, True]
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
 @pytest.mark.parametrize(
     "runtime, checkpoint_frequency, expected",
     [("8fs", "4fs", [False, False]), ("12fs", "8fs", [False, True])],
@@ -1890,22 +1942,19 @@ def test_rank_windows_unfilled_with_shared_contexts():
 
 def test_run_waits_for_blocks_on_error(monkeypatch):
     """
-    Validate that an error during a run shuts down the thread pools and waits
-    for their running blocks before it is raised.
+    Validate that an error during a run waits for the blocks still running
+    in the thread pools before it is raised.
     """
+    import time
 
-    class Executor:
-        def __init__(self):
-            self.shutdown_args = None
-
-        def shutdown(self, wait=True, cancel_futures=False):
-            self.shutdown_args = (wait, cancel_futures)
-
-    executors = [Executor(), Executor()]
     runner = object.__new__(RepexRunner)
+    runner._config = Config()
+    runner._num_gpus = 1
 
-    def fail():
-        runner._executors = executors
+    finished = []
+
+    def fail(dynamics_executor, checkpoint_executor, num_checkpoint_workers):
+        dynamics_executor.submit(lambda: (time.sleep(0.2), finished.append(True)))
         raise RuntimeError("dynamics failed")
 
     monkeypatch.setattr(runner, "_run", fail)
@@ -1913,7 +1962,20 @@ def test_run_waits_for_blocks_on_error(monkeypatch):
     with pytest.raises(RuntimeError, match="dynamics failed"):
         runner.run()
 
-    assert [e.shutdown_args for e in executors] == [(True, True)] * 2
+    assert finished == [True]
+
+
+def _layout(num_replicas, num_slots, num_gpus):
+    """
+    A dynamics cache holding only a strided layout of replicas over slots, and
+    slots over GPUs.
+    """
+    from somd2.runner._repex import DynamicsCache
+
+    cache = object.__new__(DynamicsCache)
+    cache._replica_slot = [r % num_slots for r in range(num_replicas)]
+    cache._slot_devices = [s % num_gpus for s in range(num_slots)]
+    return cache
 
 
 @pytest.mark.parametrize(
@@ -1930,14 +1992,10 @@ def test_device_capacity(num_slots, num_gpus, oversubscription_factor, expected)
     Validate that a GPU propagates no more replicas at once than it has
     contexts.
     """
-    from types import SimpleNamespace
-
     runner = object.__new__(RepexRunner)
     runner._config = Config(oversubscription_factor=oversubscription_factor)
     runner._num_gpus = num_gpus
-    runner._dynamics_cache = SimpleNamespace(
-        _slot_devices=[s % num_gpus for s in range(num_slots)]
-    )
+    runner._dynamics_cache = _layout(num_slots, num_slots, num_gpus)
 
     assert runner._device_capacity() == expected
 
@@ -1946,16 +2004,10 @@ def test_replica_devices_with_shared_contexts():
     """
     Validate that a replica runs on the GPU of the context it shares.
     """
-    from types import SimpleNamespace
-
     runner = object.__new__(RepexRunner)
     runner._num_gpus = 2
     runner._num_replicas = 10
-
-    # A strided layout over 4 contexts.
-    runner._dynamics_cache = SimpleNamespace(
-        slot_for=lambda r: r % 4, _slot_devices=[s % 2 for s in range(4)]
-    )
+    runner._dynamics_cache = _layout(10, 4, 2)
 
     assert runner._replica_devices() == [(r % 4) % 2 for r in range(10)]
 
@@ -1966,15 +2018,11 @@ def test_device_batches():
     oversubscription factor, so that hot replicas that aren't consecutive
     still spread over the GPUs.
     """
-    from types import SimpleNamespace
-
     runner = object.__new__(RepexRunner)
     runner._config = Config(num_lambda=25)
     runner._num_gpus = 3
     runner._num_replicas = 25
-    runner._dynamics_cache = SimpleNamespace(
-        slot_for=lambda r: r, _slot_devices=[s % 3 for s in range(25)]
-    )
+    runner._dynamics_cache = _layout(25, 25, 3)
     devices = runner._replica_devices()
 
     # Every replica is batched as consecutive groups of three.
