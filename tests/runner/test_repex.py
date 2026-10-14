@@ -1431,24 +1431,27 @@ def _ranking_runner(num_lambda, **config):
     return runner
 
 
-def _rank(runner, num_workers, window_samples=None, cycles_left=10**6):
+def _rank(runner, num_gpus, window_samples=None, cycles_left=10**6):
     """
-    Rank the windows. By default every window has the same samples and the run
-    is far from its end, so that only the sampling rates matter.
+    Rank the windows, with window r on GPU r % num_gpus. By default every
+    window has the same samples and the run is far from its end, so that only
+    the sampling rates matter.
     """
+    num_lambda = runner._config.num_lambda
     if window_samples is None:
-        window_samples = [200] * runner._config.num_lambda
+        window_samples = [200] * num_lambda
+    devices = [r % num_gpus for r in range(num_lambda)]
     cold_rate = 1.0 / runner._config.adaptive_mix_interval
-    runner._rank_windows(num_workers, window_samples, cycles_left, cold_rate)
+    runner._rank_windows(devices, window_samples, cycles_left, cold_rate)
 
 
-def _rank_twice(runner, num_workers):
+def _rank_twice(runner, num_gpus):
     """
     Rank the windows at two consecutive checkpoints, so that the windows found
     cold at both stop being hot.
     """
-    _rank(runner, num_workers=num_workers)
-    _rank(runner, num_workers=num_workers)
+    _rank(runner, num_gpus=num_gpus)
+    _rank(runner, num_gpus=num_gpus)
 
 
 def _fill_ranking_data(runner, hard_pair, num_samples=200, seed=7):
@@ -1476,37 +1479,39 @@ def test_rank_windows():
 
     # Starting from every window hot, those found cold once stay hot.
     _fill_ranking_data(runner, hard_pair=3)
-    _rank(runner, num_workers=2)
+    _rank(runner, num_gpus=2)
     assert cache._hot_replicas is None
 
-    _rank(runner, num_workers=2)
+    _rank(runner, num_gpus=2)
     assert cache._hot_replicas == [2, 3, 4, 5]
 
     # Windows 2 and 3 are found cold once, so stay hot.
     _fill_ranking_data(runner, hard_pair=5)
-    _rank(runner, num_workers=2)
+    _rank(runner, num_gpus=2)
     assert cache._hot_replicas == [2, 3, 4, 5, 6, 7]
 
     # Found cold a second time.
     _fill_ranking_data(runner, hard_pair=5)
-    _rank(runner, num_workers=2)
+    _rank(runner, num_gpus=2)
     assert cache._hot_replicas == [4, 5, 6, 7]
 
 
 def test_rank_windows_pads_to_workers():
     """
-    Validate that the hot replicas are padded to a multiple of the number of
-    workers, and that every replica being hot is recorded as None.
+    Validate that the hot replicas are padded so that every GPU has the same
+    number, and that every replica being hot is recorded as None.
     """
     runner = _ranking_runner(8, adaptive_min_samples=10)
 
     _fill_ranking_data(runner, hard_pair=3)
-    _rank_twice(runner, num_workers=3)
-    assert len(runner._dynamics_cache._hot_replicas) == 6
+    _rank_twice(runner, num_gpus=3)
+    hot = runner._dynamics_cache._hot_replicas
+    assert len(hot) == 6
+    assert sorted(r % 3 for r in hot) == [0, 0, 1, 1, 2, 2]
 
     runner._dynamics_cache._hot_replicas = None
     _fill_ranking_data(runner, hard_pair=3)
-    _rank(runner, num_workers=8)
+    _rank(runner, num_gpus=8)
     assert runner._dynamics_cache._hot_replicas is None
 
 
@@ -1569,7 +1574,7 @@ def test_rank_windows_minimises_variance_for_compute():
     rng = np.random.default_rng(11)
     runner._adaptive_upper[3] = list(rng.normal(1.0, 1.0, 200))
     runner._adaptive_lower[4] = list(rng.normal(0.0, 1.0, 200))
-    _rank_twice(runner, num_workers=2)
+    _rank_twice(runner, num_gpus=2)
 
     assert runner._dynamics_cache._hot_replicas == [2, 3, 4, 5]
 
@@ -1583,7 +1588,7 @@ def test_rank_windows_fill_windows_stay_cold_candidates():
 
     # The flagged pair 0 gives windows 0, 1 and 2, so one window is filled.
     _fill_ranking_data(runner, hard_pair=0)
-    _rank_twice(runner, num_workers=2)
+    _rank_twice(runner, num_gpus=2)
 
     hot = runner._dynamics_cache._hot_replicas
     assert hot is not None and len(hot) == 4
@@ -1726,7 +1731,7 @@ def test_rank_windows_without_gain():
 
     # Every pair has the same uncertainty.
     _fill_ranking_data(runner, hard_pair=-1)
-    _rank(runner, num_workers=2)
+    _rank(runner, num_gpus=2)
 
     assert runner._dynamics_cache._hot_replicas is None
     assert runner._dynamics_cache._cold_votes == [0] * 8
@@ -1742,7 +1747,7 @@ def test_rank_windows_without_uncertainty():
     for k in range(3):
         runner._adaptive_upper[k] = [0.5] * 100
         runner._adaptive_lower[k + 1] = [-0.5] * 100
-    _rank(runner, num_workers=1)
+    _rank(runner, num_gpus=1)
 
     assert runner._dynamics_cache._hot_replicas is None
 
@@ -1780,7 +1785,7 @@ def test_rank_windows_needs_enough_samples():
     runner = _ranking_runner(8, adaptive_min_samples=50)
 
     _fill_ranking_data(runner, hard_pair=3, num_samples=20)
-    _rank(runner, num_workers=2)
+    _rank(runner, num_gpus=2)
 
     assert runner._dynamics_cache._hot_replicas is None
     assert len(runner._adaptive_upper[0]) == 20
@@ -1801,7 +1806,7 @@ def test_rank_windows_keeps_undersampled_windows_hot():
     for i in range(1, len(y)):
         y[i] = 0.95 * y[i - 1] + rng.normal(0.0, 0.01)
     runner._adaptive_upper[6] = list(0.5 + y)
-    _rank_twice(runner, num_workers=2)
+    _rank_twice(runner, num_gpus=2)
 
     assert 6 in runner._dynamics_cache._hot_replicas
 
@@ -1824,10 +1829,37 @@ def test_rank_windows_keeps_slow_bond_distance_hot():
     for i in range(1, len(y)):
         y[i] = 0.95 * y[i - 1] + rng.normal()
     runner._adaptive_distance[7] = list(10.0 + y)
-    _rank_twice(runner, num_workers=2)
+    _rank_twice(runner, num_gpus=2)
 
     assert 7 in runner._dynamics_cache._hot_replicas
     assert 0 not in runner._dynamics_cache._hot_replicas
+
+
+def test_device_batches():
+    """
+    Validate that a batch never has more replicas on a GPU than the
+    oversubscription factor, so that hot replicas that aren't consecutive
+    still spread over the GPUs.
+    """
+    from types import SimpleNamespace
+
+    runner = object.__new__(RepexRunner)
+    runner._config = Config(num_lambda=25)
+    runner._num_gpus = 3
+    runner._num_replicas = 25
+    runner._dynamics_cache = SimpleNamespace(slot_for=lambda r: r)
+
+    # Every replica is batched as consecutive groups of three.
+    assert runner._device_batches(list(range(25))) == [
+        list(range(i, min(i + 3, 25))) for i in range(0, 25, 3)
+    ]
+
+    hot = [6, 7, 8, 9, 10, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24]
+    batches = runner._device_batches(hot)
+    assert sorted(r for batch in batches for r in batch) == hot
+    assert len(batches) == 5
+    for batch in batches:
+        assert len({r % 3 for r in batch}) == len(batch)
 
 
 def _ring_pair_runner(system, virtual_sites=None):
@@ -1890,7 +1922,9 @@ def test_adaptive_repex_ranking_arguments(ethane_methanol, monkeypatch):
 
     # 12 cycles with a checkpoint every 4, and every window always hot.
     assert [c[2] for c in calls] == [8, 4, 0]
-    for num_workers, samples, cycles_left, cold_rate in calls:
+    for devices, samples, cycles_left, cold_rate in calls:
+        # A context per replica, assigned to the GPUs in turn.
+        assert devices == [r % runner._num_gpus for r in range(num_lambda)]
         first = 12 - cycles_left
         assert samples == [first] * num_lambda
         if cycles_left > 0:
@@ -2002,7 +2036,7 @@ def test_rank_windows_flags_unconverged_pairs():
     _fill_ranking_data(runner, hard_pair=3)
     rng = np.random.default_rng(3)
     runner._adaptive_lower[1] = list(rng.normal(-3.0, 0.1, 200))
-    _rank_twice(runner, num_workers=2)
+    _rank_twice(runner, num_gpus=2)
 
     hot = runner._dynamics_cache._hot_replicas
     assert hot is not None and {0, 1, 2}.issubset(hot)

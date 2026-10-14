@@ -2176,9 +2176,7 @@ class RepexRunner(_RunnerBase):
                 # Run a dynamics block for each replica in the pass, making sure
                 # each GPU is only oversubscribed by a factor of
                 # self._config.oversubscription_factor.
-                for j in range(ceil(len(batch) / num_workers)):
-                    replicas = batch[j * num_workers : (j + 1) * num_workers]
-
+                for replicas in self._device_batches(batch):
                     # Whether each replica is due a GCMC or terminal flip move,
                     # including any that fell due while it wasn't propagated.
                     is_gcmc = [
@@ -2306,7 +2304,7 @@ class RepexRunner(_RunnerBase):
                         self._config.adaptive_mix_interval,
                     )
                     self._rank_windows(
-                        num_workers,
+                        self._replica_devices(),
                         self._window_samples(),
                         cycles - (i + 1),
                         cold_rate,
@@ -3005,6 +3003,55 @@ class RepexRunner(_RunnerBase):
 
         return full / (num_cycles - first_cycle)
 
+    def _replica_devices(self):
+        """
+        The GPU that propagates each replica, which is that of its slot.
+
+        Returns
+        -------
+
+        list of int
+            The device index for each replica.
+        """
+        return [
+            self._dynamics_cache.slot_for(r) % self._num_gpus
+            for r in range(self._num_replicas)
+        ]
+
+    def _device_batches(self, replicas):
+        """
+        Split replicas into batches that are propagated concurrently, each with
+        at most 'oversubscription_factor' replicas on any GPU, so that every
+        batch spreads its work over the GPUs.
+
+        Parameters
+        ----------
+
+        replicas: list of int
+            The replicas to propagate, at most one per slot.
+
+        Returns
+        -------
+
+        list of list of int
+            The batches.
+        """
+        devices = self._replica_devices()
+        per_device = self._config.oversubscription_factor
+
+        queues = {}
+        for r in replicas:
+            queues.setdefault(devices[r], []).append(r)
+
+        batches = []
+        while any(queues.values()):
+            batch = []
+            for queue in queues.values():
+                batch += queue[:per_device]
+                del queue[:per_device]
+            batches.append(sorted(batch))
+        return batches
+
     def _window_samples(self):
         """
         The number of energy samples each window has collected, from its clock.
@@ -3322,7 +3369,7 @@ class RepexRunner(_RunnerBase):
         drift = abs(estimates[0] - estimates[1])
         return drift > 0.25 and drift > 2.0 * _np.hypot(*errors)
 
-    def _rank_windows(self, num_workers, window_samples, cycles_left, cold_rate):
+    def _rank_windows(self, window_devices, window_samples, cycles_left, cold_rate):
         """
         Rank the windows by the uncertainty they contribute to the free energy
         and choose the hot replicas for adaptive replica exchange.
@@ -3335,15 +3382,15 @@ class RepexRunner(_RunnerBase):
         differences or, for a perturbation that breaks or makes a single bond,
         the bond distance. The remaining pairs are added in order of weight,
         with the windows either side of each so that exchange carries
-        configurations into and out of them. Each set this gives is filled to a
-        multiple of the number of workers with the cold windows owning the most
-        variance, so that the GPUs are evenly loaded, and scored by the
-        variance of the final free energy, given the samples each window has
-        and will collect in the cycles left, multiplied by the compute of the
-        whole run. The set with the lowest score is chosen. A window only stops
-        being hot once it has been found cold at two consecutive rankings.
-        Every window is hot if no set, including the windows kept hot, is
-        better than that.
+        configurations into and out of them. Each set this gives is filled with
+        the cold windows owning the most variance, until every GPU has as many
+        hot windows as the busiest, since those take no extra time, and scored
+        by the variance of the final free energy, given the samples each window
+        has and will collect in the cycles left, multiplied by the compute of
+        the whole run. The set with the lowest score is chosen. A window only
+        stops being hot once it has been found cold at two consecutive
+        rankings. Every window is hot if no set, including the windows kept
+        hot, is better than that.
 
         The ranking uses all of the data since the burn-in, since the slowest
         windows decorrelate over far longer than a checkpoint interval.
@@ -3351,8 +3398,8 @@ class RepexRunner(_RunnerBase):
         Parameters
         ----------
 
-        num_workers: int
-            The number of replicas that are propagated concurrently.
+        window_devices: list of int
+            The GPU that propagates each window.
 
         window_samples: list of int
             The number of energy samples each window has collected.
@@ -3446,12 +3493,21 @@ class RepexRunner(_RunnerBase):
         owned[:-1] += fwd_variance
         owned[1:] += rev_variance
 
+        per_device = self._config.oversubscription_factor
+
         def fill(windows):
-            # Make the cold windows owning the most variance hot, until the hot
-            # windows are a multiple of the number of workers.
-            target = min(num_replicas, ceil(len(windows) / num_workers) * num_workers)
-            cold = sorted(all_hot - windows, key=lambda r: -owned[r])
-            return windows | set(cold[: target - len(windows)])
+            # Make the cold windows owning the most variance hot, until each GPU
+            # has as many hot windows as a whole number of batches on the busiest.
+            counts = {d: 0 for d in window_devices}
+            for r in windows:
+                counts[window_devices[r]] += 1
+            target = ceil(max(counts.values()) / per_device) * per_device
+            filled = set(windows)
+            for r in sorted(all_hot - windows, key=lambda r: -owned[r]):
+                if counts[window_devices[r]] < target:
+                    filled.add(r)
+                    counts[window_devices[r]] += 1
+            return filled
 
         total_variance = owned.sum()
         samples = _np.maximum(_np.asarray(window_samples, dtype=float), 1.0)
