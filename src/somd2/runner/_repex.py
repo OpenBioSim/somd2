@@ -2125,6 +2125,9 @@ class RepexRunner(_RunnerBase):
         if is_adaptive:
             self._reset_adaptive_data()
             self._restore_adaptive_data()
+            cold_rate = self._cold_rate(
+                self._config.adaptive_mix_interval, cycles_per_checkpoint
+            )
         else:
             # Adaptive replica exchange may have been switched off on restart.
             self._dynamics_cache._hot_replicas = None
@@ -2301,7 +2304,10 @@ class RepexRunner(_RunnerBase):
                 # carries on with the same hot replicas.
                 if is_adaptive and is_checkpoint and is_burnt_in:
                     self._rank_windows(
-                        num_workers, self._window_samples(), cycles - (i + 1)
+                        num_workers,
+                        self._window_samples(),
+                        cycles - (i + 1),
+                        cold_rate,
                     )
 
                 # Create the lock.
@@ -2924,6 +2930,42 @@ class RepexRunner(_RunnerBase):
 
         return matrix
 
+    @staticmethod
+    def _cold_rate(mix_interval, cycles_per_checkpoint):
+        """
+        The share of cycles that propagate every window, i.e. those on which
+        the cold windows are propagated: the mix and checkpoint cycles.
+
+        Parameters
+        ----------
+
+        mix_interval: int
+            The number of cycles between mix cycles.
+
+        cycles_per_checkpoint: float
+            The number of cycles between checkpoints.
+
+        Returns
+        -------
+
+        float
+            The share of cycles.
+        """
+        from math import gcd
+
+        mix = 1.0 / mix_interval
+        checkpoint = 1.0 / cycles_per_checkpoint
+
+        # Count cycles that are both once, which for whole numbers of cycles
+        # are those at multiples of the lowest common multiple.
+        if abs(cycles_per_checkpoint - round(cycles_per_checkpoint)) < 1e-6:
+            c = round(cycles_per_checkpoint)
+            both = gcd(mix_interval, c) / (mix_interval * c)
+        else:
+            both = mix * checkpoint
+
+        return min(1.0, mix + checkpoint - both)
+
     def _window_samples(self):
         """
         The number of energy samples each window has collected, from its clock.
@@ -3241,7 +3283,7 @@ class RepexRunner(_RunnerBase):
         drift = abs(estimates[0] - estimates[1])
         return drift > 0.25 and drift > 2.0 * _np.hypot(*errors)
 
-    def _rank_windows(self, num_workers, window_samples, cycles_left):
+    def _rank_windows(self, num_workers, window_samples, cycles_left, cold_rate):
         """
         Rank the windows by the uncertainty they contribute to the free energy
         and choose the hot replicas for adaptive replica exchange.
@@ -3278,8 +3320,16 @@ class RepexRunner(_RunnerBase):
 
         cycles_left: int
             The number of cycles left in the run.
+
+        cold_rate: float
+            The share of cycles that propagate every window, and so the cold
+            ones.
         """
         from math import ceil
+
+        # There is nothing left to allocate, so keep the current hot replicas.
+        if cycles_left <= 0:
+            return
 
         num_replicas = self._config.num_lambda
         lower = [_np.array(x) for x in self._adaptive_lower]
@@ -3363,33 +3413,31 @@ class RepexRunner(_RunnerBase):
             cold = sorted(all_hot - windows, key=lambda r: -owned[r])
             return windows | set(cold[: target - len(windows)])
 
-        # A cold window is propagated every 'adaptive_mix_interval' cycles.
-        interval = self._config.adaptive_mix_interval
         total_variance = owned.sum()
         samples = _np.maximum(_np.asarray(window_samples, dtype=float), 1.0)
 
         def rates(windows):
-            return _np.array(
-                [1.0 if r in windows else 1.0 / interval for r in range(num_replicas)]
-            )
+            # The samples per cycle of each window for the rest of the run.
+            is_hot = _np.zeros(num_replicas, dtype=bool)
+            is_hot[list(windows)] = True
+            return _np.where(is_hot, 1.0, cold_rate)
 
-        def cost_and_variance(windows):
+        def score(windows):
             # The compute of the whole run, in blocks of dynamics, and the
             # variance of the final free energy, from the samples at its end.
             rate = rates(windows)
             final = samples + rate * cycles_left
             cost = samples.sum() + rate.sum() * cycles_left
-            variance = (fwd_variance / final[:-1]).sum() + (
-                rev_variance / final[1:]
-            ).sum()
+            variance = (fwd_variance / final[:-1] + rev_variance / final[1:]).sum()
             return cost, variance
 
         # A set must beat all hot by more than rounding error.
-        threshold = _np.prod(cost_and_variance(all_hot)) * (1 - 1e-9)
+        all_hot_cost, all_hot_variance = score(all_hot)
+        threshold = all_hot_cost * all_hot_variance * (1 - 1e-9)
 
-        # Add pairs in order of weight, keeping the hot windows that give the
-        # lowest variance for a fixed amount of compute, if better than all hot.
-        # Sets are scored with the windows that will fill the workers.
+        # Add pairs in order of weight, keeping the set with the lowest final
+        # variance multiplied by the compute of the whole run, if better than
+        # all hot. Sets are scored with the windows that will fill the workers.
         candidate = set(forced)
         chosen = None
         best = threshold
@@ -3402,7 +3450,7 @@ class RepexRunner(_RunnerBase):
             windows = pad(candidate)
             if not windows:
                 continue
-            efficiency = _np.prod(cost_and_variance(fill(windows)))
+            efficiency = _np.prod(score(fill(windows)))
             if efficiency < best:
                 chosen, best = windows, efficiency
 
@@ -3425,7 +3473,7 @@ class RepexRunner(_RunnerBase):
 
             # Windows kept hot can leave no gain over all hot.
             hot = fill(hot)
-            if _np.prod(cost_and_variance(hot)) >= threshold:
+            if _np.prod(score(hot)) >= threshold:
                 hot = all_hot
 
         hot = sorted(hot)
@@ -3444,15 +3492,13 @@ class RepexRunner(_RunnerBase):
         _logger.info(
             f"Hot replicas: {hot}" if len(hot) < num_replicas else "All replicas hot"
         )
-        # The cost per cycle from now on, and the final variance, relative to
+        # The compute per cycle from now on and the final variance, relative to
         # every window being hot for the rest of the run.
-        cost = rates(set(hot)).sum() / num_replicas
-        variance = cost_and_variance(set(hot))[1] / (
-            cost_and_variance(all_hot)[1] or 1.0
-        )
+        cost = rates(hot).sum() / num_replicas
+        variance = score(hot)[1] / (all_hot_variance or 1.0)
         _logger.info(
-            f"Estimated cost {cost:.2f} and variance {variance:.2f} relative to "
-            "standard replica exchange"
+            f"Estimated cost per cycle {cost:.2f} and final variance "
+            f"{variance:.2f} relative to standard replica exchange"
         )
 
     def _check_restart(self):

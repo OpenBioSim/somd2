@@ -1436,13 +1436,13 @@ function renderAdaptive(s, a) {
     html += `</div><div class="note">Hot ${LAMBDA}: ${esc(hot)}</div><div class="stats">`;
   }
   if (a.cost !== undefined && a.cost !== null) {
-    html += stat("Estimated cost", `${fmt(a.cost, 2)}`);
-    html += stat("Estimated variance", `${fmt(a.variance, 2)}`);
+    html += stat("Estimated cost per cycle", `${fmt(a.cost, 2)}`);
+    html += stat("Estimated final variance", `${fmt(a.variance, 2)}`);
   }
   if (a.hot_only_fraction !== undefined) html += stat("Hot-only cycles", `${fmt(100 * a.hot_only_fraction, 1)}%`);
   html += `</div>`;
   if (a.cost !== undefined && a.cost !== null) {
-    html += `<div class="note">Estimates from the ranking at cycle ${a.ranked_cycle}, relative to standard replica exchange: cost is the compute per cycle and variance that of the free energy for the same simulation time.</div>`;
+    html += `<div class="note">Estimates from the ranking at cycle ${a.ranked_cycle}, relative to every window being hot for the rest of the run: cost is the compute per cycle from then on, and variance that of the final free energy.</div>`;
   } else if (a.ranked_cycle === undefined && (!a.hot || a.hot.length === n)) {
     html += `<div class="note">The windows haven't been ranked yet, so every window is hot until the burn-in is complete.</div>`;
   }

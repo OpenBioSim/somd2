@@ -1438,7 +1438,8 @@ def _rank(runner, num_workers, window_samples=None, cycles_left=10**6):
     """
     if window_samples is None:
         window_samples = [200] * runner._config.num_lambda
-    runner._rank_windows(num_workers, window_samples, cycles_left)
+    cold_rate = 1.0 / runner._config.adaptive_mix_interval
+    runner._rank_windows(num_workers, window_samples, cycles_left, cold_rate)
 
 
 def _rank_twice(runner, num_workers):
@@ -1616,6 +1617,43 @@ def test_rank_windows_accounts_for_samples_collected():
 
     # Pair 1 has been sampled more, so only pair 5 is.
     assert rank([1000, 4000, 4000, 1000, 1000, 1000, 1000, 1000]) == [4, 5, 6, 7]
+
+
+def test_rank_windows_at_end_of_run():
+    """
+    Validate that a ranking with no cycles left keeps the hot replicas and the
+    cold votes, so that an extended run carries on with them.
+    """
+    runner = _ranking_runner(8, adaptive_min_samples=10)
+    runner._dynamics_cache._hot_replicas = [2, 3, 4, 5]
+    runner._dynamics_cache._cold_votes = [1, 0, 0, 0, 0, 0, 0, 1]
+
+    _fill_ranking_data(runner, hard_pair=-1)
+    _rank(runner, 2, cycles_left=0)
+
+    assert runner._dynamics_cache._hot_replicas == [2, 3, 4, 5]
+    assert runner._dynamics_cache._cold_votes == [1, 0, 0, 0, 0, 0, 0, 1]
+
+
+@pytest.mark.parametrize(
+    "mix_interval, cycles_per_checkpoint, expected",
+    [
+        # Every checkpoint cycle is also a mix cycle.
+        (4, 100, 0.25),
+        # Mix cycles at 4, 8, ..., checkpoints at 10, 20, ..., both at 20, 40.
+        (4, 10, 0.25 + 0.1 - 0.05),
+        (1, 100, 1.0),
+        # Not a whole number of cycles between checkpoints.
+        (4, 2.5, 0.25 + 0.4 - 0.1),
+    ],
+)
+def test_cold_rate(mix_interval, cycles_per_checkpoint, expected):
+    """
+    Validate the share of cycles that propagate the cold windows.
+    """
+    assert RepexRunner._cold_rate(mix_interval, cycles_per_checkpoint) == (
+        pytest.approx(expected)
+    )
 
 
 def test_rank_windows_without_gain():

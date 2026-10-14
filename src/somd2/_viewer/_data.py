@@ -95,7 +95,9 @@ _block_re = _re.compile(r"^Finished block (\d+) of (\d+) for \S+ = ([\d.]+)")
 _perf_re = _re.compile(r"^Overall performance: ([\d.]+) ns day-1")
 _correction_re = _re.compile(r"Standard state correction: (-?[\d.]+) kcal mol-1")
 _hot_re = _re.compile(r"^Hot replicas: \[([\d, ]*)\]")
-_estimate_re = _re.compile(r"^Estimated cost ([\d.]+) and variance ([\d.]+)")
+_estimate_re = _re.compile(
+    r"^Estimated cost (?:per cycle )?([\d.]+) and (?:final )?variance ([\d.]+)"
+)
 # Older versions don't log the time.
 _waters_re = _re.compile(
     r"^Current number of waters in GCMC volume at \S+ = ([\d.]+)"

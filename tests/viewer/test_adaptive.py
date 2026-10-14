@@ -40,7 +40,10 @@ def test_adaptive_summary(tmp_path):
         + _cycle(3, 4)
         + [
             _line("All replicas hot"),
-            _line("Estimated cost 1.00 and variance 1.00 relative to standard"),
+            _line(
+                "Estimated cost per cycle 1.00 and final variance 1.00 relative "
+                "to standard"
+            ),
         ]
         + _cycle(4, 4)
     )
