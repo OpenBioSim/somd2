@@ -480,6 +480,16 @@ with `--equilibration-time`, a burn-in of around 200 ps is enough. The saving
 is largest when few windows are slow. If most of the windows are hot, adaptive
 replica exchange costs almost as much as standard replica exchange.
 
+A larger `--adaptive-mix-interval` saves more compute on the cold windows, but
+samples them less and exchanges configurations between hot and cold windows less
+often, which slows their movement across the λ range. The ranking accounts for
+the reduced sampling, so fewer windows go cold as the interval grows, but not
+for the slower exchange, so the interval isn't tuned automatically. Each ranking
+logs the estimated compute per cycle and final variance relative to every window
+being hot. If most windows stay hot, a smaller interval costs little, while if
+most go cold, a larger interval saves more. Values between 2 and 8 are
+reasonable, and the interval can be changed on restart.
+
 <a id="rest2"></a>
 
 ## 🌡️ REST2
