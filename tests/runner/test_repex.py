@@ -902,8 +902,12 @@ def test_repex_concurrent_slots(ethane_methanol):
         assert not runner._config.minimisation_constraints
         assert runner._config.equilibration_constraints
 
-        # Every batch of dynamics must contain at most one replica per slot.
-        for batch in runner._dynamics_batches(runner._replica_devices()):
+        # Every batch of dynamics, and of commits, must contain at most one
+        # replica per slot.
+        num_workers = runner._num_gpus * config["oversubscription_factor"]
+        batches = list(runner._dynamics_batches(runner._replica_devices()))
+        batches += list(runner._safe_batches(num_workers))
+        for batch in batches:
             slots = [runner._dynamics_cache.slot_for(r) for r in batch]
             assert len(slots) == len(set(slots)), f"batch {batch} shares a slot"
 
@@ -1419,6 +1423,7 @@ def _ranking_runner(num_lambda, **config):
     runner._config = Config(num_lambda=num_lambda, **config)
     runner._lambda_values = list(np.linspace(0, 1, num_lambda))
     runner._ring_pair = None
+    runner._is_cached = False
     zeros = np.zeros((num_lambda, num_lambda))
     runner._dynamics_cache = SimpleNamespace(
         get_proposed=lambda: zeros,
@@ -1868,6 +1873,49 @@ def test_rank_windows_fills_whole_batches(oversubscription_factor, capacity, num
     assert sorted(r % 4 for r in hot) == sorted(list(range(4)) * (num_hot // 4))
 
 
+def test_rank_windows_unfilled_with_shared_contexts():
+    """
+    Validate that the hot replicas aren't filled when contexts are shared,
+    since a window added on a busy context needs another pass.
+    """
+    runner = _ranking_runner(8, adaptive_min_samples=10)
+    runner._is_cached = True
+
+    # The flagged pair 0 gives windows 0, 1 and 2, one on each of three GPUs.
+    _fill_ranking_data(runner, hard_pair=0)
+    _rank_twice(runner, num_gpus=4)
+
+    assert runner._dynamics_cache._hot_replicas == [0, 1, 2]
+
+
+def test_run_waits_for_blocks_on_error(monkeypatch):
+    """
+    Validate that an error during a run shuts down the thread pools and waits
+    for their running blocks before it is raised.
+    """
+
+    class Executor:
+        def __init__(self):
+            self.shutdown_args = None
+
+        def shutdown(self, wait=True, cancel_futures=False):
+            self.shutdown_args = (wait, cancel_futures)
+
+    executors = [Executor(), Executor()]
+    runner = object.__new__(RepexRunner)
+
+    def fail():
+        runner._executors = executors
+        raise RuntimeError("dynamics failed")
+
+    monkeypatch.setattr(runner, "_run", fail)
+
+    with pytest.raises(RuntimeError, match="dynamics failed"):
+        runner.run()
+
+    assert [e.shutdown_args for e in executors] == [(True, True)] * 2
+
+
 @pytest.mark.parametrize(
     "num_slots, num_gpus, oversubscription_factor, expected",
     [
@@ -1882,10 +1930,14 @@ def test_device_capacity(num_slots, num_gpus, oversubscription_factor, expected)
     Validate that a GPU propagates no more replicas at once than it has
     contexts.
     """
+    from types import SimpleNamespace
+
     runner = object.__new__(RepexRunner)
     runner._config = Config(oversubscription_factor=oversubscription_factor)
-    runner._num_slots = num_slots
     runner._num_gpus = num_gpus
+    runner._dynamics_cache = SimpleNamespace(
+        _slot_devices=[s % num_gpus for s in range(num_slots)]
+    )
 
     assert runner._device_capacity() == expected
 
@@ -1901,7 +1953,9 @@ def test_replica_devices_with_shared_contexts():
     runner._num_replicas = 10
 
     # A strided layout over 4 contexts.
-    runner._dynamics_cache = SimpleNamespace(slot_for=lambda r: r % 4)
+    runner._dynamics_cache = SimpleNamespace(
+        slot_for=lambda r: r % 4, _slot_devices=[s % 2 for s in range(4)]
+    )
 
     assert runner._replica_devices() == [(r % 4) % 2 for r in range(10)]
 
@@ -1918,7 +1972,9 @@ def test_device_batches():
     runner._config = Config(num_lambda=25)
     runner._num_gpus = 3
     runner._num_replicas = 25
-    runner._dynamics_cache = SimpleNamespace(slot_for=lambda r: r)
+    runner._dynamics_cache = SimpleNamespace(
+        slot_for=lambda r: r, _slot_devices=[s % 3 for s in range(25)]
+    )
     devices = runner._replica_devices()
 
     # Every replica is batched as consecutive groups of three.

@@ -475,14 +475,9 @@ class DynamicsCache:
         # Per-device memory tracking for estimation.
         device_mem = {}
 
-        # Work out how many slots are assigned to each device.
-        # Slots are assigned round-robin, so the first (num_slots % num_gpus)
-        # devices get one extra slot.
-        base = floor(self._num_slots / num_gpus)
-        remainder = self._num_slots % num_gpus
-        contexts_per_device = [
-            base + (1 if i < remainder else 0) for i in range(num_gpus)
-        ]
+        # The device of each slot. Slots are assigned round-robin.
+        self._slot_devices = [i % num_gpus for i in range(self._num_slots)]
+        contexts_per_device = [self._slot_devices.count(d) for d in range(num_gpus)]
 
         # Record the ghost file for each replica. A slot writes to the file of
         # whichever replica it currently hosts.
@@ -517,7 +512,7 @@ class DynamicsCache:
                 build_lam = lambdas[self._constraint_lambda_index]
 
             # Work out the device index.
-            device = i % num_gpus
+            device = self._slot_devices[i]
 
             # Record baseline memory before the first slot on this device.
             if device not in device_mem:
@@ -1901,6 +1896,20 @@ class RepexRunner(_RunnerBase):
         """
         Run the replica exchange simulation.
         """
+        self._executors = []
+        try:
+            self._run()
+        except Exception:
+            # Wait for running blocks, so that nothing still uses the contexts.
+            for executor in self._executors:
+                executor.shutdown(wait=True, cancel_futures=True)
+            raise
+
+    def _run(self):
+        """
+        Run the replica exchange simulation, using thread pools that run()
+        shuts down if an error is raised.
+        """
 
         from math import ceil
         from time import time
@@ -1970,12 +1979,15 @@ class RepexRunner(_RunnerBase):
         # Persistent thread pools, reused across every batch and cycle.
         dynamics_executor = ThreadPoolExecutor(max_workers=num_workers)
         checkpoint_executor = ThreadPoolExecutor(max_workers=num_checkpoint_workers)
+        self._executors = [dynamics_executor, checkpoint_executor]
 
         # Create the replica list.
         replica_list = list(range(self._config.num_lambda))
 
-        # The GPU that propagates each replica, which is fixed for the run.
+        # The GPU that propagates each replica, and how many replicas each GPU
+        # can propagate at once, which are fixed for the run.
         replica_devices = self._replica_devices()
+        device_capacity = self._device_capacity()
 
         # Minimise at each lambda value. Don't minimise on restart.
         if self._config.minimise and not self._is_restart:
@@ -2308,7 +2320,7 @@ class RepexRunner(_RunnerBase):
                     )
                     self._rank_windows(
                         replica_devices,
-                        self._device_capacity(),
+                        device_capacity,
                         self._window_samples(),
                         cycles - (i + 1),
                         cold_rate,
@@ -2665,7 +2677,7 @@ class RepexRunner(_RunnerBase):
                     self._dynamics_cache.delete(slot)
 
                     # Work out the device index.
-                    device = slot % self._num_gpus
+                    device = self._dynamics_cache._slot_devices[slot]
 
                     # Copy the dynamics keyword arguments.
                     dynamics_kwargs = self._dynamics_kwargs.copy()
@@ -2775,7 +2787,7 @@ class RepexRunner(_RunnerBase):
                     self._dynamics_cache.delete(slot)
 
                     # Work out the device index.
-                    device = slot % self._num_gpus
+                    device = self._dynamics_cache._slot_devices[slot]
 
                     # Copy the dynamics keyword arguments.
                     dynamics_kwargs = self._dynamics_kwargs.copy()
@@ -2821,7 +2833,7 @@ class RepexRunner(_RunnerBase):
             self._dynamics_cache.delete(slot)
 
             # Work out the device index.
-            device = slot % self._num_gpus
+            device = self._dynamics_cache._slot_devices[slot]
 
             # Copy the dynamics keyword arguments.
             dynamics_kwargs = self._dynamics_kwargs.copy()
@@ -3017,8 +3029,9 @@ class RepexRunner(_RunnerBase):
         list of int
             The device index for each replica.
         """
+        slot_devices = self._dynamics_cache._slot_devices
         return [
-            self._dynamics_cache.slot_for(r) % self._num_gpus
+            slot_devices[self._dynamics_cache.slot_for(r)]
             for r in range(self._num_replicas)
         ]
 
@@ -3033,10 +3046,11 @@ class RepexRunner(_RunnerBase):
         list of int
             The capacity of each device.
         """
-        contexts = [0] * self._num_gpus
-        for slot in range(self._num_slots):
-            contexts[slot % self._num_gpus] += 1
-        return [max(1, min(self._config.oversubscription_factor, n)) for n in contexts]
+        slot_devices = self._dynamics_cache._slot_devices
+        return [
+            max(1, min(self._config.oversubscription_factor, slot_devices.count(d)))
+            for d in range(self._num_gpus)
+        ]
 
     def _device_batches(self, replicas, devices):
         """
@@ -3431,16 +3445,18 @@ class RepexRunner(_RunnerBase):
         differences or, for a perturbation that breaks or makes a single bond,
         the bond distance. The remaining pairs are added in order of weight,
         with the windows either side of each so that exchange carries
-        configurations into and out of them. Each set this gives is filled with
-        the cold windows owning the most variance, until every GPU runs as many
-        full batches as the busiest needs, since those windows take no extra
-        time. A GPU's batches hold as many replicas as it can propagate at once.
-        The set is then scored by the variance of the final free energy, given
-        the samples each window has and will collect in the cycles left,
-        multiplied by the compute of the whole run. The set with the lowest
-        score is chosen. A window only stops being hot once it has been found
-        cold at two consecutive rankings. Every window is hot if no set,
-        including the windows kept hot, is better than that.
+        configurations into and out of them. With a context per replica, each
+        set this gives is filled with the cold windows owning the most
+        variance, until every GPU runs as many full batches as the busiest
+        needs, since those windows take no extra time. A GPU's batches hold as
+        many replicas as it can propagate at once. With shared contexts the set
+        isn't filled, since an added window can need another pass. The set is
+        then scored by the variance of the final free energy, given the samples
+        each window has and will collect in the cycles left, multiplied by the
+        compute of the whole run. The set with the lowest score is chosen. A
+        window only stops being hot once it has been found cold at two
+        consecutive rankings. Every window is hot if no set, including the
+        windows kept hot, is better than that.
 
         The ranking uses all of the data since the burn-in, since the slowest
         windows decorrelate over far longer than a checkpoint interval.
@@ -3548,7 +3564,10 @@ class RepexRunner(_RunnerBase):
 
         def fill(windows):
             # Make the cold windows owning the most variance hot, until each GPU
-            # fills as many batches as the busiest needs.
+            # fills as many batches as the busiest needs. With shared contexts
+            # an added window can need another pass, so it isn't free.
+            if self._is_cached:
+                return set(windows)
             counts = {d: 0 for d in window_devices}
             for r in windows:
                 counts[window_devices[r]] += 1
