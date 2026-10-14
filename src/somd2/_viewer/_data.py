@@ -94,6 +94,8 @@ _states_re = _re.compile(r"^States: \[([\d\s]*)\]")
 _block_re = _re.compile(r"^Finished block (\d+) of (\d+) for \S+ = ([\d.]+)")
 _perf_re = _re.compile(r"^Overall performance: ([\d.]+) ns day-1")
 _correction_re = _re.compile(r"Standard state correction: (-?[\d.]+) kcal mol-1")
+_hot_re = _re.compile(r"^Hot replicas: \[([\d, ]*)\]")
+_estimate_re = _re.compile(r"^Estimated cost ([\d.]+) and variance ([\d.]+)")
 # Older versions don't log the time.
 _waters_re = _re.compile(
     r"^Current number of waters in GCMC volume at \S+ = ([\d.]+)"
@@ -178,6 +180,13 @@ def _checkpoint_lambda(path):
         return None
 
 
+def _is_adaptive(config):
+    """
+    Whether a run uses adaptive replica exchange.
+    """
+    return bool(config.get("replica_exchange") and config.get("adaptive_repex"))
+
+
 def _to_ns(value):
     """
     Convert a time string from the config, e.g. '2 ps', to nanoseconds.
@@ -251,6 +260,10 @@ class _LogMonitor:
         self._pending_states = None
         self.states = []
         self._saved_states = 0
+        # Adaptive replica exchange rankings, as [cycle, hot or None, cost,
+        # variance], and the cycles that propagated only the hot replicas.
+        self.rankings = []
+        self.hot_only_cycles = []
         self.standard_state_correction = None
         self.messages = _deque(maxlen=20)
         # The number of waters in the GCMC region at each checkpoint, by λ, as
@@ -306,8 +319,13 @@ class _LogMonitor:
             # A restart resumes from the last checkpoint, so the permutations
             # logged after it were discarded.
             del self.states[self._saved_states :]
+            saved = self._saved_states
+            self.rankings = [r for r in self.rankings if r[0] <= saved]
+            self.hot_only_cycles = [c for c in self.hot_only_cycles if c < saved]
             self._new_session(_parse_timestamp(stamp))
-        elif message.startswith("Saving replica exchange state"):
+        elif message.startswith(
+            ("Saving replica exchange state", "Saving final replica exchange state")
+        ):
             self._saved_states = len(self.states)
         elif message.startswith("States: ["):
             if "]" in message:
@@ -334,6 +352,16 @@ class _LogMonitor:
             self.finished = True
         elif m := _correction_re.search(message):
             self.standard_state_correction = float(m.group(1))
+        elif message.startswith("Propagating") and "hot replicas" in message:
+            # Logged after the cycle's states, so this is the latest cycle.
+            self.hot_only_cycles.append(len(self.states) - 1)
+        elif m := _hot_re.match(message):
+            hot = [int(x) for x in m.group(1).split(",")]
+            self.rankings.append([len(self.states), hot, None, None])
+        elif message.startswith("All replicas hot"):
+            self.rankings.append([len(self.states), None, None, None])
+        elif (m := _estimate_re.match(message)) and self.rankings:
+            self.rankings[-1][2:] = [float(m.group(1)), float(m.group(2))]
         elif m := _waters_re.match(message):
             time = float(m.group(2)) if m.group(2) is not None else None
             counts = self.gcmc_waters.setdefault(float(m.group(1)), [])
@@ -519,9 +547,7 @@ class Simulation:
 
         # Adaptive replica exchange samples cold windows less, so progress is
         # the simulation time of the hot windows rather than the samples.
-        is_adaptive = bool(
-            config.get("replica_exchange") and config.get("adaptive_repex")
-        )
+        is_adaptive = _is_adaptive(config)
         if is_adaptive:
             state = self._repex_state()
             time = state.get("time_ns") if state else None
@@ -902,6 +928,7 @@ class Simulation:
                         "terminal_flip_stats": getattr(
                             state, "_terminal_flip_stats", None
                         ),
+                        "hot_replicas": getattr(state, "_hot_replicas", None),
                     }
                 except Exception as e:
                     error = error or e
@@ -942,8 +969,11 @@ class Simulation:
             return float(corrections.pop())
         return log.standard_state_correction if log is not None else None
 
-    def _repex(self, log, lambda_values, repex_state):
+    def _repex(self, log, lambda_values, repex_state, is_adaptive=False):
         result = {"transition_matrix": self._transition_matrix()}
+
+        if is_adaptive:
+            result["adaptive"] = self._adaptive(log, len(lambda_values), repex_state)
 
         if repex_state is not None:
             proposed = repex_state["proposed"]
@@ -957,6 +987,43 @@ class Simulation:
 
         if log is not None and log.states:
             result.update(self._replica_paths(log.states, len(lambda_values)))
+
+        return result
+
+    @staticmethod
+    def _adaptive(log, num_states, repex_state, max_rankings=200):
+        """
+        Summarise adaptive replica exchange: the current hot replicas, the
+        estimates from the latest ranking, the share of cycles that only
+        propagated the hot replicas, and the hot replicas over time.
+        """
+        result = {}
+
+        # The state holds the hot replicas in use, which a restart keeps.
+        if repex_state is not None:
+            hot = repex_state["hot_replicas"]
+            result["hot"] = list(range(num_states)) if hot is None else list(hot)
+
+        if log is None:
+            return result
+
+        if log.rankings:
+            cycle, _, cost, variance = log.rankings[-1]
+            result.update({"ranked_cycle": cycle, "cost": cost, "variance": variance})
+
+            # Keep the latest ranking when thinning a long history.
+            stride = max(1, -(-len(log.rankings) // max_rankings))
+            rankings = log.rankings[::-1][::stride][::-1]
+            result["history"] = {
+                "cycle": [r[0] for r in rankings],
+                "hot": [
+                    [int(r[1] is None or k in r[1]) for r in rankings]
+                    for k in range(num_states)
+                ],
+            }
+
+        if log.states:
+            result["hot_only_fraction"] = len(log.hot_only_cycles) / len(log.states)
 
         return result
 
@@ -1759,7 +1826,12 @@ class Simulation:
                 "repex": (
                     self._section(
                         "summarise the replica exchange",
-                        lambda: self._repex(log, lambda_values, repex_state),
+                        lambda: self._repex(
+                            log,
+                            lambda_values,
+                            repex_state,
+                            is_adaptive=_is_adaptive(config),
+                        ),
                     )
                     if is_repex
                     else None

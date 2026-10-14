@@ -1422,8 +1422,62 @@ function renderRepex(s) {
     html += `<h4>Round trips</h4><div class="note">${total} complete round trips (${LAMBDA} = 0 → 1 → 0) across all replicas, from ${r.num_cycles} logged cycles.</div><div class="chart" id="trips-chart"></div>`;
   }
   html += `</div></div>`;
+  if (r.adaptive) html += renderAdaptive(s, r.adaptive);
   if (r.replica_states) html += `<h4>Replica state trajectories</h4><div class="chart" id="replica-chart"></div>`;
   return card("Replica exchange", html);
+}
+
+function renderAdaptive(s, a) {
+  const n = s.lambda_values.length;
+  let html = `<h4>Adaptive replica exchange</h4><div class="stats">`;
+  if (a.hot) {
+    const hot = a.hot.length === n ? "all" : a.hot.map((k) => fmtLambda(s.lambda_values[k])).join(", ");
+    html += stat("Hot windows", `${a.hot.length} of ${n}`);
+    html += `</div><div class="note">Hot ${LAMBDA}: ${esc(hot)}</div><div class="stats">`;
+  }
+  if (a.cost !== undefined && a.cost !== null) {
+    html += stat("Estimated cost", `${fmt(a.cost, 2)}`);
+    html += stat("Estimated variance", `${fmt(a.variance, 2)}`);
+  }
+  if (a.hot_only_fraction !== undefined) html += stat("Hot-only cycles", `${fmt(100 * a.hot_only_fraction, 1)}%`);
+  html += `</div>`;
+  if (a.cost !== undefined && a.cost !== null) {
+    html += `<div class="note">Estimates from the ranking at cycle ${a.ranked_cycle}, relative to standard replica exchange: cost is the compute per cycle and variance that of the free energy for the same simulation time.</div>`;
+  } else if (a.ranked_cycle === undefined && (!a.hot || a.hot.length === n)) {
+    html += `<div class="note">The windows haven't been ranked yet, so every window is hot until the burn-in is complete.</div>`;
+  }
+  if (a.history) html += `<h4>Hot windows at each ranking</h4><div class="chart" id="hot-chart"></div>`;
+  return html;
+}
+
+// Which windows were hot (filled) at each ranking, by cycle.
+function hotChart(el, history, numStates) {
+  const cols = history.cycle.length;
+  const pad = 34;
+  const width = Math.max(240, el.clientWidth || 520);
+  const cellW = (width - pad) / cols;
+  const cellH = Math.max(6, Math.min(16, 240 / numStates));
+  const height = pad + cellH * numStates;
+  const rgb = css("--accent-rgb"), border = css("--border");
+  let svg = `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">`;
+  for (let k = 0; k < numStates; k++) {
+    for (let j = 0; j < cols; j++) {
+      const hot = history.hot[k][j];
+      svg += `<rect x="${pad + j * cellW}" y="${pad + k * cellH}" width="${cellW}" height="${cellH}" fill="rgba(${rgb},${hot ? 0.85 : 0.08})" stroke="${border}" stroke-width="0.3"><title>window ${k}, cycle ${history.cycle[j]}: ${hot ? "hot" : "cold"}</title></rect>`;
+    }
+  }
+  const rowStep = Math.ceil(numStates / Math.floor((height - pad) / 14));
+  for (let k = 0; k < numStates; k += rowStep) {
+    svg += `<text x="${pad - 6}" y="${pad + k * cellH + cellH / 2 + 4}" text-anchor="end">${k}</text>`;
+  }
+  const colStep = Math.ceil(cols / Math.floor((width - pad) / 60));
+  for (let j = 0; j < cols; j += colStep) {
+    svg += `<text x="${pad + j * cellW + cellW / 2}" y="${pad - 8}" text-anchor="middle">${history.cycle[j]}</text>`;
+  }
+  svg += "</svg>";
+  el.innerHTML = svg + SAVE_BUTTONS;
+  el.chartDraw = (target) => hotChart(target, history, numStates);
+  el.chartLegend = [];
 }
 
 function componentsLambda(s) {
@@ -1614,6 +1668,8 @@ function renderCharts(s) {
         xLabel: "replica", yLabel: "round trips", xFormat: (v) => String(Math.round(v)),
       });
     }
+    const hc = $("#hot-chart");
+    if (hc && r.adaptive && r.adaptive.history) hotChart(hc, r.adaptive.history, s.lambda_values.length);
     const rc = $("#replica-chart");
     if (rc && r.replica_states) {
       const n = r.replica_states.length;
