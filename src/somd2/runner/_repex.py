@@ -2317,7 +2317,20 @@ class RepexRunner(_RunnerBase):
                     cycle_time - self._config.energy_frequency
                     <= self._config.adaptive_burn_in
                 ):
-                    _logger.info("Adaptive replica exchange burn-in complete")
+                    ranked = checkpoint_cycles[checkpoint_cycles >= i + 1]
+                    if len(ranked) > 0:
+                        ranked_time = self._start_time + int(ranked[0]) * (
+                            self._config.energy_frequency
+                        )
+                        _logger.info(
+                            "Adaptive replica exchange burn-in complete, first "
+                            f"ranking at {ranked_time.to('ns'):.4f} ns"
+                        )
+                    else:
+                        _logger.info(
+                            "Adaptive replica exchange burn-in complete, but no "
+                            "checkpoint remains to rank the windows"
+                        )
                     self._adaptive_proposed = self._dynamics_cache.get_proposed().copy()
                     self._adaptive_accepted = self._dynamics_cache.get_accepted().copy()
                 self._record_adaptive_data(energy_matrix, active)

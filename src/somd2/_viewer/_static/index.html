@@ -1465,6 +1465,8 @@ function renderAdaptive(s, a) {
   html += `</div>`;
   if (a.cost !== undefined && a.cost !== null) {
     html += `<div class="note">Estimates from the ranking at cycle ${a.ranked_cycle}, relative to every window being hot for the rest of the run: cost is the compute per cycle from then on, and variance that of the final free energy.</div>`;
+  } else if (a.first_ranking !== undefined) {
+    html += `<div class="note">The burn-in is complete. The windows are first ranked at ${fmt(a.first_ranking, 3)} ns, and can go cold from the checkpoint after that.</div>`;
   } else if (a.ranked_cycle === undefined && (!a.hot || a.hot.length === n)) {
     html += `<div class="note">The windows haven't been ranked yet, so every window is hot until the burn-in is complete.</div>`;
   }

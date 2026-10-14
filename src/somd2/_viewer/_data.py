@@ -102,6 +102,9 @@ _hot_re = _re.compile(r"^Hot replicas: \[([\d, ]*)\]")
 _estimate_re = _re.compile(
     r"^Estimated cost per cycle ([\d.]+) and final variance ([\d.]+)"
 )
+_burn_in_re = _re.compile(
+    r"^Adaptive replica exchange burn-in complete, first ranking at ([\d.]+) ns"
+)
 # Older versions don't log the time.
 _waters_re = _re.compile(
     r"^Current number of waters in GCMC volume at \S+ = ([\d.]+)"
@@ -270,6 +273,8 @@ class _LogMonitor:
         # variance], and the cycles that propagated only the hot replicas.
         self.rankings = []
         self.hot_only_cycles = []
+        # The time of the first ranking in ns, logged once the burn-in ends.
+        self.first_ranking = None
         self.standard_state_correction = None
         self.messages = _deque(maxlen=20)
         # The number of waters in the GCMC region at each checkpoint, by λ, as
@@ -377,6 +382,8 @@ class _LogMonitor:
             self.rankings.append([len(self.states), None, None, None])
         elif (m := _estimate_re.match(message)) and self.rankings:
             self.rankings[-1][2:] = [float(m.group(1)), float(m.group(2))]
+        elif m := _burn_in_re.match(message):
+            self.first_ranking = float(m.group(1))
         elif m := _waters_re.match(message):
             time = float(m.group(2)) if m.group(2) is not None else None
             counts = self.gcmc_waters.setdefault(float(m.group(1)), [])
@@ -1052,6 +1059,8 @@ class Simulation:
                     for k in range(num_states)
                 ],
             }
+        elif log.first_ranking is not None:
+            result["first_ranking"] = log.first_ranking
 
         if log.states:
             result["hot_only_fraction"] = len(log.hot_only_cycles) / len(log.states)

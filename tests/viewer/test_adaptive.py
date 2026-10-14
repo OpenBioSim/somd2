@@ -58,6 +58,25 @@ def test_adaptive_summary(tmp_path):
     assert summary["history"] == {"cycle": [1, 3], "hot": [[0, 1], [1, 1], [1, 1]]}
 
 
+def test_adaptive_first_ranking(tmp_path):
+    """
+    Validate that the time of the first ranking is shown once the burn-in is
+    complete, until the windows are ranked.
+    """
+    lines = _cycle(1, 3) + [
+        _line("Adaptive replica exchange burn-in complete, first ranking at 0.6000 ns")
+    ]
+    log = _monitor(tmp_path, lines)
+
+    summary = Simulation._adaptive(log, 3, None)
+    assert summary["first_ranking"] == 0.6
+
+    log = _monitor(tmp_path, lines + [_line("All replicas hot")])
+
+    summary = Simulation._adaptive(log, 3, None)
+    assert "first_ranking" not in summary
+
+
 def test_adaptive_rankings_after_restart(tmp_path):
     """
     Validate that rankings and hot-only cycles logged after the last saved
