@@ -2090,12 +2090,17 @@ def test_find_ring_pair(syk_ring_break_mols):
     runner = _ring_pair_runner(syk_ring_break_mols, np.array([[0, 3], [100, 4]]))
     assert runner._find_ring_pair() == (1, 7)
 
+    # Legacy restarts load a system per replica.
+    runner = _ring_pair_runner([syk_ring_break_mols, syk_ring_break_mols])
+    assert runner._find_ring_pair() == (1, 7)
+
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
 def test_adaptive_repex_ranking_arguments(ethane_methanol, monkeypatch):
     """
     Validate that each ranking is given the samples each window has, the
-    cycles left, and the share of those cycles that propagate every window.
+    cycles left, and the share of those cycles that propagate every window,
+    and that swaps are only counted from the end of the burn-in.
     """
     num_lambda = 4
 
@@ -2113,21 +2118,27 @@ def test_adaptive_repex_ranking_arguments(ethane_methanol, monkeypatch):
             "replica_exchange": True,
             "adaptive_repex": True,
             "adaptive_mix_interval": 2,
-            "adaptive_burn_in": "0 ps",
+            "adaptive_burn_in": "8fs",
         }
 
         runner = RepexRunner(ethane_methanol, Config(**config))
 
         calls = []
-        monkeypatch.setattr(
-            runner,
-            "_rank_windows",
-            lambda *args: calls.append(args),
-        )
+        baselines = []
+
+        def rank_windows(*args):
+            calls.append(args)
+            baselines.append(runner._adaptive_proposed.sum())
+
+        monkeypatch.setattr(runner, "_rank_windows", rank_windows)
         runner.run()
 
     # 12 cycles with a checkpoint every 4, and every window always hot.
     assert [c[3] for c in calls] == [8, 4, 0]
+
+    # The swaps proposed in the two burn-in cycles aren't counted.
+    assert baselines[0] > 0
+    assert len(set(baselines)) == 1
     for devices, capacity, samples, cycles_left, cold_rate in calls:
         # A context per replica, assigned to the GPUs in turn.
         assert devices == [r % runner._num_gpus for r in range(num_lambda)]

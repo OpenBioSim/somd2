@@ -347,9 +347,8 @@ class DynamicsCache:
             self._update_constraints = True
         if not hasattr(self, "_virtual_sites"):
             self._virtual_sites = None
-        # Set by the runner on a restart, since it follows the configuration.
-        if not hasattr(self, "_strided"):
-            self._strided = False
+        # Not pickled, since the runner sets it from the configuration.
+        self._strided = False
 
         # Convert a legacy checkpoint to the current convention, in which the
         # stored state of a replica is its own, with the last mix already
@@ -2307,6 +2306,8 @@ class RepexRunner(_RunnerBase):
                     <= self._config.adaptive_burn_in
                 ):
                     _logger.info("Adaptive replica exchange burn-in complete")
+                    self._adaptive_proposed = self._dynamics_cache.get_proposed().copy()
+                    self._adaptive_accepted = self._dynamics_cache.get_accepted().copy()
                 self._record_adaptive_data(energy_matrix, active)
 
             # Mix the replicas that were propagated.
@@ -3163,10 +3164,12 @@ class RepexRunner(_RunnerBase):
             The particle indices, or None unless exactly one bond is broken or
             made, since the distance of a single bond is used.
         """
-        atoms = self._system.atoms()
+        # Legacy restarts load a system per replica, which share a topology.
+        system = self._system[0] if isinstance(self._system, list) else self._system
+        atoms = system.atoms()
         pairs = []
 
-        for mol in self._system["property is_perturbable"].molecules():
+        for mol in system["property is_perturbable"].molecules():
             for prop in ("ring_breaking_bonds", "ring_making_bonds"):
                 if mol.has_property(prop):
                     flat = mol.property(prop).to_list()

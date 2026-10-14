@@ -24,6 +24,7 @@ Changelog
 * Save the GCMC end-state topologies, which include the additional waters, at the first checkpoint of each run as well as the last, and keep them on restart, so that they match the trajectory and checkpoints while a simulation is running, if it crashes, or if a restart never reaches a checkpoint [#244](https://github.com/OpenBioSim/somd2/pull/244).
 * Add `gcmc_batch_size` and `gcmc_num_attempts` options to set the number of GCMC trials evaluated in parallel per batch and in total per move, which were previously fixed at the defaults of the GCMC sampler. Both can be changed on restart, e.g. to reduce wasted trials when more than one is accepted per move [#246](https://github.com/OpenBioSim/somd2/pull/246).
 * Add adaptive replica exchange, enabled with `adaptive_repex`, which concentrates sampling on the lambda windows that are slowest to converge. Windows are ranked at checkpoints by the uncertainty they contribute to the free energy, and only the highest ranked are propagated and exchanged every cycle, with the rest joining every `adaptive_mix_interval` cycles [#247](https://github.com/OpenBioSim/somd2/pull/247).
+* Require `frame_frequency` to be a multiple of `gcmc_frequency` for GCMC simulations, so that every frame has a matching ghost water record. Previously some combinations silently saved frames without one [#247](https://github.com/OpenBioSim/somd2/pull/247).
 
 [2026.2.0](https://github.com/openbiosim/somd2/compare/2026.1.0...2026.2.0) - Sep 2026
 --------------------------------------------------------------------------------------
