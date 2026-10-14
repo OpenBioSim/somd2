@@ -954,11 +954,10 @@ def test_repex_concurrent_slots(ethane_methanol):
         assert not runner._config.minimisation_constraints
         assert runner._config.equilibration_constraints
 
-        # Every batch of dynamics, and of commits, must contain at most one
-        # replica per slot.
-        num_workers = runner._num_gpus * config["oversubscription_factor"]
+        # Every batch of dynamics, and every pass of commits, must contain at
+        # most one replica per slot.
         batches = list(runner._dynamics_batches(runner._replica_devices()))
-        batches += list(runner._safe_batches(num_workers))
+        batches += runner._replica_passes(0)
         for batch in batches:
             slots = [runner._dynamics_cache.slot_for(r) for r in batch]
             assert len(slots) == len(set(slots)), f"batch {batch} shares a slot"
@@ -1953,7 +1952,7 @@ def test_run_waits_for_blocks_on_error(monkeypatch):
 
     finished = []
 
-    def fail(dynamics_executor, checkpoint_executor, num_checkpoint_workers):
+    def fail(dynamics_executor, checkpoint_executor):
         dynamics_executor.submit(lambda: (time.sleep(0.2), finished.append(True)))
         raise RuntimeError("dynamics failed")
 
