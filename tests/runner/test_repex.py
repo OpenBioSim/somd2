@@ -333,6 +333,61 @@ def test_repex_mixing_samples_boltzmann(slot_schedule, inverted):
         assert tvd < 0.03
 
 
+def test_mix_subset_samples_boltzmann():
+    """
+    Validate that mixing only the hot replicas on most cycles, with a hot set
+    that changes during the run and every replica mixed periodically, samples
+    the same Boltzmann distribution over assignments as mixing them all.
+    """
+    import itertools
+
+    n = 4
+    num_cycles = 40000
+    mix_interval = 4
+    hot_sets = [[0, 1, 2], [1, 2, 3], [0, 1], [2, 3], [1, 2]]
+
+    rng = np.random.default_rng(1234)
+    U = rng.normal(0.0, 1.0, (n, n))
+    proposed = np.zeros((n, n))
+    accepted = np.zeros((n, n))
+
+    # The configuration in each window.
+    expected = list(range(n))
+
+    counts = {}
+    for cycle in range(num_cycles):
+        if (cycle + 1) % mix_interval == 0:
+            active = list(range(n))
+        else:
+            active = hot_sets[(cycle // 1000) % len(hot_sets)]
+
+        # Only the rows of the replicas being mixed may be used.
+        energies = rng.normal(0.0, 50.0, (n, n))
+        for replica in active:
+            energies[replica] = U[:, expected[replica]]
+
+        states = _mix_subset(np.array(active), energies, proposed, accepted)
+        for window in set(range(n)) - set(active):
+            assert states[window] == window
+
+        expected = [expected[source] for source in states]
+        counts[tuple(expected)] = counts.get(tuple(expected), 0) + 1
+
+    perms = list(itertools.permutations(range(n)))
+    weights = np.array([np.exp(-sum(U[k, p[k]] for k in range(n))) for p in perms])
+    weights /= weights.sum()
+
+    def tvd(target):
+        return 0.5 * sum(
+            abs(counts.get(p, 0) / num_cycles - w) for p, w in zip(perms, target)
+        )
+
+    assert tvd(weights) < 0.03
+
+    # The energies must be far enough from uniform for the test to have power.
+    assert tvd(np.full(len(perms), 1 / len(perms))) > 0.1
+
+
 @pytest.mark.parametrize(
     "rest2_scale, is_valid",
     [
