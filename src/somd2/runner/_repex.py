@@ -2189,9 +2189,16 @@ class RepexRunner(_RunnerBase):
             self._dynamics_cache._hot_replicas = None
             self._dynamics_cache._cold_votes = [0] * num_replicas
 
+        # Converted once, since unit conversions are slow.
+        start_ns = self._start_time.to("ns")
+        energy_frequency_ns = self._config.energy_frequency.to("ns")
+
         # Perform the replica exchange simulation.
         for i in range(cycles):
-            _logger.info(f"Running dynamics for cycle {i + 1} of {cycles}")
+            _logger.info(
+                f"Running dynamics for cycle {i + 1} of {cycles} "
+                f"(time = {start_ns + i * energy_frequency_ns:.4f} ns)"
+            )
 
             # Log the states. This is the replica index for the state (positions
             # and velocities) used to seed each replica for the current cycle.

@@ -89,7 +89,11 @@ _worker = _Worker()
 _line_re = _re.compile(
     r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \| (\w+)\s*\| \S+ - (.*)$"
 )
-_cycle_re = _re.compile(r"^Running dynamics for cycle (\d+) of (\d+)")
+# Older versions don't log the time.
+_cycle_re = _re.compile(
+    r"^Running dynamics for cycle (\d+) of (\d+)(?: \(time = ([\d.]+) ns\))?"
+)
+_restart_re = _re.compile(r"^Restarting at time (.+?), time remaining")
 _states_re = _re.compile(r"^States: \[([\d\s]*)\]")
 _block_re = _re.compile(r"^Finished block (\d+) of (\d+) for \S+ = ([\d.]+)")
 _perf_re = _re.compile(r"^Overall performance: ([\d.]+) ns day-1")
@@ -276,6 +280,12 @@ class _LogMonitor:
     def _new_session(self, timestamp):
         self.session_start = timestamp
         self.production_start = None
+        # The simulation time, in ns, that a replica exchange session restarted
+        # from, which its cycles are counted from.
+        self.start_ns = 0.0
+        # The simulation time, in ns, at the start of the latest cycle, if
+        # logged.
+        self.cycle_ns = None
         self.cycles = []
         self.blocks = []
         self.performance = None
@@ -334,9 +344,12 @@ class _LogMonitor:
                 self._add_states(message)
             else:
                 self._pending_states = message
+        elif m := _restart_re.match(message):
+            self.start_ns = _to_ns(m.group(1)) or 0.0
         elif m := _cycle_re.match(message):
             timestamp = _parse_timestamp(stamp)
             self.cycles.append((timestamp, int(m.group(1)), int(m.group(2))))
+            self.cycle_ns = float(m.group(3)) if m.group(3) else None
             self.last_progress = timestamp
             if self.production_start is None:
                 self.production_start = timestamp
@@ -539,11 +552,13 @@ class Simulation:
         energy_frequency = _to_ns(config.get("energy_frequency"))
         checkpoint_frequency = _to_ns(config.get("checkpoint_frequency"))
 
+        def clamp(t):
+            return min(t, runtime) if runtime else t
+
         done = {}
         for w in windows:
             if energy_frequency is not None:
-                t = w["samples"] * energy_frequency
-                done[w["lambda"]] = min(t, runtime) if runtime else t
+                done[w["lambda"]] = clamp(w["samples"] * energy_frequency)
         total = runtime * len(lambda_values) if runtime else None
         completed = sum(done.get(lam, 0.0) for lam in lambda_values)
 
@@ -555,7 +570,7 @@ class Simulation:
             time = state.get("time_ns") if state else None
             if time is None:
                 time = max(done.values(), default=0.0)
-            time = min(time, runtime) if runtime else time
+            time = clamp(time)
             completed = time * len(lambda_values)
 
         now = _time.time()
@@ -567,6 +582,7 @@ class Simulation:
                 else None
             ),
             "completed_ns": completed,
+            "saved_ns": completed,
             "fraction": completed / total if total else None,
             "eta_seconds": None,
             "throughput_ns_day": None,
@@ -600,6 +616,19 @@ class Simulation:
             last_time, cycle, num_cycles = log.cycles[-1]
             progress["cycle"] = cycle
             progress["num_cycles"] = num_cycles
+            # The time run, from the cycles logged as they start, since samples
+            # are only saved at checkpoints. Within half a sample of the saved
+            # time, it is taken to be the same.
+            if energy_frequency is not None:
+                started = log.cycle_ns
+                if started is None:
+                    started = log.start_ns + (cycle - 1) * energy_frequency
+                time = clamp(started + log.finished * energy_frequency)
+                live = time * len(lambda_values)
+                if live - completed > 0.5 * energy_frequency * len(lambda_values):
+                    progress["completed_ns"] = live
+                    if total:
+                        progress["fraction"] = live / total
             times = [c[0] for c in log.cycles[-51:]]
             if len(times) > 1:
                 interval = (times[-1] - times[0]) / (len(times) - 1)

@@ -950,7 +950,9 @@ function renderOverview(s) {
   let html = `<div class="bar"><span style="width:${pct.toFixed(1)}%"></span></div>`;
   html += `<div class="stats">`;
   html += stat("Progress", `${fmt(pct, 1)}%`);
-  html += stat("Simulated / window", `${simTime(p.completed_ns / Math.max(1, s.lambda_values.length))} of ${simTime(p.runtime_ns)}`);
+  const perWindow = (ns) => simTime(ns / Math.max(1, s.lambda_values.length));
+  const saved = p.saved_ns < p.completed_ns ? ` (${perWindow(p.saved_ns)} saved)` : "";
+  html += stat("Simulated / window", `${perWindow(p.completed_ns)} of ${simTime(p.runtime_ns)}${saved}`);
   html += stat("Time remaining", p.status === "finished" ? "done" : duration(p.eta_seconds));
   html += stat(`Current speed${p.throughput_label ? ` (${p.throughput_label})` : ""}`, p.throughput_ns_day ? `${fmt(p.throughput_ns_day, 1)} ns/day` : "–");
   if (p.cycle) html += stat("Cycle", `${p.cycle} of ${p.num_cycles}`);
