@@ -1635,25 +1635,47 @@ def test_rank_windows_at_end_of_run():
     assert runner._dynamics_cache._cold_votes == [1, 0, 0, 0, 0, 0, 0, 1]
 
 
+def _full_cycle_share(first, num_cycles, next_checkpoint, cycles_per_checkpoint, mix):
+    """
+    The share of the cycles left that propagate every window, stepping
+    through them with the same rules as the run loop.
+    """
+    full = 0
+    for i in range(first, num_cycles):
+        is_checkpoint = (i + 1) >= next_checkpoint - 1e-10
+        if (i + 1) % mix == 0 or is_checkpoint or i == num_cycles - 1:
+            full += 1
+        if is_checkpoint:
+            next_checkpoint += cycles_per_checkpoint
+    return full / (num_cycles - first)
+
+
 @pytest.mark.parametrize(
-    "mix_interval, cycles_per_checkpoint, expected",
+    "first, num_cycles, next_checkpoint, cycles_per_checkpoint, mix",
     [
         # Every checkpoint cycle is also a mix cycle.
-        (4, 100, 0.25),
-        # Mix cycles at 4, 8, ..., checkpoints at 10, 20, ..., both at 20, 40.
-        (4, 10, 0.25 + 0.1 - 0.05),
-        (1, 100, 1.0),
+        (100, 1000, 200, 100, 4),
+        (100, 1000, 110, 10, 4),
+        (0, 1000, 100, 100, 1),
         # Not a whole number of cycles between checkpoints.
-        (4, 2.5, 0.25 + 0.4 - 0.1),
+        (5, 1000, 7.5, 2.5, 4),
+        (100, 997, 133.3, 33.3, 7),
+        # Close to the end, where the final cycle matters.
+        (990, 1000, 1100, 100, 4),
+        (998, 1000, 1100, 100, 4),
     ],
 )
-def test_cold_rate(mix_interval, cycles_per_checkpoint, expected):
+def test_cold_rate(first, num_cycles, next_checkpoint, cycles_per_checkpoint, mix):
     """
-    Validate the share of cycles that propagate the cold windows.
+    Validate the share of cycles that propagate the cold windows against the
+    run loop's schedule.
     """
-    assert RepexRunner._cold_rate(mix_interval, cycles_per_checkpoint) == (
-        pytest.approx(expected)
+    expected = _full_cycle_share(
+        first, num_cycles, next_checkpoint, cycles_per_checkpoint, mix
     )
+    assert RepexRunner._cold_rate(
+        first, num_cycles, next_checkpoint, cycles_per_checkpoint, mix
+    ) == pytest.approx(expected)
 
 
 def test_rank_windows_without_gain():
@@ -1793,6 +1815,51 @@ def test_find_ring_pair(syk_ring_break_mols):
 
     runner = _ring_pair_runner(syk_ring_break_mols, np.array([[0, 3], [100, 4]]))
     assert runner._find_ring_pair() == (1, 7)
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+def test_adaptive_repex_ranking_arguments(ethane_methanol, monkeypatch):
+    """
+    Validate that each ranking is given the samples each window has, the
+    cycles left, and the share of those cycles that propagate every window.
+    """
+    num_lambda = 4
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "48fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "16fs",
+            "frame_frequency": "16fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": num_lambda,
+            "replica_exchange": True,
+            "adaptive_repex": True,
+            "adaptive_mix_interval": 2,
+            "adaptive_burn_in": "0 ps",
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+
+        calls = []
+        monkeypatch.setattr(
+            runner,
+            "_rank_windows",
+            lambda *args: calls.append(args),
+        )
+        runner.run()
+
+    # 12 cycles with a checkpoint every 4, and every window always hot.
+    assert [c[2] for c in calls] == [8, 4, 0]
+    for num_workers, samples, cycles_left, cold_rate in calls:
+        first = 12 - cycles_left
+        assert samples == [first] * num_lambda
+        if cycles_left > 0:
+            expected = _full_cycle_share(first, 12, first + 4, 4, 2)
+            assert cold_rate == pytest.approx(expected)
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")

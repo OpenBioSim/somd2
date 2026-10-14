@@ -34,7 +34,7 @@ def test_adaptive_summary(tmp_path):
         _cycle(1, 4)
         + [
             _line("Hot replicas: [1, 2]"),
-            _line("Estimated cost 0.75 and variance 1.10 relative to standard"),
+            _line("Estimated cost per cycle 0.75 and final variance 1.10"),
         ]
         + _cycle(2, 4, hot=[1, 2])
         + _cycle(3, 4)
@@ -69,7 +69,7 @@ def test_adaptive_rankings_after_restart(tmp_path):
         + _cycle(2, 3, hot=[1, 2])
         + [
             _line("Hot replicas: [1, 2]"),
-            _line("Estimated cost 0.75 and variance 1.10 relative to standard"),
+            _line("Estimated cost per cycle 0.75 and final variance 1.10"),
             _line("somd2 version: test"),
         ]
         + _cycle(2, 3)
@@ -89,7 +89,7 @@ def test_adaptive_rankings_kept_after_final_save(tmp_path):
         _cycle(1, 2)
         + [
             _line("Hot replicas: [1, 2]"),
-            _line("Estimated cost 0.75 and variance 1.10 relative to standard"),
+            _line("Estimated cost per cycle 0.75 and final variance 1.10"),
         ]
         + _cycle(2, 2, hot=[1, 2])
         + [
@@ -112,7 +112,7 @@ def test_adaptive_history_is_thinned(tmp_path):
     for n in range(1, 11):
         lines += _cycle(n, 10) + [
             _line("Hot replicas: [1, 2]"),
-            _line("Estimated cost 0.75 and variance 1.10 relative to standard"),
+            _line("Estimated cost per cycle 0.75 and final variance 1.10"),
         ]
     log = _monitor(tmp_path, lines)
 

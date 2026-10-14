@@ -96,7 +96,7 @@ _perf_re = _re.compile(r"^Overall performance: ([\d.]+) ns day-1")
 _correction_re = _re.compile(r"Standard state correction: (-?[\d.]+) kcal mol-1")
 _hot_re = _re.compile(r"^Hot replicas: \[([\d, ]*)\]")
 _estimate_re = _re.compile(
-    r"^Estimated cost (?:per cycle )?([\d.]+) and (?:final )?variance ([\d.]+)"
+    r"^Estimated cost per cycle ([\d.]+) and final variance ([\d.]+)"
 )
 # Older versions don't log the time.
 _waters_re = _re.compile(

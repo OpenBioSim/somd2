@@ -2125,9 +2125,6 @@ class RepexRunner(_RunnerBase):
         if is_adaptive:
             self._reset_adaptive_data()
             self._restore_adaptive_data()
-            cold_rate = self._cold_rate(
-                self._config.adaptive_mix_interval, cycles_per_checkpoint
-            )
         else:
             # Adaptive replica exchange may have been switched off on restart.
             self._dynamics_cache._hot_replicas = None
@@ -2303,6 +2300,14 @@ class RepexRunner(_RunnerBase):
                 # Rank the windows before the state is saved, so that a restart
                 # carries on with the same hot replicas.
                 if is_adaptive and is_checkpoint and is_burnt_in:
+                    # The threshold isn't advanced past this checkpoint yet.
+                    cold_rate = self._cold_rate(
+                        i + 1,
+                        cycles,
+                        next_checkpoint + cycles_per_checkpoint,
+                        cycles_per_checkpoint,
+                        self._config.adaptive_mix_interval,
+                    )
                     self._rank_windows(
                         num_workers,
                         self._window_samples(),
@@ -2931,19 +2936,31 @@ class RepexRunner(_RunnerBase):
         return matrix
 
     @staticmethod
-    def _cold_rate(mix_interval, cycles_per_checkpoint):
+    def _cold_rate(
+        first_cycle, num_cycles, next_checkpoint, cycles_per_checkpoint, mix_interval
+    ):
         """
-        The share of cycles that propagate every window, i.e. those on which
-        the cold windows are propagated: the mix and checkpoint cycles.
+        The share of the cycles left that propagate every window, and so the
+        cold ones: the mix and checkpoint cycles, and the last cycle. These
+        follow the same rules as the run loop.
 
         Parameters
         ----------
 
-        mix_interval: int
-            The number of cycles between mix cycles.
+        first_cycle: int
+            The number of cycles run so far.
+
+        num_cycles: int
+            The number of cycles in the run.
+
+        next_checkpoint: float
+            The threshold for the next checkpoint, as used by the run loop.
 
         cycles_per_checkpoint: float
             The number of cycles between checkpoints.
+
+        mix_interval: int
+            The number of cycles between mix cycles.
 
         Returns
         -------
@@ -2951,20 +2968,25 @@ class RepexRunner(_RunnerBase):
         float
             The share of cycles.
         """
-        from math import gcd
+        if first_cycle >= num_cycles:
+            return 1.0
 
-        mix = 1.0 / mix_interval
-        checkpoint = 1.0 / cycles_per_checkpoint
+        # The cycles left, numbered from one as in the run loop.
+        cycles = _np.arange(first_cycle + 1, num_cycles + 1)
+        full = cycles % mix_interval == 0
 
-        # Count cycles that are both once, which for whole numbers of cycles
-        # are those at multiples of the lowest common multiple.
-        if abs(cycles_per_checkpoint - round(cycles_per_checkpoint)) < 1e-6:
-            c = round(cycles_per_checkpoint)
-            both = gcd(mix_interval, c) / (mix_interval * c)
-        else:
-            both = mix * checkpoint
+        # A checkpoint is on the first cycle that reaches each threshold.
+        num_checkpoints = int(
+            (num_cycles - next_checkpoint + 1e-10) // cycles_per_checkpoint + 1
+        )
+        if num_checkpoints > 0:
+            thresholds = next_checkpoint + _np.arange(num_checkpoints) * (
+                cycles_per_checkpoint
+            )
+            full |= _np.isin(cycles, _np.ceil(thresholds - 1e-10).astype(int))
 
-        return min(1.0, mix + checkpoint - both)
+        full[-1] = True
+        return full.mean()
 
     def _window_samples(self):
         """
@@ -3329,6 +3351,7 @@ class RepexRunner(_RunnerBase):
 
         # There is nothing left to allocate, so keep the current hot replicas.
         if cycles_left <= 0:
+            _logger.info("Not ranking windows: no cycles left, keeping hot replicas")
             return
 
         num_replicas = self._config.num_lambda
@@ -3476,6 +3499,7 @@ class RepexRunner(_RunnerBase):
             if _np.prod(score(hot)) >= threshold:
                 hot = all_hot
 
+        hot_variance = all_hot_variance if hot == all_hot else score(hot)[1]
         hot = sorted(hot)
         self._dynamics_cache._hot_replicas = None if len(hot) == num_replicas else hot
 
@@ -3495,10 +3519,10 @@ class RepexRunner(_RunnerBase):
         # The compute per cycle from now on and the final variance, relative to
         # every window being hot for the rest of the run.
         cost = rates(hot).sum() / num_replicas
-        variance = score(hot)[1] / (all_hot_variance or 1.0)
+        variance = hot_variance / all_hot_variance if all_hot_variance > 0 else 1.0
         _logger.info(
             f"Estimated cost per cycle {cost:.2f} and final variance "
-            f"{variance:.2f} relative to standard replica exchange"
+            f"{variance:.2f} relative to every window being hot"
         )
 
     def _check_restart(self):
