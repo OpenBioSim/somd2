@@ -957,7 +957,7 @@ def test_repex_concurrent_slots(ethane_methanol):
         # Every batch of dynamics, and every pass of commits, must contain at
         # most one replica per slot.
         batches = list(runner._dynamics_batches(runner._replica_devices()))
-        batches += runner._replica_passes(0)
+        batches += runner._replica_passes(0) + runner._replica_passes(1)
         for batch in batches:
             slots = [runner._dynamics_cache.slot_for(r) for r in batch]
             assert len(slots) == len(set(slots)), f"batch {batch} shares a slot"
@@ -1962,6 +1962,37 @@ def test_run_waits_for_blocks_on_error(monkeypatch):
         runner.run()
 
     assert finished == [True]
+
+
+@pytest.mark.parametrize("is_raised", [False, True])
+def test_map_replicas_finishes_every_step(is_raised):
+    """
+    Validate that a failing step is only raised once every other step has
+    finished, whether the step returns the error or raises it.
+    """
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    runner = object.__new__(RepexRunner)
+    runner._lambda_values = [0.0, 0.5, 1.0]
+
+    finished = []
+
+    def step(replica):
+        if replica == 0:
+            error = RuntimeError("checkpoint failed")
+            if is_raised:
+                raise error
+            return replica, error
+        time.sleep(0.2)
+        finished.append(replica)
+        return replica, None
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        with pytest.raises(RuntimeError, match="checkpoint failed"):
+            runner._map_replicas(executor, "Checkpoint", step, [0, 1, 2])
+
+        assert sorted(finished) == [1, 2]
 
 
 def _layout(num_replicas, num_slots, num_gpus):

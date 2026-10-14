@@ -1791,7 +1791,8 @@ class RepexRunner(_RunnerBase):
         """
         Run a step for each replica in a thread pool, letting every call
         finish before raising the first error, so that files written under a
-        lock are all written before it is released.
+        lock are all written before it is released. An interrupt exits
+        straight away, without waiting.
 
         Two replicas that share a slot must never be processed at the same
         time, so the replicas must come from a single pass, unless the step
@@ -1808,7 +1809,7 @@ class RepexRunner(_RunnerBase):
 
         func: callable
             The step, which returns the index of the replica and the exception
-            raised, if any.
+            raised, if any. An exception it raises is treated the same way.
 
         replicas: list of int
             The replicas to run the step for.
@@ -1816,12 +1817,22 @@ class RepexRunner(_RunnerBase):
         args: iterable
             The remaining arguments, an iterable of one per replica for each.
         """
+        from concurrent.futures import wait
+
         try:
-            outcomes = list(executor.map(func, replicas, *args))
+            futures = [
+                executor.submit(func, *arguments) for arguments in zip(replicas, *args)
+            ]
+            wait(futures)
         except KeyboardInterrupt:
             executor.shutdown(wait=False, cancel_futures=True)
             _logger.error(f"{step} cancelled. Exiting.")
             _sys.exit(1)
+
+        outcomes = []
+        for replica, future in zip(replicas, futures):
+            error = future.exception()
+            outcomes.append((replica, error) if error else future.result())
 
         for index, error in outcomes:
             if error is not None:
@@ -3832,10 +3843,11 @@ class RepexRunner(_RunnerBase):
                 if error is not None:
                     return index, error
 
-            # Delete all trajectory frames from the Sire system within the
-            # dynamics object. This is a no-op when the replica was committed
-            # earlier, since the frames were cleared then to free the slot.
-            dynamics._d._sire_mols.delete_all_frames()
+            # Delete the trajectory frames from the Sire system within the
+            # dynamics object. A replica committed earlier, with shared
+            # contexts, had them cleared then, so its slot isn't touched here.
+            if committed is None:
+                dynamics._d._sire_mols.delete_all_frames()
 
             if block == -1:
                 _logger.info(

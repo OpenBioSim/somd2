@@ -454,15 +454,15 @@ carries configurations into and out of them, and a window only stops being hot
 after it has been found cold at two consecutive checkpoints, so no window is
 cold until the second checkpoint after the burn-in.
 
-The replicas propagated in each cycle are split into batches with no more than
-`--oversubscription-factor` replicas on any GPU, so that every GPU has work in
-every batch. With a context per replica, the hot windows are topped up with the
-cold windows that contribute the most uncertainty until every GPU has as many
-hot windows as the busiest, since those take no extra time. When contexts are
-re-used, replicas are assigned to them in a strided rather than contiguous
-pattern, so that the hot windows are spread evenly over the GPUs, and the hot
-windows aren't topped up, since a window added to a busy context would need
-another pass.
+The replicas propagated in each cycle are split into batches with no more
+replicas on any GPU than it can propagate at once: `--oversubscription-factor`,
+or fewer if the GPU has fewer contexts. With a context per replica, the hot
+windows are topped up with the cold windows that contribute the most
+uncertainty until every GPU fills as many batches as the busiest GPU needs,
+since those windows take no extra time. When contexts are re-used, replicas
+are assigned to them in a strided rather than contiguous pattern, so that the
+hot windows are spread evenly over the GPUs, and the hot windows aren't topped
+up, since a window added to a busy context would need another pass.
 
 The `--runtime` is the simulation time of the hot windows, so the remaining
 windows are sampled for less time and the windows have different numbers of
