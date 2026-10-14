@@ -2104,9 +2104,9 @@ class RepexRunner(_RunnerBase):
         else:
             cycles_per_flip = cycles + 1
 
-        # Initialise the threshold for the next checkpoint cycle. This is a float
-        # to handle non-integer ratios between the checkpoint and energy frequencies.
-        next_checkpoint = cycles_per_checkpoint
+        # The cycles, numbered from one, that end with a checkpoint.
+        checkpoint_cycles = self._checkpoint_cycles(cycles, cycles_per_checkpoint)
+        checkpoint_set = set(checkpoint_cycles.tolist())
 
         # Whether the most recent cycle saved the replica exchange state.
         is_checkpoint = False
@@ -2146,9 +2146,8 @@ class RepexRunner(_RunnerBase):
             # Clear the results list.
             results = []
 
-            # Whether to checkpoint. Use a float threshold to correctly handle
-            # non-integer ratios between the checkpoint and energy frequencies.
-            is_checkpoint = (i + 1) >= next_checkpoint - 1e-10
+            # Whether to checkpoint.
+            is_checkpoint = (i + 1) in checkpoint_set
 
             # Whether the checkpoint files are written at the end of this cycle.
             do_checkpoint = is_checkpoint or i == cycles - 1
@@ -2300,12 +2299,10 @@ class RepexRunner(_RunnerBase):
                 # Rank the windows before the state is saved, so that a restart
                 # carries on with the same hot replicas.
                 if is_adaptive and is_checkpoint and is_burnt_in:
-                    # The threshold isn't advanced past this checkpoint yet.
                     cold_rate = self._cold_rate(
                         i + 1,
                         cycles,
-                        next_checkpoint + cycles_per_checkpoint,
-                        cycles_per_checkpoint,
+                        checkpoint_cycles,
                         self._config.adaptive_mix_interval,
                     )
                     self._rank_windows(
@@ -2388,9 +2385,6 @@ class RepexRunner(_RunnerBase):
             if is_checkpoint:
                 # Update the block number.
                 block += 1
-
-                # Advance the checkpoint threshold.
-                next_checkpoint += cycles_per_checkpoint
 
         dynamics_executor.shutdown(wait=True)
         checkpoint_executor.shutdown(wait=True)
@@ -2936,13 +2930,37 @@ class RepexRunner(_RunnerBase):
         return matrix
 
     @staticmethod
-    def _cold_rate(
-        first_cycle, num_cycles, next_checkpoint, cycles_per_checkpoint, mix_interval
-    ):
+    def _checkpoint_cycles(num_cycles, cycles_per_checkpoint):
+        """
+        The cycles that end with a checkpoint: the first to reach each multiple
+        of the number of cycles between checkpoints, which may not be a whole
+        number.
+
+        Parameters
+        ----------
+
+        num_cycles: int
+            The number of cycles in the run.
+
+        cycles_per_checkpoint: float
+            The number of cycles between checkpoints.
+
+        Returns
+        -------
+
+        np.ndarray
+            The checkpoint cycles, numbered from one, in increasing order.
+        """
+        num_checkpoints = int(num_cycles / cycles_per_checkpoint) + 1
+        multiples = _np.arange(1, num_checkpoints + 1) * cycles_per_checkpoint
+        cycles = _np.ceil(multiples - 1e-10).astype(int)
+        return cycles[cycles <= num_cycles]
+
+    @staticmethod
+    def _cold_rate(first_cycle, num_cycles, checkpoint_cycles, mix_interval):
         """
         The share of the cycles left that propagate every window, and so the
-        cold ones: the mix and checkpoint cycles, and the last cycle. These
-        follow the same rules as the run loop.
+        cold ones: the mix and checkpoint cycles, and the last cycle.
 
         Parameters
         ----------
@@ -2953,11 +2971,8 @@ class RepexRunner(_RunnerBase):
         num_cycles: int
             The number of cycles in the run.
 
-        next_checkpoint: float
-            The threshold for the next checkpoint, as used by the run loop.
-
-        cycles_per_checkpoint: float
-            The number of cycles between checkpoints.
+        checkpoint_cycles: np.ndarray
+            The checkpoint cycles, numbered from one, in increasing order.
 
         mix_interval: int
             The number of cycles between mix cycles.
@@ -2971,22 +2986,21 @@ class RepexRunner(_RunnerBase):
         if first_cycle >= num_cycles:
             return 1.0
 
-        # The cycles left, numbered from one as in the run loop.
-        cycles = _np.arange(first_cycle + 1, num_cycles + 1)
-        full = cycles % mix_interval == 0
-
-        # A checkpoint is on the first cycle that reaches each threshold.
-        num_checkpoints = int(
-            (num_cycles - next_checkpoint + 1e-10) // cycles_per_checkpoint + 1
+        # Mix cycles, then checkpoint cycles that aren't also mix cycles.
+        full = num_cycles // mix_interval - first_cycle // mix_interval
+        start, end = _np.searchsorted(
+            checkpoint_cycles, [first_cycle, num_cycles], side="right"
         )
-        if num_checkpoints > 0:
-            thresholds = next_checkpoint + _np.arange(num_checkpoints) * (
-                cycles_per_checkpoint
-            )
-            full |= _np.isin(cycles, _np.ceil(thresholds - 1e-10).astype(int))
+        checkpoints = checkpoint_cycles[start:end]
+        full += int((checkpoints % mix_interval != 0).sum())
 
-        full[-1] = True
-        return full.mean()
+        # The last cycle always propagates every window.
+        if num_cycles % mix_interval != 0 and (
+            len(checkpoints) == 0 or checkpoints[-1] != num_cycles
+        ):
+            full += 1
+
+        return full / (num_cycles - first_cycle)
 
     def _window_samples(self):
         """
@@ -3344,8 +3358,8 @@ class RepexRunner(_RunnerBase):
             The number of cycles left in the run.
 
         cold_rate: float
-            The share of cycles that propagate every window, and so the cold
-            ones.
+            The share of the cycles left that propagate every window, and so
+            the cold ones.
         """
         from math import ceil
 
@@ -3499,7 +3513,7 @@ class RepexRunner(_RunnerBase):
             if _np.prod(score(hot)) >= threshold:
                 hot = all_hot
 
-        hot_variance = all_hot_variance if hot == all_hot else score(hot)[1]
+        hot_variance = score(hot)[1]
         hot = sorted(hot)
         self._dynamics_cache._hot_replicas = None if len(hot) == num_replicas else hot
 

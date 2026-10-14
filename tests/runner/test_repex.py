@@ -1635,47 +1635,72 @@ def test_rank_windows_at_end_of_run():
     assert runner._dynamics_cache._cold_votes == [1, 0, 0, 0, 0, 0, 0, 1]
 
 
-def _full_cycle_share(first, num_cycles, next_checkpoint, cycles_per_checkpoint, mix):
+def _loop_schedule(num_cycles, cycles_per_checkpoint, mix):
     """
-    The share of the cycles left that propagate every window, stepping
-    through them with the same rules as the run loop.
+    The checkpoint cycles and the cycles that propagate every window, from
+    stepping through the cycles with a running checkpoint threshold, kept
+    exact so that it doesn't drift.
     """
-    full = 0
-    for i in range(first, num_cycles):
-        is_checkpoint = (i + 1) >= next_checkpoint - 1e-10
-        if (i + 1) % mix == 0 or is_checkpoint or i == num_cycles - 1:
-            full += 1
+    from fractions import Fraction
+
+    checkpoints, full = [], []
+    cycles_per_checkpoint = Fraction(cycles_per_checkpoint)
+    threshold = cycles_per_checkpoint
+    for i in range(num_cycles):
+        is_checkpoint = (i + 1) >= threshold
         if is_checkpoint:
-            next_checkpoint += cycles_per_checkpoint
-    return full / (num_cycles - first)
+            checkpoints.append(i + 1)
+            threshold += cycles_per_checkpoint
+        if (i + 1) % mix == 0 or is_checkpoint or i == num_cycles - 1:
+            full.append(i + 1)
+    return checkpoints, full
 
 
-@pytest.mark.parametrize(
-    "first, num_cycles, next_checkpoint, cycles_per_checkpoint, mix",
-    [
-        # Every checkpoint cycle is also a mix cycle.
-        (100, 1000, 200, 100, 4),
-        (100, 1000, 110, 10, 4),
-        (0, 1000, 100, 100, 1),
-        # Not a whole number of cycles between checkpoints.
-        (5, 1000, 7.5, 2.5, 4),
-        (100, 997, 133.3, 33.3, 7),
-        # Close to the end, where the final cycle matters.
-        (990, 1000, 1100, 100, 4),
-        (998, 1000, 1100, 100, 4),
-    ],
-)
-def test_cold_rate(first, num_cycles, next_checkpoint, cycles_per_checkpoint, mix):
+def _full_cycle_share(first, num_cycles, cycles_per_checkpoint, mix):
+    """
+    The share of the cycles after 'first' that propagate every window.
+    """
+    _, full = _loop_schedule(num_cycles, cycles_per_checkpoint, mix)
+    return sum(c > first for c in full) / (num_cycles - first)
+
+
+SCHEDULES = [
+    # Every checkpoint cycle is also a mix cycle.
+    (100, 1000, 100, 4),
+    (100, 1000, 10, 4),
+    (0, 1000, 100, 1),
+    # Not a whole number of cycles between checkpoints.
+    (5, 1000, 2.5, 4),
+    (100, 997, 33.3, 7),
+    (0, 100000, 33.3, 3),
+    # A checkpoint interval longer than the run.
+    (0, 250, 250.0, 4),
+    # Close to the end, where the final cycle matters.
+    (990, 1000, 100, 4),
+    (998, 1000, 100, 4),
+]
+
+
+@pytest.mark.parametrize("first, num_cycles, cycles_per_checkpoint, mix", SCHEDULES)
+def test_checkpoint_cycles(first, num_cycles, cycles_per_checkpoint, mix):
+    """
+    Validate the checkpoint cycles against a running checkpoint threshold.
+    """
+    expected, _ = _loop_schedule(num_cycles, cycles_per_checkpoint, mix)
+    cycles = RepexRunner._checkpoint_cycles(num_cycles, cycles_per_checkpoint)
+    assert cycles.tolist() == expected
+
+
+@pytest.mark.parametrize("first, num_cycles, cycles_per_checkpoint, mix", SCHEDULES)
+def test_cold_rate(first, num_cycles, cycles_per_checkpoint, mix):
     """
     Validate the share of cycles that propagate the cold windows against the
     run loop's schedule.
     """
-    expected = _full_cycle_share(
-        first, num_cycles, next_checkpoint, cycles_per_checkpoint, mix
+    checkpoints = RepexRunner._checkpoint_cycles(num_cycles, cycles_per_checkpoint)
+    assert RepexRunner._cold_rate(first, num_cycles, checkpoints, mix) == pytest.approx(
+        _full_cycle_share(first, num_cycles, cycles_per_checkpoint, mix)
     )
-    assert RepexRunner._cold_rate(
-        first, num_cycles, next_checkpoint, cycles_per_checkpoint, mix
-    ) == pytest.approx(expected)
 
 
 def test_rank_windows_without_gain():
@@ -1858,7 +1883,7 @@ def test_adaptive_repex_ranking_arguments(ethane_methanol, monkeypatch):
         first = 12 - cycles_left
         assert samples == [first] * num_lambda
         if cycles_left > 0:
-            expected = _full_cycle_share(first, 12, first + 4, 4, 2)
+            expected = _full_cycle_share(first, 12, 4, 2)
             assert cold_rate == pytest.approx(expected)
 
 
