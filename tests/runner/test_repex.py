@@ -1639,15 +1639,16 @@ def _loop_schedule(num_cycles, cycles_per_checkpoint, mix):
     """
     The checkpoint cycles and the cycles that propagate every window, from
     stepping through the cycles with a running checkpoint threshold, kept
-    exact so that it doesn't drift.
+    exact so that it doesn't drift, with the same tolerance as the runner.
     """
     from fractions import Fraction
 
     checkpoints, full = [], []
     cycles_per_checkpoint = Fraction(cycles_per_checkpoint)
+    tolerance = Fraction(1, 10**10)
     threshold = cycles_per_checkpoint
     for i in range(num_cycles):
-        is_checkpoint = (i + 1) >= threshold
+        is_checkpoint = (i + 1) >= threshold - tolerance
         if is_checkpoint:
             checkpoints.append(i + 1)
             threshold += cycles_per_checkpoint
@@ -1673,6 +1674,8 @@ SCHEDULES = [
     (5, 1000, 2.5, 4),
     (100, 997, 33.3, 7),
     (0, 100000, 33.3, 3),
+    # Multiples that are whole numbers, but not exactly so in binary.
+    (0, 1000, 1.1, 4),
     # A checkpoint interval longer than the run.
     (0, 250, 250.0, 4),
     # Close to the end, where the final cycle matters.
@@ -1689,6 +1692,14 @@ def test_checkpoint_cycles(first, num_cycles, cycles_per_checkpoint, mix):
     expected, _ = _loop_schedule(num_cycles, cycles_per_checkpoint, mix)
     cycles = RepexRunner._checkpoint_cycles(num_cycles, cycles_per_checkpoint)
     assert cycles.tolist() == expected
+
+
+def test_checkpoint_cycles_without_cycles():
+    """
+    Validate that a run with no cycles, and so no checkpoint interval, has no
+    checkpoints.
+    """
+    assert RepexRunner._checkpoint_cycles(0, 0.0).tolist() == []
 
 
 @pytest.mark.parametrize("first, num_cycles, cycles_per_checkpoint, mix", SCHEDULES)

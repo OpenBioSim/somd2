@@ -2951,6 +2951,9 @@ class RepexRunner(_RunnerBase):
         np.ndarray
             The checkpoint cycles, numbered from one, in increasing order.
         """
+        if num_cycles <= 0 or cycles_per_checkpoint <= 0:
+            return _np.array([], dtype=int)
+
         num_checkpoints = int(num_cycles / cycles_per_checkpoint) + 1
         multiples = _np.arange(1, num_checkpoints + 1) * cycles_per_checkpoint
         cycles = _np.ceil(multiples - 1e-10).astype(int)
