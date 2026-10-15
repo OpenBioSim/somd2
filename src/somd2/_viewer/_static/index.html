@@ -725,6 +725,25 @@ function saveViewer(v, title) {
 
 // ---------------------------------------------------------------- rendering
 
+// Which details are open and how far lists are scrolled, for elements marked
+// with data-keep, so that redrawing the page keeps them.
+function keptState(root) {
+  const kept = {};
+  root.querySelectorAll("[data-keep]").forEach((el) => {
+    kept[el.dataset.keep] = { open: el.open, scroll: el.scrollTop };
+  });
+  return kept;
+}
+
+function restoreState(root, kept) {
+  root.querySelectorAll("[data-keep]").forEach((el) => {
+    const k = kept[el.dataset.keep];
+    if (!k) return;
+    if (el.tagName === "DETAILS") el.open = k.open;
+    el.scrollTop = k.scroll;
+  });
+}
+
 function card(title, body) {
   const open = state.collapsed.has(title) ? "" : " open";
   return `<details class="card section" data-section="${esc(title)}"${open}><summary><h3>${esc(title)}</h3></summary>${body}</details>`;
@@ -931,7 +950,9 @@ function renderOverview(s) {
   let html = `<div class="bar"><span style="width:${pct.toFixed(1)}%"></span></div>`;
   html += `<div class="stats">`;
   html += stat("Progress", `${fmt(pct, 1)}%`);
-  html += stat("Simulated / window", `${simTime(p.completed_ns / Math.max(1, s.lambda_values.length))} of ${simTime(p.runtime_ns)}`);
+  const perWindow = (ns) => simTime(ns / Math.max(1, s.lambda_values.length));
+  const saved = p.saved_ns < p.completed_ns ? ` (${perWindow(p.saved_ns)} saved)` : "";
+  html += stat("Simulated / window", `${perWindow(p.completed_ns)} of ${simTime(p.runtime_ns)}${saved}`);
   html += stat("Time remaining", p.status === "finished" ? "done" : duration(p.eta_seconds));
   html += stat(`Current speed${p.throughput_label ? ` (${p.throughput_label})` : ""}`, p.throughput_ns_day ? `${fmt(p.throughput_ns_day, 1)} ns/day` : "–");
   if (p.cycle) html += stat("Cycle", `${p.cycle} of ${p.num_cycles}`);
@@ -941,7 +962,8 @@ function renderOverview(s) {
   html += `</div>`;
   if (p.messages && p.messages.length) {
     const msgs = p.messages.slice().reverse().map((m) => `<div class="lvl-${m.level}">${esc(new Date(m.time * 1000).toLocaleString())} · ${esc(m.level)} · ${esc(m.message)}</div>`).join("");
-    html += `<details class="log-messages"${p.status === "error" ? " open" : ""}><summary>Recent warnings and errors (${p.messages.length})</summary><div class="messages">${msgs}</div></details>`;
+    // Keyed by status, so that an error still opens it.
+    html += `<details class="log-messages" data-keep="log-${esc(p.status)}"${p.status === "error" ? " open" : ""}><summary>Recent warnings and errors (${p.messages.length})</summary><div class="messages" data-keep="log-scroll">${msgs}</div></details>`;
   }
   return card("Progress", html);
 }
@@ -1422,8 +1444,68 @@ function renderRepex(s) {
     html += `<h4>Round trips</h4><div class="note">${total} complete round trips (${LAMBDA} = 0 → 1 → 0) across all replicas, from ${r.num_cycles} logged cycles.</div><div class="chart" id="trips-chart"></div>`;
   }
   html += `</div></div>`;
+  if (r.adaptive) html += renderAdaptive(s, r.adaptive);
   if (r.replica_states) html += `<h4>Replica state trajectories</h4><div class="chart" id="replica-chart"></div>`;
   return card("Replica exchange", html);
+}
+
+function renderAdaptive(s, a) {
+  const n = s.lambda_values.length;
+  let html = `<h4>Adaptive replica exchange</h4><div class="stats">`;
+  if (a.hot) {
+    const hot = a.hot.length === n ? "all" : a.hot.map((k) => fmtLambda(s.lambda_values[k])).join(", ");
+    html += stat("Hot windows", `${a.hot.length} of ${n}`);
+    html += `</div><div class="note">Hot ${LAMBDA}: ${esc(hot)}</div><div class="stats">`;
+  }
+  if (a.cost !== undefined && a.cost !== null) {
+    html += stat("Estimated cost per cycle", `${fmt(a.cost, 2)}`);
+    html += stat("Estimated final variance", `${fmt(a.variance, 2)}`);
+  }
+  if (a.hot_only_fraction !== undefined) html += stat("Hot-only cycles", `${fmt(100 * a.hot_only_fraction, 1)}%`);
+  html += `</div>`;
+  if (a.cost !== undefined && a.cost !== null) {
+    html += `<div class="note">Estimates from the ranking at cycle ${a.ranked_cycle}, relative to every window being hot for the rest of the run: cost is the compute per cycle from then on, and variance that of the final free energy.</div>`;
+  } else if (a.first_ranking !== undefined) {
+    html += `<div class="note">The burn-in is complete. The windows are first ranked at ${fmt(a.first_ranking, 3)} ns, and can go cold from the checkpoint after that.</div>`;
+  } else if (a.ranked_cycle === undefined && (!a.hot || a.hot.length === n)) {
+    html += `<div class="note">The windows haven't been ranked yet, so every window is hot until the burn-in is complete.</div>`;
+  }
+  if (a.history) html += `<h4>Hot windows at each ranking</h4><div class="chart" id="hot-chart"></div><div class="note">Filled cells are hot windows, propagated every cycle. The others are cold, propagated every adaptive mix interval.</div>`;
+  return html;
+}
+
+// Which windows were hot (filled) at each ranking, by cycle.
+function hotChart(el, history, numStates) {
+  const cols = history.cycle.length;
+  const m = { l: 54, r: 14, t: 10, b: 40 };
+  const width = Math.max(280, el.clientWidth || 560);
+  const pw = width - m.l - m.r;
+  const cellW = pw / cols;
+  const cellH = Math.max(6, Math.min(16, 240 / numStates));
+  const ph = cellH * numStates;
+  const height = m.t + ph + m.b;
+  const rgb = css("--accent-rgb"), border = css("--border");
+  let svg = `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" style="max-width:${width}px" role="img">`;
+  for (let k = 0; k < numStates; k++) {
+    for (let j = 0; j < cols; j++) {
+      const hot = history.hot[k][j];
+      svg += `<rect x="${m.l + j * cellW}" y="${m.t + (numStates - 1 - k) * cellH}" width="${cellW}" height="${cellH}" fill="rgba(${rgb},${hot ? 0.85 : 0.08})" stroke="${border}" stroke-width="0.3"><title>window ${k}, cycle ${history.cycle[j]}: ${hot ? "hot" : "cold"}</title></rect>`;
+    }
+  }
+  const rowStep = Math.ceil(numStates / Math.max(1, Math.floor(ph / 14)));
+  for (let k = 0; k < numStates; k += rowStep) {
+    svg += `<text x="${m.l - 6}" y="${m.t + (numStates - 1 - k) * cellH + cellH / 2 + 4}" text-anchor="end">${k}</text>`;
+  }
+  const colStep = Math.ceil(cols / Math.max(1, Math.floor(pw / 60)));
+  for (let j = 0; j < cols; j += colStep) {
+    svg += `<text x="${m.l + j * cellW + cellW / 2}" y="${m.t + ph + 16}" text-anchor="middle">${history.cycle[j]}</text>`;
+  }
+  svg += `<text x="${m.l + pw / 2}" y="${height - 4}" text-anchor="middle">cycle</text>`;
+  svg += `<text transform="translate(12 ${m.t + ph / 2}) rotate(-90)" text-anchor="middle">window</text>`;
+  svg += "</svg>";
+  el.innerHTML = svg + SAVE_BUTTONS;
+  el.chartDraw = (target) => hotChart(target, history, numStates);
+  el.chartLegend = [];
 }
 
 function componentsLambda(s) {
@@ -1508,19 +1590,19 @@ function renderSchedule(s) {
     html += `</div>`;
   }
   html += `</div>`;
-  if (sc.description) html += `<details><summary>Schedule definition</summary><pre>${esc(sc.description)}</pre></details>`;
+  if (sc.description) html += `<details data-keep="schedule"><summary>Schedule definition</summary><pre>${esc(sc.description)}</pre></details>`;
   return card(`${LAMBDA} schedule`, html);
 }
 
 function renderConfig(s) {
   let html = `<input type="search" id="config-filter" placeholder="Filter options" value="${esc(state.configFilter)}" style="width:100%;margin-bottom:8px">`;
-  html += `<div class="table-wrap" style="max-height:420px;overflow-y:auto"><table class="config" id="config-table">`;
+  html += `<div class="table-wrap" data-keep="config-table" style="max-height:420px;overflow-y:auto"><table class="config" id="config-table">`;
   for (const [k, v] of Object.entries(s.config)) {
     const value = v === null ? "null" : typeof v === "object" ? JSON.stringify(v) : String(v);
     html += `<tr data-key="${esc(k)}"><td>${esc(k)}</td><td>${esc(value)}</td></tr>`;
   }
   html += `</table></div>`;
-  if (s.pme) html += `<details><summary>Tuned PME parameters</summary>${renderPME(s.pme)}</details>`;
+  if (s.pme) html += `<details data-keep="pme"><summary>Tuned PME parameters</summary>${renderPME(s.pme)}</details>`;
   return card("Configuration", html);
 }
 
@@ -1614,6 +1696,8 @@ function renderCharts(s) {
         xLabel: "replica", yLabel: "round trips", xFormat: (v) => String(Math.round(v)),
       });
     }
+    const hc = $("#hot-chart");
+    if (hc && r.adaptive && r.adaptive.history) hotChart(hc, r.adaptive.history, s.lambda_values.length);
     const rc = $("#replica-chart");
     if (rc && r.replica_states) {
       const n = r.replica_states.length;
@@ -2378,9 +2462,12 @@ function render() {
   html += renderConfig(s);
   html += `</div>`;
   const focused = document.activeElement && document.activeElement.id === "config-filter" ? document.activeElement.selectionStart : null;
+  const kept = main.dataset.run === s.id ? keptState(main) : null;
   main.innerHTML = html;
+  main.dataset.run = s.id;
   renderCharts(s);
   applyConfigFilter();
+  if (kept) restoreState(main, kept);
   const repeatSelect = $("#repeat-select");
   if (repeatSelect) repeatSelect.addEventListener("change", (e) => { location.hash = e.target.value; });
   attachStructure(s);

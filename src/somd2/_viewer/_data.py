@@ -89,11 +89,22 @@ _worker = _Worker()
 _line_re = _re.compile(
     r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \| (\w+)\s*\| \S+ - (.*)$"
 )
-_cycle_re = _re.compile(r"^Running dynamics for cycle (\d+) of (\d+)")
+# Older versions don't log the time.
+_cycle_re = _re.compile(
+    r"^Running dynamics for cycle (\d+) of (\d+)(?: \(time = ([\d.]+) ns\))?"
+)
+_restart_re = _re.compile(r"^Restarting at time (.+?), time remaining")
 _states_re = _re.compile(r"^States: \[([\d\s]*)\]")
 _block_re = _re.compile(r"^Finished block (\d+) of (\d+) for \S+ = ([\d.]+)")
 _perf_re = _re.compile(r"^Overall performance: ([\d.]+) ns day-1")
 _correction_re = _re.compile(r"Standard state correction: (-?[\d.]+) kcal mol-1")
+_hot_re = _re.compile(r"^Hot replicas: \[([\d, ]*)\]")
+_estimate_re = _re.compile(
+    r"^Estimated cost per cycle ([\d.]+) and final variance ([\d.]+)"
+)
+_burn_in_re = _re.compile(
+    r"^Adaptive replica exchange burn-in complete, first ranking at ([\d.]+) ns"
+)
 # Older versions don't log the time.
 _waters_re = _re.compile(
     r"^Current number of waters in GCMC volume at \S+ = ([\d.]+)"
@@ -178,6 +189,13 @@ def _checkpoint_lambda(path):
         return None
 
 
+def _is_adaptive(config):
+    """
+    Whether a run uses adaptive replica exchange.
+    """
+    return bool(config.get("replica_exchange") and config.get("adaptive_repex"))
+
+
 def _to_ns(value):
     """
     Convert a time string from the config, e.g. '2 ps', to nanoseconds.
@@ -251,6 +269,12 @@ class _LogMonitor:
         self._pending_states = None
         self.states = []
         self._saved_states = 0
+        # Adaptive replica exchange rankings, as [cycle, hot or None, cost,
+        # variance], and the cycles that propagated only the hot replicas.
+        self.rankings = []
+        self.hot_only_cycles = []
+        # The time of the first ranking in ns, logged once the burn-in ends.
+        self.first_ranking = None
         self.standard_state_correction = None
         self.messages = _deque(maxlen=20)
         # The number of waters in the GCMC region at each checkpoint, by λ, as
@@ -261,6 +285,12 @@ class _LogMonitor:
     def _new_session(self, timestamp):
         self.session_start = timestamp
         self.production_start = None
+        # The simulation time, in ns, that a replica exchange session restarted
+        # from, which its cycles are counted from.
+        self.start_ns = 0.0
+        # The simulation time, in ns, at the start of the latest cycle, if
+        # logged.
+        self.cycle_ns = None
         self.cycles = []
         self.blocks = []
         self.performance = None
@@ -306,17 +336,25 @@ class _LogMonitor:
             # A restart resumes from the last checkpoint, so the permutations
             # logged after it were discarded.
             del self.states[self._saved_states :]
+            saved = self._saved_states
+            self.rankings = [r for r in self.rankings if r[0] <= saved]
+            self.hot_only_cycles = [c for c in self.hot_only_cycles if c < saved]
             self._new_session(_parse_timestamp(stamp))
-        elif message.startswith("Saving replica exchange state"):
+        elif message.startswith(
+            ("Saving replica exchange state", "Saving final replica exchange state")
+        ):
             self._saved_states = len(self.states)
         elif message.startswith("States: ["):
             if "]" in message:
                 self._add_states(message)
             else:
                 self._pending_states = message
+        elif m := _restart_re.match(message):
+            self.start_ns = _to_ns(m.group(1)) or 0.0
         elif m := _cycle_re.match(message):
             timestamp = _parse_timestamp(stamp)
             self.cycles.append((timestamp, int(m.group(1)), int(m.group(2))))
+            self.cycle_ns = float(m.group(3)) if m.group(3) else None
             self.last_progress = timestamp
             if self.production_start is None:
                 self.production_start = timestamp
@@ -334,6 +372,18 @@ class _LogMonitor:
             self.finished = True
         elif m := _correction_re.search(message):
             self.standard_state_correction = float(m.group(1))
+        elif message.startswith("Propagating") and "hot replicas" in message:
+            # Logged after the cycle's states, so this is the latest cycle.
+            self.hot_only_cycles.append(len(self.states) - 1)
+        elif m := _hot_re.match(message):
+            hot = [int(x) for x in m.group(1).split(",")]
+            self.rankings.append([len(self.states), hot, None, None])
+        elif message.startswith("All replicas hot"):
+            self.rankings.append([len(self.states), None, None, None])
+        elif (m := _estimate_re.match(message)) and self.rankings:
+            self.rankings[-1][2:] = [float(m.group(1)), float(m.group(2))]
+        elif m := _burn_in_re.match(message):
+            self.first_ranking = float(m.group(1))
         elif m := _waters_re.match(message):
             time = float(m.group(2)) if m.group(2) is not None else None
             counts = self.gcmc_waters.setdefault(float(m.group(1)), [])
@@ -509,23 +559,37 @@ class Simulation:
         energy_frequency = _to_ns(config.get("energy_frequency"))
         checkpoint_frequency = _to_ns(config.get("checkpoint_frequency"))
 
+        def clamp(t):
+            return min(t, runtime) if runtime else t
+
         done = {}
         for w in windows:
             if energy_frequency is not None:
-                t = w["samples"] * energy_frequency
-                done[w["lambda"]] = min(t, runtime) if runtime else t
+                done[w["lambda"]] = clamp(w["samples"] * energy_frequency)
         total = runtime * len(lambda_values) if runtime else None
         completed = sum(done.get(lam, 0.0) for lam in lambda_values)
+
+        # Adaptive replica exchange samples cold windows less, so progress is
+        # the simulation time of the hot windows rather than the samples.
+        is_adaptive = _is_adaptive(config)
+        if is_adaptive:
+            state = self._repex_state()
+            time = state.get("time_ns") if state else None
+            if time is None:
+                time = max(done.values(), default=0.0)
+            time = clamp(time)
+            completed = time * len(lambda_values)
 
         now = _time.time()
         progress = {
             "runtime_ns": runtime,
             "expected_samples": (
                 round(runtime / energy_frequency)
-                if runtime and energy_frequency
+                if runtime and energy_frequency and not is_adaptive
                 else None
             ),
             "completed_ns": completed,
+            "saved_ns": completed,
             "fraction": completed / total if total else None,
             "eta_seconds": None,
             "throughput_ns_day": None,
@@ -559,6 +623,19 @@ class Simulation:
             last_time, cycle, num_cycles = log.cycles[-1]
             progress["cycle"] = cycle
             progress["num_cycles"] = num_cycles
+            # The time run, from the cycles logged as they start, since samples
+            # are only saved at checkpoints. Within half a sample of the saved
+            # time, it is taken to be the same.
+            if energy_frequency is not None:
+                started = log.cycle_ns
+                if started is None:
+                    started = log.start_ns + (cycle - 1) * energy_frequency
+                time = clamp(started + log.finished * energy_frequency)
+                live = time * len(lambda_values)
+                if live - completed > 0.5 * energy_frequency * len(lambda_values):
+                    progress["completed_ns"] = live
+                    if total:
+                        progress["fraction"] = live / total
             times = [c[0] for c in log.cycles[-51:]]
             if len(times) > 1:
                 interval = (times[-1] - times[0]) / (len(times) - 1)
@@ -566,7 +643,9 @@ class Simulation:
                 progress["eta_seconds"] = max(remaining, 0.0)
                 if energy_frequency is not None and interval > 0:
                     progress["throughput_ns_day"] = energy_frequency / interval * 86400
-                    progress["throughput_label"] = "per replica"
+                    progress["throughput_label"] = (
+                        "per hot replica" if is_adaptive else "per replica"
+                    )
         elif log.blocks and log.production_start is not None:
             elapsed = log.blocks[-1][0] - log.production_start
             if elapsed > 0 and checkpoint_frequency is not None:
@@ -878,13 +957,16 @@ class Simulation:
                 try:
                     with open(p, "rb") as f:
                         state = _RepexUnpickler(f).load()
+                    time = getattr(state, "_time", None)
                     return {
+                        "time_ns": time.to("ns") if time is not None else None,
                         "proposed": _np.asarray(state._num_proposed),
                         "accepted": _np.asarray(state._num_accepted),
                         "gcmc_stats": getattr(state, "_gcmc_stats", None),
                         "terminal_flip_stats": getattr(
                             state, "_terminal_flip_stats", None
                         ),
+                        "hot_replicas": getattr(state, "_hot_replicas", None),
                     }
                 except Exception as e:
                     error = error or e
@@ -925,8 +1007,11 @@ class Simulation:
             return float(corrections.pop())
         return log.standard_state_correction if log is not None else None
 
-    def _repex(self, log, lambda_values, repex_state):
+    def _repex(self, log, lambda_values, repex_state, is_adaptive=False):
         result = {"transition_matrix": self._transition_matrix()}
+
+        if is_adaptive:
+            result["adaptive"] = self._adaptive(log, len(lambda_values), repex_state)
 
         if repex_state is not None:
             proposed = repex_state["proposed"]
@@ -940,6 +1025,45 @@ class Simulation:
 
         if log is not None and log.states:
             result.update(self._replica_paths(log.states, len(lambda_values)))
+
+        return result
+
+    @staticmethod
+    def _adaptive(log, num_states, repex_state, max_rankings=200):
+        """
+        Summarise adaptive replica exchange: the current hot replicas, the
+        estimates from the latest ranking, the share of cycles that only
+        propagated the hot replicas, and the hot replicas over time.
+        """
+        result = {}
+
+        # The state holds the hot replicas in use, which a restart keeps.
+        if repex_state is not None:
+            hot = repex_state["hot_replicas"]
+            result["hot"] = list(range(num_states)) if hot is None else list(hot)
+
+        if log is None:
+            return result
+
+        if log.rankings:
+            cycle, _, cost, variance = log.rankings[-1]
+            result.update({"ranked_cycle": cycle, "cost": cost, "variance": variance})
+
+            # Keep the latest ranking when thinning a long history.
+            stride = max(1, -(-len(log.rankings) // max_rankings))
+            rankings = log.rankings[::-1][::stride][::-1]
+            result["history"] = {
+                "cycle": [r[0] for r in rankings],
+                "hot": [
+                    [int(r[1] is None or k in r[1]) for r in rankings]
+                    for k in range(num_states)
+                ],
+            }
+        elif log.first_ranking is not None:
+            result["first_ranking"] = log.first_ranking
+
+        if log.states:
+            result["hot_only_fraction"] = len(log.hot_only_cycles) / len(log.states)
 
         return result
 
@@ -1742,7 +1866,12 @@ class Simulation:
                 "repex": (
                     self._section(
                         "summarise the replica exchange",
-                        lambda: self._repex(log, lambda_values, repex_state),
+                        lambda: self._repex(
+                            log,
+                            lambda_values,
+                            repex_state,
+                            is_adaptive=_is_adaptive(config),
+                        ),
                     )
                     if is_repex
                     else None

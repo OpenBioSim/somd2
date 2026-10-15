@@ -282,6 +282,10 @@ except ModuleNotFoundError:
 # Settings that can be changed.
 RESOLUTION = ({width}, {height})
 TRANSPARENT = False
+# Colour management, brightened since the render is lit more dimly than the
+# viewer.
+VIEW_TRANSFORM = "Standard"
+EXPOSURE = 1.3
 # How the GCMC region is drawn: "wireframe", "shell" or None to leave it out.
 GCMC_STYLE = "wireframe"
 
@@ -305,6 +309,8 @@ path.write_text(PDB)
 
 canvas = mn.Canvas(resolution=RESOLUTION, transparent=TRANSPARENT)
 canvas.clear()
+bpy.context.scene.view_settings.view_transform = VIEW_TRANSFORM
+bpy.context.scene.view_settings.exposure = EXPOSURE
 
 mol = mn.Molecule.load(str(path))
 {styles}

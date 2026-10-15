@@ -79,6 +79,11 @@ class Runner(_RunnerBase):
             _logger.error(msg)
             raise ValueError(msg)
 
+        if config.adaptive_repex:
+            msg = "'adaptive_repex' requires 'replica_exchange' to be enabled."
+            _logger.error(msg)
+            raise ValueError(msg)
+
         # Call the base class constructor.
         super().__init__(system, config)
 

@@ -24,6 +24,8 @@ simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and
   [charge-change](#charge-change-perturbations), and protein mutations.
 - 🔁 **[Replica exchange](#replica-exchange)**: Hamiltonian replica exchange
   between λ windows.
+- 🎯 **[Adaptive replica exchange](#adaptive-replica-exchange)**: sampling
+  concentrated on the λ windows that are slowest to converge.
 - 🌡️ **[REST2](#rest2)**: replica exchange with solute scaling.
 - 💧 **[GCMC](#gcmc)**: grand canonical Monte Carlo water sampling.
 - 🔄 **[Terminal ring flips](#terminal-ring-flip-monte-carlo)**: Monte Carlo
@@ -413,6 +415,82 @@ e.g. a value of 2 computes energies for the current window and the two windows
 on either side of it, and the null energy with `--null-energy`. The number of
 neighbours is a trade-off between accuracy and computational cost, and around
 20% of the number of replicas has been found to be a good starting point.
+
+<a id="adaptive-replica-exchange"></a>
+
+### 🎯 Adaptive replica exchange
+
+For difficult perturbations, most of the uncertainty in the free energy often
+comes from a few λ windows, while the rest converge quickly and then contribute
+little as the simulation is extended. Adaptive replica exchange, enabled with
+`--adaptive-repex`, concentrates the sampling on the slow windows. After a
+burn-in period of standard replica exchange, set with `--adaptive-burn-in`, the
+windows are ranked at each checkpoint. Only the highest ranked ("hot") windows
+are propagated and exchanged every cycle, with every window joining in every
+`--adaptive-mix-interval` cycles, as well as on checkpoint cycles. A window that
+misses a frame cycle saves its frame the next time it is propagated.
+
+Each pair of neighbouring windows is ranked by σ√g of the reduced energy
+differences between them, where σ is the standard deviation and g the
+statistical inefficiency, which sets the uncertainty of its free energy
+difference. Pairs are made hot in order of rank for as long as doing so reduces
+the variance of the final free energy for the compute of the whole run,
+accounting for the samples each window has already collected and for cold
+windows costing and sampling `--adaptive-mix-interval` times less than hot ones.
+The following are always hot:
+
+- pairs whose forward and reverse free energy estimates disagree, or whose
+  estimate drifts during the simulation,
+- pairs that rarely exchange,
+- windows with fewer than `--adaptive-min-samples` statistically independent
+  samples since the burn-in,
+- for ring-breaking perturbations that break or make a single bond, windows in
+  which the bond distance has fewer than `--adaptive-min-samples` statistically
+  independent samples, since a slow distance can bias the free energy without
+  showing in the energy differences.
+
+The windows either side of each hot window are also made hot, so that exchange
+carries configurations into and out of them, and a window only stops being hot
+after it has been found cold at two consecutive checkpoints, so no window is
+cold until the second checkpoint after the burn-in.
+
+The replicas propagated in each cycle are split into batches with no more
+replicas on any GPU than it can propagate at once: `--oversubscription-factor`,
+or fewer if the GPU has fewer contexts. With a context per replica, the hot
+windows are topped up with the cold windows that contribute the most
+uncertainty until every GPU fills as many batches as the busiest GPU needs,
+since those windows take no extra time. When contexts are re-used, replicas
+are assigned to them in a strided rather than contiguous pattern, so that the
+hot windows are spread evenly over the GPUs, and the hot windows aren't topped
+up, since a window added to a busy context would need another pass.
+
+The `--runtime` is the simulation time of the hot windows, so the remaining
+windows are sampled for less time and the windows have different numbers of
+energy samples. For the same `--runtime`, adaptive replica exchange gives
+roughly the same uncertainty as standard replica exchange for less compute.
+To reduce the uncertainty instead, increase the `--runtime` until the run takes
+as long as standard replica exchange would, so that the slow windows are
+sampled for longer. It doesn't help a window that is stuck to escape.
+
+The windows are ranked at checkpoints, so the `--checkpoint-frequency` should
+be several times the `--adaptive-mix-interval` multiplied by the
+`--energy-frequency`, which can't be changed on restart. The default burn-in of
+500 ps also allows for equilibration, which is off by default. If the system has
+been equilibrated with `--equilibration-time`, a burn-in of around 200 ps is
+enough. Raising the burn-in on restart beyond the current time makes every
+window hot again until it is reached. The saving is largest when few windows
+are slow. If most of the windows are hot, adaptive replica exchange costs almost
+as much as standard replica exchange.
+
+A larger `--adaptive-mix-interval` saves more compute on the cold windows, but
+samples them less and exchanges configurations between hot and cold windows less
+often, which slows their movement across the λ range. The ranking accounts for
+the reduced sampling, so fewer windows go cold as the interval grows, but not
+for the slower exchange, so the interval isn't tuned automatically. Each ranking
+logs the estimated compute per cycle and final variance relative to every window
+being hot. If most windows stay hot, a smaller interval costs little, while if
+most go cold, a larger interval saves more. Values between 2 and 8 are
+reasonable, and the interval can be changed on restart.
 
 <a id="rest2"></a>
 

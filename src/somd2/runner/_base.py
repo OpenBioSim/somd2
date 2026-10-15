@@ -802,6 +802,15 @@ class RunnerBase:
                 _logger.error(msg)
                 raise ValueError(msg)
 
+            # Ghost waters are written by GCMC moves, so frames must coincide
+            # with them.
+            ratio = (self._config.frame_frequency / self._config.gcmc_frequency).value()
+
+            if not isclose(ratio, round(ratio), abs_tol=1e-4):
+                msg = "'frame_frequency' must be a multiple of 'gcmc_frequency'."
+                _logger.error(msg)
+                raise ValueError(msg)
+
             # Make sure the checkpoint frequency is a multiple of the frame frequency.
 
             # Get the ratio.
@@ -2276,6 +2285,23 @@ class RunnerBase:
 
         self._compare_configs(self._last_config, config)
 
+        # Adaptive replica exchange derives each window's sample count from its
+        # clock and the energy frequency, so the frequency can't change.
+        if self._config.adaptive_repex:
+            from math import isclose
+
+            last = self._last_config.get("energy_frequency")
+            if last and not isclose(
+                _sr.u(str(last)).to("ps"), self._config.energy_frequency.to("ps")
+            ):
+                msg = (
+                    "'energy_frequency' can't be changed on restart when using "
+                    f"'adaptive_repex'. Set energy_frequency='{last}' to continue "
+                    "the run."
+                )
+                _logger.error(msg)
+                raise ValueError(msg)
+
     @staticmethod
     def _systems_are_same(system0, system1, num_gcmc_waters=0):
         """
@@ -2489,6 +2515,7 @@ class RunnerBase:
         is_final_block=False,
         context=None,
         gcmc_sampler=None,
+        num_energy_rows=None,
     ):
         """
         Save a checkpoint file.
@@ -2517,6 +2544,10 @@ class RunnerBase:
         is_final_block: bool
             Whether this is the final block of the simulation.
 
+        num_energy_rows: int
+            The number of energy samples collected since the last checkpoint. If
+            None, every window is assumed to have collected a full block.
+
         Returns
         -------
 
@@ -2537,6 +2568,9 @@ class RunnerBase:
 
             # Get the lambda value.
             lam = self._lambda_values[index]
+
+            if num_energy_rows is None:
+                num_energy_rows = self._energy_per_block
 
             # -1 is the sentinel for a post-equilibration checkpoint. No
             # energies are collected during equilibration, so skip all
@@ -2634,7 +2668,8 @@ class RunnerBase:
                 # yet (e.g. checkpoint_frequency=0), create one from scratch.
                 _energy_traj = self._filenames[index]["energy_traj"]
                 if _Path(_energy_traj).exists():
-                    _parquet_append(_energy_traj, df.iloc[-self._energy_per_block :])
+                    if num_energy_rows > 0:
+                        _parquet_append(_energy_traj, df.iloc[-num_energy_rows:])
                 else:
                     _dataframe_to_parquet(df, metadata=metadata, filename=_energy_traj)
 
@@ -2673,10 +2708,10 @@ class RunnerBase:
                         self._is_restart and _Path(filename).exists()
                     ):
                         _dataframe_to_parquet(df, metadata=metadata, filename=filename)
-                    else:
+                    elif num_energy_rows > 0:
                         _parquet_append(
                             filename,
-                            df.iloc[-self._energy_per_block :],
+                            df.iloc[-num_energy_rows:],
                         )
 
             if not is_post_equilibration:
