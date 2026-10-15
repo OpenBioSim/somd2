@@ -303,8 +303,8 @@ class RepexRunner(_RunnerBase):
                 constraint_lambda_index=self._constraint_lambda_index,
                 gpu_devices=self._gpu_devices,
                 strided=self._is_strided,
+                virtual_sites=self._virtual_sites,
             )
-            self._dynamics_cache._virtual_sites = self._virtual_sites
 
         else:
             _logger.debug("Restarting from file")
@@ -321,16 +321,13 @@ class RepexRunner(_RunnerBase):
                 )
                 raise e
 
-            # Set again, since states saved by older versions don't have it.
-            self._dynamics_cache._virtual_sites = self._virtual_sites
-
             # Derive the simulation time: prefer the value stored in the
-            # pickle (_time is set by the new-format _write_checkpoint_system);
-            # fall back to the Sire system for old-format checkpoints.
-            if self._dynamics_cache._time is not None and not isinstance(
+            # pickle (set by the new-format _write_checkpoint_system); fall
+            # back to the Sire system for old-format checkpoints.
+            if self._dynamics_cache.time is not None and not isinstance(
                 self._system, list
             ):
-                time = self._dynamics_cache._time
+                time = self._dynamics_cache.time
             else:
                 time = self._system[0].time()
 
@@ -366,9 +363,9 @@ class RepexRunner(_RunnerBase):
                 )
 
             # Make sure the number of replicas is the same.
-            if len(self._dynamics_cache._lambdas) != self._config.num_lambda:
+            if self._dynamics_cache.num_replicas != self._config.num_lambda:
                 _logger.error(
-                    f"The number of replicas in the dynamics cache ({len(self._dynamics_cache._lambdas)}) "
+                    f"The number of replicas in the dynamics cache ({self._dynamics_cache.num_replicas}) "
                     f"does not match the number of replicas in the configuration ({self._config.num_lambda})."
                 )
 
@@ -377,23 +374,11 @@ class RepexRunner(_RunnerBase):
             if not isinstance(self._system, list):
                 self._system.set_time(time)
 
-            # The physical device list is not pickled, since the run may be
-            # restarted against a different set of GPUs.
-            self._dynamics_cache._gpu_devices = self._gpu_devices
-
-            # Rebuild the slot layout from the current config, so that
-            # 'max_contexts' can change on restart. Everything that is restored
-            # is per-replica, so it doesn't depend on the grouping.
-            self._dynamics_cache._num_slots = self._num_slots
-            self._dynamics_cache._update_constraints = self._config.update_constraints
-            self._dynamics_cache._constraint_lambda_index = (
-                self._constraint_lambda_index
-            )
-            self._dynamics_cache._strided = self._is_strided
-            self._dynamics_cache._build_slot_layout()
-
-            # Create the dynamics objects.
-            self._dynamics_cache._create_dynamics(
+            # The settings that aren't stored are taken from the current
+            # configuration, so that the GPUs and 'max_contexts' can change on
+            # restart. Everything that is restored is per-replica, so it doesn't
+            # depend on the slot layout.
+            self._dynamics_cache.prepare_restart(
                 self._system,
                 self._lambda_values,
                 self._rest2_scale_factors,
@@ -401,19 +386,13 @@ class RepexRunner(_RunnerBase):
                 self._dynamics_kwargs,
                 gcmc_kwargs=self._gcmc_kwargs,
                 output_directory=self._config.output_directory,
+                num_slots=self._num_slots,
+                update_constraints=self._config.update_constraints,
+                constraint_lambda_index=self._constraint_lambda_index,
+                gpu_devices=self._gpu_devices,
+                strided=self._is_strided,
+                virtual_sites=self._virtual_sites,
             )
-
-            # The OpenMM contexts are not reset here. Each replica's state is
-            # pushed into its slot by load_replica() at the start of its first
-            # block, which is the only point at which the slot is known to be
-            # free.
-
-            # Restore the sampling statistics. A sampler keeps only the lambda
-            # values it visits, so each can be handed the whole simulation's.
-            if self._dynamics_cache._gcmc_stats is not None:
-                for slot in range(self._dynamics_cache._num_slots):
-                    _, gcmc_sampler = self._dynamics_cache.get(slot)
-                    gcmc_sampler.restore_stats(self._dynamics_cache._gcmc_stats)
 
         # Log the GCMC sphere centre for each replica. This uses the stored
         # state rather than the context, since a slot only holds the positions
@@ -423,9 +402,7 @@ class RepexRunner(_RunnerBase):
         for i, lam in enumerate(self._lambda_values):
             _, gcmc_sampler = self._dynamics_cache.get(self._dynamics_cache.slot_for(i))
             if gcmc_sampler is not None and gcmc_sampler._reference is not None:
-                positions = DynamicsCache._get_positions(
-                    self._dynamics_cache._openmm_states[i]
-                )
+                positions = self._dynamics_cache.stored_positions(i)
                 target = gcmc_sampler._get_target_position(
                     positions.value_in_unit(_omm_unit.angstrom)
                 )
@@ -441,9 +418,9 @@ class RepexRunner(_RunnerBase):
         # If restarting, subtract the time already run from the total runtime
         if self._config.restart:
             time = (
-                self._dynamics_cache._time
+                self._dynamics_cache.time
                 if (
-                    self._dynamics_cache._time is not None
+                    self._dynamics_cache.time is not None
                     and not isinstance(self._system, list)
                 )
                 else self._system[0].time()
@@ -486,7 +463,7 @@ class RepexRunner(_RunnerBase):
         # until here so that _terminal_flip_samplers is always initialised first).
         if self._is_restart and self._terminal_flip_samplers is not None:
             for i in range(len(self._lambda_values)):
-                attempted, accepted = self._dynamics_cache._terminal_flip_stats[i]
+                attempted, accepted = self._dynamics_cache.terminal_flip_stats[i]
                 self._terminal_flip_samplers[i].reset(attempted, accepted)
 
         from threading import Lock
@@ -553,7 +530,7 @@ class RepexRunner(_RunnerBase):
         list of list of int
             The replicas to propagate in each pass.
         """
-        groups = self._dynamics_cache._groups
+        groups = self._dynamics_cache.groups
 
         if replicas is not None:
             replicas = set(replicas)
@@ -851,7 +828,7 @@ class RepexRunner(_RunnerBase):
 
             # Only the hot replicas are propagated, except on mix and checkpoint
             # cycles.
-            hot = self._dynamics_cache._hot_replicas
+            hot = self._dynamics_cache.hot_replicas
             is_full = (
                 hot is None
                 or (i + 1) % self._config.adaptive_mix_interval == 0
@@ -1162,14 +1139,12 @@ class RepexRunner(_RunnerBase):
             )
             # A burn-in raised on restart starts the adaptation again.
             if self._start_time >= self._config.adaptive_burn_in:
-                self._ranker.restore(self._dynamics_cache._adaptive_data)
+                self._ranker.restore(self._dynamics_cache.adaptive_data)
             else:
-                self._dynamics_cache._hot_replicas = None
-                self._dynamics_cache._cold_votes = [0] * num_replicas
+                self._dynamics_cache.reset_hot_replicas()
         else:
             # Adaptive replica exchange may have been switched off on restart.
-            self._dynamics_cache._hot_replicas = None
-            self._dynamics_cache._cold_votes = [0] * num_replicas
+            self._dynamics_cache.reset_hot_replicas()
 
     def _propagate_cycle(
         self,
@@ -1415,7 +1390,7 @@ class RepexRunner(_RunnerBase):
 
             # Replicas' own clocks fall behind while they are cold, so the
             # simulation time is that of the cycle.
-            self._dynamics_cache._time = cycle_time
+            self._dynamics_cache.time = cycle_time
 
             self._save_repex_state(final=not is_checkpoint)
 
@@ -2048,13 +2023,17 @@ class RepexRunner(_RunnerBase):
             The number of samples for each window.
         """
         energy_frequency = self._config.energy_frequency.to("ps")
+        clocks = [
+            self._dynamics_cache.get_clock(replica)
+            for replica in range(self._dynamics_cache.num_replicas)
+        ]
         return [
             (
                 0
                 if clock is None
                 else round(clock["_current_time"].to("ps") / energy_frequency)
             )
-            for clock in self._dynamics_cache._clocks
+            for clock in clocks
         ]
 
     def _check_adaptive_config(self):
@@ -2196,9 +2175,7 @@ class RepexRunner(_RunnerBase):
         i, j = self._ring_pair
         distances = {}
         for k in replicas:
-            positions = DynamicsCache._get_positions(
-                self._dynamics_cache._openmm_states[k]
-            )
+            positions = self._dynamics_cache.stored_positions(k)
             pair = _np.asarray(positions[[i, j]].value_in_unit(_omm_unit.angstrom))
             distances[k] = float(_np.linalg.norm(pair[1] - pair[0]))
 
@@ -2239,11 +2216,11 @@ class RepexRunner(_RunnerBase):
             cold_rate,
             self._dynamics_cache.get_proposed(),
             self._dynamics_cache.get_accepted(),
-            self._dynamics_cache._hot_replicas,
-            self._dynamics_cache._cold_votes,
+            self._dynamics_cache.hot_replicas,
+            self._dynamics_cache.cold_votes,
         )
-        self._dynamics_cache._hot_replicas = hot
-        self._dynamics_cache._cold_votes = votes
+        self._dynamics_cache.hot_replicas = hot
+        self._dynamics_cache.cold_votes = votes
 
     def _check_restart(self):
         """
@@ -2277,7 +2254,7 @@ class RepexRunner(_RunnerBase):
         velocities are already stored as compact numpy arrays in the OpenMM
         state dict.
         """
-        self._dynamics_cache._time = system.time()
+        self._dynamics_cache.time = system.time()
 
     def _load_and_commit(self, index):
         """
@@ -2453,7 +2430,7 @@ class RepexRunner(_RunnerBase):
             # the water count and the statistics are read from what was
             # recorded while this replica was resident in its slot, since by
             # the time the cycle finishes the slot may hold another one.
-            num_waters = self._dynamics_cache._gcmc_num_waters[index]
+            num_waters = self._dynamics_cache.gcmc_num_waters(index)
             if gcmc_sampler is not None and num_waters is not None:
                 stats = gcmc_sampler.get_stats().get(gcmc_sampler.stats_key(lam))
                 n_moves = stats["num_moves"] if stats is not None else 0
@@ -2541,7 +2518,7 @@ class RepexRunner(_RunnerBase):
         """
         stats = {}
 
-        for slot in range(self._dynamics_cache._num_slots):
+        for slot in range(self._dynamics_cache.num_slots):
             _, gcmc_sampler = self._dynamics_cache.get(slot)
             if gcmc_sampler is not None:
                 stats.update(gcmc_sampler.get_stats())
@@ -2574,9 +2551,9 @@ class RepexRunner(_RunnerBase):
         _logger.info(f"Saving {label} state")
         self._save_sampler_stats()
         if self._config.adaptive_repex:
-            self._dynamics_cache._adaptive_data = self._ranker.to_dict()
+            self._dynamics_cache.adaptive_data = self._ranker.to_dict()
         else:
-            self._dynamics_cache._adaptive_data = None
+            self._dynamics_cache.adaptive_data = None
         with open(self._repex_state, "wb") as f:
             _pickle.dump(self._dynamics_cache, f)
 
@@ -2585,10 +2562,10 @@ class RepexRunner(_RunnerBase):
         Save GCMC and terminal flip sampler statistics to the dynamics cache
         prior to pickling.
         """
-        self._dynamics_cache._gcmc_stats = self._merge_gcmc_stats()
+        self._dynamics_cache.gcmc_stats = self._merge_gcmc_stats()
 
         if self._terminal_flip_samplers is not None:
-            self._dynamics_cache._terminal_flip_stats = [
+            self._dynamics_cache.terminal_flip_stats = [
                 [s.num_attempted, s.num_accepted] for s in self._terminal_flip_samplers
             ]
 

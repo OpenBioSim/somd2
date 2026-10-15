@@ -1561,18 +1561,22 @@ def _ranking_runner(num_lambda, is_ring_break=False, is_cached=False, **config):
     """
     Create a runner holding only what is needed to rank windows.
     """
-    from types import SimpleNamespace
+    from somd2.runner._dynamics_cache import DynamicsCache
 
     runner = object.__new__(RepexRunner)
     runner._config = Config(num_lambda=num_lambda, **config)
     runner._lambda_values = list(np.linspace(0, 1, num_lambda))
     zeros = np.zeros((num_lambda, num_lambda))
-    runner._dynamics_cache = SimpleNamespace(
-        get_proposed=lambda: zeros,
-        get_accepted=lambda: zeros,
-        _hot_replicas=None,
-        _cold_votes=[0] * num_lambda,
-    )
+
+    cache = object.__new__(DynamicsCache)
+    cache._num_replicas = num_lambda
+    cache._num_proposed = zeros
+    cache._num_accepted = zeros
+    cache._hot_replicas = None
+    cache._cold_votes = [0] * num_lambda
+    cache._adaptive_data = None
+    runner._dynamics_cache = cache
+
     runner._ranker = WindowRanker(
         num_lambda,
         runner._config.adaptive_min_samples,

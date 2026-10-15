@@ -49,6 +49,7 @@ class DynamicsCache:
         constraint_lambda_index=None,
         gpu_devices=None,
         strided=False,
+        virtual_sites=None,
     ):
         """
         Constructor.
@@ -113,6 +114,10 @@ class DynamicsCache:
             Whether to assign replicas to slots in a strided rather than a
             contiguous pattern, so that any contiguous range of replicas is
             spread evenly over the slots.
+
+        virtual_sites: np.ndarray
+            The molecules with virtual sites, so that each molecule's particles
+            can be found in the saved states.
         """
 
         num_replicas = len(lambdas)
@@ -138,9 +143,7 @@ class DynamicsCache:
         self._cold_votes = [0] * num_replicas
         self._adaptive_data = None
         self._openmm_states = [None] * num_replicas
-        # The molecules with virtual sites, so that each molecule's particles
-        # can be found in the saved states. Set by the runner.
-        self._virtual_sites = None
+        self._virtual_sites = virtual_sites
         self._gcmc_states = [None] * num_replicas
         # GCMC statistics for the whole simulation, keyed by lambda value.
         self._gcmc_stats = None
@@ -1081,6 +1084,241 @@ class DynamicsCache:
         Return the swap matrix.
         """
         return self._num_swaps
+
+    def prepare_restart(
+        self,
+        system,
+        lambdas,
+        rest2_scale_factors,
+        num_gpus,
+        dynamics_kwargs,
+        gcmc_kwargs=None,
+        output_directory=None,
+        num_slots=None,
+        update_constraints=True,
+        constraint_lambda_index=None,
+        gpu_devices=None,
+        strided=False,
+        virtual_sites=None,
+    ):
+        """
+        Prepare a cache loaded from a checkpoint to carry on the simulation.
+        The settings that aren't stored in a checkpoint are taken from the
+        current configuration, so that the number of contexts and the GPUs can
+        change on restart. The slot layout is rebuilt, the dynamics objects are
+        created, and the GCMC statistics are handed to the new samplers.
+
+        The OpenMM contexts are not reset here. Each replica's state is pushed
+        into its slot by load_replica() at the start of its first block, which
+        is the only point at which the slot is known to be free.
+
+        Parameters
+        ----------
+
+        system: :class: `System <sire.system.System>`, List[:class: `System <sire.system.System>`]
+            The perturbable system, or systems, to be simulated.
+
+        lambdas: np.ndarray
+            The lambda value for each replica.
+
+        rest2_scale_factors: np.ndarray
+            The REST2 scaling factor for each replica.
+
+        num_gpus: int
+            The number of GPUs to use.
+
+        dynamics_kwargs: dict
+            A dictionary of default dynamics keyword arguments.
+
+        gcmc_kwargs: dict
+            GCMC specific keyword arguments. If None, then GCMC is not used.
+
+        output_directory: pathlib.Path
+            The directory for simulation output.
+
+        num_slots: int
+            The number of dynamics objects (slots) to create. See the
+            constructor.
+
+        update_constraints: bool
+            Whether to update the constraints when changing the lambda value of
+            a slot.
+
+        constraint_lambda_index: int
+            The index of the lambda value to create every context at. See the
+            constructor.
+
+        gpu_devices: list
+            The physical devices backing each OpenMM device index.
+
+        strided: bool
+            Whether to assign replicas to slots in a strided pattern.
+
+        virtual_sites: np.ndarray
+            The molecules with virtual sites. Set again, since checkpoints
+            written by older versions don't store them.
+        """
+        self._gpu_devices = gpu_devices
+        self._num_slots = self._num_replicas if num_slots is None else num_slots
+        self._update_constraints = update_constraints
+        self._constraint_lambda_index = constraint_lambda_index
+        self._strided = strided
+        self._virtual_sites = virtual_sites
+        self._build_slot_layout()
+
+        self._create_dynamics(
+            system,
+            lambdas,
+            rest2_scale_factors,
+            num_gpus,
+            dynamics_kwargs,
+            gcmc_kwargs=gcmc_kwargs,
+            output_directory=output_directory,
+        )
+
+        # A sampler keeps only the lambda values it visits, so each can be
+        # handed the whole simulation's statistics.
+        if self._gcmc_stats is not None:
+            for slot in range(self._num_slots):
+                _, gcmc_sampler = self.get(slot)
+                gcmc_sampler.restore_stats(self._gcmc_stats)
+
+    def stored_positions(self, replica):
+        """
+        Return the positions in the stored state of a replica.
+
+        Parameters
+        ----------
+
+        replica: int
+            The index of the replica.
+
+        Returns
+        -------
+
+        positions: openmm.unit.Quantity
+            The positions.
+        """
+        return self._get_positions(self._openmm_states[replica])
+
+    def gcmc_num_waters(self, replica):
+        """
+        Return the number of waters in the GCMC volume, recorded when a replica
+        was last propagated.
+
+        Parameters
+        ----------
+
+        replica: int
+            The index of the replica.
+
+        Returns
+        -------
+
+        int
+            The number of waters, or None if not recorded.
+        """
+        return self._gcmc_num_waters[replica]
+
+    def reset_hot_replicas(self):
+        """
+        Make every replica hot, clearing the votes for adaptive replica
+        exchange.
+        """
+        self._hot_replicas = None
+        self._cold_votes = [0] * self._num_replicas
+
+    @property
+    def num_replicas(self):
+        """
+        The number of replicas.
+        """
+        return self._num_replicas
+
+    @property
+    def num_slots(self):
+        """
+        The number of dynamics objects (slots).
+        """
+        return self._num_slots
+
+    @property
+    def groups(self):
+        """
+        The replicas hosted by each slot.
+        """
+        return self._groups
+
+    @property
+    def time(self):
+        """
+        The simulation time at the last checkpoint, or None.
+        """
+        return self._time
+
+    @time.setter
+    def time(self, time):
+        self._time = time
+
+    @property
+    def hot_replicas(self):
+        """
+        The hot replicas of adaptive replica exchange, or None if every
+        replica is hot.
+        """
+        return self._hot_replicas
+
+    @hot_replicas.setter
+    def hot_replicas(self, hot_replicas):
+        self._hot_replicas = hot_replicas
+
+    @property
+    def cold_votes(self):
+        """
+        The number of consecutive rankings at which each replica has been
+        found cold.
+        """
+        return self._cold_votes
+
+    @cold_votes.setter
+    def cold_votes(self, cold_votes):
+        self._cold_votes = cold_votes
+
+    @property
+    def adaptive_data(self):
+        """
+        The data used to rank the windows for adaptive replica exchange, or
+        None.
+        """
+        return self._adaptive_data
+
+    @adaptive_data.setter
+    def adaptive_data(self, adaptive_data):
+        self._adaptive_data = adaptive_data
+
+    @property
+    def gcmc_stats(self):
+        """
+        The GCMC statistics for the whole simulation, keyed by lambda value, or
+        None.
+        """
+        return self._gcmc_stats
+
+    @gcmc_stats.setter
+    def gcmc_stats(self, gcmc_stats):
+        self._gcmc_stats = gcmc_stats
+
+    @property
+    def terminal_flip_stats(self):
+        """
+        The number of terminal flip moves attempted and accepted by each
+        replica.
+        """
+        return self._terminal_flip_stats
+
+    @terminal_flip_stats.setter
+    def terminal_flip_stats(self, terminal_flip_stats):
+        self._terminal_flip_stats = terminal_flip_stats
 
     def _physical_device(self, device):
         """
