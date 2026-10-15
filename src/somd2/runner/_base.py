@@ -245,17 +245,8 @@ class RunnerBase:
         # Link properties to the lambda = 0 end state.
         self._system = _sr.morph.link_to_reference(self._system)
 
-        # Whether this is a ring-breaking schedule.
-        if (
-            self._config._lambda_schedule_name is not None
-            and "ring_break" in self._config._lambda_schedule_name
-        ):
-            self._is_ring_breaking = True
-        else:
-            self._is_ring_breaking = False
-
         # Check to see if the end-state connectivities are the same.
-        if not self._is_ring_breaking:
+        if not self._is_ring_break:
             for mol in self._system["property is_perturbable"].molecules():
                 has_end_state_connectivity = False
                 try:
@@ -1038,21 +1029,12 @@ class RunnerBase:
         else:
             self._initial_time = [self._system.time()] * len(self._lambda_values)
 
-        # Check for missing systems in a multi-system simulation.
+        # Windows whose checkpoint couldn't be loaded start again from the
+        # reference system, matching their initial time of zero.
         if isinstance(self._system, list):
-            ref_system = None
-            missing_systems = []
             for i, system in enumerate(self._system):
-                if system is not None:
-                    ref_system = None
-                else:
-                    missing_systems.append(i)
-            if ref_system is None:
-                ref_system = self._reference_system
-
-            # Fill in any missing systems.
-            for i in missing_systems:
-                self._system[i] = ref_system.clone()
+                if system is None:
+                    self._system[i] = self._reference_system.clone()
 
         # Create the lock file name.
         self._lock_file = str(self._config.output_directory / "somd2.lock")
