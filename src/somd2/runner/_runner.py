@@ -1112,6 +1112,9 @@ class Runner(_RunnerBase):
         dynamics = window.dynamics
         checkpoint_frequency = self._config.checkpoint_frequency
 
+        # The simulation time at the start of production.
+        start_time = self._config.runtime - time
+
         # Calculate the number of blocks and the remainder time.
         frac = (time / checkpoint_frequency).value()
 
@@ -1120,21 +1123,24 @@ class Runner(_RunnerBase):
             frac = 1.0
             checkpoint_frequency = time
 
-        # Store the checkpoint time in nanoseconds.
-        checkpoint_interval = checkpoint_frequency.to("ns")
-
         num_blocks = int(frac)
         rem = round(frac - num_blocks, 12)
-        end_block = self._start_block + num_blocks
-        total_blocks = end_block + 1 if rem > 0 else end_block
 
-        for block in range(self._start_block, end_block):
+        # The length of each block, with the remainder run as a final block.
+        durations = [checkpoint_frequency] * num_blocks
+        if rem > 0:
+            durations.append(rem * checkpoint_frequency)
+        total_blocks = self._start_block + len(durations)
+
+        num_samples = self._num_energy_samples(window)
+
+        for i, duration in enumerate(durations):
+            block = self._start_block + i
+            is_final_block = i == len(durations) - 1
             block_start = _timer()
 
             try:
-                self._run_block(
-                    window, checkpoint_frequency, block * checkpoint_frequency
-                )
+                self._run_block(window, duration, start_time + i * checkpoint_frequency)
             except Exception as e:
                 raise RuntimeError(
                     f"Dynamics block {block + 1} for {_lam_sym} = {lambda_value:.5f} failed: {e}"
@@ -1145,11 +1151,19 @@ class Runner(_RunnerBase):
                 system = dynamics.commit()
 
                 # Calculate the speed in nanoseconds per day.
-                speed = checkpoint_interval / ((_timer() - block_start) / 86400)
+                speed = duration.to("ns") / ((_timer() - block_start) / 86400)
 
-                is_final_block = block == end_block - 1 and rem == 0
-
-                self._write_checkpoint(window, system, block, speed, is_final_block)
+                # Only the energy samples from this block are new.
+                previous_samples = num_samples
+                num_samples = self._num_energy_samples(window)
+                self._write_checkpoint(
+                    window,
+                    system,
+                    block,
+                    speed,
+                    is_final_block,
+                    num_energy_rows=num_samples - previous_samples,
+                )
 
                 # Delete all trajectory frames from the Sire system within the
                 # dynamics object.
@@ -1171,68 +1185,6 @@ class Runner(_RunnerBase):
                     f"Checkpoint failed for {_lam_sym} = {lambda_value:.5f}: {e}"
                 )
 
-        # Handle the remainder time. (There will be no remainder when GCMC
-        # sampling.)
-        if rem > 0:
-            block = end_block
-            remainder = rem * checkpoint_frequency
-            block_start = _timer()
-            try:
-                # Perform one terminal flip at the start of the remainder block.
-                if window.terminal_flip_sampler is not None:
-                    _logger.info(
-                        f"Performing terminal flip move at "
-                        f"{_lam_sym} = {lambda_value:.5f}"
-                    )
-                    if (
-                        window.terminal_flip_sampler.move(dynamics.context())
-                        and self._config.randomise_velocities
-                    ):
-                        dynamics.randomise_velocities()
-
-                self._run_dynamics(window, remainder)
-
-                # Commit the current system.
-                system = dynamics.commit()
-
-                # Save the energy contribution for each force.
-                if self._config.save_energy_components:
-                    self._save_energy_components(
-                        window.index, dynamics.context(), system.time().to("ns")
-                    )
-
-                # Calculate the speed in nanoseconds per day.
-                speed = remainder.to("ns") / ((_timer() - block_start) / 86400)
-
-                # Only the samples from the remainder are new.
-                self._write_checkpoint(
-                    window,
-                    system,
-                    block,
-                    speed,
-                    is_final_block=True,
-                    num_energy_rows=round(
-                        (remainder / self._config.energy_frequency).value()
-                    ),
-                )
-
-                # Delete all trajectory frames from the Sire system within the
-                # dynamics object.
-                dynamics._d._sire_mols.delete_all_frames()
-
-                _logger.info(
-                    f"Finished block {block + 1} of {total_blocks} "
-                    f"for {_lam_sym} = {lambda_value:.5f}"
-                )
-
-                _logger.success(
-                    f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"
-                )
-            except Exception as e:
-                raise RuntimeError(
-                    f"Final dynamics block for {_lam_sym} = {lambda_value:.5f} failed: {e}"
-                )
-
     def _run_without_checkpoints(self, window, time):
         """
         Run production dynamics in a single block, writing one checkpoint at
@@ -1250,6 +1202,7 @@ class Runner(_RunnerBase):
         lambda_value = window.lambda_value
 
         start = _timer()
+        num_samples = self._num_energy_samples(window)
 
         try:
             self._run_block(window, time, self._config.runtime - time)
@@ -1265,7 +1218,14 @@ class Runner(_RunnerBase):
         speed = time.to("ns") / ((_timer() - start) / 86400)
 
         try:
-            self._write_checkpoint(window, system, 0, speed, is_final_block=True)
+            self._write_checkpoint(
+                window,
+                system,
+                0,
+                speed,
+                is_final_block=True,
+                num_energy_rows=self._num_energy_samples(window) - num_samples,
+            )
         except Exception as e:
             msg = f"Checkpoint failed for {_lam_sym} = {lambda_value:.5f}: {e}"
             _logger.error(msg)
@@ -1307,10 +1267,9 @@ class Runner(_RunnerBase):
             self._run_dynamics(window, duration)
             return
 
-        runtime = _sr.u("0ps")
+        timestep = self._config.timestep
         flip_counter = 0
         save_frames = gcmc_sampler is not None and self._config.frame_frequency > 0
-        next_frame = self._config.frame_frequency if save_frames else None
 
         # Sub-block size: shortest active MC frequency, or energy_frequency when
         # only saving energy components.
@@ -1341,7 +1300,19 @@ class Runner(_RunnerBase):
             else None
         )
 
-        while runtime < duration:
+        # Count in integration steps, so that rounding errors can't add or drop
+        # a sub-block.
+        num_steps = self._num_steps(duration)
+        steps_per_block = max(1, self._num_steps(block_size))
+        frame_steps = self._num_steps(self._config.frame_frequency)
+        next_frame = frame_steps if save_frames else None
+        completed = 0
+
+        while completed < num_steps:
+            # The last sub-block is shortened if the block isn't a whole number
+            # of them.
+            step = min(steps_per_block, num_steps - completed)
+
             needs_pre_run_snapshot = False
 
             # GCMC move.
@@ -1375,14 +1346,14 @@ class Runner(_RunnerBase):
 
             # Record ghost residues immediately before the dynamics block if a
             # frame will be saved within it.
-            if save_frames and runtime + block_size >= next_frame:
+            if save_frames and completed + step >= next_frame:
                 self._save_ghost_residues(index, gcmc_sampler)
-                next_frame += self._config.frame_frequency
+                next_frame += frame_steps
 
             # Run the dynamics block.
             self._run_dynamics(
                 window,
-                block_size,
+                step * timestep,
                 excess_chemical_potential=(
                     self._mu_ex if gcmc_sampler is not None else None
                 ),
@@ -1393,14 +1364,54 @@ class Runner(_RunnerBase):
                 ),
             )
 
-            runtime += block_size
+            completed += step
             flip_counter += 1
 
             # Save energy components.
             if self._config.save_energy_components:
                 self._save_energy_components(
-                    index, dynamics.context(), (start_time + runtime).to("ns")
+                    index,
+                    dynamics.context(),
+                    (start_time + completed * timestep).to("ns"),
                 )
+
+    def _num_steps(self, duration):
+        """
+        The number of integration steps in a length of time.
+
+        Parameters
+        ----------
+
+        duration: sire.units.GeneralUnit
+            The length of time.
+
+        Returns
+        -------
+
+        int
+            The number of steps, to the nearest whole step.
+        """
+        return round((duration / self._config.timestep).value())
+
+    @staticmethod
+    def _num_energy_samples(window):
+        """
+        The number of energy samples recorded by a window's dynamics.
+
+        Parameters
+        ----------
+
+        window: _Window
+            The window being simulated.
+
+        Returns
+        -------
+
+        int
+            The number of samples.
+        """
+        energy_trajectory = window.dynamics._d._energy_trajectory
+        return 0 if energy_trajectory is None else len(energy_trajectory)
 
     def _run_dynamics(self, window, duration, **kwargs):
         """
@@ -1418,8 +1429,10 @@ class Runner(_RunnerBase):
         kwargs: dict
             Additional keyword arguments for the dynamics run.
         """
+        # Pass a number of steps, since Sire truncates a time that is a
+        # rounding error short of a whole step.
         window.dynamics.run(
-            duration,
+            self._num_steps(duration),
             energy_frequency=self._config.energy_frequency,
             frame_frequency=self._config.frame_frequency,
             lambda_windows=window.lambda_array,
