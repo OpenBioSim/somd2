@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from somd2.runner._base import RunnerBase
-from somd2.runner._repex import DynamicsCache
+from somd2.runner._dynamics_cache import DynamicsCache
 
 
 def counters(num_moves=0):

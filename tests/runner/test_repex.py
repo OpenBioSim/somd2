@@ -84,7 +84,7 @@ def test_repex_mixing_moves_configurations():
     Validate that each configuration is moved to the state that the mixing
     accepted, for a mix that can only be a 3-cycle.
     """
-    from somd2.runner._repex import DynamicsCache
+    from somd2.runner._dynamics_cache import DynamicsCache
 
     num_replicas = 3
 
@@ -233,7 +233,7 @@ def test_repex_mixing_samples_boltzmann(slot_schedule, inverted):
     import pickle
     from types import SimpleNamespace
 
-    from somd2.runner._repex import DynamicsCache
+    from somd2.runner._dynamics_cache import DynamicsCache
 
     n = 4
     num_cycles = 20000
@@ -1045,7 +1045,7 @@ def test_physical_device_mapping(gpu_devices, expected):
     backing it, since OpenMM numbers devices relative to the visible set
     whereas pynvml and pyopencl enumerate all of them.
     """
-    from somd2.runner._repex import DynamicsCache
+    from somd2.runner._dynamics_cache import DynamicsCache
 
     cache = object.__new__(DynamicsCache)
     cache._gpu_devices = gpu_devices
@@ -1059,7 +1059,7 @@ def test_max_contexts_advice():
     must name a number that the user can pass to 'max_contexts', and mention
     the frame frequency constraint that comes with it.
     """
-    from somd2.runner._repex import DynamicsCache
+    from somd2.runner._dynamics_cache import DynamicsCache
 
     advice = DynamicsCache._max_contexts_advice(6)
     assert "'max_contexts' to 6 or fewer" in advice
@@ -1085,7 +1085,7 @@ def test_gcmc_state_follows_replica():
     The ghost files and the sampling statistics belong to the lambda window
     rather than the configuration, so they must not be permuted.
     """
-    from somd2.runner._repex import DynamicsCache
+    from somd2.runner._dynamics_cache import DynamicsCache
 
     num_replicas = 4
 
@@ -1132,7 +1132,7 @@ def test_check_device_memory_queries_requested_device(monkeypatch, device, key, 
     import sys
     import types
 
-    from somd2.runner._repex import DynamicsCache
+    from somd2.runner._dynamics_cache import DynamicsCache
 
     pynvml = pytest.importorskip("pynvml")
 
@@ -1174,7 +1174,7 @@ def test_legacy_checkpoint_restore():
     loaded. These stored the replica states unpermuted, with the states array
     holding the mapping to apply on restart.
     """
-    from somd2.runner._repex import DynamicsCache
+    from somd2.runner._dynamics_cache import DynamicsCache
 
     n = 4
     legacy = {
@@ -1208,6 +1208,43 @@ def test_legacy_checkpoint_restore():
     assert cache._groups == [[0], [1], [2], [3]]
     assert cache._energy_trajectories == [None] * n
     assert cache._ghost_files == [None] * n
+
+
+def test_checkpoint_from_before_the_cache_moved(monkeypatch):
+    """
+    Validate that a checkpoint pickled when the dynamics cache was defined in
+    _repex can still be loaded.
+    """
+    import pickle
+
+    from somd2.runner._dynamics_cache import DynamicsCache
+
+    n = 2
+    cache = object.__new__(DynamicsCache)
+    cache.__setstate__(
+        {
+            "_lambdas": [0.0, 1.0],
+            "_rest2_scale_factors": [1.0] * n,
+            "_num_slots": n,
+            "_states": np.arange(n),
+            "_time": None,
+            "_openmm_states": [None] * n,
+            "_gcmc_samplers": [None] * n,
+            "_gcmc_states": [None] * n,
+            "_gcmc_stats": None,
+            "_terminal_flip_stats": [[0, 0]] * n,
+            "_num_proposed": np.zeros((n, n)),
+            "_num_accepted": np.zeros((n, n)),
+            "_num_swaps": np.zeros((n, n)),
+        }
+    )
+
+    with monkeypatch.context() as m:
+        m.setattr(DynamicsCache, "__module__", "somd2.runner._repex")
+        data = pickle.dumps(cache)
+
+    assert b"somd2.runner._repex" in data
+    assert isinstance(pickle.loads(data), DynamicsCache)
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
@@ -1487,7 +1524,7 @@ def test_strided_slot_layout():
     Validate that a strided layout spreads any contiguous range of replicas
     evenly over the slots.
     """
-    from somd2.runner._repex import DynamicsCache
+    from somd2.runner._dynamics_cache import DynamicsCache
 
     cache = object.__new__(DynamicsCache)
     cache._num_replicas = 10
@@ -2088,7 +2125,7 @@ def _layout(num_replicas, num_slots, num_gpus):
     A dynamics cache holding only a strided layout of replicas over slots, and
     slots over GPUs.
     """
-    from somd2.runner._repex import DynamicsCache
+    from somd2.runner._dynamics_cache import DynamicsCache
 
     cache = object.__new__(DynamicsCache)
     cache._replica_slot = [r % num_slots for r in range(num_replicas)]
@@ -2355,7 +2392,7 @@ def test_checkpoint_without_adaptive_state():
     Validate that a checkpoint written before adaptive replica exchange was
     added restores with every replica hot and no clocks of its own.
     """
-    from somd2.runner._repex import DynamicsCache
+    from somd2.runner._dynamics_cache import DynamicsCache
     from tests.runner.test_gcmc_stats import TestLegacyRepexCheckpoint
 
     cache = object.__new__(DynamicsCache)
