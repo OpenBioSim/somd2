@@ -2373,6 +2373,7 @@ class RunnerBase:
         is_final_block=False,
         context=None,
         gcmc_sampler=None,
+        num_energy_rows=None,
     ):
         """
         Save a checkpoint file.
@@ -2401,6 +2402,10 @@ class RunnerBase:
         is_final_block: bool
             Whether this is the final block of the simulation.
 
+        num_energy_rows: int
+            The number of energy samples collected since the last checkpoint.
+            If None, then a full block is assumed.
+
         Returns
         -------
 
@@ -2426,6 +2431,13 @@ class RunnerBase:
             # energies are collected during equilibration, so skip all
             # parquet-related work in this case.
             is_post_equilibration = block == -1
+
+            def new_rows(df):
+                # The rows sampled since the last checkpoint. Sliced from the
+                # start, since a count of zero must select no rows.
+                if num_energy_rows is None:
+                    return df.iloc[-self._energy_per_block :]
+                return df.iloc[len(df) - num_energy_rows :]
 
             # Get the energy trajectory.
             if not is_post_equilibration:
@@ -2518,7 +2530,7 @@ class RunnerBase:
                 # yet (e.g. checkpoint_frequency=0), create one from scratch.
                 _energy_traj = self._filenames[index]["energy_traj"]
                 if _Path(_energy_traj).exists():
-                    _parquet_append(_energy_traj, df.iloc[-self._energy_per_block :])
+                    _parquet_append(_energy_traj, new_rows(df))
                 else:
                     _dataframe_to_parquet(df, metadata=metadata, filename=_energy_traj)
 
@@ -2558,10 +2570,7 @@ class RunnerBase:
                     ):
                         _dataframe_to_parquet(df, metadata=metadata, filename=filename)
                     else:
-                        _parquet_append(
-                            filename,
-                            df.iloc[-self._energy_per_block :],
-                        )
+                        _parquet_append(filename, new_rows(df))
 
             if not is_post_equilibration:
                 self._flush_energy_components(index)

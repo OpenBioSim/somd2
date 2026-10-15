@@ -79,6 +79,61 @@ class Runner(_RunnerBase):
             _logger.error(msg)
             raise ValueError(msg)
 
+        from math import isclose
+
+        def is_multiple(value, interval):
+            ratio = (value / interval).value()
+            return isclose(ratio, round(ratio), abs_tol=1e-4)
+
+        # Dynamics are run in whole integration steps.
+        for option in (
+            "runtime",
+            "checkpoint_frequency",
+            "energy_frequency",
+            "frame_frequency",
+            "gcmc_frequency",
+            "terminal_flip_frequency",
+        ):
+            value = getattr(config, option)
+            if value is not None and not is_multiple(value, config.timestep):
+                msg = f"'{option}' must be a multiple of 'timestep'."
+                _logger.error(msg)
+                raise ValueError(msg)
+
+        # Blocks are split into sub-blocks between Monte Carlo moves, or energy
+        # component samples, so they must hold a whole number of them.
+        is_checkpointing = config.checkpoint_frequency.value() > 0.0
+        intervals = {}
+        if config.gcmc:
+            intervals["gcmc_frequency"] = (
+                config.gcmc_frequency or config.energy_frequency
+            )
+        if config.terminal_flip_frequency is not None:
+            intervals["terminal_flip_frequency"] = config.terminal_flip_frequency
+        if config.save_energy_components:
+            intervals["energy_frequency"] = config.energy_frequency
+        options = (
+            ("runtime", "checkpoint_frequency") if is_checkpointing else ("runtime",)
+        )
+        for name, interval in intervals.items():
+            for option in options:
+                if not is_multiple(getattr(config, option), interval):
+                    msg = f"'{option}' must be a multiple of '{name}'."
+                    _logger.error(msg)
+                    raise ValueError(msg)
+
+        if is_checkpointing:
+            # A final partial block doesn't perform GCMC moves.
+            if config.gcmc and not is_multiple(
+                config.runtime, config.checkpoint_frequency
+            ):
+                msg = (
+                    "'runtime' must be a multiple of 'checkpoint_frequency' "
+                    "for GCMC simulations."
+                )
+                _logger.error(msg)
+                raise ValueError(msg)
+
         # Call the base class constructor.
         super().__init__(system, config)
 
@@ -906,6 +961,10 @@ class Runner(_RunnerBase):
         # Store the start time.
         start = _timer()
 
+        # The number of energy samples recorded when the last checkpoint was
+        # written, so that each checkpoint appends only the new ones.
+        num_samples = len(dynamics._d._energy_trajectory)
+
         # Run the simulation, checkpointing in blocks.
         if checkpoint_frequency.value() > 0.0:
             # Calculate the number of blocks and the remainder time.
@@ -989,7 +1048,12 @@ class Runner(_RunnerBase):
                             else None
                         )
 
-                        while runtime < checkpoint_frequency:
+                        # Count sub-blocks rather than compare times, since a
+                        # rounding error can otherwise add one.
+                        num_subblocks = round(
+                            (checkpoint_frequency / block_size).value()
+                        )
+                        while flip_counter < num_subblocks:
                             needs_pre_run_snapshot = False
 
                             # GCMC move.
@@ -1071,9 +1135,7 @@ class Runner(_RunnerBase):
                                 self._save_energy_components(
                                     index,
                                     dynamics.context(),
-                                    (block * checkpoint_frequency + ec_elapsed).to(
-                                        "ns"
-                                    ),
+                                    dynamics.current_time().to("ns"),
                                 )
 
                     else:
@@ -1136,10 +1198,13 @@ class Runner(_RunnerBase):
                             is_final_block=is_final_block,
                             context=dynamics.context(),
                             gcmc_sampler=gcmc_sampler,
+                            num_energy_rows=len(dynamics._d._energy_trajectory)
+                            - num_samples,
                         )
 
                         if error is not None:
                             raise error
+                        num_samples = len(dynamics._d._energy_trajectory)
 
                         # Save sampler statistics alongside the checkpoint.
                         self._save_sampler_stats(
@@ -1214,8 +1279,12 @@ class Runner(_RunnerBase):
                         ):
                             dynamics.randomise_velocities()
 
+                    # Run the remaining time as a whole number of steps, since
+                    # Sire truncates a time a rounding error short of a step.
                     dynamics.run(
-                        rem,
+                        round(
+                            (rem * checkpoint_frequency / self._config.timestep).value()
+                        ),
                         energy_frequency=self._config.energy_frequency,
                         frame_frequency=self._config.frame_frequency,
                         lambda_windows=lambda_array,
@@ -1268,6 +1337,8 @@ class Runner(_RunnerBase):
                             is_final_block=True,
                             context=dynamics.context(),
                             gcmc_sampler=gcmc_sampler,
+                            num_energy_rows=len(dynamics._d._energy_trajectory)
+                            - num_samples,
                         )
 
                         if error is not None:
@@ -1346,7 +1417,10 @@ class Runner(_RunnerBase):
                     )
                     time_base = self._config.runtime - time
 
-                    while runtime < time:
+                    # Count sub-blocks rather than compare times, since a
+                    # rounding error can otherwise add one.
+                    num_subblocks = round((time / block_size).value())
+                    while flip_counter < num_subblocks:
                         needs_pre_run_snapshot = False
 
                         # GCMC move.
@@ -1481,6 +1555,7 @@ class Runner(_RunnerBase):
                     is_final_block=True,
                     context=dynamics.context(),
                     gcmc_sampler=gcmc_sampler,
+                    num_energy_rows=len(dynamics._d._energy_trajectory) - num_samples,
                 )
 
                 if error is not None:
