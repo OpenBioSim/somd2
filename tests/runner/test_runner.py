@@ -69,11 +69,68 @@ def test_runtime_remainder_with_terminal_flips(phenethyl_mols):
         times = energy_traj.index.get_level_values(0)
         assert list(np.round(times, 6)) == [0.004, 0.008, 0.012, 0.016, 0.020]
 
-        # Flips are attempted at the start of each 8 fs interval of the first
-        # block, then at the start of the remainder.
+        # Flips are attempted every 8 fs, at 0, 8 and 16 fs, for each window.
         log = (Path(tmpdir) / "log.txt").read_text()
-        num_flips = log.count("Performing terminal flip move at λ = 0.00000")
-        assert num_flips == 3
+        assert log.count("Performing terminal flip move at") == 6
+
+
+def test_terminal_flip_frequency_across_blocks(phenethyl_mols):
+    """
+    Validate that terminal flips keep their frequency when the checkpoint
+    frequency isn't a multiple of it.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "48fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "12fs",
+            "frame_frequency": "4fs",
+            "terminal_flip_frequency": "8fs",
+            "platform": "CPU",
+            "max_threads": 1,
+            "num_lambda": 1,
+        }
+
+        runner = Runner(phenethyl_mols, Config(**config))
+        runner.run()
+
+        # Every 8 fs, at 0, 8, 16, 24, 32 and 40 fs.
+        log = (Path(tmpdir) / "log.txt").read_text()
+        assert log.count("Performing terminal flip move at") == 6
+
+
+@pytest.mark.parametrize(
+    "option, value",
+    [
+        ("runtime", "18fs"),
+        ("checkpoint_frequency", "10fs"),
+        ("energy_frequency", "6fs"),
+        ("terminal_flip_frequency", "6fs"),
+    ],
+)
+def test_times_must_be_whole_steps(ethane_methanol, option, value):
+    """
+    Validate that times which aren't a whole number of integration steps are
+    rejected.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "24fs",
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "12fs",
+            "frame_frequency": "12fs",
+            "timestep": "4fs",
+            "platform": "CPU",
+            "max_threads": 1,
+            "num_lambda": 2,
+            option: value,
+        }
+
+        with pytest.raises(ValueError, match=f"'{option}' must be a multiple"):
+            Runner(ethane_methanol, Config(**config))
 
 
 def test_energy_components_after_restart(ethane_methanol):

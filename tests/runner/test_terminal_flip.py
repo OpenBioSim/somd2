@@ -397,8 +397,8 @@ def test_runner_validation_frequency_multiple(ethane_methanol):
             output_directory=tmpdir,
             platform="cpu",
             num_lambda=2,
-            energy_frequency="4fs",
-            terminal_flip_frequency="3fs",  # not a multiple of 4fs
+            energy_frequency="8fs",
+            terminal_flip_frequency="12fs",  # not a multiple of 8fs
         )
         with pytest.raises(
             ValueError, match="must be a multiple of 'energy_frequency'"

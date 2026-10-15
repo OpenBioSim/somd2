@@ -130,3 +130,46 @@ def test_runner_gcmc_ghosts_written_at_checkpoint(ethane_methanol):
         )
         assert num_lines() > 0
         assert traj.num_frames() == num_lines()
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+def test_runner_gcmc_runtime_remainder(ethane_methanol):
+    """
+    Validate that a runtime which isn't a multiple of the checkpoint frequency
+    finishes with GCMC moves, with a ghost residue record for every frame.
+    """
+    pytest.importorskip("loch")
+
+    import sire as sr
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = Config(
+            runtime="20fs",
+            output_directory=tmpdir,
+            energy_frequency="4fs",
+            checkpoint_frequency="8fs",
+            frame_frequency="4fs",
+            platform="cuda",
+            max_threads=1,
+            num_lambda=2,
+            gcmc=True,
+            gcmc_selection="resname LIG",
+            gcmc_frequency="4fs",
+        )
+
+        runner = Runner(ethane_methanol, config)
+        runner.run()
+
+        for lam in runner._lambda_values:
+            ghost_file = Path(tmpdir) / f"gcmc_ghosts_{lam:.5f}.txt"
+            traj = sr.load(
+                str(Path(tmpdir) / "system0.prm7"),
+                str(Path(tmpdir) / f"traj_{lam:.5f}.dcd"),
+            )
+            assert traj.num_frames() == 5
+            assert len(ghost_file.read_text().splitlines()) == 5
+
+        # A GCMC move at the start of every 4 fs interval, including the
+        # remainder, for each window.
+        log = (Path(tmpdir) / config.log_file).read_text()
+        assert log.count("Performing GCMC move at") == 10

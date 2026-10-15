@@ -55,6 +55,10 @@ class _Window:
     lambda_array: list = None
     rest2_scale_factors: list = None
     num_energy_neighbours: int = None
+    # The integration step reached, counted from the start of the simulation.
+    step: int = 0
+    # The number of energy samples recorded when the last checkpoint was written.
+    num_energy_samples: int = 0
 
 
 class Runner(_RunnerBase):
@@ -105,6 +109,28 @@ class Runner(_RunnerBase):
             msg = "'adaptive_repex' requires 'replica_exchange' to be enabled."
             _logger.error(msg)
             raise ValueError(msg)
+
+        # Production is run in whole integration steps. This is checked before
+        # the base class writes the config file, so a rejected restart doesn't
+        # leave one behind.
+        from math import isclose
+
+        for option in (
+            "runtime",
+            "checkpoint_frequency",
+            "energy_frequency",
+            "frame_frequency",
+            "gcmc_frequency",
+            "terminal_flip_frequency",
+        ):
+            value = getattr(config, option)
+            if value is None:
+                continue
+            ratio = (value / config.timestep).value()
+            if not isclose(ratio, round(ratio), abs_tol=1e-4):
+                msg = f"'{option}' must be a multiple of 'timestep'."
+                _logger.error(msg)
+                raise ValueError(msg)
 
         # Call the base class constructor.
         super().__init__(system, config)
@@ -531,6 +557,9 @@ class Runner(_RunnerBase):
         # after an early production crash doesn't need to re-equilibrate.
         if is_equilibrated:
             self._write_post_equilibration_checkpoint(system, window)
+
+        window.step = self._num_steps(self._config.runtime - time)
+        window.num_energy_samples = self._num_energy_samples(window)
 
         if self._config.checkpoint_frequency.value() > 0.0:
             self._run_checkpoint_blocks(window, time)
@@ -1110,37 +1139,23 @@ class Runner(_RunnerBase):
         """
         lambda_value = window.lambda_value
         dynamics = window.dynamics
-        checkpoint_frequency = self._config.checkpoint_frequency
 
-        # The simulation time at the start of production.
-        start_time = self._config.runtime - time
+        # The number of steps in each block. The last is shorter if the time
+        # remaining isn't a whole number of checkpoint intervals.
+        num_steps = self._num_steps(time)
+        checkpoint_steps = self._num_steps(self._config.checkpoint_frequency)
+        blocks = [checkpoint_steps] * (num_steps // checkpoint_steps)
+        if num_steps % checkpoint_steps > 0:
+            blocks.append(num_steps % checkpoint_steps)
+        total_blocks = self._start_block + len(blocks)
 
-        # Calculate the number of blocks and the remainder time.
-        frac = (time / checkpoint_frequency).value()
-
-        # Handle the case where the runtime is less than the checkpoint frequency.
-        if frac < 1.0:
-            frac = 1.0
-            checkpoint_frequency = time
-
-        num_blocks = int(frac)
-        rem = round(frac - num_blocks, 12)
-
-        # The length of each block, with the remainder run as a final block.
-        durations = [checkpoint_frequency] * num_blocks
-        if rem > 0:
-            durations.append(rem * checkpoint_frequency)
-        total_blocks = self._start_block + len(durations)
-
-        num_samples = self._num_energy_samples(window)
-
-        for i, duration in enumerate(durations):
+        for i, block_steps in enumerate(blocks):
             block = self._start_block + i
-            is_final_block = i == len(durations) - 1
+            is_final_block = i == len(blocks) - 1
             block_start = _timer()
 
             try:
-                self._run_block(window, duration, start_time + i * checkpoint_frequency)
+                self._run_block(window, block_steps)
             except Exception as e:
                 raise RuntimeError(
                     f"Dynamics block {block + 1} for {_lam_sym} = {lambda_value:.5f} failed: {e}"
@@ -1151,19 +1166,10 @@ class Runner(_RunnerBase):
                 system = dynamics.commit()
 
                 # Calculate the speed in nanoseconds per day.
-                speed = duration.to("ns") / ((_timer() - block_start) / 86400)
+                duration = (block_steps * self._config.timestep).to("ns")
+                speed = duration / ((_timer() - block_start) / 86400)
 
-                # Only the energy samples from this block are new.
-                previous_samples = num_samples
-                num_samples = self._num_energy_samples(window)
-                self._write_checkpoint(
-                    window,
-                    system,
-                    block,
-                    speed,
-                    is_final_block,
-                    num_energy_rows=num_samples - previous_samples,
-                )
+                self._write_checkpoint(window, system, block, speed, is_final_block)
 
                 # Delete all trajectory frames from the Sire system within the
                 # dynamics object.
@@ -1202,10 +1208,9 @@ class Runner(_RunnerBase):
         lambda_value = window.lambda_value
 
         start = _timer()
-        num_samples = self._num_energy_samples(window)
 
         try:
-            self._run_block(window, time, self._config.runtime - time)
+            self._run_block(window, self._num_steps(time))
         except Exception as e:
             raise RuntimeError(
                 f"Dynamics for {_lam_sym} = {lambda_value:.5f} failed: {e}"
@@ -1218,14 +1223,7 @@ class Runner(_RunnerBase):
         speed = time.to("ns") / ((_timer() - start) / 86400)
 
         try:
-            self._write_checkpoint(
-                window,
-                system,
-                0,
-                speed,
-                is_final_block=True,
-                num_energy_rows=self._num_energy_samples(window) - num_samples,
-            )
+            self._write_checkpoint(window, system, 0, speed, is_final_block=True)
         except Exception as e:
             msg = f"Checkpoint failed for {_lam_sym} = {lambda_value:.5f}: {e}"
             _logger.error(msg)
@@ -1235,7 +1233,7 @@ class Runner(_RunnerBase):
             f"{_lam_sym} = {lambda_value:.5f} complete, speed = {speed:.2f} ns day-1"
         )
 
-    def _run_block(self, window, duration, start_time):
+    def _run_block(self, window, num_steps):
         """
         Run a block of production dynamics. This is split into sub-blocks
         when Monte Carlo moves are performed or energy components are saved.
@@ -1246,12 +1244,8 @@ class Runner(_RunnerBase):
         window: _Window
             The window being simulated.
 
-        duration: sire.units.GeneralUnit
-            The length of the block.
-
-        start_time: sire.units.GeneralUnit
-            The simulation time at the start of the block, used to time stamp
-            the energy components.
+        num_steps: int
+            The number of integration steps in the block.
         """
         index = window.index
         lambda_value = window.lambda_value
@@ -1264,59 +1258,40 @@ class Runner(_RunnerBase):
             and terminal_flip_sampler is None
             and not self._config.save_energy_components
         ):
-            self._run_dynamics(window, duration)
+            self._run_dynamics(window, num_steps)
+            window.step += num_steps
             return
 
-        timestep = self._config.timestep
-        flip_counter = 0
-        save_frames = gcmc_sampler is not None and self._config.frame_frequency > 0
-
-        # Sub-block size: shortest active MC frequency, or energy_frequency when
-        # only saving energy components.
-        if gcmc_sampler is not None and terminal_flip_sampler is not None:
-            block_size = min(
-                self._config.gcmc_frequency,
-                self._config.terminal_flip_frequency,
-            )
-        elif gcmc_sampler is not None:
-            block_size = self._config.gcmc_frequency
-        elif terminal_flip_sampler is not None:
-            block_size = self._config.terminal_flip_frequency
-        else:
-            block_size = self._config.energy_frequency
-
-        # How often to attempt each MC move (in sub-block units).
-        gcmc_every = (
-            max(1, round((self._config.gcmc_frequency / block_size).value()))
+        # The number of steps between each MC move, or between energy samples
+        # when only saving energy components.
+        gcmc_steps = (
+            self._num_steps(self._config.gcmc_frequency)
             if gcmc_sampler is not None
             else None
         )
-        mc_flip_every = (
-            max(
-                1,
-                round((self._config.terminal_flip_frequency / block_size).value()),
-            )
+        flip_steps = (
+            self._num_steps(self._config.terminal_flip_frequency)
             if terminal_flip_sampler is not None
             else None
         )
+        intervals = [n for n in (gcmc_steps, flip_steps) if n is not None]
+        if not intervals:
+            intervals = [self._num_steps(self._config.energy_frequency)]
 
-        # Count in integration steps, so that rounding errors can't add or drop
-        # a sub-block.
-        num_steps = self._num_steps(duration)
-        steps_per_block = max(1, self._num_steps(block_size))
+        save_frames = gcmc_sampler is not None and self._config.frame_frequency > 0
         frame_steps = self._num_steps(self._config.frame_frequency)
-        next_frame = frame_steps if save_frames else None
-        completed = 0
 
-        while completed < num_steps:
-            # The last sub-block is shortened if the block isn't a whole number
-            # of them.
-            step = min(steps_per_block, num_steps - completed)
+        end = window.step + num_steps
+
+        while window.step < end:
+            # Run to the next move, counting from the start of the simulation so
+            # that the moves keep their frequency across blocks.
+            step = min(min(n - window.step % n for n in intervals), end - window.step)
 
             needs_pre_run_snapshot = False
 
             # GCMC move.
-            if gcmc_sampler is not None and flip_counter % gcmc_every == 0:
+            if gcmc_sampler is not None and window.step % gcmc_steps == 0:
                 _logger.info(f"Performing GCMC move at {_lam_sym} = {lambda_value:.5f}")
                 gcmc_sampler.push()
                 try:
@@ -1326,7 +1301,7 @@ class Runner(_RunnerBase):
                 needs_pre_run_snapshot = self._config.auto_fix_minimise
 
             # Terminal flip move.
-            if terminal_flip_sampler is not None and flip_counter % mc_flip_every == 0:
+            if terminal_flip_sampler is not None and window.step % flip_steps == 0:
                 _logger.info(
                     f"Performing terminal flip move at {_lam_sym} = {lambda_value:.5f}"
                 )
@@ -1346,14 +1321,16 @@ class Runner(_RunnerBase):
 
             # Record ghost residues immediately before the dynamics block if a
             # frame will be saved within it.
-            if save_frames and completed + step >= next_frame:
+            if (
+                save_frames
+                and (window.step + step) // frame_steps > window.step // frame_steps
+            ):
                 self._save_ghost_residues(index, gcmc_sampler)
-                next_frame += frame_steps
 
             # Run the dynamics block.
             self._run_dynamics(
                 window,
-                step * timestep,
+                step,
                 excess_chemical_potential=(
                     self._mu_ex if gcmc_sampler is not None else None
                 ),
@@ -1364,15 +1341,12 @@ class Runner(_RunnerBase):
                 ),
             )
 
-            completed += step
-            flip_counter += 1
+            window.step += step
 
             # Save energy components.
             if self._config.save_energy_components:
                 self._save_energy_components(
-                    index,
-                    dynamics.context(),
-                    (start_time + completed * timestep).to("ns"),
+                    index, dynamics.context(), dynamics.current_time().to("ns")
                 )
 
     def _num_steps(self, duration):
@@ -1413,7 +1387,7 @@ class Runner(_RunnerBase):
         energy_trajectory = window.dynamics._d._energy_trajectory
         return 0 if energy_trajectory is None else len(energy_trajectory)
 
-    def _run_dynamics(self, window, duration, **kwargs):
+    def _run_dynamics(self, window, num_steps, **kwargs):
         """
         Run production dynamics, sampling energies at every lambda value.
 
@@ -1423,16 +1397,16 @@ class Runner(_RunnerBase):
         window: _Window
             The window being simulated.
 
-        duration: sire.units.GeneralUnit
-            The length of the run.
+        num_steps: int
+            The number of integration steps to run. A number of steps is passed
+            to Sire, since it truncates a time that is a rounding error short
+            of a whole step.
 
         kwargs: dict
             Additional keyword arguments for the dynamics run.
         """
-        # Pass a number of steps, since Sire truncates a time that is a
-        # rounding error short of a whole step.
         window.dynamics.run(
-            self._num_steps(duration),
+            num_steps,
             energy_frequency=self._config.energy_frequency,
             frame_frequency=self._config.frame_frequency,
             lambda_windows=window.lambda_array,
@@ -1445,9 +1419,7 @@ class Runner(_RunnerBase):
             **kwargs,
         )
 
-    def _write_checkpoint(
-        self, window, system, block, speed, is_final_block, num_energy_rows=None
-    ):
+    def _write_checkpoint(self, window, system, block, speed, is_final_block):
         """
         Back up the previous checkpoint of a window, then write the new one and
         the sampler statistics, all under the file lock so that another process
@@ -1470,11 +1442,10 @@ class Runner(_RunnerBase):
 
         is_final_block: bool
             Whether this is the last block of the simulation.
-
-        num_energy_rows: int
-            The number of energy samples collected in the block. If None, then
-            a full block is assumed.
         """
+        # Only the energy samples recorded since the last checkpoint are new.
+        num_energy_samples = self._num_energy_samples(window)
+
         lock = _FileLock(self._lock_file)
         with lock.acquire(timeout=self._config.timeout.to("seconds")):
             # Backup any existing checkpoint files.
@@ -1493,10 +1464,11 @@ class Runner(_RunnerBase):
                 is_final_block=is_final_block,
                 context=window.dynamics.context(),
                 gcmc_sampler=window.gcmc_sampler,
-                num_energy_rows=num_energy_rows,
+                num_energy_rows=num_energy_samples - window.num_energy_samples,
             )
             if error is not None:
                 raise error
+            window.num_energy_samples = num_energy_samples
 
             # Save sampler statistics alongside the checkpoint.
             self._save_sampler_stats(
