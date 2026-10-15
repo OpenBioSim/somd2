@@ -2002,7 +2002,7 @@ class RepexRunner(_RunnerBase):
         # Record the start time.
         start = time()
 
-        cycles, cycles_per_checkpoint, num_blocks = self._cycle_counts()
+        cycles, cycles_per_checkpoint, total_blocks = self._cycle_counts()
 
         # The GPU that propagates each replica, and how many replicas each GPU
         # can propagate at once, which are fixed for the run.
@@ -2080,12 +2080,12 @@ class RepexRunner(_RunnerBase):
             results = self._propagate_cycle(
                 dynamics_executor,
                 checkpoint_executor,
-                i,
-                None if is_full else active,
-                replica_devices,
-                last_cycle,
-                (cycles_per_frame, cycles_per_gcmc, cycles_per_flip),
-                do_checkpoint,
+                cycle=i,
+                replicas=None if is_full else active,
+                replica_devices=replica_devices,
+                last_cycle=last_cycle,
+                move_cycles=(cycles_per_frame, cycles_per_gcmc, cycles_per_flip),
+                do_checkpoint=do_checkpoint,
             )
 
             for index in active:
@@ -2096,11 +2096,9 @@ class RepexRunner(_RunnerBase):
             _logger.info("Assembling energy matrix")
             energy_matrix = self._assemble_results(results)
 
-            # Record the energy differences used to rank the windows, once the
-            # burn-in is complete.
             cycle_time = self._start_time + (i + 1) * self._config.energy_frequency
             is_burnt_in = cycle_time > self._config.adaptive_burn_in
-            if is_adaptive and is_burnt_in:
+            if is_adaptive:
                 self._record_cycle(
                     i, cycle_time, energy_matrix, active, checkpoint_cycles
                 )
@@ -2141,7 +2139,7 @@ class RepexRunner(_RunnerBase):
                 self._write_cycle_checkpoint(
                     checkpoint_executor,
                     block,
-                    num_blocks,
+                    total_blocks,
                     i == cycles - 1,
                     num_samples,
                     cycle_time,
@@ -2170,7 +2168,7 @@ class RepexRunner(_RunnerBase):
         cycles_per_checkpoint: float
             The number of cycles between checkpoints, which may be fractional.
 
-        num_blocks: int
+        total_blocks: int
             The number of checkpoint blocks, including a final partial block.
         """
         from math import ceil
@@ -2372,11 +2370,10 @@ class RepexRunner(_RunnerBase):
             self._ranker = _WindowRanker(
                 num_replicas,
                 self._config.adaptive_min_samples,
+                self._dynamics_cache.get_proposed(),
+                self._dynamics_cache.get_accepted(),
                 is_ring_break=self._ring_pair is not None,
                 is_cached=self._is_cached,
-            )
-            self._ranker.reset(
-                self._dynamics_cache.get_proposed(), self._dynamics_cache.get_accepted()
             )
             # A burn-in raised on restart starts the adaptation again.
             if self._start_time >= self._config.adaptive_burn_in:
@@ -2539,6 +2536,10 @@ class RepexRunner(_RunnerBase):
         checkpoint_cycles: np.ndarray
             The checkpoint cycles, numbered from one, in increasing order.
         """
+        # Nothing is recorded until the burn-in is complete.
+        if cycle_time <= self._config.adaptive_burn_in:
+            return
+
         if cycle_time - self._config.energy_frequency <= self._config.adaptive_burn_in:
             ranked = checkpoint_cycles[checkpoint_cycles >= cycle + 1]
             if len(ranked) > 0:
@@ -3445,7 +3446,7 @@ class RepexRunner(_RunnerBase):
             The share of the cycles left that propagate every window, and so
             the cold ones.
         """
-        self._dynamics_cache._hot_replicas = self._ranker.rank(
+        hot, votes = self._ranker.rank(
             window_devices,
             device_capacity,
             window_samples,
@@ -3456,6 +3457,8 @@ class RepexRunner(_RunnerBase):
             self._dynamics_cache._hot_replicas,
             self._dynamics_cache._cold_votes,
         )
+        self._dynamics_cache._hot_replicas = hot
+        self._dynamics_cache._cold_votes = votes
 
     def _check_restart(self):
         """

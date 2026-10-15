@@ -193,7 +193,15 @@ class WindowRanker:
     the ranking that chooses the hot windows.
     """
 
-    def __init__(self, num_windows, min_samples, is_ring_break=False, is_cached=False):
+    def __init__(
+        self,
+        num_windows,
+        min_samples,
+        proposed,
+        accepted,
+        is_ring_break=False,
+        is_cached=False,
+    ):
         """
         Constructor.
 
@@ -207,6 +215,13 @@ class WindowRanker:
             The number of independent samples a window needs before it can be
             made cold.
 
+        proposed: np.ndarray
+            The number of swaps proposed between each pair of windows so far,
+            from which swaps are counted for the ranking.
+
+        accepted: np.ndarray
+            The number of swaps accepted between each pair of windows so far.
+
         is_ring_break: bool
             Whether the distance of the bond that is broken or made is
             recorded, in which case windows where it is slow are kept hot.
@@ -219,9 +234,7 @@ class WindowRanker:
         self._min_samples = min_samples
         self._is_ring_break = is_ring_break
         self._is_cached = is_cached
-
-        no_swaps = _np.zeros((num_windows, num_windows))
-        self.reset(no_swaps, no_swaps)
+        self.reset(proposed, accepted)
 
     def reset(self, proposed, accepted):
         """
@@ -279,9 +292,14 @@ class WindowRanker:
             The windows that were propagated.
 
         distances: dict
-            The bond distance in each window that was propagated, for a
-            ring-breaking perturbation.
+            The bond distance in each window that was propagated, which is
+            required for a ring-breaking perturbation.
         """
+        if self._is_ring_break and distances is None:
+            raise ValueError(
+                "Bond distances are required for a ring-breaking perturbation"
+            )
+
         for k in windows:
             row = energy_matrix[k]
             if k > 0:
@@ -325,8 +343,7 @@ class WindowRanker:
         self.lower = [list(x) for x in data["lower"]]
         self.upper = [list(x) for x in data["upper"]]
         self.distance = [list(x) for x in data["distance"]]
-        self.proposed = data["proposed"]
-        self.accepted = data["accepted"]
+        self.set_swap_baseline(data["proposed"], data["accepted"])
 
     def rank(
         self,
@@ -398,18 +415,24 @@ class WindowRanker:
 
         votes: list of int
             The number of consecutive rankings at which each window has been
-            found cold, which is updated.
+            found cold.
 
         Returns
         -------
 
-        list of int
+        hot: list of int
             The hot windows, or None if every window is hot.
+
+        votes: list of int
+            The updated number of consecutive rankings at which each window
+            has been found cold.
         """
+        votes = list(votes)
+
         # There is nothing left to allocate, so keep the current hot windows.
         if cycles_left <= 0:
             _logger.info("Not ranking windows: no cycles left, keeping hot replicas")
-            return hot
+            return hot, votes
 
         num_windows = self._num_windows
         lower = [_np.array(x) for x in self.lower]
@@ -421,7 +444,7 @@ class WindowRanker:
         num_samples = min(len(x) for x in lower[1:] + upper[:-1])
         if num_samples < min_samples:
             _logger.info(f"Not ranking windows: {num_samples} samples of {min_samples}")
-            return hot
+            return hot, votes
 
         g_lower = [statistical_inefficiency(x) for x in lower]
         g_upper = [statistical_inefficiency(x) for x in upper]
@@ -547,7 +570,7 @@ class WindowRanker:
 
         if chosen is None:
             new_hot = all_hot
-            votes[:] = [0] * num_windows
+            votes = [0] * num_windows
         else:
             # Keep windows hot until they have been found cold twice in a row.
             previous = all_hot if hot is None else set(hot)
@@ -592,4 +615,4 @@ class WindowRanker:
             f"{variance:.2f} relative to every window being hot"
         )
 
-        return None if len(new_hot) == num_windows else new_hot
+        return (None if len(new_hot) == num_windows else new_hot), votes

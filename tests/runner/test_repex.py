@@ -1539,6 +1539,8 @@ def _ranking_runner(num_lambda, is_ring_break=False, is_cached=False, **config):
     runner._ranker = WindowRanker(
         num_lambda,
         runner._config.adaptive_min_samples,
+        zeros,
+        zeros,
         is_ring_break=is_ring_break,
         is_cached=is_cached,
     )
@@ -1892,6 +1894,37 @@ def test_adaptive_data_is_restored():
     assert runner._ranker.lower == expected[0]
     assert runner._ranker.upper == expected[1]
     assert runner._ranker.distance[2] == [1.0, 2.0]
+
+
+@pytest.mark.parametrize("burn_in, is_restored", [("0 ps", True), ("1 ns", False)])
+def test_start_adaptive_restores_data(burn_in, is_restored):
+    """
+    Validate that a restart restores the data used to rank the windows from
+    the dynamics cache, unless the burn-in has been raised beyond the current
+    time, which makes every window hot again.
+    """
+    import sire as sr
+
+    saved = _ranking_runner(8, adaptive_min_samples=10)
+    _fill_ranking_data(saved, hard_pair=3)
+
+    runner = _ranking_runner(8, adaptive_repex=True, adaptive_burn_in=burn_in)
+    runner._ring_pair = None
+    runner._is_cached = False
+    runner._start_time = sr.u("100 ps")
+    runner._dynamics_cache._adaptive_data = saved._ranker.to_dict()
+    runner._dynamics_cache._hot_replicas = [2, 3, 4]
+    runner._dynamics_cache._cold_votes = [1] * 8
+
+    runner._start_adaptive()
+
+    if is_restored:
+        assert runner._ranker.upper == saved._ranker.upper
+        assert runner._dynamics_cache._hot_replicas == [2, 3, 4]
+    else:
+        assert runner._ranker.upper == [[]] * 8
+        assert runner._dynamics_cache._hot_replicas is None
+        assert runner._dynamics_cache._cold_votes == [0] * 8
 
 
 def test_rank_windows_needs_enough_samples():
