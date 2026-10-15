@@ -1050,8 +1050,13 @@ class Simulation:
             return result
 
         if log.rankings:
-            cycle, _, cost, variance = log.rankings[-1]
+            cycle, hot, cost, variance = log.rankings[-1]
             result.update({"ranked_cycle": cycle, "cost": cost, "variance": variance})
+
+            # Windows can be ranked between checkpoints, so the latest ranking
+            # is newer than the state. Rankings after the last saved state are
+            # dropped on restart, so it is always the one in use.
+            result["hot"] = list(range(num_states)) if hot is None else list(hot)
 
             # Keep the latest ranking when thinning a long history.
             stride = max(1, -(-len(log.rankings) // max_rankings))

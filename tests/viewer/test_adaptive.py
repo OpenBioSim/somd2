@@ -58,6 +58,23 @@ def test_adaptive_summary(tmp_path):
     assert summary["history"] == {"cycle": [1, 3], "hot": [[0, 1], [1, 1], [1, 1]]}
 
 
+def test_adaptive_hot_from_latest_ranking(tmp_path):
+    """
+    Validate that the hot replicas are taken from the latest ranking, which
+    can be newer than the saved state when windows are ranked between
+    checkpoints.
+    """
+    lines = _cycle(1, 2) + [
+        _line("Hot replicas: [1, 2]"),
+        _line("Estimated cost per cycle 0.75 and final variance 1.10"),
+    ]
+    log = _monitor(tmp_path, lines)
+
+    summary = Simulation._adaptive(log, 3, {"hot_replicas": None})
+
+    assert summary["hot"] == [1, 2]
+
+
 def test_adaptive_first_ranking(tmp_path):
     """
     Validate that the time of the first ranking is shown once the burn-in is

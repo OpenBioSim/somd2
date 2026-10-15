@@ -789,12 +789,14 @@ class RepexRunner(_RunnerBase):
 
         # The cycles on which the windows are ranked for adaptive replica
         # exchange, which are the checkpoint cycles unless set separately.
-        rank_frequency = self._config.adaptive_rank_frequency
-        if rank_frequency is None:
+        if self._config.adaptive_rank_frequency is None:
             rank_cycles = checkpoint_cycles
         else:
-            rank_cycles = self._checkpoint_cycles(
-                cycles, (rank_frequency / self._config.energy_frequency).value()
+            energy_frequency = self._config.energy_frequency
+            rank_cycles = self._rank_cycles(
+                cycles,
+                round((self._start_time / energy_frequency).value()),
+                round((self._rank_interval() / energy_frequency).value()),
             )
         rank_set = set(rank_cycles.tolist())
 
@@ -872,7 +874,14 @@ class RepexRunner(_RunnerBase):
             cycle_time = self._start_time + (i + 1) * self._config.energy_frequency
             is_burnt_in = cycle_time > self._config.adaptive_burn_in
             if is_adaptive:
-                self._record_cycle(i, cycle_time, energy_matrix, active, rank_cycles)
+                # Nothing is ranked on the last cycle, since no cycles are left.
+                self._record_cycle(
+                    i,
+                    cycle_time,
+                    energy_matrix,
+                    active,
+                    rank_cycles[rank_cycles < cycles],
+                )
 
             # Mix the replicas that were propagated.
             _logger.info("Mixing replicas")
@@ -1926,6 +1935,52 @@ class RepexRunner(_RunnerBase):
         cycles = _np.ceil(multiples - 1e-10).astype(int)
         return cycles[cycles <= num_cycles]
 
+    @staticmethod
+    def _rank_cycles(num_cycles, first_cycle, cycles_per_rank):
+        """
+        The cycles on which the windows are ranked, when ranking has its own
+        frequency. These fall on multiples of the number of cycles between
+        rankings counted from the start of the simulation, so that a restart
+        keeps the same schedule.
+
+        Parameters
+        ----------
+
+        num_cycles: int
+            The number of cycles in this run.
+
+        first_cycle: int
+            The number of cycles run before this run started.
+
+        cycles_per_rank: int
+            The number of cycles between rankings.
+
+        Returns
+        -------
+
+        np.ndarray
+            The cycles of this run, numbered from one, in increasing order.
+        """
+        cycles = _np.arange(
+            cycles_per_rank, first_cycle + num_cycles + 1, cycles_per_rank
+        )
+        return cycles[cycles > first_cycle] - first_cycle
+
+    def _rank_interval(self):
+        """
+        The simulation time between rankings of the windows for adaptive
+        replica exchange, which is the checkpoint frequency unless set.
+
+        Returns
+        -------
+
+        sire.units.GeneralUnit
+            The time between rankings.
+        """
+        if self._config.adaptive_rank_frequency is None:
+            return self._config.checkpoint_frequency
+        return self._config.adaptive_rank_frequency
+
     def _replica_devices(self):
         """
         The GPU that propagates each replica, which is that of its slot.
@@ -2049,13 +2104,20 @@ class RepexRunner(_RunnerBase):
         Warn about settings that stop adaptive replica exchange having an
         effect, before any time is spent on minimisation and equilibration.
         """
-        from math import floor
+        from math import floor, isclose
 
         checkpoint = self._config.checkpoint_frequency.to("ps")
-        rank_frequency = self._config.adaptive_rank_frequency
-        rank = checkpoint if rank_frequency is None else rank_frequency.to("ps")
+        rank = self._rank_interval().to("ps")
+        energy_frequency = self._config.energy_frequency.to("ps")
         burn_in = self._config.adaptive_burn_in.to("ps")
         end_time = (self._start_time + self._config.runtime).to("ps")
+
+        if self._config.adaptive_rank_frequency is not None:
+            ratio = rank / energy_frequency
+            if ratio < 1.0 or not isclose(ratio, round(ratio), abs_tol=1e-4):
+                msg = "'adaptive_rank_frequency' must be a multiple of 'energy_frequency'."
+                _logger.error(msg)
+                raise ValueError(msg)
 
         if rank == 0.0:
             _logger.warning(
@@ -2072,13 +2134,21 @@ class RepexRunner(_RunnerBase):
             )
         elif (
             checkpoint > 0.0
-            and checkpoint / self._config.energy_frequency.to("ps")
-            <= self._config.adaptive_mix_interval
+            and checkpoint / energy_frequency <= self._config.adaptive_mix_interval
         ):
             _logger.warning(
                 "Every window is propagated on checkpoint cycles, which are no "
                 "further apart than 'adaptive_mix_interval'. Adaptive replica "
                 "exchange will have little effect."
+            )
+        # A window goes cold after two consecutive rankings, which only smooths
+        # out noisy rankings if they are a few cycles apart.
+        elif rank / energy_frequency < self._config.adaptive_mix_interval:
+            _logger.warning(
+                "The windows are ranked more often than every "
+                "'adaptive_mix_interval' cycles, so a window can switch between "
+                "hot and cold on noisy estimates. Consider a larger "
+                "'adaptive_rank_frequency'."
             )
 
     def _find_ring_pair(self):

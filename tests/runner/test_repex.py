@@ -1695,6 +1695,8 @@ def test_rank_windows_balances_gpus():
         # Ranking more often than checkpointing leaves time to go cold.
         ("1 ns", "500 ps", "400 ps", "100 ps", False),
         ("5 ns", "0 ps", "500 ps", "100 ps", False),
+        # Rankings closer than 'adaptive_mix_interval' cycles are noisy.
+        ("5 ns", "500 ps", "500 ps", "2 ps", True),
     ],
 )
 def test_check_adaptive_config(
@@ -1871,6 +1873,38 @@ def test_checkpoint_cycles_without_cycles():
     checkpoints.
     """
     assert RepexRunner._checkpoint_cycles(0, 0.0).tolist() == []
+
+
+def test_rank_cycles_across_restart():
+    """
+    Validate that windows ranked on their own schedule are ranked at the same
+    simulation times whether or not the run is restarted.
+    """
+    # Ranked every 300 cycles over 1100 cycles: at 300, 600 and 900.
+    assert RepexRunner._rank_cycles(1100, 0, 300).tolist() == [300, 600, 900]
+
+    # Restarted after 500 cycles, the same rankings fall 100 and 400 cycles in.
+    assert RepexRunner._rank_cycles(600, 500, 300).tolist() == [100, 400]
+
+
+def test_rank_frequency_must_be_a_multiple():
+    """
+    Validate that a ranking interval that isn't a whole number of cycles is
+    rejected.
+    """
+    import sire as sr
+
+    runner = object.__new__(RepexRunner)
+    runner._config = Config(
+        runtime="5 ns",
+        energy_frequency="1 ps",
+        checkpoint_frequency="500 ps",
+        adaptive_rank_frequency="1.5 ps",
+    )
+    runner._start_time = sr.u("0 ps")
+
+    with pytest.raises(ValueError, match="'adaptive_rank_frequency' must be"):
+        runner._check_adaptive_config()
 
 
 @pytest.mark.parametrize("first, num_cycles, cycles_per_checkpoint, mix", SCHEDULES)
