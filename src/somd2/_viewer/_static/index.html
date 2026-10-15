@@ -1489,12 +1489,12 @@ function hotChart(el, history, numStates) {
   for (let k = 0; k < numStates; k++) {
     for (let j = 0; j < cols; j++) {
       const hot = history.hot[k][j];
-      svg += `<rect x="${m.l + j * cellW}" y="${m.t + k * cellH}" width="${cellW}" height="${cellH}" fill="rgba(${rgb},${hot ? 0.85 : 0.08})" stroke="${border}" stroke-width="0.3"><title>window ${k}, cycle ${history.cycle[j]}: ${hot ? "hot" : "cold"}</title></rect>`;
+      svg += `<rect x="${m.l + j * cellW}" y="${m.t + (numStates - 1 - k) * cellH}" width="${cellW}" height="${cellH}" fill="rgba(${rgb},${hot ? 0.85 : 0.08})" stroke="${border}" stroke-width="0.3"><title>window ${k}, cycle ${history.cycle[j]}: ${hot ? "hot" : "cold"}</title></rect>`;
     }
   }
   const rowStep = Math.ceil(numStates / Math.max(1, Math.floor(ph / 14)));
   for (let k = 0; k < numStates; k += rowStep) {
-    svg += `<text x="${m.l - 6}" y="${m.t + k * cellH + cellH / 2 + 4}" text-anchor="end">${k}</text>`;
+    svg += `<text x="${m.l - 6}" y="${m.t + (numStates - 1 - k) * cellH + cellH / 2 + 4}" text-anchor="end">${k}</text>`;
   }
   const colStep = Math.ceil(cols / Math.max(1, Math.floor(pw / 60)));
   for (let j = 0; j < cols; j += colStep) {
