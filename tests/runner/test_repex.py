@@ -5,6 +5,7 @@ import pytest
 import tempfile
 
 from somd2.runner import RepexRunner
+from somd2.runner._adaptive import WindowRanker, cold_rate, statistical_inefficiency
 from somd2.runner._base import RunnerBase
 from somd2.runner._repex import _mix_subset
 from somd2.config import Config
@@ -1509,17 +1510,17 @@ def test_statistical_inefficiency():
     rng = np.random.default_rng(42)
 
     x = rng.normal(size=20000)
-    assert RepexRunner._statistical_inefficiency(x) == pytest.approx(1.0, abs=0.1)
+    assert statistical_inefficiency(x) == pytest.approx(1.0, abs=0.1)
 
     phi = 0.8
     y = np.zeros(20000)
     for i in range(1, len(y)):
         y[i] = phi * y[i - 1] + rng.normal()
     expected = (1 + phi) / (1 - phi)
-    assert RepexRunner._statistical_inefficiency(y) == pytest.approx(expected, rel=0.15)
+    assert statistical_inefficiency(y) == pytest.approx(expected, rel=0.15)
 
 
-def _ranking_runner(num_lambda, **config):
+def _ranking_runner(num_lambda, is_ring_break=False, is_cached=False, **config):
     """
     Create a runner holding only what is needed to rank windows.
     """
@@ -1528,8 +1529,6 @@ def _ranking_runner(num_lambda, **config):
     runner = object.__new__(RepexRunner)
     runner._config = Config(num_lambda=num_lambda, **config)
     runner._lambda_values = list(np.linspace(0, 1, num_lambda))
-    runner._ring_pair = None
-    runner._is_cached = False
     zeros = np.zeros((num_lambda, num_lambda))
     runner._dynamics_cache = SimpleNamespace(
         get_proposed=lambda: zeros,
@@ -1537,7 +1536,12 @@ def _ranking_runner(num_lambda, **config):
         _hot_replicas=None,
         _cold_votes=[0] * num_lambda,
     )
-    runner._reset_adaptive_data()
+    runner._ranker = WindowRanker(
+        num_lambda,
+        runner._config.adaptive_min_samples,
+        is_ring_break=is_ring_break,
+        is_cached=is_cached,
+    )
     return runner
 
 
@@ -1579,8 +1583,8 @@ def _fill_ranking_data(runner, hard_pair, num_samples=200, seed=7):
 
     for k in range(num_lambda - 1):
         sigma = 1.5 if k == hard_pair else 0.1
-        runner._adaptive_upper[k] = list(rng.normal(0.5, sigma, num_samples))
-        runner._adaptive_lower[k + 1] = list(rng.normal(-0.5, sigma, num_samples))
+        runner._ranker.upper[k] = list(rng.normal(0.5, sigma, num_samples))
+        runner._ranker.lower[k + 1] = list(rng.normal(-0.5, sigma, num_samples))
 
 
 def test_rank_windows():
@@ -1687,8 +1691,8 @@ def test_rank_windows_minimises_variance_for_compute():
 
     # Forward and reverse estimates that agree, so the pair isn't flagged.
     rng = np.random.default_rng(11)
-    runner._adaptive_upper[3] = list(rng.normal(1.0, 1.0, 200))
-    runner._adaptive_lower[4] = list(rng.normal(0.0, 1.0, 200))
+    runner._ranker.upper[3] = list(rng.normal(1.0, 1.0, 200))
+    runner._ranker.lower[4] = list(rng.normal(0.0, 1.0, 200))
     _rank_twice(runner, num_gpus=2)
 
     assert runner._dynamics_cache._hot_replicas == [2, 3, 4, 5]
@@ -1725,8 +1729,8 @@ def test_rank_windows_accounts_for_samples_collected():
         # Forward and reverse estimates that agree, so neither pair is flagged.
         rng = np.random.default_rng(11)
         for k in (1, 5):
-            runner._adaptive_upper[k] = list(rng.normal(1.0, 1.0, 200))
-            runner._adaptive_lower[k + 1] = list(rng.normal(0.0, 1.0, 200))
+            runner._ranker.upper[k] = list(rng.normal(1.0, 1.0, 200))
+            runner._ranker.lower[k + 1] = list(rng.normal(0.0, 1.0, 200))
 
         for _ in range(2):
             _rank(runner, 2, window_samples=samples, cycles_left=1000)
@@ -1829,7 +1833,7 @@ def test_cold_rate(first, num_cycles, cycles_per_checkpoint, mix):
     run loop's schedule.
     """
     checkpoints = RepexRunner._checkpoint_cycles(num_cycles, cycles_per_checkpoint)
-    assert RepexRunner._cold_rate(first, num_cycles, checkpoints, mix) == pytest.approx(
+    assert cold_rate(first, num_cycles, checkpoints, mix) == pytest.approx(
         _full_cycle_share(first, num_cycles, cycles_per_checkpoint, mix)
     )
 
@@ -1860,8 +1864,8 @@ def test_rank_windows_without_uncertainty():
     runner = _ranking_runner(4, adaptive_min_samples=10)
 
     for k in range(3):
-        runner._adaptive_upper[k] = [0.5] * 100
-        runner._adaptive_lower[k + 1] = [-0.5] * 100
+        runner._ranker.upper[k] = [0.5] * 100
+        runner._ranker.lower[k + 1] = [-0.5] * 100
     _rank(runner, num_gpus=1)
 
     assert runner._dynamics_cache._hot_replicas is None
@@ -1875,21 +1879,19 @@ def test_adaptive_data_is_restored():
     import pickle
 
     runner = _ranking_runner(8, adaptive_min_samples=10)
-    runner._dynamics_cache._adaptive_data = None
     _fill_ranking_data(runner, hard_pair=3)
-    runner._adaptive_distance[2] = [1.0, 2.0]
+    runner._ranker.distance[2] = [1.0, 2.0]
 
-    expected = (runner._adaptive_lower, runner._adaptive_upper)
-    runner._store_adaptive_data()
-    data = pickle.loads(pickle.dumps(runner._dynamics_cache._adaptive_data))
+    expected = (runner._ranker.lower, runner._ranker.upper)
+    data = pickle.loads(pickle.dumps(runner._ranker.to_dict()))
 
-    runner._reset_adaptive_data()
-    runner._dynamics_cache._adaptive_data = data
-    runner._restore_adaptive_data()
+    zeros = np.zeros((8, 8))
+    runner._ranker.reset(zeros, zeros)
+    runner._ranker.restore(data)
 
-    assert runner._adaptive_lower == expected[0]
-    assert runner._adaptive_upper == expected[1]
-    assert runner._adaptive_distance[2] == [1.0, 2.0]
+    assert runner._ranker.lower == expected[0]
+    assert runner._ranker.upper == expected[1]
+    assert runner._ranker.distance[2] == [1.0, 2.0]
 
 
 def test_rank_windows_needs_enough_samples():
@@ -1903,7 +1905,7 @@ def test_rank_windows_needs_enough_samples():
     _rank(runner, num_gpus=2)
 
     assert runner._dynamics_cache._hot_replicas is None
-    assert len(runner._adaptive_upper[0]) == 20
+    assert len(runner._ranker.upper[0]) == 20
 
 
 def test_rank_windows_keeps_undersampled_windows_hot():
@@ -1920,7 +1922,7 @@ def test_rank_windows_keeps_undersampled_windows_hot():
     y = np.zeros(200)
     for i in range(1, len(y)):
         y[i] = 0.95 * y[i - 1] + rng.normal(0.0, 0.01)
-    runner._adaptive_upper[6] = list(0.5 + y)
+    runner._ranker.upper[6] = list(0.5 + y)
     _rank_twice(runner, num_gpus=2)
 
     assert 6 in runner._dynamics_cache._hot_replicas
@@ -1931,19 +1933,18 @@ def test_rank_windows_keeps_slow_bond_distance_hot():
     Validate that a window in which the distance of the bond that is broken
     decorrelates slowly stays hot, even though its energies are converged.
     """
-    runner = _ranking_runner(8, adaptive_min_samples=50)
-    runner._ring_pair = (0, 1)
+    runner = _ranking_runner(8, is_ring_break=True, adaptive_min_samples=50)
 
     _fill_ranking_data(runner, hard_pair=3)
 
     rng = np.random.default_rng(9)
     for k in range(8):
-        runner._adaptive_distance[k] = list(rng.normal(1.5, 0.05, 200))
+        runner._ranker.distance[k] = list(rng.normal(1.5, 0.05, 200))
 
     y = np.zeros(200)
     for i in range(1, len(y)):
         y[i] = 0.95 * y[i - 1] + rng.normal()
-    runner._adaptive_distance[7] = list(10.0 + y)
+    runner._ranker.distance[7] = list(10.0 + y)
     _rank_twice(runner, num_gpus=2)
 
     assert 7 in runner._dynamics_cache._hot_replicas
@@ -1984,8 +1985,7 @@ def test_rank_windows_unfilled_with_shared_contexts():
     Validate that the hot replicas aren't filled when contexts are shared,
     since a window added on a busy context needs another pass.
     """
-    runner = _ranking_runner(8, adaptive_min_samples=10)
-    runner._is_cached = True
+    runner = _ranking_runner(8, is_cached=True, adaptive_min_samples=10)
 
     # The flagged pair 0 gives windows 0, 1 and 2, one on each of three GPUs.
     _fill_ranking_data(runner, hard_pair=0)
@@ -2183,7 +2183,7 @@ def test_adaptive_repex_ranking_arguments(ethane_methanol, monkeypatch):
 
         def rank_windows(*args):
             calls.append(args)
-            baselines.append(runner._adaptive_proposed.sum())
+            baselines.append(runner._ranker.proposed.sum())
 
         monkeypatch.setattr(runner, "_rank_windows", rank_windows)
         runner.run()
@@ -2281,11 +2281,11 @@ def test_adaptive_repex_records_bond_distance(syk_ring_break_mols):
         assert runner._ring_pair == (1, 7)
         runner.run()
 
-        for distances in runner._adaptive_distance:
+        for distances in runner._ranker.distance:
             assert len(distances) == 10
 
         # The S-C bond is intact at lambda = 0.
-        assert np.mean(runner._adaptive_distance[0]) == pytest.approx(1.8, abs=0.2)
+        assert np.mean(runner._ranker.distance[0]) == pytest.approx(1.8, abs=0.2)
 
 
 def test_find_ring_pair_needs_a_single_bond(syk_ring_break_mols):
@@ -2310,7 +2310,7 @@ def test_rank_windows_flags_unconverged_pairs():
 
     _fill_ranking_data(runner, hard_pair=3)
     rng = np.random.default_rng(3)
-    runner._adaptive_lower[1] = list(rng.normal(-3.0, 0.1, 200))
+    runner._ranker.lower[1] = list(rng.normal(-3.0, 0.1, 200))
     _rank_twice(runner, num_gpus=2)
 
     hot = runner._dynamics_cache._hot_replicas

@@ -35,6 +35,8 @@ from somd2 import _logger
 
 from .._utils import _lam_sym
 
+from ._adaptive import WindowRanker as _WindowRanker
+from ._adaptive import cold_rate as _cold_rate
 from ._base import RunnerBase as _RunnerBase
 
 
@@ -2177,10 +2179,18 @@ class RepexRunner(_RunnerBase):
         num_samples = [0] * num_replicas
 
         if is_adaptive:
-            self._reset_adaptive_data()
+            self._ranker = _WindowRanker(
+                num_replicas,
+                self._config.adaptive_min_samples,
+                is_ring_break=self._ring_pair is not None,
+                is_cached=self._is_cached,
+            )
+            self._ranker.reset(
+                self._dynamics_cache.get_proposed(), self._dynamics_cache.get_accepted()
+            )
             # A burn-in raised on restart starts the adaptation again.
             if self._start_time >= self._config.adaptive_burn_in:
-                self._restore_adaptive_data()
+                self._ranker.restore(self._dynamics_cache._adaptive_data)
             else:
                 self._dynamics_cache._hot_replicas = None
                 self._dynamics_cache._cold_votes = [0] * num_replicas
@@ -2331,9 +2341,11 @@ class RepexRunner(_RunnerBase):
                             "Adaptive replica exchange burn-in complete, but no "
                             "checkpoint remains to rank the windows"
                         )
-                    self._adaptive_proposed = self._dynamics_cache.get_proposed().copy()
-                    self._adaptive_accepted = self._dynamics_cache.get_accepted().copy()
-                self._record_adaptive_data(energy_matrix, active)
+                    self._ranker.set_swap_baseline(
+                        self._dynamics_cache.get_proposed(),
+                        self._dynamics_cache.get_accepted(),
+                    )
+                self._ranker.record(energy_matrix, active, self._bond_distances(active))
 
             # Mix the replicas that were propagated.
             _logger.info("Mixing replicas")
@@ -2359,7 +2371,7 @@ class RepexRunner(_RunnerBase):
                 # Rank the windows before the state is saved, so that a restart
                 # carries on with the same hot replicas.
                 if is_adaptive and is_checkpoint and is_burnt_in:
-                    cold_rate = self._cold_rate(
+                    cold_rate = _cold_rate(
                         i + 1,
                         cycles,
                         checkpoint_cycles,
@@ -2983,52 +2995,6 @@ class RepexRunner(_RunnerBase):
         cycles = _np.ceil(multiples - 1e-10).astype(int)
         return cycles[cycles <= num_cycles]
 
-    @staticmethod
-    def _cold_rate(first_cycle, num_cycles, checkpoint_cycles, mix_interval):
-        """
-        The share of the cycles left that propagate every window, and so the
-        cold ones: the mix and checkpoint cycles, and the last cycle.
-
-        Parameters
-        ----------
-
-        first_cycle: int
-            The number of cycles run so far.
-
-        num_cycles: int
-            The number of cycles in the run.
-
-        checkpoint_cycles: np.ndarray
-            The checkpoint cycles, numbered from one, in increasing order.
-
-        mix_interval: int
-            The number of cycles between mix cycles.
-
-        Returns
-        -------
-
-        float
-            The share of cycles.
-        """
-        if first_cycle >= num_cycles:
-            return 1.0
-
-        # Mix cycles, then checkpoint cycles that aren't also mix cycles.
-        full = num_cycles // mix_interval - first_cycle // mix_interval
-        start, end = _np.searchsorted(
-            checkpoint_cycles, [first_cycle, num_cycles], side="right"
-        )
-        checkpoints = checkpoint_cycles[start:end]
-        full += int((checkpoints % mix_interval != 0).sum())
-
-        # The last cycle always propagates every window.
-        if num_cycles % mix_interval != 0 and (
-            len(checkpoints) == 0 or checkpoints[-1] != num_cycles
-        ):
-            full += 1
-
-        return full / (num_cycles - first_cycle)
-
     def _replica_devices(self):
         """
         The GPU that propagates each replica, which is that of its slot.
@@ -3255,225 +3221,48 @@ class RepexRunner(_RunnerBase):
         """
         return (cycle + 1) // cycles_per_move > (last_cycle + 1) // cycles_per_move
 
-    def _reset_adaptive_data(self):
+    def _bond_distances(self, replicas):
         """
-        Clear the data used to rank the windows for adaptive replica exchange.
-        """
-        num_replicas = self._config.num_lambda
-
-        # The reduced energy difference to the lower and upper neighbouring
-        # window, sampled in each window.
-        self._adaptive_lower = [[] for _ in range(num_replicas)]
-        self._adaptive_upper = [[] for _ in range(num_replicas)]
-
-        # The distance of the bond that is broken or made, sampled in each
-        # window.
-        self._adaptive_distance = [[] for _ in range(num_replicas)]
-
-        # The swap counts when the data was cleared.
-        self._adaptive_proposed = self._dynamics_cache.get_proposed().copy()
-        self._adaptive_accepted = self._dynamics_cache.get_accepted().copy()
-
-    def _store_adaptive_data(self):
-        """
-        Store the data used to rank the windows in the dynamics cache, so that
-        it is kept on restart.
-        """
-        self._dynamics_cache._adaptive_data = {
-            "lower": [_np.array(x) for x in self._adaptive_lower],
-            "upper": [_np.array(x) for x in self._adaptive_upper],
-            "distance": [_np.array(x) for x in self._adaptive_distance],
-            "proposed": self._adaptive_proposed,
-            "accepted": self._adaptive_accepted,
-        }
-
-    def _restore_adaptive_data(self):
-        """
-        Restore the data used to rank the windows from the dynamics cache.
-        """
-        data = self._dynamics_cache._adaptive_data
-        if data is None:
-            return
-
-        self._adaptive_lower = [list(x) for x in data["lower"]]
-        self._adaptive_upper = [list(x) for x in data["upper"]]
-        self._adaptive_distance = [list(x) for x in data["distance"]]
-        self._adaptive_proposed = data["proposed"]
-        self._adaptive_accepted = data["accepted"]
-
-    def _record_adaptive_data(self, energy_matrix, replicas):
-        """
-        Record the reduced energy differences between neighbouring windows,
-        and the distance of the bond that is broken or made, if any. Must be
-        called before the replicas are mixed.
+        The distance of the bond that is broken or made in each replica, for
+        a ring-breaking perturbation. Must be called before the replicas are
+        mixed.
 
         Parameters
         ----------
-
-        energy_matrix: np.ndarray
-            The reduced energy of each replica at each window.
 
         replicas: list of int
             The replicas that were propagated.
-        """
-        num_replicas = self._config.num_lambda
 
+        Returns
+        -------
+
+        dict
+            The distance in Angstrom for each replica, or None if there is no
+            single bond that is broken or made.
+        """
+        if self._ring_pair is None:
+            return None
+
+        import openmm.unit as _omm_unit
+
+        i, j = self._ring_pair
+        distances = {}
         for k in replicas:
-            row = energy_matrix[k]
-            if k > 0:
-                self._adaptive_lower[k].append(row[k - 1] - row[k])
-            if k < num_replicas - 1:
-                self._adaptive_upper[k].append(row[k + 1] - row[k])
-
-            if self._ring_pair is not None:
-                import openmm.unit as _omm_unit
-
-                positions = DynamicsCache._get_positions(
-                    self._dynamics_cache._openmm_states[k]
-                )
-                i, j = self._ring_pair
-                pair = _np.asarray(positions[[i, j]].value_in_unit(_omm_unit.angstrom))
-                self._adaptive_distance[k].append(
-                    float(_np.linalg.norm(pair[1] - pair[0]))
-                )
-
-    @staticmethod
-    def _statistical_inefficiency(x):
-        """
-        Estimate the statistical inefficiency of a time series, i.e. the number
-        of samples per independent sample.
-
-        Parameters
-        ----------
-
-        x: np.ndarray
-            The time series.
-
-        Returns
-        -------
-
-        float
-            The statistical inefficiency.
-        """
-        n = len(x)
-        if n < 2:
-            return 1.0
-
-        dx = x - x.mean()
-        var = dx.dot(dx) / n
-        if var == 0.0:
-            return 1.0
-
-        # The unnormalised autocovariance at every lag.
-        f = _np.fft.rfft(dx, 2 * n)
-        acov = _np.fft.irfft(f * _np.conj(f))[:n]
-
-        # Sum the autocorrelation function up to its first non-positive value.
-        g = 1.0
-        for t in range(1, n):
-            c = acov[t] / ((n - t) * var)
-            if c <= 0.0:
-                break
-            g += 2.0 * c * (1.0 - t / n)
-
-        return max(1.0, g)
-
-    @staticmethod
-    def _exp_estimate(du):
-        """
-        The free energy difference from exponential averaging of reduced
-        energy differences.
-
-        Parameters
-        ----------
-
-        du: np.ndarray
-            The reduced energy differences.
-
-        Returns
-        -------
-
-        float
-            The reduced free energy difference.
-        """
-        m = (-du).max()
-        return -(m + _np.log(_np.mean(_np.exp(-du - m))))
-
-    @classmethod
-    def _is_unconverged(cls, fwd, rev, g_fwd, g_rev):
-        """
-        Whether the free energy difference between a pair of neighbouring
-        windows shows signs of poor sampling, regardless of its uncertainty.
-
-        Parameters
-        ----------
-
-        fwd: np.ndarray
-            The reduced energy difference to the upper window, sampled in the
-            lower window.
-
-        rev: np.ndarray
-            The reduced energy difference to the lower window, sampled in the
-            upper window.
-
-        g_fwd, g_rev: float
-            The statistical inefficiencies of fwd and rev.
-
-        Returns
-        -------
-
-        bool
-            Whether the pair is unconverged.
-        """
-        # The forward and reverse estimates disagree by more than 1 kT.
-        if abs(cls._exp_estimate(fwd) + cls._exp_estimate(rev)) > 1.0:
-            return True
-
-        # The estimates from the two halves of the data differ by more than
-        # 0.25 kT, and by more than twice their combined standard error.
-        estimates = []
-        errors = []
-        for half in range(2):
-            f = _np.array_split(fwd, 2)[half]
-            r = _np.array_split(rev, 2)[half]
-            estimates.append(0.5 * (cls._exp_estimate(f) - cls._exp_estimate(r)))
-            errors.append(
-                0.5 * _np.sqrt(f.var() * g_fwd / len(f) + r.var() * g_rev / len(r))
+            positions = DynamicsCache._get_positions(
+                self._dynamics_cache._openmm_states[k]
             )
+            pair = _np.asarray(positions[[i, j]].value_in_unit(_omm_unit.angstrom))
+            distances[k] = float(_np.linalg.norm(pair[1] - pair[0]))
 
-        drift = abs(estimates[0] - estimates[1])
-        return drift > 0.25 and drift > 2.0 * _np.hypot(*errors)
+        return distances
 
     def _rank_windows(
         self, window_devices, device_capacity, window_samples, cycles_left, cold_rate
     ):
         """
-        Rank the windows by the uncertainty they contribute to the free energy
-        and choose the hot replicas for adaptive replica exchange.
-
-        Each pair of neighbouring windows is weighted by sigma * sqrt(g) of
-        its reduced energy differences, which sets the uncertainty of its free
-        energy difference for a fixed amount of sampling. Pairs with signs of
-        poor sampling are always hot, as are windows with fewer than
-        'adaptive_min_samples' independent samples of either the energy
-        differences or, for a perturbation that breaks or makes a single bond,
-        the bond distance. The remaining pairs are added in order of weight,
-        with the windows either side of each so that exchange carries
-        configurations into and out of them. With a context per replica, each
-        set this gives is filled with the cold windows owning the most
-        variance, until every GPU runs as many full batches as the busiest
-        needs, since those windows take no extra time. A GPU's batches hold as
-        many replicas as it can propagate at once. With shared contexts the set
-        isn't filled, since an added window can need another pass. The set is
-        then scored by the variance of the final free energy, given the samples
-        each window has and will collect in the cycles left, multiplied by the
-        compute of the whole run. The set with the lowest score is chosen. A
-        window only stops being hot once it has been found cold at two
-        consecutive rankings. Every window is hot if no set, including the
-        windows kept hot, is better than that.
-
-        The ranking uses all of the data since the burn-in, since the slowest
-        windows decorrelate over far longer than a checkpoint interval.
+        Rank the windows and choose the hot replicas for adaptive replica
+        exchange, which are kept in the dynamics cache so that a restart
+        carries on with them. See WindowRanker.rank().
 
         Parameters
         ----------
@@ -3494,193 +3283,16 @@ class RepexRunner(_RunnerBase):
             The share of the cycles left that propagate every window, and so
             the cold ones.
         """
-        from math import ceil
-
-        # There is nothing left to allocate, so keep the current hot replicas.
-        if cycles_left <= 0:
-            _logger.info("Not ranking windows: no cycles left, keeping hot replicas")
-            return
-
-        num_replicas = self._config.num_lambda
-        lower = [_np.array(x) for x in self._adaptive_lower]
-        upper = [_np.array(x) for x in self._adaptive_upper]
-
-        min_samples = self._config.adaptive_min_samples
-
-        # Every window needs enough samples to estimate its fluctuations.
-        num_samples = min(len(x) for x in lower[1:] + upper[:-1])
-        if num_samples < min_samples:
-            _logger.info(f"Not ranking windows: {num_samples} samples of {min_samples}")
-            return
-
-        g_lower = [self._statistical_inefficiency(x) for x in lower]
-        g_upper = [self._statistical_inefficiency(x) for x in upper]
-
-        # Windows with too few independent samples can't be made cold.
-        undersampled = []
-        for k in range(num_replicas):
-            series = []
-            if k > 0:
-                series.append((lower[k], g_lower[k]))
-            if k < num_replicas - 1:
-                series.append((upper[k], g_upper[k]))
-            if min(len(x) / g for x, g in series) < min_samples:
-                undersampled.append(k)
-
-        # Nor can windows with a slow bond distance, which can bias the free
-        # energy without showing in the energy differences.
-        slow_distance = []
-        if self._ring_pair is not None:
-            for k, x in enumerate(self._adaptive_distance):
-                x = _np.array(x)
-                if len(x) / self._statistical_inefficiency(x) < min_samples:
-                    slow_distance.append(k)
-
-        proposed = self._dynamics_cache.get_proposed() - self._adaptive_proposed
-        accepted = self._dynamics_cache.get_accepted() - self._adaptive_accepted
-
-        # The variance per sample of each pair's free energy, from the samples
-        # in its lower (forward) and upper (reverse) windows.
-        fwd_variance = _np.zeros(num_replicas - 1)
-        rev_variance = _np.zeros(num_replicas - 1)
-        flagged = []
-        for k in range(num_replicas - 1):
-            fwd = upper[k]
-            rev = lower[k + 1]
-            fwd_variance[k] = fwd.var() * g_upper[k]
-            rev_variance[k] = rev.var() * g_lower[k + 1]
-
-            # Flag pairs that rarely exchange, or whose estimates disagree.
-            num_proposed = proposed[k, k + 1]
-            if (
-                num_proposed > 0 and accepted[k, k + 1] / num_proposed < 0.05
-            ) or self._is_unconverged(fwd, rev, g_upper[k], g_lower[k + 1]):
-                flagged.append(k)
-
-        weights = _np.sqrt(fwd_variance + rev_variance)
-
-        forced = set(undersampled) | set(slow_distance)
-        for k in flagged:
-            forced.update((k, k + 1))
-
-        def pad(windows):
-            return windows | {
-                r + d for r in windows for d in (-1, 1) if 0 <= r + d < num_replicas
-            }
-
-        all_hot = set(range(num_replicas))
-
-        # The variance owned by each window: the forward side of the pair above
-        # it and the reverse side of the pair below it.
-        owned = _np.zeros(num_replicas)
-        owned[:-1] += fwd_variance
-        owned[1:] += rev_variance
-
-        def fill(windows):
-            # Make the cold windows owning the most variance hot, until each GPU
-            # fills as many batches as the busiest needs. With shared contexts
-            # an added window can need another pass, so it isn't free.
-            if self._is_cached:
-                return set(windows)
-            counts = {d: 0 for d in window_devices}
-            for r in windows:
-                counts[window_devices[r]] += 1
-            batches = max(ceil(n / device_capacity[d]) for d, n in counts.items())
-            filled = set(windows)
-            for r in sorted(all_hot - windows, key=lambda r: -owned[r]):
-                d = window_devices[r]
-                if counts[d] < batches * device_capacity[d]:
-                    filled.add(r)
-                    counts[d] += 1
-            return filled
-
-        total_variance = owned.sum()
-        samples = _np.maximum(_np.asarray(window_samples, dtype=float), 1.0)
-
-        def rates(windows):
-            # The samples per cycle of each window for the rest of the run.
-            is_hot = _np.zeros(num_replicas, dtype=bool)
-            is_hot[list(windows)] = True
-            return _np.where(is_hot, 1.0, cold_rate)
-
-        def score(windows):
-            # The compute of the whole run, in blocks of dynamics, and the
-            # variance of the final free energy, from the samples at its end.
-            rate = rates(windows)
-            final = samples + rate * cycles_left
-            cost = samples.sum() + rate.sum() * cycles_left
-            variance = (fwd_variance / final[:-1] + rev_variance / final[1:]).sum()
-            return cost, variance
-
-        # A set must beat all hot by more than rounding error.
-        all_hot_cost, all_hot_variance = score(all_hot)
-        threshold = all_hot_cost * all_hot_variance * (1 - 1e-9)
-
-        # Add pairs in order of weight, keeping the set with the lowest final
-        # variance multiplied by the compute of the whole run, if better than
-        # all hot. Sets are scored with the windows that will fill the workers.
-        candidate = set(forced)
-        chosen = None
-        best = threshold
-        order = list(_np.argsort(-weights)) if total_variance > 0 else []
-        for k in [None] + order:
-            if k is not None:
-                if k in candidate and k + 1 in candidate:
-                    continue
-                candidate.update((int(k), int(k) + 1))
-            windows = pad(candidate)
-            if not windows:
-                continue
-            efficiency = _np.prod(score(fill(windows)))
-            if efficiency < best:
-                chosen, best = windows, efficiency
-
-        votes = self._dynamics_cache._cold_votes
-        if chosen is None:
-            hot = all_hot
-            votes[:] = [0] * num_replicas
-        else:
-            # Keep windows hot until they have been found cold twice in a row.
-            previous = self._dynamics_cache._hot_replicas
-            previous = all_hot if previous is None else set(previous)
-            hot = set(chosen)
-            for r in range(num_replicas):
-                if r in chosen:
-                    votes[r] = 0
-                elif r in previous:
-                    votes[r] += 1
-                    if votes[r] < 2:
-                        hot.add(r)
-
-            # Windows kept hot can leave no gain over all hot.
-            hot = fill(hot)
-            if _np.prod(score(hot)) >= threshold:
-                hot = all_hot
-
-        hot_variance = score(hot)[1]
-        hot = sorted(hot)
-        self._dynamics_cache._hot_replicas = None if len(hot) == num_replicas else hot
-
-        _logger.info(
-            "Window pair weights (sigma * sqrt(g)): "
-            + ", ".join(f"{w:.3f}" for w in weights)
-        )
-        if flagged:
-            _logger.info(f"Unconverged window pairs: {flagged}")
-        if undersampled:
-            _logger.info(f"Undersampled windows: {undersampled}")
-        if slow_distance:
-            _logger.info(f"Windows with a slow bond distance: {slow_distance}")
-        _logger.info(
-            f"Hot replicas: {hot}" if len(hot) < num_replicas else "All replicas hot"
-        )
-        # The compute per cycle from now on and the final variance, relative to
-        # every window being hot for the rest of the run.
-        cost = rates(hot).sum() / num_replicas
-        variance = hot_variance / all_hot_variance if all_hot_variance > 0 else 1.0
-        _logger.info(
-            f"Estimated cost per cycle {cost:.2f} and final variance "
-            f"{variance:.2f} relative to every window being hot"
+        self._dynamics_cache._hot_replicas = self._ranker.rank(
+            window_devices,
+            device_capacity,
+            window_samples,
+            cycles_left,
+            cold_rate,
+            self._dynamics_cache.get_proposed(),
+            self._dynamics_cache.get_accepted(),
+            self._dynamics_cache._hot_replicas,
+            self._dynamics_cache._cold_votes,
         )
 
     def _check_restart(self):
@@ -4012,7 +3624,7 @@ class RepexRunner(_RunnerBase):
         _logger.info(f"Saving {label} state")
         self._save_sampler_stats()
         if self._config.adaptive_repex:
-            self._store_adaptive_data()
+            self._dynamics_cache._adaptive_data = self._ranker.to_dict()
         else:
             self._dynamics_cache._adaptive_data = None
         with open(self._repex_state, "wb") as f:
