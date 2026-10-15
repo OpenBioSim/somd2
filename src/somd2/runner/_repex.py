@@ -3104,59 +3104,6 @@ class RepexRunner(_RunnerBase):
 
         return True, index, None
 
-    def _compute_energies(self, index):
-        """
-        Compute the energies for a given replica by updating the OpenMM state
-        within the context and re-evaluating the potential energy.
-
-        Energies are currently computed internally by Sire at the end of each
-        dynamics block, but this approach incurs an overhead due to the cost of
-        updating the force field parameters within the context when changing
-        lambda. This alternaitve method is left here for performance testing.
-
-        Parameters
-        ----------
-
-        index: int
-            The index of the replica.
-
-        Returns
-        -------
-
-        index: int
-            The index of the replica.
-
-        energies: np.ndarray
-            The energies of the replica and each state.
-        """
-        _logger.info(
-            f"Computing energies for {_lam_sym} = {self._lambda_values[index]:.5f}"
-        )
-
-        # Get the dynamics object.
-        dynamics, _ = self._dynamics_cache.get(self._dynamics_cache.slot_for(index))
-
-        # Create an array to hold the energies.
-        energies = _np.zeros(self._config.num_lambda)
-
-        # Loop over the states.
-        for i in range(self._config.num_lambda):
-            # Set the state.
-            DynamicsCache._apply_openmm_state(
-                dynamics.context(), self._dynamics_cache._openmm_states[i]
-            )
-            dynamics._d._clear_state()
-
-            # Compute and store the energy for this state.
-            energies[i] = dynamics.current_potential_energy().value()
-
-        # Reset the state.
-        DynamicsCache._apply_openmm_state(
-            dynamics.context(), self._dynamics_cache._openmm_states[index]
-        )
-
-        return index, energies
-
     def _assemble_results(self, results):
         """
         Assemble the results into a matrix.
