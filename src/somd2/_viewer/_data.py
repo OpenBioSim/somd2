@@ -249,7 +249,11 @@ class _RepexState:
 
 class _RepexUnpickler(_pickle.Unpickler):
     def find_class(self, module, name):
-        if module == "somd2.runner._repex" and name == "DynamicsCache":
+        # The cache moved to its own module, so older checkpoints use _repex.
+        if name == "DynamicsCache" and module in (
+            "somd2.runner._dynamics_cache",
+            "somd2.runner._repex",
+        ):
             return _RepexState
         return super().find_class(module, name)
 

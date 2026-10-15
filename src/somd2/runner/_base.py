@@ -22,6 +22,7 @@
 __all__ = ["RunnerBase"]
 
 from glob import glob as _glob
+from math import isclose as _isclose
 from pathlib import Path as _Path
 from shutil import copyfile as _copyfile
 
@@ -56,7 +57,38 @@ class RunnerBase:
         config: :class: `Config <somd2.config.Config>`
             The configuration options for the simulation.
         """
+        self._load_system(system)
+        self._set_config(config)
+        self._check_inputs()
 
+        # The system is fully prepared before the reference copy is stored and
+        # the restart is checked, since the checkpoints must match it.
+        pert_idxs, ion_indices = self._prepare_system()
+        self._set_schedule(pert_idxs, ion_indices)
+        self._apply_hmr()
+
+        # Validate the samplers before anything is written to the output
+        # directory.
+        self._check_gcmc()
+        self._set_terminal_groups()
+
+        self._prepare_output_and_restart()
+        self._finalise_systems()
+        self._set_dynamics_kwargs()
+        self._limit_sire_threads()
+        self._set_tuned_pme_parameters()
+
+    def _load_system(self, system):
+        """
+        Load the system to be simulated.
+
+        Parameters
+        ----------
+
+        system: str, :class: `System <sire.system.System>`
+            The perturbable system to be simulated. This can be either a path
+            to a stream file, or a Sire system object.
+        """
         if not isinstance(system, (str, _System)):
             msg = "'system' must be of type 'str' or 'sire.system.System'"
             _logger.error(msg)
@@ -73,7 +105,16 @@ class RunnerBase:
         else:
             self._system = system.clone()
 
-        # Validate the configuration.
+    def _set_config(self, config):
+        """
+        Validate the configuration and set up the output directory.
+
+        Parameters
+        ----------
+
+        config: :class: `Config <somd2.config.Config>`
+            The configuration options for the simulation.
+        """
         if not isinstance(config, _Config):
             msg = "'config' must be of type 'somd2.config.Config'"
             _logger.error(msg)
@@ -90,6 +131,11 @@ class RunnerBase:
         # blocks only exist to update the bar.
         _sr.base.ProgressBar.set_silent()
 
+    def _check_inputs(self):
+        """
+        Check the perturbed system and the frame frequency, log the versions of
+        the packages used, and set whether frames are saved.
+        """
         if self._config.replica_exchange and self._config.perturbed_system is not None:
             # Make sure the number of positions is correct.
             num_atoms = self._system.num_atoms()
@@ -143,6 +189,21 @@ class RunnerBase:
             _logger.error(msg)
             raise ValueError(msg)
 
+    def _prepare_system(self):
+        """
+        Prepare the system for simulation: apply any perturbation file, check
+        the perturbable molecules, set the simulation options that depend on
+        the system, modify the bonded terms, and add alchemical ions.
+
+        Returns
+        -------
+
+        pert_idxs: list of int
+            The indices of the perturbable atoms.
+
+        ion_indices: list of int
+            The indices of the alchemical ions.
+        """
         # Check whether we need to apply a perturbation to the reference system.
         if self._config.pert_file is not None:
             _logger.info(
@@ -188,17 +249,8 @@ class RunnerBase:
         # Link properties to the lambda = 0 end state.
         self._system = _sr.morph.link_to_reference(self._system)
 
-        # Whether this is a ring-breaking schedule.
-        if (
-            self._config._lambda_schedule_name is not None
-            and "ring_break" in self._config._lambda_schedule_name
-        ):
-            self._is_ring_breaking = True
-        else:
-            self._is_ring_breaking = False
-
         # Check to see if the end-state connectivities are the same.
-        if not self._is_ring_breaking:
+        if not self._is_ring_break:
             for mol in self._system["property is_perturbable"].molecules():
                 has_end_state_connectivity = False
                 try:
@@ -247,7 +299,7 @@ class RunnerBase:
         # Check for water.
         try:
             # The search will fail if there are no water molecules.
-            water = self._system["water"].molecules()
+            self._system["water"].molecules()
             self._has_water = True
         except:
             self._has_water = False
@@ -355,9 +407,21 @@ class RunnerBase:
                     _logger.error(msg)
                     raise RuntimeError(msg)
 
-        # Convert water topology to AMBER format if not already done. AMBER
-        # format adds an explicit H-H bond, giving fully rigid water (O-H and
-        # H-H constraints) rather than just O-H constraints under h_bonds.
+        self._convert_water_to_amber()
+
+        # Check the end state constraints.
+        self._check_end_state_constraints()
+
+        ion_indices = self._add_alchemical_ions()
+
+        return pert_idxs, ion_indices
+
+    def _convert_water_to_amber(self):
+        """
+        Convert the water topology to AMBER format if not already done. AMBER
+        format adds an explicit H-H bond, giving fully rigid water (O-H and H-H
+        constraints) rather than just O-H constraints under h_bonds.
+        """
         try:
             waters = self._system["water"]
         except:
@@ -394,9 +458,17 @@ class RunnerBase:
                     _logger.error("Unable to convert water topology to AMBER format.")
                     raise e
 
-        # Check the end state constraints.
-        self._check_end_state_constraints()
+    def _add_alchemical_ions(self):
+        """
+        Add alchemical ions to keep the charge constant when the end states
+        have different charges.
 
+        Returns
+        -------
+
+        ion_indices: list of int
+            The indices of the alchemical ions.
+        """
         # Get the charge difference between the two end states.
         charge_diff = self._get_charge_difference(self._system)
 
@@ -458,6 +530,22 @@ class RunnerBase:
                     coalchemical_restraints
                 )
 
+        return ion_indices
+
+    def _set_schedule(self, pert_idxs, ion_indices):
+        """
+        Set the soft-core form, the lambda schedule and values, and the REST2
+        scaling factors.
+
+        Parameters
+        ----------
+
+        pert_idxs: list of int
+            The indices of the perturbable atoms.
+
+        ion_indices: list of int
+            The indices of the alchemical ions.
+        """
         # Set the soft-core form.
         if self._config._softcore_form == "auto":
             schedule_name = self._config._lambda_schedule_name or "custom"
@@ -538,8 +626,6 @@ class RunnerBase:
             _logger.error(msg)
             raise ValueError(msg)
 
-        from math import isclose
-
         # Set the REST2 scale factors.
         is_rest2 = False
         if self._config.rest2_scale is not None:
@@ -558,18 +644,21 @@ class RunnerBase:
                 if len(self._config.rest2_scale) != len(self._lambda_energy):
                     msg = f"Length of 'rest2_scale' must match the number of {_lam_sym} values."
                     if is_missing:
-                        msg += "If you have omitted some 'lambda_values` from `lambda_energy`, please "
-                        "add them to `lambda_energy`, along with the corresponding `rest2_scale` values."
+                        msg += (
+                            " If you have omitted some 'lambda_values' from 'lambda_energy', "
+                            "please add them to 'lambda_energy', along with the "
+                            "corresponding 'rest2_scale' values."
+                        )
                     _logger.error(msg)
                     raise ValueError(msg)
                 # Make sure the end states are close to 1.0.
-                if isclose(self._lambda_energy[0], 0.0, abs_tol=1e-4):
-                    if not isclose(self._config.rest2_scale[0], 1.0, abs_tol=1e-4):
+                if _isclose(self._lambda_energy[0], 0.0, abs_tol=1e-4):
+                    if not _isclose(self._config.rest2_scale[0], 1.0, abs_tol=1e-4):
                         msg = f"'rest2_scale' must be 1.0 at {_lam_sym}=0."
                         _logger.error(msg)
                         raise ValueError(msg)
-                if isclose(self._lambda_energy[-1], 1.0, abs_tol=1e-4):
-                    if not isclose(self._config.rest2_scale[-1], 1.0, abs_tol=1e-4):
+                if _isclose(self._lambda_energy[-1], 1.0, abs_tol=1e-4):
+                    if not _isclose(self._config.rest2_scale[-1], 1.0, abs_tol=1e-4):
                         msg = f"'rest2_scale' must be 1.0 at {_lam_sym}=1."
                         _logger.error(msg)
                         raise ValueError(msg)
@@ -577,7 +666,7 @@ class RunnerBase:
 
             # If there are any non-zero REST2 scale factors, then log it.
             if any(
-                not isclose(factor, 1.0, abs_tol=1e-4)
+                not _isclose(factor, 1.0, abs_tol=1e-4)
                 for factor in self._rest2_scale_factors
             ):
                 is_rest2 = True
@@ -613,7 +702,12 @@ class RunnerBase:
         if is_rest2:
             _logger.info(f"REST2 selection contains {len(idxs)} atoms: {idxs}")
 
-        # Apply hydrogen mass repartitioning.
+    def _apply_hmr(self):
+        """
+        Apply hydrogen mass repartitioning, if requested, accounting for any
+        repartitioning already applied to the system.
+        """
+
         if self._config.hmr:
             # Work out the current hydrogen mass factor.
             factor_non_water, factor_water = self._get_h_mass_factor(self._system)
@@ -627,7 +721,7 @@ class RunnerBase:
 
             # We don't support repartiioning water molecules, so check those first.
             if factor_water is not None:
-                if not isclose(factor_water, 1.0, abs_tol=1e-4):
+                if not _isclose(factor_water, 1.0, abs_tol=1e-4):
                     msg = (
                         "Water molecules have already been repartitioned with "
                         f"a factor of {factor_water:.3f}. We only support "
@@ -638,12 +732,12 @@ class RunnerBase:
 
             # HMR has already been applied.
             if factor_non_water is not None:
-                if not isclose(factor_non_water, 1.0, abs_tol=1e-4):
+                if not _isclose(factor_non_water, 1.0, abs_tol=1e-4):
                     _logger.info(
                         f"Detected existing hydrogen mass repartioning factor of {factor_non_water:.3f}"
                     )
 
-                    if not isclose(
+                    if not _isclose(
                         factor_non_water, self._config.h_mass_factor, abs_tol=1e-4
                     ):
                         new_factor = self._config.h_mass_factor / factor_non_water
@@ -661,6 +755,11 @@ class RunnerBase:
                         self._system, self._config.h_mass_factor
                     )
 
+    def _prepare_output_and_restart(self):
+        """
+        Prepare the output files, store the reference system, and check for a
+        valid restart.
+        """
         # Flag whether this is a GPU simulation.
         self._is_gpu = self._config.platform in ["cuda", "opencl", "hip"]
 
@@ -744,7 +843,11 @@ class RunnerBase:
             self._config.checkpoint_frequency / self._config.energy_frequency
         )
 
-        # GCMC specific validation.
+    def _check_gcmc(self):
+        """
+        Validate the GCMC options, if GCMC is used.
+        """
+
         if self._config.gcmc:
             if self._config.platform not in ["cuda", "opencl"]:
                 msg = "GCMC simulations require the CUDA or OpenCL platform."
@@ -756,22 +859,17 @@ class RunnerBase:
                 _logger.error(msg)
                 raise ValueError(msg)
 
-            if isinstance(self._system, list):
-                mols = self._system[0]
-            else:
-                mols = self._system
-
             # Check that the system is solvated with water molecules. This
             # is required for GCMC simulations since the existing waters
             # provide a template for the ghost waters.
             try:
-                water = mols["water"].molecules()[0]
+                self._system["water"].molecules()[0]
             except:
                 msg = "No water molecules in the system. Cannot perform GCMC."
                 _logger.error(msg)
                 raise ValueError(msg)
 
-            # Make sure the frame frequency is a multiple of the energy frequency.
+            # Make sure the GCMC frequency is a multiple of the energy frequency.
             if self._config.gcmc_frequency is None:
                 self._config.gcmc_frequency = str(self._config.energy_frequency)
                 msg = (
@@ -786,7 +884,7 @@ class RunnerBase:
                 ).value()
 
                 # Make sure it's an integer.
-                if not isclose(ratio, round(ratio), abs_tol=1e-4):
+                if not _isclose(ratio, round(ratio), abs_tol=1e-4):
                     msg = "'gcmc_frequency' must be a multiple of 'energy_frequency'."
                     _logger.error(msg)
                     raise ValueError(msg)
@@ -797,7 +895,7 @@ class RunnerBase:
             ).value()
 
             # Make sure it's an integer.
-            if not isclose(ratio, round(ratio), abs_tol=1e-4):
+            if not _isclose(ratio, round(ratio), abs_tol=1e-4):
                 msg = "'frame_frequency' must be a multiple of 'energy_frequency'."
                 _logger.error(msg)
                 raise ValueError(msg)
@@ -806,7 +904,7 @@ class RunnerBase:
             # with them.
             ratio = (self._config.frame_frequency / self._config.gcmc_frequency).value()
 
-            if not isclose(ratio, round(ratio), abs_tol=1e-4):
+            if not _isclose(ratio, round(ratio), abs_tol=1e-4):
                 msg = "'frame_frequency' must be a multiple of 'gcmc_frequency'."
                 _logger.error(msg)
                 raise ValueError(msg)
@@ -819,7 +917,7 @@ class RunnerBase:
             ).value()
 
             # Make sure it's an integer.
-            if not isclose(ratio, round(ratio), abs_tol=1e-4):
+            if not _isclose(ratio, round(ratio), abs_tol=1e-4):
                 msg = "'checkpoint_frequency' must be a multiple of 'frame_frequency'."
                 _logger.error(msg)
                 raise ValueError(msg)
@@ -830,20 +928,16 @@ class RunnerBase:
             ratio = (self._config.runtime / self._config.frame_frequency).value()
 
             # Make sure it's an integer.
-            if not isclose(ratio, round(ratio), abs_tol=1e-4):
+            if not _isclose(ratio, round(ratio), abs_tol=1e-4):
                 msg = "'runtime' must be a multiple of 'frame_frequency'."
                 _logger.error(msg)
                 raise ValueError(msg)
 
             # Make sure the selection is valid.
             if self._config.gcmc_selection is not None:
-                if isinstance(self._system, list):
-                    mols = self._system[0]
-                else:
-                    mols = self._system
                 try:
-                    atoms = _sr.mol.selection_to_atoms(
-                        mols, self._config.gcmc_selection
+                    _sr.mol.selection_to_atoms(
+                        self._system, self._config.gcmc_selection
                     )
                 except:
                     msg = "Invalid 'gcmc_selection' value."
@@ -853,17 +947,19 @@ class RunnerBase:
             # Store the excess chemcical potential value.
             self._mu_ex = self._config.gcmc_excess_chemical_potential.value()
 
-        # Terminal flip specific validation and setup.
+    def _set_terminal_groups(self):
+        """
+        Validate the terminal flip options and detect the terminal ring groups,
+        if terminal flips are used.
+        """
         if self._config.terminal_flip_frequency is not None:
-            from math import isclose
-
             # Make sure the terminal flip frequency is a multiple of the
             # energy frequency.
             ratio = (
                 self._config.terminal_flip_frequency / self._config.energy_frequency
             ).value()
 
-            if not isclose(ratio, round(ratio), abs_tol=1e-4):
+            if not _isclose(ratio, round(ratio), abs_tol=1e-4):
                 msg = "'terminal_flip_frequency' must be a multiple of 'energy_frequency'."
                 _logger.error(msg)
                 raise ValueError(msg)
@@ -871,18 +967,13 @@ class RunnerBase:
             # Auto-detect terminal ring groups using Sire connectivity.
             from ._samplers import detect_terminal_groups
 
-            if isinstance(self._system, list):
-                mols = self._system[0]
-            else:
-                mols = self._system
-
             flip_angle = (
                 self._config.terminal_flip_angle.to("degrees").value()
                 if self._config.terminal_flip_angle is not None
                 else None
             )
             self._terminal_groups = detect_terminal_groups(
-                mols,
+                self._system,
                 flip_angle=flip_angle,
                 max_mobile_atoms=self._config.terminal_flip_max_mobile_atoms,
             )
@@ -906,32 +997,20 @@ class RunnerBase:
         else:
             self._terminal_groups = []
 
-        # Store the initial system time.
+    def _finalise_systems(self):
+        """
+        Store the initial time of each system, fill in any missing systems,
+        and write the end-state topologies.
+        """
+        # Store the initial system time. Windows whose checkpoint couldn't be
+        # loaded start again from the reference system.
         if isinstance(self._system, list):
-            self._initial_time = []
-            for system in self._system:
+            for i, system in enumerate(self._system):
                 if system is None:
-                    self._initial_time.append(_sr.u("0 ps"))
-                else:
-                    self._initial_time.append(system.time())
+                    self._system[i] = self._reference_system.clone()
+            self._initial_time = [system.time() for system in self._system]
         else:
             self._initial_time = [self._system.time()] * len(self._lambda_values)
-
-        # Check for missing systems in a multi-system simulation.
-        if isinstance(self._system, list):
-            ref_system = None
-            missing_systems = []
-            for i, system in enumerate(self._system):
-                if system is not None:
-                    ref_system = None
-                else:
-                    missing_systems.append(i)
-            if ref_system is None:
-                ref_system = self._reference_system
-
-            # Fill in any missing systems.
-            for i in missing_systems:
-                self._system[i] = ref_system.clone()
 
         # Create the lock file name.
         self._lock_file = str(self._config.output_directory / "somd2.lock")
@@ -959,7 +1038,11 @@ class RunnerBase:
             _logger.warning(f"Couldn't find the molecules with virtual sites: {e}")
             self._virtual_sites = None
 
-        # Update the tajectory page size.
+    def _set_dynamics_kwargs(self):
+        """
+        Set the options used to create the dynamics objects and GCMC samplers.
+        """
+        # Update the trajectory page size.
         if self._config.page_size is not None:
             # Convert from MB to bytes.
             page_size = int(self._config.page_size * 1024 * 1024)
@@ -1044,6 +1127,11 @@ class RunnerBase:
                 "schedule"
             ].reverse()
 
+    def _limit_sire_threads(self):
+        """
+        Find the GPU devices, and limit the number of CPU threads available to
+        Sire when running on GPUs in parallel.
+        """
         # The physical GPU devices available to this run, as listed by the
         # visible-devices environment variable for the chosen platform.
         self._gpu_devices = []
@@ -1087,8 +1175,6 @@ class RunnerBase:
 
             # Update the maximum number of threads.
             _sr.legacy.Base.set_max_num_threads(sire_threads)
-
-        self._set_tuned_pme_parameters()
 
     def _set_tuned_pme_parameters(self):
         """
@@ -2288,10 +2374,8 @@ class RunnerBase:
         # Adaptive replica exchange derives each window's sample count from its
         # clock and the energy frequency, so the frequency can't change.
         if self._config.adaptive_repex:
-            from math import isclose
-
             last = self._last_config.get("energy_frequency")
-            if last and not isclose(
+            if last and not _isclose(
                 _sr.u(str(last)).to("ps"), self._config.energy_frequency.to("ps")
             ):
                 msg = (
@@ -2486,10 +2570,8 @@ class RunnerBase:
         if not isinstance(factor, float):
             raise TypeError("'factor' must be of type 'float'")
 
-        from math import isclose
-
         # Early exit if no repartitioning is required.
-        if isclose(factor, 1.0, abs_tol=1e-4):
+        if _isclose(factor, 1.0, abs_tol=1e-4):
             return system
 
         from sire.morph import (

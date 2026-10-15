@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 import sire as sr
 
-from somd2._viewer._data import Simulation
-from somd2.runner._repex import DynamicsCache
+from somd2._viewer._data import Simulation, _RepexUnpickler
+from somd2.runner._dynamics_cache import DynamicsCache
 
 LAMBDAS = [0.0, 0.5, 1.0]
 
@@ -62,6 +62,26 @@ def _config(adaptive):
         "energy_frequency": "1 ps",
         "checkpoint_frequency": "100 ps",
     }
+
+
+@pytest.mark.parametrize(
+    "module", ["somd2.runner._dynamics_cache", "somd2.runner._repex"]
+)
+def test_repex_state_from_either_module(tmp_path, monkeypatch, module):
+    """
+    Validate that the replica exchange state is read whether the cache was
+    pickled from its own module or, before it moved, from _repex.
+    """
+    monkeypatch.setattr(DynamicsCache, "__module__", module)
+    _simulation(tmp_path, "1 ns")
+
+    with open(tmp_path / "repex_state.pkl", "rb") as f:
+        data = f.read()
+        f.seek(0)
+        state = _RepexUnpickler(f).load()
+
+    assert module.encode() in data
+    assert state._time.to("ns") == pytest.approx(1.0)
 
 
 def test_adaptive_progress_uses_simulation_time(tmp_path):
