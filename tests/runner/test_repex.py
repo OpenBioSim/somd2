@@ -1906,6 +1906,10 @@ def test_rank_frequency_must_be_a_multiple():
     with pytest.raises(ValueError, match="'adaptive_rank_frequency' must be"):
         runner._check_adaptive_config()
 
+    # The energy frequency in other units is accepted despite rounding error.
+    runner._config.adaptive_rank_frequency = "0.001 ns"
+    runner._check_adaptive_config()
+
 
 @pytest.mark.parametrize("first, num_cycles, cycles_per_checkpoint, mix", SCHEDULES)
 def test_cold_rate(first, num_cycles, cycles_per_checkpoint, mix):
@@ -2260,6 +2264,33 @@ def test_find_ring_pair(syk_ring_break_mols):
     # Legacy restarts load a system per replica.
     runner = _ring_pair_runner([syk_ring_break_mols, syk_ring_break_mols])
     assert runner._find_ring_pair() == (1, 7)
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+def test_rank_frequency_ignored_without_adaptive(ethane_methanol):
+    """
+    Validate that a ranking frequency of less than a cycle, which adaptive
+    replica exchange would reject, doesn't stop a standard run.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "8fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "8fs",
+            "frame_frequency": "8fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": 2,
+            "replica_exchange": True,
+            "adaptive_rank_frequency": "1fs",
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+        runner.run()
+
+        assert (Path(tmpdir) / "repex_matrix.txt").exists()
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")

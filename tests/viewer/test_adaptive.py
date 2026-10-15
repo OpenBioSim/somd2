@@ -75,6 +75,27 @@ def test_adaptive_hot_from_latest_ranking(tmp_path):
     assert summary["hot"] == [1, 2]
 
 
+def test_adaptive_hot_from_newer_state(tmp_path):
+    """
+    Validate that the hot replicas are taken from the saved state when it is
+    newer than the latest ranking, e.g. after a restart reset them.
+    """
+    lines = (
+        _cycle(1, 2)
+        + [
+            _line("Hot replicas: [1, 2]"),
+            _line("Estimated cost per cycle 0.75 and final variance 1.10"),
+        ]
+        + _cycle(2, 2)
+        + [_line("Saving replica exchange state")]
+    )
+    log = _monitor(tmp_path, lines)
+
+    summary = Simulation._adaptive(log, 3, {"hot_replicas": None})
+
+    assert summary["hot"] == [0, 1, 2]
+
+
 def test_adaptive_first_ranking(tmp_path):
     """
     Validate that the time of the first ranking is shown once the burn-in is

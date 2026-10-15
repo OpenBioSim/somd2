@@ -787,21 +787,26 @@ class RepexRunner(_RunnerBase):
         checkpoint_cycles = self._checkpoint_cycles(cycles, cycles_per_checkpoint)
         checkpoint_set = set(checkpoint_cycles.tolist())
 
+        num_replicas = self._config.num_lambda
+        is_adaptive = self._config.adaptive_repex
+
         # The cycles on which the windows are ranked for adaptive replica
         # exchange, which are the checkpoint cycles unless set separately.
-        if self._config.adaptive_rank_frequency is None:
+        rank_cycles = _np.array([], dtype=int)
+        rank_frequency = self._config.adaptive_rank_frequency
+        if is_adaptive and rank_frequency is None:
             rank_cycles = checkpoint_cycles
-        else:
+        elif is_adaptive:
             energy_frequency = self._config.energy_frequency
             rank_cycles = self._rank_cycles(
                 cycles,
                 round((self._start_time / energy_frequency).value()),
-                round((self._rank_interval() / energy_frequency).value()),
+                round((rank_frequency / energy_frequency).value()),
             )
         rank_set = set(rank_cycles.tolist())
 
-        num_replicas = self._config.num_lambda
-        is_adaptive = self._config.adaptive_repex
+        # Nothing is ranked on the last cycle, since no cycles are left.
+        first_rank_cycles = rank_cycles[rank_cycles < cycles]
 
         # The cycle on which each replica was last propagated, used to catch up
         # on the MC moves that fell due while it wasn't.
@@ -874,13 +879,8 @@ class RepexRunner(_RunnerBase):
             cycle_time = self._start_time + (i + 1) * self._config.energy_frequency
             is_burnt_in = cycle_time > self._config.adaptive_burn_in
             if is_adaptive:
-                # Nothing is ranked on the last cycle, since no cycles are left.
                 self._record_cycle(
-                    i,
-                    cycle_time,
-                    energy_matrix,
-                    active,
-                    rank_cycles[rank_cycles < cycles],
+                    i, cycle_time, energy_matrix, active, first_rank_cycles
                 )
 
             # Mix the replicas that were propagated.
@@ -2101,8 +2101,9 @@ class RepexRunner(_RunnerBase):
 
     def _check_adaptive_config(self):
         """
-        Warn about settings that stop adaptive replica exchange having an
-        effect, before any time is spent on minimisation and equilibration.
+        Validate the ranking frequency, and warn about settings that stop
+        adaptive replica exchange having an effect, before any time is spent
+        on minimisation and equilibration.
         """
         from math import floor, isclose
 
@@ -2114,7 +2115,7 @@ class RepexRunner(_RunnerBase):
 
         if self._config.adaptive_rank_frequency is not None:
             ratio = rank / energy_frequency
-            if ratio < 1.0 or not isclose(ratio, round(ratio), abs_tol=1e-4):
+            if round(ratio) < 1 or not isclose(ratio, round(ratio), abs_tol=1e-4):
                 msg = "'adaptive_rank_frequency' must be a multiple of 'energy_frequency'."
                 _logger.error(msg)
                 raise ValueError(msg)
