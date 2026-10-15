@@ -1997,14 +1997,183 @@ class RepexRunner(_RunnerBase):
         checkpoint_executor: concurrent.futures.ThreadPoolExecutor
             The thread pool for writing checkpoint files.
         """
-
-        from math import ceil
         from time import time
-
-        from itertools import repeat
 
         # Record the start time.
         start = time()
+
+        cycles, cycles_per_checkpoint, num_blocks = self._cycle_counts()
+
+        # The GPU that propagates each replica, and how many replicas each GPU
+        # can propagate at once, which are fixed for the run.
+        replica_devices = self._replica_devices()
+        device_capacity = self._device_capacity()
+
+        self._prepare_replicas(
+            dynamics_executor, checkpoint_executor, replica_devices, cycles
+        )
+
+        # Current block number.
+        block = self._start_block
+
+        # Record the start time for the production block.
+        prod_start = time()
+
+        cycles_per_frame, cycles_per_gcmc, cycles_per_flip = self._move_cycles(cycles)
+
+        # The cycles, numbered from one, that end with a checkpoint.
+        checkpoint_cycles = self._checkpoint_cycles(cycles, cycles_per_checkpoint)
+        checkpoint_set = set(checkpoint_cycles.tolist())
+
+        num_replicas = self._config.num_lambda
+        is_adaptive = self._config.adaptive_repex
+
+        # The cycle on which each replica was last propagated, used to catch up
+        # on the MC moves that fell due while it wasn't.
+        last_cycle = [-1] * num_replicas
+
+        # The number of energy samples each replica has collected since the
+        # last checkpoint.
+        num_samples = [0] * num_replicas
+
+        self._start_adaptive()
+
+        # Converted once, since unit conversions are slow.
+        start_ns = self._start_time.to("ns")
+        energy_frequency_ns = self._config.energy_frequency.to("ns")
+
+        # Perform the replica exchange simulation.
+        for i in range(cycles):
+            _logger.info(
+                f"Running dynamics for cycle {i + 1} of {cycles} "
+                f"(time = {start_ns + i * energy_frequency_ns:.4f} ns)"
+            )
+
+            # Log the states. This is the replica index for the state (positions
+            # and velocities) used to seed each replica for the current cycle.
+            # For example:
+            #   States: [ 2 0 1 3 4 5 6 7 8 9 10 ]
+            # means that the final positions and velocities from replica 2 are
+            # used to seed replica 0, those from replica 0 are used to seed
+            # replica 1, and so on.
+            _logger.info(f"States: {self._dynamics_cache.get_states()}")
+
+            # Whether to checkpoint.
+            is_checkpoint = (i + 1) in checkpoint_set
+
+            # Whether the checkpoint files are written at the end of this cycle.
+            do_checkpoint = is_checkpoint or i == cycles - 1
+
+            # Only the hot replicas are propagated, except on mix and checkpoint
+            # cycles.
+            hot = self._dynamics_cache._hot_replicas
+            is_full = (
+                hot is None
+                or (i + 1) % self._config.adaptive_mix_interval == 0
+                or do_checkpoint
+            )
+            active = list(range(num_replicas)) if is_full else hot
+
+            if not is_full:
+                _logger.info(f"Propagating {len(active)} hot replicas: {active}")
+
+            results = self._propagate_cycle(
+                dynamics_executor,
+                checkpoint_executor,
+                i,
+                None if is_full else active,
+                replica_devices,
+                last_cycle,
+                (cycles_per_frame, cycles_per_gcmc, cycles_per_flip),
+                do_checkpoint,
+            )
+
+            for index in active:
+                last_cycle[index] = i
+                num_samples[index] += 1
+
+            # Assemble an energy matrix from the results.
+            _logger.info("Assembling energy matrix")
+            energy_matrix = self._assemble_results(results)
+
+            # Record the energy differences used to rank the windows, once the
+            # burn-in is complete.
+            cycle_time = self._start_time + (i + 1) * self._config.energy_frequency
+            is_burnt_in = cycle_time > self._config.adaptive_burn_in
+            if is_adaptive and is_burnt_in:
+                self._record_cycle(
+                    i, cycle_time, energy_matrix, active, checkpoint_cycles
+                )
+
+            # Mix the replicas that were propagated.
+            _logger.info("Mixing replicas")
+            self._dynamics_cache.set_states(
+                _mix_subset(
+                    _np.array(active, dtype=_np.int64),
+                    energy_matrix,
+                    self._dynamics_cache.get_proposed(),
+                    self._dynamics_cache.get_accepted(),
+                )
+            )
+
+            # This only permutes the stored states. They are pushed into the
+            # contexts by load_replica() at the start of the next block, which
+            # is also where the pre-run state for crash recovery is captured.
+            self._dynamics_cache.mix_states()
+
+            if do_checkpoint:
+                # Rank the windows before the state is saved, so that a restart
+                # carries on with the same hot replicas.
+                if is_adaptive and is_checkpoint and is_burnt_in:
+                    self._rank_windows(
+                        replica_devices,
+                        device_capacity,
+                        self._window_samples(),
+                        cycles - (i + 1),
+                        _cold_rate(
+                            i + 1,
+                            cycles,
+                            checkpoint_cycles,
+                            self._config.adaptive_mix_interval,
+                        ),
+                    )
+
+                self._write_cycle_checkpoint(
+                    checkpoint_executor,
+                    block,
+                    num_blocks,
+                    i == cycles - 1,
+                    num_samples,
+                    cycle_time,
+                    is_checkpoint,
+                )
+                num_samples = [0] * num_replicas
+
+            # This is a checkpoint cycle.
+            if is_checkpoint:
+                # Update the block number.
+                block += 1
+
+        self._finish(start, prod_start)
+
+    def _cycle_counts(self):
+        """
+        Work out the number of replica exchange cycles in the run, between
+        checkpoints, and the number of checkpoint blocks.
+
+        Returns
+        -------
+
+        cycles: int
+            The number of cycles.
+
+        cycles_per_checkpoint: float
+            The number of cycles between checkpoints, which may be fractional.
+
+        num_blocks: int
+            The number of checkpoint blocks, including a final partial block.
+        """
+        from math import ceil
 
         # Work out the number of repex cycles.
         cycles = (self._config.runtime / self._config.energy_frequency).value()
@@ -2037,7 +2206,6 @@ class RepexRunner(_RunnerBase):
             # Handle the case where the checkpoint frequency is less than the energy frequency.
             if frac < 1.0:
                 frac = 1.0
-                checkpoint_frequency = self._config.energy_frequency
 
             # Store the number of repex cycles per block (may be fractional).
             cycles_per_checkpoint = frac
@@ -2048,13 +2216,32 @@ class RepexRunner(_RunnerBase):
             num_blocks = 1
             rem = 0
 
-        # Create the replica list.
-        replica_list = list(range(self._config.num_lambda))
+        return cycles, cycles_per_checkpoint, num_blocks + int(rem > 0)
 
-        # The GPU that propagates each replica, and how many replicas each GPU
-        # can propagate at once, which are fixed for the run.
-        replica_devices = self._replica_devices()
-        device_capacity = self._device_capacity()
+    def _prepare_replicas(
+        self, dynamics_executor, checkpoint_executor, replica_devices, cycles
+    ):
+        """
+        Minimise and equilibrate the replicas, unless this is a restart, and
+        write a checkpoint after equilibration so that a restart after an
+        early production crash doesn't need to re-equilibrate.
+
+        Parameters
+        ----------
+
+        dynamics_executor: concurrent.futures.ThreadPoolExecutor
+            The thread pool for dynamics.
+
+        checkpoint_executor: concurrent.futures.ThreadPoolExecutor
+            The thread pool for writing checkpoint files.
+
+        replica_devices: list of int
+            The GPU that propagates each replica.
+
+        cycles: int
+            The number of cycles in the run.
+        """
+        from itertools import repeat
 
         # Minimise at each lambda value. Don't minimise on restart.
         if self._config.minimise and not self._is_restart:
@@ -2115,18 +2302,30 @@ class RepexRunner(_RunnerBase):
                     checkpoint_executor,
                     "Post-equilibration checkpoint",
                     self._checkpoint,
-                    replica_list,
+                    list(range(self._config.num_lambda)),
                     repeat(self._lambda_values),
                     repeat(-1),
                     repeat(cycles),
                 )
 
-        # Current block number.
-        block = self._start_block
+    def _move_cycles(self, cycles):
+        """
+        Work out the number of cycles between frames, GCMC moves and terminal
+        flip moves.
 
-        # Record the start time for the production block.
-        prod_start = time()
+        Parameters
+        ----------
 
+        cycles: int
+            The number of cycles in the run.
+
+        Returns
+        -------
+
+        cycles_per_frame, cycles_per_gcmc, cycles_per_flip: int
+            The number of cycles between each. A move that isn't used is never
+            due.
+        """
         # Store the number of blocks per-frame. For GCMC, we need to write the
         # indices of the current ghost water residues each time a frame is saved.
         # For GCMC simulations, the frame frequency is guaranteed to be a multiple
@@ -2160,25 +2359,16 @@ class RepexRunner(_RunnerBase):
         else:
             cycles_per_flip = cycles + 1
 
-        # The cycles, numbered from one, that end with a checkpoint.
-        checkpoint_cycles = self._checkpoint_cycles(cycles, cycles_per_checkpoint)
-        checkpoint_set = set(checkpoint_cycles.tolist())
+        return cycles_per_frame, cycles_per_gcmc, cycles_per_flip
 
-        # Whether the most recent cycle saved the replica exchange state.
-        is_checkpoint = False
-
+    def _start_adaptive(self):
+        """
+        Set up the ranking of windows for adaptive replica exchange, restoring
+        the data from a restart, or make every replica hot if it isn't used.
+        """
         num_replicas = self._config.num_lambda
-        is_adaptive = self._config.adaptive_repex
 
-        # The cycle on which each replica was last propagated, used to catch up
-        # on the MC moves that fell due while it wasn't.
-        last_cycle = [-1] * num_replicas
-
-        # The number of energy samples each replica has collected since the
-        # last checkpoint.
-        num_samples = [0] * num_replicas
-
-        if is_adaptive:
+        if self._config.adaptive_repex:
             self._ranker = _WindowRanker(
                 num_replicas,
                 self._config.adaptive_min_samples,
@@ -2199,245 +2389,270 @@ class RepexRunner(_RunnerBase):
             self._dynamics_cache._hot_replicas = None
             self._dynamics_cache._cold_votes = [0] * num_replicas
 
-        # Converted once, since unit conversions are slow.
-        start_ns = self._start_time.to("ns")
-        energy_frequency_ns = self._config.energy_frequency.to("ns")
+    def _propagate_cycle(
+        self,
+        dynamics_executor,
+        checkpoint_executor,
+        cycle,
+        replicas,
+        replica_devices,
+        last_cycle,
+        move_cycles,
+        do_checkpoint,
+    ):
+        """
+        Propagate the replicas for a cycle, one pass at a time. Each pass takes
+        at most one replica from each slot, and there is a single pass when
+        there is a slot per replica.
 
-        # Perform the replica exchange simulation.
-        for i in range(cycles):
-            _logger.info(
-                f"Running dynamics for cycle {i + 1} of {cycles} "
-                f"(time = {start_ns + i * energy_frequency_ns:.4f} ns)"
-            )
+        Parameters
+        ----------
 
-            # Log the states. This is the replica index for the state (positions
-            # and velocities) used to seed each replica for the current cycle.
-            # For example:
-            #   States: [ 2 0 1 3 4 5 6 7 8 9 10 ]
-            # means that the final positions and velocities from replica 2 are
-            # used to seed replica 0, those from replica 0 are used to seed
-            # replica 1, and so on.
-            _logger.info(f"States: {self._dynamics_cache.get_states()}")
+        dynamics_executor: concurrent.futures.ThreadPoolExecutor
+            The thread pool for dynamics.
 
-            # Clear the results list.
-            results = []
+        checkpoint_executor: concurrent.futures.ThreadPoolExecutor
+            The thread pool for writing checkpoint files.
 
-            # Whether to checkpoint.
-            is_checkpoint = (i + 1) in checkpoint_set
+        cycle: int
+            The index of the cycle.
 
-            # Whether the checkpoint files are written at the end of this cycle.
-            do_checkpoint = is_checkpoint or i == cycles - 1
+        replicas: list of int
+            The replicas to propagate. If None, every replica is propagated.
 
-            # Only the hot replicas are propagated, except on mix and checkpoint
-            # cycles.
-            hot = self._dynamics_cache._hot_replicas
-            is_full = (
-                hot is None
-                or (i + 1) % self._config.adaptive_mix_interval == 0
-                or do_checkpoint
-            )
-            active = list(range(num_replicas)) if is_full else hot
+        replica_devices: list of int
+            The GPU that propagates each replica.
 
-            if not is_full:
-                _logger.info(f"Propagating {len(active)} hot replicas: {active}")
+        last_cycle: list of int
+            The cycle on which each replica was last propagated, or -1.
 
-            # Capture the simulation clock at the start of the cycle. This seeds
-            # any replica that doesn't yet have a clock of its own.
-            clock = self._dynamics_cache.get_clock()
+        move_cycles: tuple of int
+            The number of cycles between frames, GCMC moves and terminal flip
+            moves.
 
-            # Propagate the replicas, one pass at a time. Each pass takes at
-            # most one replica from each slot, and there is a single pass when
-            # there is a slot per replica.
-            for batch in self._replica_passes(i, replicas=None if is_full else active):
-                # Run a dynamics block for each replica in the pass, making sure
-                # each GPU is only oversubscribed by a factor of
-                # self._config.oversubscription_factor.
-                for replicas in self._device_batches(batch, replica_devices):
-                    # Whether each replica is due a GCMC or terminal flip move,
-                    # including any that fell due while it wasn't propagated.
-                    is_gcmc = [
-                        self._is_due(last_cycle[r], i, cycles_per_gcmc)
-                        for r in replicas
-                    ]
-                    is_terminal_flip = [
-                        self._is_due(last_cycle[r], i, cycles_per_flip)
-                        for r in replicas
-                    ]
+        do_checkpoint: bool
+            Whether the checkpoint files are written at the end of the cycle.
 
-                    # Whether each replica saves a frame and writes its ghost
-                    # waters, scheduled by the cycle since a cold replica's own
-                    # clock falls behind.
-                    is_frame = [
-                        self._is_due(last_cycle[r], i, cycles_per_frame)
-                        for r in replicas
-                    ]
+        Returns
+        -------
 
-                    try:
-                        for result, index, energies in dynamics_executor.map(
-                            self._run_block,
-                            replicas,
-                            repeat(self._lambda_values),
-                            is_gcmc,
-                            is_frame,
-                            is_terminal_flip,
-                            repeat(self._config.save_energy_components),
-                            repeat(clock),
-                            (
-                                is_frame
-                                if is_adaptive and self._save_frames
-                                else repeat(None)
-                            ),
-                        ):
-                            if not result:
-                                _logger.error(
-                                    f"Dynamics failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {energies}"
-                                )
-                                raise energies
-                            results.append((index, energies))
-                    except KeyboardInterrupt:
-                        dynamics_executor.shutdown(wait=False, cancel_futures=True)
-                        _logger.error("Dynamics cancelled. Exiting.")
-                        _sys.exit(1)
+        list of tuple
+            The index and energies of each replica that was propagated.
+        """
+        from itertools import repeat
 
-                # When contexts are shared, commit the replicas of this pass
-                # while they are still resident in their slots. The committed
-                # systems are held until the end of the cycle, so that every
-                # checkpoint file is still written under a single lock. With a
-                # context per replica everything is still resident once the
-                # cycle finishes, so committing is left to _checkpoint().
-                if do_checkpoint and self._is_cached:
-                    self._map_replicas(
-                        checkpoint_executor, "Commit", self._commit_replica, batch
-                    )
+        cycles_per_frame, cycles_per_gcmc, cycles_per_flip = move_cycles
+        is_adaptive = self._config.adaptive_repex
+        results = []
 
-            for index in active:
-                last_cycle[index] = i
-                num_samples[index] += 1
+        # Capture the simulation clock at the start of the cycle. This seeds
+        # any replica that doesn't yet have a clock of its own.
+        clock = self._dynamics_cache.get_clock()
 
-            # Assemble an energy matrix from the results.
-            _logger.info("Assembling energy matrix")
-            energy_matrix = self._assemble_results(results)
+        for batch in self._replica_passes(cycle, replicas=replicas):
+            # Run a dynamics block for each replica in the pass, making sure
+            # each GPU is only oversubscribed by a factor of
+            # self._config.oversubscription_factor.
+            for batch_replicas in self._device_batches(batch, replica_devices):
+                # Whether each replica is due a GCMC or terminal flip move,
+                # including any that fell due while it wasn't propagated.
+                is_gcmc = [
+                    self._is_due(last_cycle[r], cycle, cycles_per_gcmc)
+                    for r in batch_replicas
+                ]
+                is_terminal_flip = [
+                    self._is_due(last_cycle[r], cycle, cycles_per_flip)
+                    for r in batch_replicas
+                ]
 
-            # Record the energy differences used to rank the windows, once the
-            # burn-in is complete.
-            cycle_time = self._start_time + (i + 1) * self._config.energy_frequency
-            is_burnt_in = cycle_time > self._config.adaptive_burn_in
-            if is_adaptive and is_burnt_in:
-                if (
-                    cycle_time - self._config.energy_frequency
-                    <= self._config.adaptive_burn_in
-                ):
-                    ranked = checkpoint_cycles[checkpoint_cycles >= i + 1]
-                    if len(ranked) > 0:
-                        ranked_time = self._start_time + int(ranked[0]) * (
-                            self._config.energy_frequency
-                        )
-                        _logger.info(
-                            "Adaptive replica exchange burn-in complete, first "
-                            f"ranking at {ranked_time.to('ns'):.4f} ns"
-                        )
-                    else:
-                        _logger.info(
-                            "Adaptive replica exchange burn-in complete, but no "
-                            "checkpoint remains to rank the windows"
-                        )
-                    self._ranker.set_swap_baseline(
-                        self._dynamics_cache.get_proposed(),
-                        self._dynamics_cache.get_accepted(),
-                    )
-                self._ranker.record(energy_matrix, active, self._bond_distances(active))
+                # Whether each replica saves a frame and writes its ghost
+                # waters, scheduled by the cycle since a cold replica's own
+                # clock falls behind.
+                is_frame = [
+                    self._is_due(last_cycle[r], cycle, cycles_per_frame)
+                    for r in batch_replicas
+                ]
 
-            # Mix the replicas that were propagated.
-            _logger.info("Mixing replicas")
-            self._dynamics_cache.set_states(
-                _mix_subset(
-                    _np.array(active, dtype=_np.int64),
-                    energy_matrix,
-                    self._dynamics_cache.get_proposed(),
-                    self._dynamics_cache.get_accepted(),
-                )
-            )
-
-            # This only permutes the stored states. They are pushed into the
-            # contexts by load_replica() at the start of the next block, which
-            # is also where the pre-run state for crash recovery is captured.
-            self._dynamics_cache.mix_states()
-
-            # Checkpoint. This happens once the whole cycle is complete, with
-            # every checkpoint file written under a single lock, so that an
-            # external process reading the output directory always sees a
-            # coherent set rather than a mixture of new and old files.
-            if do_checkpoint:
-                # Rank the windows before the state is saved, so that a restart
-                # carries on with the same hot replicas.
-                if is_adaptive and is_checkpoint and is_burnt_in:
-                    cold_rate = _cold_rate(
-                        i + 1,
-                        cycles,
-                        checkpoint_cycles,
-                        self._config.adaptive_mix_interval,
-                    )
-                    self._rank_windows(
-                        replica_devices,
-                        device_capacity,
-                        self._window_samples(),
-                        cycles - (i + 1),
-                        cold_rate,
-                    )
-
-                # Create the lock.
-                lock = _FileLock(self._lock_file)
-
-                # Acquire the file lock to ensure that the checkpoint files are
-                # in a consistent state if read by another process.
-                with lock.acquire(timeout=self._config.timeout.to("seconds")):
-                    # First backup existing checkpoint files.
-                    self._map_replicas(
-                        checkpoint_executor,
-                        "Backup",
-                        self._backup_checkpoint,
-                        replica_list,
-                    )
-
-                    # Now write the new checkpoint files.
-                    self._map_replicas(
-                        checkpoint_executor,
-                        "Checkpoint",
-                        self._checkpoint,
-                        replica_list,
+                try:
+                    for result, index, energies in dynamics_executor.map(
+                        self._run_block,
+                        batch_replicas,
                         repeat(self._lambda_values),
-                        repeat(block),
-                        repeat(num_blocks + int(rem > 0)),
-                        repeat(i == cycles - 1),
-                        num_samples,
-                    )
+                        is_gcmc,
+                        is_frame,
+                        is_terminal_flip,
+                        repeat(self._config.save_energy_components),
+                        repeat(clock),
+                        (
+                            is_frame
+                            if is_adaptive and self._save_frames
+                            else repeat(None)
+                        ),
+                    ):
+                        if not result:
+                            _logger.error(
+                                f"Dynamics failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {energies}"
+                            )
+                            raise energies
+                        results.append((index, energies))
+                except KeyboardInterrupt:
+                    dynamics_executor.shutdown(wait=False, cancel_futures=True)
+                    _logger.error("Dynamics cancelled. Exiting.")
+                    _sys.exit(1)
 
-                    num_samples = [0] * num_replicas
+            # When contexts are shared, commit the replicas of this pass while
+            # they are still resident in their slots. The committed systems are
+            # held until the end of the cycle, so that every checkpoint file is
+            # still written under a single lock. With a context per replica
+            # everything is still resident once the cycle finishes, so
+            # committing is left to _checkpoint().
+            if do_checkpoint and self._is_cached:
+                self._map_replicas(
+                    checkpoint_executor, "Commit", self._commit_replica, batch
+                )
 
-                    # Replicas' own clocks fall behind while they are cold, so
-                    # the simulation time is that of the cycle.
-                    self._dynamics_cache._time = cycle_time
+        return results
 
-                    self._save_repex_state(final=not is_checkpoint)
+    def _record_cycle(
+        self, cycle, cycle_time, energy_matrix, replicas, checkpoint_cycles
+    ):
+        """
+        Record the data used to rank the windows for adaptive replica exchange,
+        logging when the burn-in is complete and counting swaps from then on.
+        Must be called before the replicas are mixed.
 
-            # This is a checkpoint cycle.
-            if is_checkpoint:
-                # Update the block number.
-                block += 1
+        Parameters
+        ----------
 
-        # Record the end time for the production block.
-        prod_end = time()
+        cycle: int
+            The index of the cycle.
 
-        # Record the end time.
+        cycle_time: sire.units.GeneralUnit
+            The simulation time at the end of the cycle.
+
+        energy_matrix: np.ndarray
+            The reduced energy of each replica at each window.
+
+        replicas: list of int
+            The replicas that were propagated.
+
+        checkpoint_cycles: np.ndarray
+            The checkpoint cycles, numbered from one, in increasing order.
+        """
+        if cycle_time - self._config.energy_frequency <= self._config.adaptive_burn_in:
+            ranked = checkpoint_cycles[checkpoint_cycles >= cycle + 1]
+            if len(ranked) > 0:
+                ranked_time = self._start_time + int(ranked[0]) * (
+                    self._config.energy_frequency
+                )
+                _logger.info(
+                    "Adaptive replica exchange burn-in complete, first "
+                    f"ranking at {ranked_time.to('ns'):.4f} ns"
+                )
+            else:
+                _logger.info(
+                    "Adaptive replica exchange burn-in complete, but no "
+                    "checkpoint remains to rank the windows"
+                )
+            self._ranker.set_swap_baseline(
+                self._dynamics_cache.get_proposed(),
+                self._dynamics_cache.get_accepted(),
+            )
+        self._ranker.record(energy_matrix, replicas, self._bond_distances(replicas))
+
+    def _write_cycle_checkpoint(
+        self,
+        checkpoint_executor,
+        block,
+        num_blocks,
+        is_final_block,
+        num_samples,
+        cycle_time,
+        is_checkpoint,
+    ):
+        """
+        Write the checkpoint files once a cycle is complete, every one under a
+        single lock, so that an external process reading the output directory
+        always sees a coherent set rather than a mixture of new and old files.
+
+        Parameters
+        ----------
+
+        checkpoint_executor: concurrent.futures.ThreadPoolExecutor
+            The thread pool for writing checkpoint files.
+
+        block: int
+            The index of the checkpoint block.
+
+        num_blocks: int
+            The number of checkpoint blocks in the run.
+
+        is_final_block: bool
+            Whether this is the last cycle of the run.
+
+        num_samples: list of int
+            The number of energy samples each replica has collected since the
+            last checkpoint.
+
+        cycle_time: sire.units.GeneralUnit
+            The simulation time at the end of the cycle.
+
+        is_checkpoint: bool
+            Whether this is a checkpoint cycle, rather than a final save.
+        """
+        from itertools import repeat
+
+        replica_list = list(range(self._config.num_lambda))
+
+        lock = _FileLock(self._lock_file)
+        with lock.acquire(timeout=self._config.timeout.to("seconds")):
+            # First backup existing checkpoint files.
+            self._map_replicas(
+                checkpoint_executor,
+                "Backup",
+                self._backup_checkpoint,
+                replica_list,
+            )
+
+            # Now write the new checkpoint files.
+            self._map_replicas(
+                checkpoint_executor,
+                "Checkpoint",
+                self._checkpoint,
+                replica_list,
+                repeat(self._lambda_values),
+                repeat(block),
+                repeat(num_blocks),
+                repeat(is_final_block),
+                num_samples,
+            )
+
+            # Replicas' own clocks fall behind while they are cold, so the
+            # simulation time is that of the cycle.
+            self._dynamics_cache._time = cycle_time
+
+            self._save_repex_state(final=not is_checkpoint)
+
+    def _finish(self, start, prod_start):
+        """
+        Log the performance and run time, remove the backup files, and mark
+        the run as complete.
+
+        Parameters
+        ----------
+
+        start: float
+            The time at which the run started, in seconds.
+
+        prod_start: float
+            The time at which production started, in seconds.
+        """
+        from time import time
+
         end = time()
 
-        # Work how many fractional days the production block took.
-        prod_time = (prod_end - prod_start) / 86400
-
         # Record the average production speed. (ns/day per replica)
-        prod_speed = self._config.runtime.to("ns") / prod_time
-
-        # Record the average production speed.
+        prod_speed = self._config.runtime.to("ns") / ((end - prod_start) / 86400)
         _logger.info(f"Overall performance: {prod_speed:.2f} ns day-1")
 
         # Log the run time in minutes.
