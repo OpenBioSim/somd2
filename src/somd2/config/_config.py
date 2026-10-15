@@ -532,9 +532,11 @@ class Config:
 
         adaptive_rank_frequency: str
             How often the windows are ranked when using adaptive replica exchange.
-            Ranking is cheap and writes no files, so it can be more frequent than
-            'checkpoint_frequency', which helps runs that checkpoint rarely. If
-            None, then the windows are ranked at each checkpoint.
+            Ranking writes no files, so it can be more frequent than
+            'checkpoint_frequency', which helps runs that checkpoint rarely. It
+            must be a multiple of 'energy_frequency' of at least
+            'adaptive_mix_interval' cycles. If None, then the windows are ranked
+            at each checkpoint.
 
         randomise_velocities: bool
             Whether to randomise velocities at the start of each replica exchange cycle

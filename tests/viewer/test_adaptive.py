@@ -78,7 +78,7 @@ def test_adaptive_hot_from_latest_ranking(tmp_path):
 def test_adaptive_hot_from_newer_state(tmp_path):
     """
     Validate that the hot replicas are taken from the saved state when it is
-    newer than the latest ranking, e.g. after a restart reset them.
+    at least as new as the latest ranking.
     """
     lines = (
         _cycle(1, 2)

@@ -1695,8 +1695,6 @@ def test_rank_windows_balances_gpus():
         # Ranking more often than checkpointing leaves time to go cold.
         ("1 ns", "500 ps", "400 ps", "100 ps", False),
         ("5 ns", "0 ps", "500 ps", "100 ps", False),
-        # Rankings closer than 'adaptive_mix_interval' cycles are noisy.
-        ("5 ns", "500 ps", "500 ps", "2 ps", True),
     ],
 )
 def test_check_adaptive_config(
@@ -1887,10 +1885,19 @@ def test_rank_cycles_across_restart():
     assert RepexRunner._rank_cycles(600, 500, 300).tolist() == [100, 400]
 
 
-def test_rank_frequency_must_be_a_multiple():
+@pytest.mark.parametrize(
+    "rank_frequency, error",
+    [
+        # Not a whole number of cycles.
+        ("10.5 ps", "a multiple of 'energy_frequency'"),
+        # Fewer cycles apart than 'adaptive_mix_interval'.
+        ("2 ps", "at least 'adaptive_mix_interval' cycles"),
+    ],
+)
+def test_rank_frequency_is_validated(rank_frequency, error):
     """
-    Validate that a ranking interval that isn't a whole number of cycles is
-    rejected.
+    Validate that a ranking interval that isn't a whole number of cycles, or
+    is shorter than 'adaptive_mix_interval' cycles, is rejected.
     """
     import sire as sr
 
@@ -1899,16 +1906,13 @@ def test_rank_frequency_must_be_a_multiple():
         runtime="5 ns",
         energy_frequency="1 ps",
         checkpoint_frequency="500 ps",
-        adaptive_rank_frequency="1.5 ps",
+        adaptive_mix_interval=4,
+        adaptive_rank_frequency=rank_frequency,
     )
     runner._start_time = sr.u("0 ps")
 
-    with pytest.raises(ValueError, match="'adaptive_rank_frequency' must be"):
+    with pytest.raises(ValueError, match=error):
         runner._check_adaptive_config()
-
-    # The energy frequency in other units is accepted despite rounding error.
-    runner._config.adaptive_rank_frequency = "0.001 ns"
-    runner._check_adaptive_config()
 
 
 @pytest.mark.parametrize("first, num_cycles, cycles_per_checkpoint, mix", SCHEDULES)
@@ -2267,40 +2271,13 @@ def test_find_ring_pair(syk_ring_break_mols):
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
-def test_rank_frequency_ignored_without_adaptive(ethane_methanol):
-    """
-    Validate that a ranking frequency of less than a cycle, which adaptive
-    replica exchange would reject, doesn't stop a standard run.
-    """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        config = {
-            "runtime": "8fs",
-            "restart": False,
-            "output_directory": tmpdir,
-            "energy_frequency": "4fs",
-            "checkpoint_frequency": "8fs",
-            "frame_frequency": "8fs",
-            "platform": "cuda",
-            "max_threads": 1,
-            "num_lambda": 2,
-            "replica_exchange": True,
-            "adaptive_rank_frequency": "1fs",
-        }
-
-        runner = RepexRunner(ethane_methanol, Config(**config))
-        runner.run()
-
-        assert (Path(tmpdir) / "repex_matrix.txt").exists()
-
-
-@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
 @pytest.mark.parametrize(
     "rank_frequency, cycles_left",
     [
-        # Ranked at each checkpoint, every 4 cycles.
-        (None, [8, 4, 0]),
+        # Ranked at each checkpoint, every 4 cycles, apart from the last.
+        (None, [8, 4]),
         # Ranked every 2 cycles, from the end of the burn-in.
-        ("8fs", [8, 6, 4, 2, 0]),
+        ("8fs", [8, 6, 4, 2]),
     ],
 )
 def test_adaptive_repex_ranking_arguments(
@@ -2356,9 +2333,8 @@ def test_adaptive_repex_ranking_arguments(
         assert capacity == [1] * runner._num_gpus
         first = 12 - cycles_left
         assert samples == [first] * num_lambda
-        if cycles_left > 0:
-            expected = _full_cycle_share(first, 12, 4, 2)
-            assert cold_rate == pytest.approx(expected)
+        expected = _full_cycle_share(first, 12, 4, 2)
+        assert cold_rate == pytest.approx(expected)
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
