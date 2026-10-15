@@ -1126,6 +1126,7 @@ class Runner(_RunnerBase):
         num_blocks = int(frac)
         rem = round(frac - num_blocks, 12)
         end_block = self._start_block + num_blocks
+        total_blocks = end_block + 1 if rem > 0 else end_block
 
         for block in range(self._start_block, end_block):
             block_start = _timer()
@@ -1155,7 +1156,7 @@ class Runner(_RunnerBase):
                 dynamics._d._sire_mols.delete_all_frames()
 
                 _logger.info(
-                    f"Finished block {block + 1} of {end_block} "
+                    f"Finished block {block + 1} of {total_blocks} "
                     f"for {_lam_sym} = {lambda_value:.5f}"
                 )
 
@@ -1174,6 +1175,7 @@ class Runner(_RunnerBase):
         # sampling.)
         if rem > 0:
             block = end_block
+            remainder = rem * checkpoint_frequency
             block_start = _timer()
             try:
                 # Perform one terminal flip at the start of the remainder block.
@@ -1188,7 +1190,7 @@ class Runner(_RunnerBase):
                     ):
                         dynamics.randomise_velocities()
 
-                self._run_dynamics(window, rem)
+                self._run_dynamics(window, remainder)
 
                 # Commit the current system.
                 system = dynamics.commit()
@@ -1200,10 +1202,18 @@ class Runner(_RunnerBase):
                     )
 
                 # Calculate the speed in nanoseconds per day.
-                speed = checkpoint_interval / ((_timer() - block_start) / 86400)
+                speed = remainder.to("ns") / ((_timer() - block_start) / 86400)
 
+                # Only the samples from the remainder are new.
                 self._write_checkpoint(
-                    window, system, block, speed, is_final_block=True
+                    window,
+                    system,
+                    block,
+                    speed,
+                    is_final_block=True,
+                    num_energy_rows=round(
+                        (remainder / self._config.energy_frequency).value()
+                    ),
                 )
 
                 # Delete all trajectory frames from the Sire system within the
@@ -1211,7 +1221,7 @@ class Runner(_RunnerBase):
                 dynamics._d._sire_mols.delete_all_frames()
 
                 _logger.info(
-                    f"Finished block {block + 1} of {end_block} "
+                    f"Finished block {block + 1} of {total_blocks} "
                     f"for {_lam_sym} = {lambda_value:.5f}"
                 )
 
@@ -1422,7 +1432,9 @@ class Runner(_RunnerBase):
             **kwargs,
         )
 
-    def _write_checkpoint(self, window, system, block, speed, is_final_block):
+    def _write_checkpoint(
+        self, window, system, block, speed, is_final_block, num_energy_rows=None
+    ):
         """
         Back up the previous checkpoint of a window, then write the new one and
         the sampler statistics, all under the file lock so that another process
@@ -1445,6 +1457,10 @@ class Runner(_RunnerBase):
 
         is_final_block: bool
             Whether this is the last block of the simulation.
+
+        num_energy_rows: int
+            The number of energy samples collected in the block. If None, then
+            a full block is assumed.
         """
         lock = _FileLock(self._lock_file)
         with lock.acquire(timeout=self._config.timeout.to("seconds")):
@@ -1464,6 +1480,7 @@ class Runner(_RunnerBase):
                 is_final_block=is_final_block,
                 context=window.dynamics.context(),
                 gcmc_sampler=window.gcmc_sampler,
+                num_energy_rows=num_energy_rows,
             )
             if error is not None:
                 raise error
