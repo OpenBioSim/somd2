@@ -787,6 +787,17 @@ class RepexRunner(_RunnerBase):
         checkpoint_cycles = self._checkpoint_cycles(cycles, cycles_per_checkpoint)
         checkpoint_set = set(checkpoint_cycles.tolist())
 
+        # The cycles on which the windows are ranked for adaptive replica
+        # exchange, which are the checkpoint cycles unless set separately.
+        rank_frequency = self._config.adaptive_rank_frequency
+        if rank_frequency is None:
+            rank_cycles = checkpoint_cycles
+        else:
+            rank_cycles = self._checkpoint_cycles(
+                cycles, (rank_frequency / self._config.energy_frequency).value()
+            )
+        rank_set = set(rank_cycles.tolist())
+
         num_replicas = self._config.num_lambda
         is_adaptive = self._config.adaptive_repex
 
@@ -861,9 +872,7 @@ class RepexRunner(_RunnerBase):
             cycle_time = self._start_time + (i + 1) * self._config.energy_frequency
             is_burnt_in = cycle_time > self._config.adaptive_burn_in
             if is_adaptive:
-                self._record_cycle(
-                    i, cycle_time, energy_matrix, active, checkpoint_cycles
-                )
+                self._record_cycle(i, cycle_time, energy_matrix, active, rank_cycles)
 
             # Mix the replicas that were propagated.
             _logger.info("Mixing replicas")
@@ -881,23 +890,23 @@ class RepexRunner(_RunnerBase):
             # is also where the pre-run state for crash recovery is captured.
             self._dynamics_cache.mix_states()
 
-            if do_checkpoint:
-                # Rank the windows before the state is saved, so that a restart
-                # carries on with the same hot replicas.
-                if is_adaptive and is_checkpoint and is_burnt_in:
-                    self._rank_windows(
-                        replica_devices,
-                        device_capacity,
-                        self._window_samples(),
-                        cycles - (i + 1),
-                        _cold_rate(
-                            i + 1,
-                            cycles,
-                            checkpoint_cycles,
-                            self._config.adaptive_mix_interval,
-                        ),
-                    )
+            # Rank the windows before any checkpoint is written, so that a
+            # restart carries on with the same hot replicas.
+            if is_adaptive and (i + 1) in rank_set and is_burnt_in:
+                self._rank_windows(
+                    replica_devices,
+                    device_capacity,
+                    self._window_samples(),
+                    cycles - (i + 1),
+                    _cold_rate(
+                        i + 1,
+                        cycles,
+                        checkpoint_cycles,
+                        self._config.adaptive_mix_interval,
+                    ),
+                )
 
+            if do_checkpoint:
                 self._write_cycle_checkpoint(
                     checkpoint_executor,
                     block,
@@ -1270,9 +1279,7 @@ class RepexRunner(_RunnerBase):
 
         return results
 
-    def _record_cycle(
-        self, cycle, cycle_time, energy_matrix, replicas, checkpoint_cycles
-    ):
+    def _record_cycle(self, cycle, cycle_time, energy_matrix, replicas, rank_cycles):
         """
         Record the data used to rank the windows for adaptive replica exchange,
         logging when the burn-in is complete and counting swaps from then on.
@@ -1293,15 +1300,16 @@ class RepexRunner(_RunnerBase):
         replicas: list of int
             The replicas that were propagated.
 
-        checkpoint_cycles: np.ndarray
-            The checkpoint cycles, numbered from one, in increasing order.
+        rank_cycles: np.ndarray
+            The cycles on which the windows are ranked, numbered from one, in
+            increasing order.
         """
         # Nothing is recorded until the burn-in is complete.
         if cycle_time <= self._config.adaptive_burn_in:
             return
 
         if cycle_time - self._config.energy_frequency <= self._config.adaptive_burn_in:
-            ranked = checkpoint_cycles[checkpoint_cycles >= cycle + 1]
+            ranked = rank_cycles[rank_cycles >= cycle + 1]
             if len(ranked) > 0:
                 ranked_time = self._start_time + int(ranked[0]) * (
                     self._config.energy_frequency
@@ -1313,7 +1321,7 @@ class RepexRunner(_RunnerBase):
             else:
                 _logger.info(
                     "Adaptive replica exchange burn-in complete, but no "
-                    "checkpoint remains to rank the windows"
+                    "ranking of the windows remains"
                 )
             self._ranker.set_swap_baseline(
                 self._dynamics_cache.get_proposed(),
@@ -2044,24 +2052,27 @@ class RepexRunner(_RunnerBase):
         from math import floor
 
         checkpoint = self._config.checkpoint_frequency.to("ps")
+        rank_frequency = self._config.adaptive_rank_frequency
+        rank = checkpoint if rank_frequency is None else rank_frequency.to("ps")
         burn_in = self._config.adaptive_burn_in.to("ps")
         end_time = (self._start_time + self._config.runtime).to("ps")
 
-        if checkpoint == 0.0:
+        if rank == 0.0:
             _logger.warning(
                 "Adaptive replica exchange ranks the windows at checkpoints, but "
-                "'checkpoint_frequency' is zero. Every window will be propagated "
-                "every cycle."
+                "'checkpoint_frequency' is zero and 'adaptive_rank_frequency' "
+                "isn't set. Every window will be propagated every cycle."
             )
-        # Windows first go cold at the second checkpoint after the burn-in.
-        elif (floor(burn_in / checkpoint + 1e-9) + 2) * checkpoint >= end_time - 1e-6:
+        # Windows first go cold at the second ranking after the burn-in.
+        elif (floor(burn_in / rank + 1e-9) + 2) * rank >= end_time - 1e-6:
             _logger.warning(
-                "There are fewer than two checkpoints after 'adaptive_burn_in' "
+                "There are fewer than two rankings after 'adaptive_burn_in' "
                 "and before the end of the run, so no window will stop being "
                 "hot. Every window will be propagated every cycle."
             )
         elif (
-            checkpoint / self._config.energy_frequency.to("ps")
+            checkpoint > 0.0
+            and checkpoint / self._config.energy_frequency.to("ps")
             <= self._config.adaptive_mix_interval
         ):
             _logger.warning(

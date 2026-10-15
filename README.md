@@ -425,10 +425,11 @@ comes from a few λ windows, while the rest converge quickly and then contribute
 little as the simulation is extended. Adaptive replica exchange, enabled with
 `--adaptive-repex`, concentrates the sampling on the slow windows. After a
 burn-in period of standard replica exchange, set with `--adaptive-burn-in`, the
-windows are ranked at each checkpoint. Only the highest ranked ("hot") windows
-are propagated and exchanged every cycle, with every window joining in every
-`--adaptive-mix-interval` cycles, as well as on checkpoint cycles. A window that
-misses a frame cycle saves its frame the next time it is propagated.
+windows are ranked at each checkpoint, or every `--adaptive-rank-frequency` if
+set. Only the highest ranked ("hot") windows are propagated and exchanged every
+cycle, with every window joining in every `--adaptive-mix-interval` cycles, as
+well as on checkpoint cycles. A window that misses a frame cycle saves its frame
+the next time it is propagated.
 
 Each pair of neighbouring windows is ranked by σ√g of the reduced energy
 differences between them, where σ is the standard deviation and g the
@@ -451,8 +452,8 @@ The following are always hot:
 
 The windows either side of each hot window are also made hot, so that exchange
 carries configurations into and out of them, and a window only stops being hot
-after it has been found cold at two consecutive checkpoints, so no window is
-cold until the second checkpoint after the burn-in.
+after it has been found cold at two consecutive rankings, so no window is cold
+until the second ranking after the burn-in.
 
 The replicas propagated in each cycle are split into batches with no more
 replicas on any GPU than it can propagate at once: `--oversubscription-factor`,
@@ -472,15 +473,19 @@ To reduce the uncertainty instead, increase the `--runtime` until the run takes
 as long as standard replica exchange would, so that the slow windows are
 sampled for longer. It doesn't help a window that is stuck to escape.
 
-The windows are ranked at checkpoints, so the `--checkpoint-frequency` should
-be several times the `--adaptive-mix-interval` multiplied by the
-`--energy-frequency`, which can't be changed on restart. The default burn-in of
-500 ps also allows for equilibration, which is off by default. If the system has
-been equilibrated with `--equilibration-time`, a burn-in of around 200 ps is
-enough. Raising the burn-in on restart beyond the current time makes every
-window hot again until it is reached. The saving is largest when few windows
-are slow. If most of the windows are hot, adaptive replica exchange costs almost
-as much as standard replica exchange.
+Every window is propagated on checkpoint cycles, so the `--checkpoint-frequency`
+should be several times the `--adaptive-mix-interval` multiplied by the
+`--energy-frequency`, which can't be changed on restart. Ranking is cheap and
+writes no files, so if checkpoints are far apart, e.g. every 500 ps, setting
+`--adaptive-rank-frequency` to around 100 ps lets windows go cold sooner after
+the burn-in and respond sooner as the run goes on. The hot windows are saved at
+each checkpoint, so a restart carries on with those of the last checkpoint. The
+default burn-in of 500 ps also allows for equilibration, which is off by
+default. If the system has been equilibrated with `--equilibration-time`, a
+burn-in of around 200 ps is enough. Raising the burn-in on restart beyond the
+current time makes every window hot again until it is reached. The saving is
+largest when few windows are slow. If most of the windows are hot, adaptive
+replica exchange costs almost as much as standard replica exchange.
 
 A larger `--adaptive-mix-interval` saves more compute on the cold windows, but
 samples them less and exchanges configurations between hot and cold windows less

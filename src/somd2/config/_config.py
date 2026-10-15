@@ -121,6 +121,7 @@ class Config:
             "adaptive_mix_interval",
             "adaptive_burn_in",
             "adaptive_min_samples",
+            "adaptive_rank_frequency",
             "restraint_search_time",
             "restraint_search_frequency",
             "gcmc_batch_size",
@@ -195,6 +196,7 @@ class Config:
         adaptive_mix_interval=4,
         adaptive_burn_in="500 ps",
         adaptive_min_samples=50,
+        adaptive_rank_frequency=None,
         randomise_velocities=False,
         perturbed_system=None,
         terminal_flip_frequency=None,
@@ -528,6 +530,12 @@ class Config:
             when using adaptive replica exchange. Windows are not ranked until each has
             collected this many samples.
 
+        adaptive_rank_frequency: str
+            How often the windows are ranked when using adaptive replica exchange.
+            Ranking is cheap and writes no files, so it can be more frequent than
+            'checkpoint_frequency', which helps runs that checkpoint rarely. If
+            None, then the windows are ranked at each checkpoint.
+
         randomise_velocities: bool
             Whether to randomise velocities at the start of each replica exchange cycle
             or following a terminal flip Monte Carlo move.
@@ -823,6 +831,7 @@ class Config:
         self.adaptive_mix_interval = adaptive_mix_interval
         self.adaptive_burn_in = adaptive_burn_in
         self.adaptive_min_samples = adaptive_min_samples
+        self.adaptive_rank_frequency = adaptive_rank_frequency
         self.randomise_velocities = randomise_velocities
         self.perturbed_system = perturbed_system
         self.terminal_flip_frequency = terminal_flip_frequency
@@ -2236,6 +2245,33 @@ class Config:
         if adaptive_min_samples < 1:
             raise ValueError("'adaptive_min_samples' must be greater than 0")
         self._adaptive_min_samples = adaptive_min_samples
+
+    @property
+    def adaptive_rank_frequency(self):
+        return self._adaptive_rank_frequency
+
+    @adaptive_rank_frequency.setter
+    def adaptive_rank_frequency(self, adaptive_rank_frequency):
+        if adaptive_rank_frequency is not None:
+            if not isinstance(adaptive_rank_frequency, str):
+                raise TypeError("'adaptive_rank_frequency' must be of type 'str'")
+
+            from sire.units import picosecond
+
+            try:
+                t = _sr.u(adaptive_rank_frequency)
+            except:
+                raise ValueError(
+                    "Unable to parse 'adaptive_rank_frequency' as a Sire "
+                    f"GeneralUnit: {adaptive_rank_frequency}"
+                )
+
+            if t.value() <= 0 or not t.has_same_units(picosecond):
+                raise ValueError("'adaptive_rank_frequency' must be a positive time.")
+
+            self._adaptive_rank_frequency = t
+        else:
+            self._adaptive_rank_frequency = None
 
     @property
     def randomise_velocities(self):

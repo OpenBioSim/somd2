@@ -1678,24 +1678,27 @@ def test_rank_windows_balances_gpus():
 
 
 @pytest.mark.parametrize(
-    "runtime, checkpoint_frequency, burn_in, warns",
+    "runtime, checkpoint_frequency, burn_in, rank_frequency, warns",
     [
-        ("5 ns", "100 ps", "500 ps", False),
+        ("5 ns", "100 ps", "500 ps", None, False),
         # The only checkpoint is the end of the run.
-        ("1 ns", "2 ns", "0 ps", True),
+        ("1 ns", "2 ns", "0 ps", None, True),
         # The first checkpoint after the burn-in is the end of the run.
-        ("12 ns", "4 ns", "9 ns", True),
+        ("12 ns", "4 ns", "9 ns", None, True),
         # The second checkpoint after the burn-in is the end of the run, so
         # no window goes cold.
-        ("1 ns", "500 ps", "400 ps", True),
-        ("1.2 ns", "500 ps", "400 ps", False),
-        ("5 ns", "0 ps", "500 ps", True),
+        ("1 ns", "500 ps", "400 ps", None, True),
+        ("1.2 ns", "500 ps", "400 ps", None, False),
+        ("5 ns", "0 ps", "500 ps", None, True),
         # Checkpoints are no further apart than 'adaptive_mix_interval'.
-        ("5 ns", "4 ps", "500 ps", True),
+        ("5 ns", "4 ps", "500 ps", None, True),
+        # Ranking more often than checkpointing leaves time to go cold.
+        ("1 ns", "500 ps", "400 ps", "100 ps", False),
+        ("5 ns", "0 ps", "500 ps", "100 ps", False),
     ],
 )
 def test_check_adaptive_config(
-    monkeypatch, runtime, checkpoint_frequency, burn_in, warns
+    monkeypatch, runtime, checkpoint_frequency, burn_in, rank_frequency, warns
 ):
     """
     Validate that settings which stop adaptive replica exchange having an
@@ -1715,6 +1718,7 @@ def test_check_adaptive_config(
         checkpoint_frequency=checkpoint_frequency,
         adaptive_burn_in=burn_in,
         adaptive_mix_interval=4,
+        adaptive_rank_frequency=rank_frequency,
     )
     runner._start_time = sr.u("0 ps")
     runner._check_adaptive_config()
@@ -2225,11 +2229,23 @@ def test_find_ring_pair(syk_ring_break_mols):
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
-def test_adaptive_repex_ranking_arguments(ethane_methanol, monkeypatch):
+@pytest.mark.parametrize(
+    "rank_frequency, cycles_left",
+    [
+        # Ranked at each checkpoint, every 4 cycles.
+        (None, [8, 4, 0]),
+        # Ranked every 2 cycles, from the end of the burn-in.
+        ("8fs", [8, 6, 4, 2, 0]),
+    ],
+)
+def test_adaptive_repex_ranking_arguments(
+    ethane_methanol, monkeypatch, rank_frequency, cycles_left
+):
     """
     Validate that each ranking is given the samples each window has, the
     cycles left, and the share of those cycles that propagate every window,
-    and that swaps are only counted from the end of the burn-in.
+    that swaps are only counted from the end of the burn-in, and that the
+    windows are ranked on their own schedule if one is set.
     """
     num_lambda = 4
 
@@ -2248,6 +2264,7 @@ def test_adaptive_repex_ranking_arguments(ethane_methanol, monkeypatch):
             "adaptive_repex": True,
             "adaptive_mix_interval": 2,
             "adaptive_burn_in": "8fs",
+            "adaptive_rank_frequency": rank_frequency,
         }
 
         runner = RepexRunner(ethane_methanol, Config(**config))
@@ -2263,7 +2280,7 @@ def test_adaptive_repex_ranking_arguments(ethane_methanol, monkeypatch):
         runner.run()
 
     # 12 cycles with a checkpoint every 4, and every window always hot.
-    assert [c[3] for c in calls] == [8, 4, 0]
+    assert [c[3] for c in calls] == cycles_left
 
     # The swaps proposed in the two burn-in cycles aren't counted.
     assert baselines[0] > 0
