@@ -21,6 +21,7 @@
 
 __all__ = ["RepexRunner"]
 
+from contextlib import nullcontext as _nullcontext
 from filelock import FileLock as _FileLock
 from numba import njit as _njit
 from shutil import copyfile as _copyfile
@@ -1524,7 +1525,8 @@ class RepexRunner(_RunnerBase):
 
         from threading import Lock
 
-        # Create a lock to guard the dynamics cache.
+        # Create a lock to guard the committed systems, which also makes the
+        # replicas take turns at the final checkpoint.
         self._lock = Lock()
 
         # Systems committed while a replica was resident in its slot, awaiting
@@ -1860,26 +1862,36 @@ class RepexRunner(_RunnerBase):
             # resident so that every checkpoint file can still be written
             # under a single lock below.
             if self._is_cached:
-                for batch in self._safe_batches(num_checkpoint_workers):
-                    try:
-                        for index, error in checkpoint_executor.map(
-                            self._load_and_commit,
-                            batch,
-                        ):
-                            if error is not None:
-                                msg = (
-                                    f"Post-equilibration commit failed for {_lam_sym} = "
-                                    f"{self._lambda_values[index]:.5f}:\n{error}"
-                                )
-                                _logger.error(msg)
-                                raise error
-                    except KeyboardInterrupt:
-                        checkpoint_executor.shutdown(wait=False, cancel_futures=True)
-                        _logger.error("Post-equilibration commit cancelled. Exiting.")
-                        _sys.exit(1)
+                with self._checkpoint_threads():
+                    for batch in self._safe_batches(num_checkpoint_workers):
+                        try:
+                            for index, error in checkpoint_executor.map(
+                                self._load_and_commit,
+                                batch,
+                            ):
+                                if error is not None:
+                                    msg = (
+                                        f"Post-equilibration commit failed for {_lam_sym} = "
+                                        f"{self._lambda_values[index]:.5f}:\n{error}"
+                                    )
+                                    _logger.error(msg)
+                                    raise error
+                        except KeyboardInterrupt:
+                            checkpoint_executor.shutdown(
+                                wait=False, cancel_futures=True
+                            )
+                            _logger.error(
+                                "Post-equilibration commit cancelled. Exiting."
+                            )
+                            _sys.exit(1)
 
             lock = _FileLock(self._lock_file)
-            with lock.acquire(timeout=self._config.timeout.to("seconds")):
+            with (
+                lock.acquire(timeout=self._config.timeout.to("seconds")),
+                self._checkpoint_threads(),
+            ):
+                self._save_replica_topology(is_final_block=False)
+
                 for j in range(num_checkpoint_batches):
                     replicas = replica_list[
                         j * num_checkpoint_workers : (j + 1) * num_checkpoint_workers
@@ -2037,28 +2049,29 @@ class RepexRunner(_RunnerBase):
                 # context per replica everything is still resident once the
                 # cycle finishes, so committing is left to _checkpoint().
                 if do_checkpoint and self._is_cached:
-                    for j in range(ceil(len(batch) / num_checkpoint_workers)):
-                        replicas = batch[
-                            j * num_checkpoint_workers : (j + 1)
-                            * num_checkpoint_workers
-                        ]
-                        try:
-                            for index, error in checkpoint_executor.map(
-                                self._commit_replica,
-                                replicas,
-                            ):
-                                if error:
-                                    _logger.error(
-                                        f"Commit failed for {_lam_sym} = "
-                                        f"{self._lambda_values[index]:.5f}: {error}"
-                                    )
-                                    raise error
-                        except KeyboardInterrupt:
-                            checkpoint_executor.shutdown(
-                                wait=False, cancel_futures=True
-                            )
-                            _logger.error("Commit cancelled. Exiting.")
-                            _sys.exit(1)
+                    with self._checkpoint_threads():
+                        for j in range(ceil(len(batch) / num_checkpoint_workers)):
+                            replicas = batch[
+                                j * num_checkpoint_workers : (j + 1)
+                                * num_checkpoint_workers
+                            ]
+                            try:
+                                for index, error in checkpoint_executor.map(
+                                    self._commit_replica,
+                                    replicas,
+                                ):
+                                    if error:
+                                        _logger.error(
+                                            f"Commit failed for {_lam_sym} = "
+                                            f"{self._lambda_values[index]:.5f}: {error}"
+                                        )
+                                        raise error
+                            except KeyboardInterrupt:
+                                checkpoint_executor.shutdown(
+                                    wait=False, cancel_futures=True
+                                )
+                                _logger.error("Commit cancelled. Exiting.")
+                                _sys.exit(1)
 
             # Assemble an energy matrix from the results.
             _logger.info("Assembling energy matrix")
@@ -2090,7 +2103,10 @@ class RepexRunner(_RunnerBase):
 
                 # Acquire the file lock to ensure that the checkpoint files are
                 # in a consistent state if read by another process.
-                with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                with (
+                    lock.acquire(timeout=self._config.timeout.to("seconds")),
+                    self._checkpoint_threads(),
+                ):
                     # First backup existing checkpoint files.
                     for j in range(num_checkpoint_batches):
                         # Get the indices of the replicas in this batch.
@@ -2115,6 +2131,8 @@ class RepexRunner(_RunnerBase):
                             )
                             _logger.error("Backup cancelled. Exiting.")
                             _sys.exit(1)
+
+                    self._save_replica_topology(i == cycles - 1)
 
                     # Now write the new checkpoint files.
                     for j in range(num_checkpoint_batches):
@@ -2740,11 +2758,12 @@ class RepexRunner(_RunnerBase):
         Commit a replica while it is still resident in its slot, holding the
         result until the checkpoint files are written at the end of the cycle.
 
-        This is only used when contexts are shared between replicas. A slot
-        holds the positions and trajectory frames of the replica it last
-        hosted, so a replica has to be committed before its slot is handed on.
-        Deferring only the file writes keeps every checkpoint file within a
-        single lock, so that an external reader never sees a partial set.
+        When contexts are shared between replicas, a slot holds the positions
+        and trajectory frames of the replica it last hosted, so a replica has
+        to be committed before its slot is handed on. Deferring only the file
+        writes keeps every checkpoint file within a single lock, so that an
+        external reader never sees a partial set. It is also used to commit
+        the first replica early, when the GCMC topologies are saved from it.
 
         Parameters
         ----------
@@ -2778,6 +2797,35 @@ class RepexRunner(_RunnerBase):
             return index, e
 
         return index, None
+
+    def _save_replica_topology(self, is_final_block):
+        """
+        Save the GCMC topologies from the first replica when they are due. The
+        replicas share the topology files, so they are saved once, before the
+        replicas are checkpointed, rather than by each replica.
+
+        Parameters
+        ----------
+
+        is_final_block: bool
+            Whether this is the final block of the simulation.
+        """
+        if not self._is_gcmc_topology_due(is_final_block):
+            return
+
+        try:
+            # Commit the replica now if it isn't already, so that _checkpoint()
+            # re-uses the committed system.
+            if 0 not in self._committed:
+                _, error = self._commit_replica(0)
+                if error is not None:
+                    raise error
+
+            system, _ = self._committed[0]
+            self._save_gcmc_topology(system)
+        except Exception as e:
+            _logger.error(f"Saving the GCMC topologies failed: {e}")
+            raise
 
     def _checkpoint(self, index, lambdas, block, num_blocks, is_final_block=False):
         """
@@ -2834,7 +2882,9 @@ class RepexRunner(_RunnerBase):
                 system, speed = committed
 
             # Call the base class checkpoint method to save the system state.
-            with self._lock:
+            # The final block reassembles each trajectory, which loads the
+            # topology, so replicas take turns to bound the memory used.
+            with self._lock if is_final_block else _nullcontext():
                 index, error = super()._checkpoint(
                     system, index, block, speed, is_final_block=is_final_block
                 )
