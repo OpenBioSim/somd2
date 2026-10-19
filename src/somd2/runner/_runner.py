@@ -420,6 +420,10 @@ class Runner(_RunnerBase):
         self._config._reset_logger(_logger)
         _sr.base.ProgressBar.set_silent()
 
+        # The thread limit set in the parent process doesn't carry over.
+        if self._sire_threads is not None:
+            _sr.legacy.Base.set_max_num_threads(self._sire_threads)
+
         # Get the lambda value.
         lambda_value = self._lambda_values[index]
 
@@ -1101,7 +1105,13 @@ class Runner(_RunnerBase):
             The window being simulated.
         """
         lock = _FileLock(self._lock_file)
-        with lock.acquire(timeout=self._config.timeout.to("seconds")):
+        with (
+            lock.acquire(timeout=self._config.timeout.to("seconds")),
+            self._checkpoint_threads(),
+        ):
+            if self._is_gcmc_topology_due(is_final_block=False):
+                self._save_gcmc_topology(system)
+
             _, error = self._checkpoint(
                 system,
                 window.index,
@@ -1447,11 +1457,17 @@ class Runner(_RunnerBase):
         num_energy_samples = self._num_energy_samples(window)
 
         lock = _FileLock(self._lock_file)
-        with lock.acquire(timeout=self._config.timeout.to("seconds")):
+        with (
+            lock.acquire(timeout=self._config.timeout.to("seconds")),
+            self._checkpoint_threads(),
+        ):
             # Backup any existing checkpoint files.
             _, error = self._backup_checkpoint(window.index)
             if error is not None:
                 raise error
+
+            if self._is_gcmc_topology_due(is_final_block):
+                self._save_gcmc_topology(system)
 
             # Write the checkpoint files.
             _, error = self._checkpoint(

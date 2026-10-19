@@ -893,6 +893,8 @@ def test_repex_gcmc_bounded_contexts(ethane_methanol, max_contexts):
             "num_lambda": num_lambda,
             "replica_exchange": True,
             "max_contexts": max_contexts,
+            # Checkpoint replicas concurrently.
+            "oversubscription_factor": 2,
             "gcmc": True,
             "gcmc_selection": "resname LIG",
             "gcmc_frequency": "4fs",

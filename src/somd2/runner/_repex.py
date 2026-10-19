@@ -21,6 +21,7 @@
 
 __all__ = ["RepexRunner"]
 
+from contextlib import nullcontext as _nullcontext
 from filelock import FileLock as _FileLock
 from numba import njit as _njit
 from shutil import copyfile as _copyfile
@@ -468,7 +469,8 @@ class RepexRunner(_RunnerBase):
 
         from threading import Lock
 
-        # Create a lock to guard the dynamics cache.
+        # Create a lock to guard the committed systems, which also makes the
+        # replicas take turns at the final checkpoint.
         self._lock = Lock()
 
         # Systems committed while a replica was resident in its slot, awaiting
@@ -1063,16 +1065,22 @@ class RepexRunner(_RunnerBase):
             # resident so that every checkpoint file can still be written
             # under a single lock below.
             if self._is_cached:
-                for batch in self._replica_passes(0):
-                    self._map_replicas(
-                        checkpoint_executor,
-                        "Post-equilibration commit",
-                        self._load_and_commit,
-                        batch,
-                    )
+                with self._checkpoint_threads():
+                    for batch in self._replica_passes(0):
+                        self._map_replicas(
+                            checkpoint_executor,
+                            "Post-equilibration commit",
+                            self._load_and_commit,
+                            batch,
+                        )
 
             lock = _FileLock(self._lock_file)
-            with lock.acquire(timeout=self._config.timeout.to("seconds")):
+            with (
+                lock.acquire(timeout=self._config.timeout.to("seconds")),
+                self._checkpoint_threads(),
+            ):
+                self._save_replica_topology(is_final_block=False)
+
                 self._map_replicas(
                     checkpoint_executor,
                     "Post-equilibration checkpoint",
@@ -1279,9 +1287,10 @@ class RepexRunner(_RunnerBase):
             # everything is still resident once the cycle finishes, so
             # committing is left to _checkpoint().
             if do_checkpoint and self._is_cached:
-                self._map_replicas(
-                    checkpoint_executor, "Commit", self._commit_replica, batch
-                )
+                with self._checkpoint_threads():
+                    self._map_replicas(
+                        checkpoint_executor, "Commit", self._commit_replica, batch
+                    )
 
         return results
 
@@ -1380,7 +1389,10 @@ class RepexRunner(_RunnerBase):
         replica_list = list(range(self._config.num_lambda))
 
         lock = _FileLock(self._lock_file)
-        with lock.acquire(timeout=self._config.timeout.to("seconds")):
+        with (
+            lock.acquire(timeout=self._config.timeout.to("seconds")),
+            self._checkpoint_threads(),
+        ):
             # First backup existing checkpoint files.
             self._map_replicas(
                 checkpoint_executor,
@@ -1388,6 +1400,8 @@ class RepexRunner(_RunnerBase):
                 self._backup_checkpoint,
                 replica_list,
             )
+
+            self._save_replica_topology(is_final_block)
 
             # Now write the new checkpoint files.
             self._map_replicas(
@@ -2357,11 +2371,12 @@ class RepexRunner(_RunnerBase):
         Commit a replica while it is still resident in its slot, holding the
         result until the checkpoint files are written at the end of the cycle.
 
-        This is only used when contexts are shared between replicas. A slot
-        holds the positions and trajectory frames of the replica it last
-        hosted, so a replica has to be committed before its slot is handed on.
-        Deferring only the file writes keeps every checkpoint file within a
-        single lock, so that an external reader never sees a partial set.
+        When contexts are shared between replicas, a slot holds the positions
+        and trajectory frames of the replica it last hosted, so a replica has
+        to be committed before its slot is handed on. Deferring only the file
+        writes keeps every checkpoint file within a single lock, so that an
+        external reader never sees a partial set. It is also used to commit
+        the first replica early, when the GCMC topologies are saved from it.
 
         Parameters
         ----------
@@ -2395,6 +2410,35 @@ class RepexRunner(_RunnerBase):
             return index, e
 
         return index, None
+
+    def _save_replica_topology(self, is_final_block):
+        """
+        Save the GCMC topologies from the first replica when they are due. The
+        replicas share the topology files, so they are saved once, before the
+        replicas are checkpointed, rather than by each replica.
+
+        Parameters
+        ----------
+
+        is_final_block: bool
+            Whether this is the final block of the simulation.
+        """
+        if not self._is_gcmc_topology_due(is_final_block):
+            return
+
+        try:
+            # Commit the replica now if it isn't already, so that _checkpoint()
+            # re-uses the committed system.
+            if 0 not in self._committed:
+                _, error = self._commit_replica(0)
+                if error is not None:
+                    raise error
+
+            system, _ = self._committed[0]
+            self._save_gcmc_topology(system)
+        except Exception as e:
+            _logger.error(f"Saving the GCMC topologies failed: {e}")
+            raise
 
     def _checkpoint(
         self,
@@ -2463,7 +2507,9 @@ class RepexRunner(_RunnerBase):
                 system, speed = committed
 
             # Call the base class checkpoint method to save the system state.
-            with self._lock:
+            # The final block reassembles each trajectory, which loads the
+            # topology, so replicas take turns to bound the memory used.
+            with self._lock if is_final_block else _nullcontext():
                 index, error = super()._checkpoint(
                     system,
                     index,
@@ -2473,8 +2519,8 @@ class RepexRunner(_RunnerBase):
                     num_energy_rows=num_energy_rows,
                 )
 
-                if error is not None:
-                    return index, error
+            if error is not None:
+                return index, error
 
             # Delete the trajectory frames from the Sire system within the
             # dynamics object. A replica committed earlier, with shared
