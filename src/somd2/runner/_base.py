@@ -44,6 +44,9 @@ class RunnerBase:
     Base class for the SOMD2 simulation runner.
     """
 
+    # The number of threads available to Sire before any runner limited it.
+    _total_sire_threads = None
+
     def __init__(self, system, config):
         """
         Constructor.
@@ -1142,13 +1145,14 @@ class RunnerBase:
         self._sire_threads = None
         self._checkpoint_sire_threads = None
 
+        # Undo any limit set by an earlier runner in this process.
+        if RunnerBase._total_sire_threads is None:
+            RunnerBase._total_sire_threads = _sr.legacy.Base.get_max_num_threads()
+        total_threads = RunnerBase._total_sire_threads
+        _sr.legacy.Base.set_max_num_threads(total_threads)
+
         # Limit the number of CPU threads available to Sire when running in parallel.
         if self._is_gpu:
-            # First get the total number of threads that are available to Sire,
-            # resetting any limit set by an earlier runner in this process.
-            _sr.set_default_num_threads()
-            total_threads = _sr.legacy.Base.get_max_num_threads()
-
             # Get the available GPU devices. Subclasses re-use this list rather
             # than querying the environment again.
             self._gpu_devices = self._get_gpu_devices(

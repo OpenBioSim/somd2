@@ -171,28 +171,41 @@ def test_energy_components_after_restart(ethane_methanol):
 
 def test_sire_thread_limit_with_repeated_runners(monkeypatch):
     """
-    Validate that the Sire thread limit is worked out from every available
-    thread, not from the limit left by an earlier runner in the same process.
+    Validate that the Sire thread limit is worked out from the threads that
+    were available before the first runner, keeping a limit set by the user,
+    rather than from the limit left by an earlier runner in the same process.
     """
     import sire as sr
 
     from somd2.runner._base import RunnerBase
 
     sr.set_default_num_threads()
-    total_threads = sr.get_max_num_threads()
-    if total_threads < 2:
-        pytest.skip("Needs more than one CPU thread.")
+    if sr.get_max_num_threads() < 4:
+        pytest.skip("Needs at least four CPU threads.")
 
+    # A limit set by the user before the first runner is created.
+    user_threads = sr.get_max_num_threads() // 2
+
+    monkeypatch.setattr(RunnerBase, "_total_sire_threads", None)
     monkeypatch.setattr(RunnerBase, "_get_gpu_devices", staticmethod(lambda *args: [0]))
 
-    runner = object.__new__(RunnerBase)
-    runner._is_gpu = True
-    runner._config = Config(max_gpus=1, oversubscription_factor=2)
+    gpu_runner = object.__new__(RunnerBase)
+    gpu_runner._is_gpu = True
+    gpu_runner._config = Config(max_gpus=1, oversubscription_factor=2)
+
+    cpu_runner = object.__new__(RunnerBase)
+    cpu_runner._is_gpu = False
 
     try:
+        sr.set_max_num_threads(user_threads)
+
         for _ in range(2):
-            runner._limit_sire_threads()
-            assert runner._sire_threads == max(1, total_threads // 2)
-            assert runner._checkpoint_sire_threads == total_threads
+            gpu_runner._limit_sire_threads()
+            assert gpu_runner._sire_threads == user_threads // 2
+            assert gpu_runner._checkpoint_sire_threads == user_threads
+
+        # A CPU runner isn't left with the limit of the GPU runner before it.
+        cpu_runner._limit_sire_threads()
+        assert sr.get_max_num_threads() == user_threads
     finally:
         sr.set_default_num_threads()
