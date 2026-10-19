@@ -2492,19 +2492,18 @@ class RepexRunner(_RunnerBase):
                 system, speed = committed
 
             # Call the base class checkpoint method to save the system state.
-            with self._lock:
-                index, error = super()._checkpoint(
-                    system,
-                    index,
-                    block,
-                    speed,
-                    is_final_block=is_final_block,
-                    num_energy_rows=num_energy_rows,
-                    save_gcmc_topology=False,
-                )
+            index, error = super()._checkpoint(
+                system,
+                index,
+                block,
+                speed,
+                is_final_block=is_final_block,
+                num_energy_rows=num_energy_rows,
+                save_gcmc_topology=False,
+            )
 
-                if error is not None:
-                    return index, error
+            if error is not None:
+                return index, error
 
             # Delete the trajectory frames from the Sire system within the
             # dynamics object. A replica committed earlier, with shared
