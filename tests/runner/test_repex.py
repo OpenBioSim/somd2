@@ -500,6 +500,58 @@ def test_repex_checkpoint_single_lock(ethane_methanol, max_contexts):
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+def test_repex_checkpoint_failure_keeps_lock(ethane_methanol, monkeypatch):
+    """
+    Validate that when one replica's checkpoint fails, the others finish
+    writing while the file lock is still held, before the error is raised.
+    """
+    import time
+
+    from filelock import FileLock, Timeout
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "4fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": 4,
+            "replica_exchange": True,
+            # Enough workers to checkpoint every replica at once.
+            "oversubscription_factor": 4,
+            "num_checkpoint_workers": 4,
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+
+        held = []
+
+        def checkpoint(index, *args, **kwargs):
+            if index == 0:
+                return index, RuntimeError("checkpoint failed")
+            time.sleep(0.5)
+            lock = FileLock(runner._lock_file)
+            try:
+                lock.acquire(timeout=0)
+                lock.release()
+                held.append(False)
+            except Timeout:
+                held.append(True)
+            return index, None
+
+        monkeypatch.setattr(runner, "_checkpoint", checkpoint)
+
+        with pytest.raises(RuntimeError, match="checkpoint failed"):
+            runner.run()
+
+    assert held == [True, True, True]
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
 @pytest.mark.parametrize(
     "runtime, checkpoint_frequency, expected",
     [("8fs", "4fs", [False, False]), ("12fs", "8fs", [False, True])],
@@ -566,6 +618,8 @@ def test_repex_gcmc_bounded_contexts(ethane_methanol, max_contexts):
             "num_lambda": num_lambda,
             "replica_exchange": True,
             "max_contexts": max_contexts,
+            # Checkpoint replicas concurrently.
+            "oversubscription_factor": 2,
             "gcmc": True,
             "gcmc_selection": "resname LIG",
             "gcmc_frequency": "4fs",

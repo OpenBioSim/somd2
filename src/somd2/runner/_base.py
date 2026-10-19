@@ -21,6 +21,7 @@
 
 __all__ = ["RunnerBase"]
 
+from contextlib import contextmanager as _contextmanager
 from glob import glob as _glob
 from pathlib import Path as _Path
 from shutil import copyfile as _copyfile
@@ -41,6 +42,9 @@ class RunnerBase:
     """
     Base class for the SOMD2 simulation runner.
     """
+
+    # The number of threads available to Sire before any runner limited it.
+    _total_sire_threads = None
 
     def __init__(self, system, config):
         """
@@ -1008,11 +1012,19 @@ class RunnerBase:
         # visible-devices environment variable for the chosen platform.
         self._gpu_devices = []
 
+        # The maximum number of Sire CPU threads during dynamics and while
+        # checkpointing, or None if it isn't limited.
+        self._sire_threads = None
+        self._checkpoint_sire_threads = None
+
+        # Undo any limit set by an earlier runner in this process.
+        if RunnerBase._total_sire_threads is None:
+            RunnerBase._total_sire_threads = _sr.legacy.Base.get_max_num_threads()
+        total_threads = RunnerBase._total_sire_threads
+        _sr.legacy.Base.set_max_num_threads(total_threads)
+
         # Limit the number of CPU threads available to Sire when running in parallel.
         if self._is_gpu:
-            # First get the total number of threads that are available to Sire.
-            total_threads = _sr.legacy.Base.get_max_num_threads()
-
             # Get the available GPU devices. Subclasses re-use this list rather
             # than querying the environment again.
             self._gpu_devices = self._get_gpu_devices(
@@ -1046,7 +1058,31 @@ class RunnerBase:
             _logger.info(f"Setting maximum Sire CPU threads to {sire_threads}")
 
             # Update the maximum number of threads.
+            self._sire_threads = sire_threads
             _sr.legacy.Base.set_max_num_threads(sire_threads)
+
+            # Checkpoints never overlap one another, so they can use every
+            # thread unless the user has set a limit.
+            if self._config.max_sire_threads is None:
+                self._checkpoint_sire_threads = total_threads
+            else:
+                self._checkpoint_sire_threads = sire_threads
+
+    @_contextmanager
+    def _checkpoint_threads(self):
+        """
+        Raise the maximum number of Sire CPU threads while checkpoint files
+        are written, restoring the limit for dynamics afterwards.
+        """
+        if self._checkpoint_sire_threads == self._sire_threads:
+            yield
+            return
+
+        _sr.legacy.Base.set_max_num_threads(self._checkpoint_sire_threads)
+        try:
+            yield
+        finally:
+            _sr.legacy.Base.set_max_num_threads(self._sire_threads)
 
     @property
     def _is_abfe_bound(self):
@@ -2468,12 +2504,6 @@ class RunnerBase:
                         f"{self._standard_state_correction:.6f}"
                     )
 
-            # Saved at the first checkpoint of each run, and the final one for the
-            # final coordinates in the PDB files.
-            if self._config.gcmc and (is_final_block or not self._gcmc_topology_saved):
-                self._save_gcmc_topology(system)
-                self._gcmc_topology_saved = True
-
             if is_final_block:
                 # Assemble and save the final trajectory.
                 if self._config.save_trajectories:
@@ -2825,6 +2855,26 @@ class RunnerBase:
             )
             _pq_local.write_table(table, filepath)
 
+    def _is_gcmc_topology_due(self, is_final_block):
+        """
+        Whether the GCMC topologies are due to be saved. They are saved at the
+        first checkpoint of each run, and the final one for the final
+        coordinates in the PDB files.
+
+        Parameters
+        ----------
+
+        is_final_block: bool
+            Whether this is the final block of the simulation.
+
+        Returns
+        -------
+
+        bool
+            Whether the topologies are due.
+        """
+        return self._config.gcmc and (is_final_block or not self._gcmc_topology_saved)
+
     def _save_gcmc_topology(self, system):
         """
         Save the end-state topologies, including the additional waters used for
@@ -2845,6 +2895,8 @@ class RunnerBase:
         ):
             _sr.save(mols, topology)
             _sr.save(mols, topology.replace(".prm7", ".pdb"))
+
+        self._gcmc_topology_saved = True
 
     def _save_ghost_residues(self, index, gcmc_sampler):
         """
