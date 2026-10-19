@@ -1063,16 +1063,20 @@ class RepexRunner(_RunnerBase):
             # resident so that every checkpoint file can still be written
             # under a single lock below.
             if self._is_cached:
-                for batch in self._replica_passes(0):
-                    self._map_replicas(
-                        checkpoint_executor,
-                        "Post-equilibration commit",
-                        self._load_and_commit,
-                        batch,
-                    )
+                with self._checkpoint_threads():
+                    for batch in self._replica_passes(0):
+                        self._map_replicas(
+                            checkpoint_executor,
+                            "Post-equilibration commit",
+                            self._load_and_commit,
+                            batch,
+                        )
 
             lock = _FileLock(self._lock_file)
-            with lock.acquire(timeout=self._config.timeout.to("seconds")):
+            with (
+                lock.acquire(timeout=self._config.timeout.to("seconds")),
+                self._checkpoint_threads(),
+            ):
                 self._save_replica_topology(is_final_block=False)
 
                 self._map_replicas(
@@ -1281,9 +1285,10 @@ class RepexRunner(_RunnerBase):
             # everything is still resident once the cycle finishes, so
             # committing is left to _checkpoint().
             if do_checkpoint and self._is_cached:
-                self._map_replicas(
-                    checkpoint_executor, "Commit", self._commit_replica, batch
-                )
+                with self._checkpoint_threads():
+                    self._map_replicas(
+                        checkpoint_executor, "Commit", self._commit_replica, batch
+                    )
 
         return results
 
@@ -1382,7 +1387,10 @@ class RepexRunner(_RunnerBase):
         replica_list = list(range(self._config.num_lambda))
 
         lock = _FileLock(self._lock_file)
-        with lock.acquire(timeout=self._config.timeout.to("seconds")):
+        with (
+            lock.acquire(timeout=self._config.timeout.to("seconds")),
+            self._checkpoint_threads(),
+        ):
             # First backup existing checkpoint files.
             self._map_replicas(
                 checkpoint_executor,

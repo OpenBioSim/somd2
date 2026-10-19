@@ -21,6 +21,7 @@
 
 __all__ = ["RunnerBase"]
 
+from contextlib import contextmanager as _contextmanager
 from glob import glob as _glob
 from math import isclose as _isclose
 from pathlib import Path as _Path
@@ -1136,8 +1137,10 @@ class RunnerBase:
         # visible-devices environment variable for the chosen platform.
         self._gpu_devices = []
 
-        # The maximum number of Sire CPU threads, or None if it isn't limited.
+        # The maximum number of Sire CPU threads during dynamics and while
+        # checkpointing, or None if it isn't limited.
         self._sire_threads = None
+        self._checkpoint_sire_threads = None
 
         # Limit the number of CPU threads available to Sire when running in parallel.
         if self._is_gpu:
@@ -1179,6 +1182,29 @@ class RunnerBase:
             # Update the maximum number of threads.
             self._sire_threads = sire_threads
             _sr.legacy.Base.set_max_num_threads(sire_threads)
+
+            # Checkpoints never overlap one another, so they can use every
+            # thread unless the user has set a limit.
+            if self._config.max_sire_threads is None:
+                self._checkpoint_sire_threads = total_threads
+            else:
+                self._checkpoint_sire_threads = sire_threads
+
+    @_contextmanager
+    def _checkpoint_threads(self):
+        """
+        Raise the maximum number of Sire CPU threads while checkpoint files
+        are written, restoring the limit for dynamics afterwards.
+        """
+        if self._checkpoint_sire_threads == self._sire_threads:
+            yield
+            return
+
+        _sr.legacy.Base.set_max_num_threads(self._checkpoint_sire_threads)
+        try:
+            yield
+        finally:
+            _sr.legacy.Base.set_max_num_threads(self._sire_threads)
 
     def _set_tuned_pme_parameters(self):
         """

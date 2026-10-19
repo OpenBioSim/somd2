@@ -1105,7 +1105,10 @@ class Runner(_RunnerBase):
             The window being simulated.
         """
         lock = _FileLock(self._lock_file)
-        with lock.acquire(timeout=self._config.timeout.to("seconds")):
+        with (
+            lock.acquire(timeout=self._config.timeout.to("seconds")),
+            self._checkpoint_threads(),
+        ):
             _, error = self._checkpoint(
                 system,
                 window.index,
@@ -1451,7 +1454,10 @@ class Runner(_RunnerBase):
         num_energy_samples = self._num_energy_samples(window)
 
         lock = _FileLock(self._lock_file)
-        with lock.acquire(timeout=self._config.timeout.to("seconds")):
+        with (
+            lock.acquire(timeout=self._config.timeout.to("seconds")),
+            self._checkpoint_threads(),
+        ):
             # Backup any existing checkpoint files.
             _, error = self._backup_checkpoint(window.index)
             if error is not None:
