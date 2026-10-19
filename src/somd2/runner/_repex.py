@@ -1634,6 +1634,61 @@ class RepexRunner(_RunnerBase):
             for i in range(ceil(len(batch) / num_workers)):
                 yield batch[i * num_workers : (i + 1) * num_workers]
 
+    def _map_replicas(self, executor, step, func, replicas, *args):
+        """
+        Run a step for each replica in a thread pool, letting every call
+        finish before raising the first error, so that files written under a
+        lock are all written before it is released. An interrupt exits
+        straight away, without waiting.
+
+        Two replicas that share a slot must never be processed at the same
+        time, so the replicas must come from a single pass, unless the step
+        doesn't use the slot's context.
+
+        Parameters
+        ----------
+
+        executor: concurrent.futures.ThreadPoolExecutor
+            The thread pool to run the step in.
+
+        step: str
+            The name of the step, for logging.
+
+        func: callable
+            The step, which returns the index of the replica and the exception
+            raised, if any. An exception it raises is treated the same way.
+
+        replicas: list of int
+            The replicas to run the step for.
+
+        args: iterable
+            The remaining arguments, an iterable of one per replica for each.
+        """
+        from concurrent.futures import wait
+
+        try:
+            futures = [
+                executor.submit(func, *arguments) for arguments in zip(replicas, *args)
+            ]
+            wait(futures)
+        except KeyboardInterrupt:
+            executor.shutdown(wait=False, cancel_futures=True)
+            _logger.error(f"{step} cancelled. Exiting.")
+            _sys.exit(1)
+
+        outcomes = []
+        for replica, future in zip(replicas, futures):
+            error = future.exception()
+            outcomes.append((replica, error) if error else future.result())
+
+        for index, error in outcomes:
+            if error is not None:
+                _logger.error(
+                    f"{step} failed for {_lam_sym} = "
+                    f"{self._lambda_values[index]:.5f}: {error}"
+                )
+                raise error
+
     def _set_num_slots(self):
         """
         Work out the number of OpenMM contexts (slots) to create, validating
@@ -1864,26 +1919,12 @@ class RepexRunner(_RunnerBase):
             if self._is_cached:
                 with self._checkpoint_threads():
                     for batch in self._safe_batches(num_checkpoint_workers):
-                        try:
-                            for index, error in checkpoint_executor.map(
-                                self._load_and_commit,
-                                batch,
-                            ):
-                                if error is not None:
-                                    msg = (
-                                        f"Post-equilibration commit failed for {_lam_sym} = "
-                                        f"{self._lambda_values[index]:.5f}:\n{error}"
-                                    )
-                                    _logger.error(msg)
-                                    raise error
-                        except KeyboardInterrupt:
-                            checkpoint_executor.shutdown(
-                                wait=False, cancel_futures=True
-                            )
-                            _logger.error(
-                                "Post-equilibration commit cancelled. Exiting."
-                            )
-                            _sys.exit(1)
+                        self._map_replicas(
+                            checkpoint_executor,
+                            "Post-equilibration commit",
+                            self._load_and_commit,
+                            batch,
+                        )
 
             lock = _FileLock(self._lock_file)
             with (
@@ -1896,27 +1937,15 @@ class RepexRunner(_RunnerBase):
                     replicas = replica_list[
                         j * num_checkpoint_workers : (j + 1) * num_checkpoint_workers
                     ]
-                    try:
-                        for index, error in checkpoint_executor.map(
-                            self._checkpoint,
-                            replicas,
-                            repeat(self._lambda_values),
-                            repeat(-1),
-                            repeat(cycles),
-                        ):
-                            if error is not None:
-                                msg = (
-                                    f"Post-equilibration checkpoint failed for {_lam_sym} = "
-                                    f"{self._lambda_values[index]:.5f}:\n{error}"
-                                )
-                                _logger.error(msg)
-                                raise error
-                    except KeyboardInterrupt:
-                        checkpoint_executor.shutdown(wait=False, cancel_futures=True)
-                        _logger.error(
-                            "Post-equilibration checkpoint cancelled. Exiting."
-                        )
-                        _sys.exit(1)
+                    self._map_replicas(
+                        checkpoint_executor,
+                        "Post-equilibration checkpoint",
+                        self._checkpoint,
+                        replicas,
+                        repeat(self._lambda_values),
+                        repeat(-1),
+                        repeat(cycles),
+                    )
 
         # Current block number.
         block = self._start_block
@@ -2055,23 +2084,12 @@ class RepexRunner(_RunnerBase):
                                 j * num_checkpoint_workers : (j + 1)
                                 * num_checkpoint_workers
                             ]
-                            try:
-                                for index, error in checkpoint_executor.map(
-                                    self._commit_replica,
-                                    replicas,
-                                ):
-                                    if error:
-                                        _logger.error(
-                                            f"Commit failed for {_lam_sym} = "
-                                            f"{self._lambda_values[index]:.5f}: {error}"
-                                        )
-                                        raise error
-                            except KeyboardInterrupt:
-                                checkpoint_executor.shutdown(
-                                    wait=False, cancel_futures=True
-                                )
-                                _logger.error("Commit cancelled. Exiting.")
-                                _sys.exit(1)
+                            self._map_replicas(
+                                checkpoint_executor,
+                                "Commit",
+                                self._commit_replica,
+                                replicas,
+                            )
 
             # Assemble an energy matrix from the results.
             _logger.info("Assembling energy matrix")
@@ -2114,23 +2132,12 @@ class RepexRunner(_RunnerBase):
                             j * num_checkpoint_workers : (j + 1)
                             * num_checkpoint_workers
                         ]
-                        try:
-                            for index, error in checkpoint_executor.map(
-                                self._backup_checkpoint,
-                                replicas,
-                            ):
-                                if error:
-                                    _logger.error(
-                                        f"Backup failed for {_lam_sym} = "
-                                        f"{self._lambda_values[index]:.5f}: {error}"
-                                    )
-                                    raise error
-                        except KeyboardInterrupt:
-                            checkpoint_executor.shutdown(
-                                wait=False, cancel_futures=True
-                            )
-                            _logger.error("Backup cancelled. Exiting.")
-                            _sys.exit(1)
+                        self._map_replicas(
+                            checkpoint_executor,
+                            "Backup",
+                            self._backup_checkpoint,
+                            replicas,
+                        )
 
                     self._save_replica_topology(i == cycles - 1)
 
@@ -2141,27 +2148,16 @@ class RepexRunner(_RunnerBase):
                             j * num_checkpoint_workers : (j + 1)
                             * num_checkpoint_workers
                         ]
-                        try:
-                            for index, error in checkpoint_executor.map(
-                                self._checkpoint,
-                                replicas,
-                                repeat(self._lambda_values),
-                                repeat(block),
-                                repeat(num_blocks + int(rem > 0)),
-                                repeat(i == cycles - 1),
-                            ):
-                                if error:
-                                    _logger.error(
-                                        f"Checkpoint failed for {_lam_sym} = "
-                                        f"{self._lambda_values[index]:.5f}: {error}"
-                                    )
-                                    raise error
-                        except KeyboardInterrupt:
-                            checkpoint_executor.shutdown(
-                                wait=False, cancel_futures=True
-                            )
-                            _logger.error("Checkpoint cancelled. Exiting.")
-                            _sys.exit(1)
+                        self._map_replicas(
+                            checkpoint_executor,
+                            "Checkpoint",
+                            self._checkpoint,
+                            replicas,
+                            repeat(self._lambda_values),
+                            repeat(block),
+                            repeat(num_blocks + int(rem > 0)),
+                            repeat(i == cycles - 1),
+                        )
 
                     self._save_repex_state(final=not is_checkpoint)
 
