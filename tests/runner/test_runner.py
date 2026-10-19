@@ -167,3 +167,32 @@ def test_energy_components_after_restart(ethane_methanol):
         # The times are in ns.
         times = list(np.round(components["time"] * 1e6, 6))
         assert times == [4, 8, 12, 16, 20]
+
+
+def test_sire_thread_limit_with_repeated_runners(monkeypatch):
+    """
+    Validate that the Sire thread limit is worked out from every available
+    thread, not from the limit left by an earlier runner in the same process.
+    """
+    import sire as sr
+
+    from somd2.runner._base import RunnerBase
+
+    sr.set_default_num_threads()
+    total_threads = sr.get_max_num_threads()
+    if total_threads < 2:
+        pytest.skip("Needs more than one CPU thread.")
+
+    monkeypatch.setattr(RunnerBase, "_get_gpu_devices", staticmethod(lambda *args: [0]))
+
+    runner = object.__new__(RunnerBase)
+    runner._is_gpu = True
+    runner._config = Config(max_gpus=1, oversubscription_factor=2)
+
+    try:
+        for _ in range(2):
+            runner._limit_sire_threads()
+            assert runner._sire_threads == max(1, total_threads // 2)
+            assert runner._checkpoint_sire_threads == total_threads
+    finally:
+        sr.set_default_num_threads()

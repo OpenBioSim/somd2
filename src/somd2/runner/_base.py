@@ -1144,7 +1144,9 @@ class RunnerBase:
 
         # Limit the number of CPU threads available to Sire when running in parallel.
         if self._is_gpu:
-            # First get the total number of threads that are available to Sire.
+            # First get the total number of threads that are available to Sire,
+            # resetting any limit set by an earlier runner in this process.
+            _sr.set_default_num_threads()
             total_threads = _sr.legacy.Base.get_max_num_threads()
 
             # Get the available GPU devices. Subclasses re-use this list rather
