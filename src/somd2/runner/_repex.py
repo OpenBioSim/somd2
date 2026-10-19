@@ -1073,6 +1073,8 @@ class RepexRunner(_RunnerBase):
 
             lock = _FileLock(self._lock_file)
             with lock.acquire(timeout=self._config.timeout.to("seconds")):
+                self._save_replica_topology(is_final_block=False)
+
                 self._map_replicas(
                     checkpoint_executor,
                     "Post-equilibration checkpoint",
@@ -1388,6 +1390,8 @@ class RepexRunner(_RunnerBase):
                 self._backup_checkpoint,
                 replica_list,
             )
+
+            self._save_replica_topology(is_final_block)
 
             # Now write the new checkpoint files.
             self._map_replicas(
@@ -2396,6 +2400,31 @@ class RepexRunner(_RunnerBase):
 
         return index, None
 
+    def _save_replica_topology(self, is_final_block):
+        """
+        Save the GCMC topologies from the first replica when they are due. The
+        replicas share the topology files, so they are saved once, before the
+        replicas are checkpointed, rather than by each replica.
+
+        Parameters
+        ----------
+
+        is_final_block: bool
+            Whether this is the final block of the simulation.
+        """
+        if not self._is_gcmc_topology_due(is_final_block):
+            return
+
+        # Commit the replica now if it isn't already, so that _checkpoint()
+        # re-uses the committed system.
+        if 0 not in self._committed:
+            _, error = self._commit_replica(0)
+            if error is not None:
+                raise error
+
+        system, _ = self._committed[0]
+        self._save_gcmc_topology(system)
+
     def _checkpoint(
         self,
         index,
@@ -2471,6 +2500,7 @@ class RepexRunner(_RunnerBase):
                     speed,
                     is_final_block=is_final_block,
                     num_energy_rows=num_energy_rows,
+                    save_gcmc_topology=False,
                 )
 
                 if error is not None:

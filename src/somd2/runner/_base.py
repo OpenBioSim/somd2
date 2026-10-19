@@ -2598,6 +2598,7 @@ class RunnerBase:
         context=None,
         gcmc_sampler=None,
         num_energy_rows=None,
+        save_gcmc_topology=True,
     ):
         """
         Save a checkpoint file.
@@ -2629,6 +2630,10 @@ class RunnerBase:
         num_energy_rows: int
             The number of energy samples collected since the last checkpoint. If
             None, every window is assumed to have collected a full block.
+
+        save_gcmc_topology: bool
+            Whether to save the GCMC topologies when they are due. Replica
+            exchange saves them once for every replica instead.
 
         Returns
         -------
@@ -2688,11 +2693,8 @@ class RunnerBase:
                         f"{self._standard_state_correction:.6f}"
                     )
 
-            # Saved at the first checkpoint of each run, and the final one for the
-            # final coordinates in the PDB files.
-            if self._config.gcmc and (is_final_block or not self._gcmc_topology_saved):
+            if save_gcmc_topology and self._is_gcmc_topology_due(is_final_block):
                 self._save_gcmc_topology(system)
-                self._gcmc_topology_saved = True
 
             if is_final_block:
                 # Assemble and save the final trajectory.
@@ -3084,6 +3086,26 @@ class RunnerBase:
             )
             _pq_local.write_table(table, filepath)
 
+    def _is_gcmc_topology_due(self, is_final_block):
+        """
+        Whether the GCMC topologies are due to be saved. They are saved at the
+        first checkpoint of each run, and the final one for the final
+        coordinates in the PDB files.
+
+        Parameters
+        ----------
+
+        is_final_block: bool
+            Whether this is the final block of the simulation.
+
+        Returns
+        -------
+
+        bool
+            Whether the topologies are due.
+        """
+        return self._config.gcmc and (is_final_block or not self._gcmc_topology_saved)
+
     def _save_gcmc_topology(self, system):
         """
         Save the end-state topologies, including the additional waters used for
@@ -3104,6 +3126,8 @@ class RunnerBase:
         ):
             _sr.save(mols, topology)
             _sr.save(mols, topology.replace(".prm7", ".pdb"))
+
+        self._gcmc_topology_saved = True
 
     def _save_ghost_residues(self, index, gcmc_sampler):
         """
