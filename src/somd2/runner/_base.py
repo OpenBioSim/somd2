@@ -2630,7 +2630,6 @@ class RunnerBase:
         context=None,
         gcmc_sampler=None,
         num_energy_rows=None,
-        save_gcmc_topology=True,
     ):
         """
         Save a checkpoint file.
@@ -2662,10 +2661,6 @@ class RunnerBase:
         num_energy_rows: int
             The number of energy samples collected since the last checkpoint. If
             None, every window is assumed to have collected a full block.
-
-        save_gcmc_topology: bool
-            Whether to save the GCMC topologies when they are due. Replica
-            exchange saves them once for every replica instead.
 
         Returns
         -------
@@ -2724,9 +2719,6 @@ class RunnerBase:
                     metadata["standard_state_correction"] = (
                         f"{self._standard_state_correction:.6f}"
                     )
-
-            if save_gcmc_topology and self._is_gcmc_topology_due(is_final_block):
-                self._save_gcmc_topology(system)
 
             if is_final_block:
                 # Assemble and save the final trajectory.

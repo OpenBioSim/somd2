@@ -2371,11 +2371,12 @@ class RepexRunner(_RunnerBase):
         Commit a replica while it is still resident in its slot, holding the
         result until the checkpoint files are written at the end of the cycle.
 
-        This is only used when contexts are shared between replicas. A slot
-        holds the positions and trajectory frames of the replica it last
-        hosted, so a replica has to be committed before its slot is handed on.
-        Deferring only the file writes keeps every checkpoint file within a
-        single lock, so that an external reader never sees a partial set.
+        When contexts are shared between replicas, a slot holds the positions
+        and trajectory frames of the replica it last hosted, so a replica has
+        to be committed before its slot is handed on. Deferring only the file
+        writes keeps every checkpoint file within a single lock, so that an
+        external reader never sees a partial set. It is also used to commit
+        the first replica early, when the GCMC topologies are saved from it.
 
         Parameters
         ----------
@@ -2425,15 +2426,19 @@ class RepexRunner(_RunnerBase):
         if not self._is_gcmc_topology_due(is_final_block):
             return
 
-        # Commit the replica now if it isn't already, so that _checkpoint()
-        # re-uses the committed system.
-        if 0 not in self._committed:
-            _, error = self._commit_replica(0)
-            if error is not None:
-                raise error
+        try:
+            # Commit the replica now if it isn't already, so that _checkpoint()
+            # re-uses the committed system.
+            if 0 not in self._committed:
+                _, error = self._commit_replica(0)
+                if error is not None:
+                    raise error
 
-        system, _ = self._committed[0]
-        self._save_gcmc_topology(system)
+            system, _ = self._committed[0]
+            self._save_gcmc_topology(system)
+        except Exception as e:
+            _logger.error(f"Saving the GCMC topologies failed: {e}")
+            raise
 
     def _checkpoint(
         self,
@@ -2512,7 +2517,6 @@ class RepexRunner(_RunnerBase):
                     speed,
                     is_final_block=is_final_block,
                     num_energy_rows=num_energy_rows,
-                    save_gcmc_topology=False,
                 )
 
             if error is not None:

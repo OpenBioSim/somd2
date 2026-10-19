@@ -1109,6 +1109,9 @@ class Runner(_RunnerBase):
             lock.acquire(timeout=self._config.timeout.to("seconds")),
             self._checkpoint_threads(),
         ):
+            if self._is_gcmc_topology_due(is_final_block=False):
+                self._save_gcmc_topology(system)
+
             _, error = self._checkpoint(
                 system,
                 window.index,
@@ -1462,6 +1465,9 @@ class Runner(_RunnerBase):
             _, error = self._backup_checkpoint(window.index)
             if error is not None:
                 raise error
+
+            if self._is_gcmc_topology_due(is_final_block):
+                self._save_gcmc_topology(system)
 
             # Write the checkpoint files.
             _, error = self._checkpoint(
