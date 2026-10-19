@@ -420,6 +420,10 @@ class Runner(_RunnerBase):
         self._config._reset_logger(_logger)
         _sr.base.ProgressBar.set_silent()
 
+        # The thread limit set in the parent process doesn't carry over.
+        if self._sire_threads is not None:
+            _sr.legacy.Base.set_max_num_threads(self._sire_threads)
+
         # Get the lambda value.
         lambda_value = self._lambda_values[index]
 

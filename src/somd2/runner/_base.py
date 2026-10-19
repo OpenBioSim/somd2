@@ -1136,6 +1136,9 @@ class RunnerBase:
         # visible-devices environment variable for the chosen platform.
         self._gpu_devices = []
 
+        # The maximum number of Sire CPU threads, or None if it isn't limited.
+        self._sire_threads = None
+
         # Limit the number of CPU threads available to Sire when running in parallel.
         if self._is_gpu:
             # First get the total number of threads that are available to Sire.
@@ -1174,6 +1177,7 @@ class RunnerBase:
             _logger.info(f"Setting maximum Sire CPU threads to {sire_threads}")
 
             # Update the maximum number of threads.
+            self._sire_threads = sire_threads
             _sr.legacy.Base.set_max_num_threads(sire_threads)
 
     def _set_tuned_pme_parameters(self):
