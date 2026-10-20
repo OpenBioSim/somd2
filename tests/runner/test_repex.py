@@ -211,6 +211,60 @@ def _fake_slots(cache, num_slots):
     ]
 
 
+def test_release_restores_resident_replica():
+    """
+    Validate that loading a replica into a released slot sets it up in full,
+    even if it is already resident, e.g. after the slot's dynamics object was
+    rebuilt at another lambda value or a failed step changed its context.
+    """
+    from somd2.runner._dynamics_cache import DynamicsCache
+
+    n = 2
+
+    cache = object.__new__(DynamicsCache)
+    cache._lambdas = [0.0, 1.0]
+    cache._rest2_scale_factors = [1.0] * n
+    cache._num_replicas = n
+    cache._update_constraints = True
+    cache._strided = False
+    cache._energy_trajectories = [None] * n
+    cache._ghost_files = [None] * n
+    cache._state_moved = [False] * n
+    _fake_slots(cache, n)
+
+    cache._openmm_states = [
+        {"positions": np.array([r, 0]), "velocities": np.array([r]), "box": (1, 2, 3)}
+        for r in range(n)
+    ]
+    cache._gcmc_states = [np.eye(n, dtype=int)[r] for r in range(n)]
+
+    replica = 1
+    slot = cache.slot_for(replica)
+    context = cache._dynamics[slot].context()
+    sampler = cache._gcmc_samplers[slot]
+
+    cache.load_replica(replica)
+
+    def disturb():
+        context.positions = np.array([99, 0])
+        context.lam = None
+        sampler.water = np.zeros(n, dtype=int)
+
+    # A resident replica is left alone by a plain load.
+    disturb()
+    cache.load_replica(replica)
+    assert context.positions[0] == 99
+    assert context.lam is None
+
+    # After a release, the same replica is set up in full.
+    disturb()
+    cache.release(slot)
+    cache.load_replica(replica)
+    assert context.positions[0] == replica
+    assert context.lam == cache._lambdas[replica]
+    assert list(sampler.water) == list(cache._gcmc_states[replica])
+
+
 @pytest.mark.parametrize(
     "slot_schedule, inverted",
     [
@@ -972,7 +1026,8 @@ def test_repex_gcmc_without_a_selection(ethane_methanol):
 
 
 @pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
-def test_repex_concurrent_slots(ethane_methanol):
+@pytest.mark.parametrize("max_contexts", [2, None])
+def test_repex_concurrent_slots(ethane_methanol, max_contexts):
     """
     Validate that replicas sharing a slot are never propagated concurrently.
     Oversubscribing exercises this on a single GPU, since the worker count is
@@ -997,7 +1052,7 @@ def test_repex_concurrent_slots(ethane_methanol):
             "max_threads": 1,
             "num_lambda": num_lambda,
             "replica_exchange": True,
-            "max_contexts": 2,
+            "max_contexts": max_contexts,
             "oversubscription_factor": 2,
         }
 
@@ -1012,17 +1067,33 @@ def test_repex_concurrent_slots(ethane_methanol):
         assert not runner._config.minimisation_constraints
         assert runner._config.equilibration_constraints
 
-        # Every batch of dynamics, and every pass of commits, must contain at
-        # most one replica per slot.
-        batches = list(runner._dynamics_batches(runner._replica_devices()))
-        batches += runner._replica_passes(0) + runner._replica_passes(1)
-        for batch in batches:
-            slots = [runner._dynamics_cache.slot_for(r) for r in batch]
+        # Every batch of slots set up at once must hold distinct slots, at most
+        # oversubscription_factor on each GPU.
+        cache = runner._dynamics_cache
+        for batch in runner._setup_batches(runner._replica_devices()):
+            slots = [cache.slot_for(group[0]) for group in batch]
+            assert len(slots) == len(set(slots)), f"batch {batch} repeats a slot"
+            devices = [cache.device_for(slot) for slot in slots]
+            for device in set(devices):
+                assert devices.count(device) <= config["oversubscription_factor"]
+
+        # Every pass of commits must contain at most one replica per slot.
+        for batch in runner._replica_passes(0) + runner._replica_passes(1):
+            slots = [cache.slot_for(r) for r in batch]
             assert len(slots) == len(set(slots)), f"batch {batch} shares a slot"
 
         runner.run()
 
         assert (Path(tmpdir) / "repex_matrix.txt").exists()
+
+        # Equilibration doesn't advance any replica's clock, so each one
+        # records its first energies after one energy_frequency.
+        import pandas as pd
+
+        for i in range(num_lambda):
+            records = pd.read_parquet(runner._filenames[i]["energy_traj"])
+            times = [round(t, 6) for t in records.index.get_level_values(0)]
+            assert times == [0.004, 0.008, 0.012], f"replica {i} recorded {times}"
 
 
 @pytest.mark.parametrize(
