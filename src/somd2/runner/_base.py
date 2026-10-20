@@ -2734,9 +2734,6 @@ class RunnerBase:
                             format=["DCD"],
                         )
 
-                    # Create the final topology file name.
-                    topology0 = self._filenames["topology0"]
-
                     # Create the final trajectory file name.
                     traj_filename = self._filenames[index]["trajectory"]
 
@@ -2745,26 +2742,12 @@ class RunnerBase:
                         _glob(f"{self._filenames[index]['trajectory_chunk']}*")
                     )
 
-                    # If this is a restart, then we need to check for an existing
-                    # trajectory file with the same name. If it exists and is non-empty,
-                    # then copy it to a backup file and prepend it to the list of chunks.
-                    if self._config.restart:
-                        path = _Path(traj_filename)
-                        if path.exists() and path.stat().st_size > 0:
-                            _copyfile(traj_filename, f"{traj_filename}.prev")
-                            traj_chunks = [f"{traj_filename}.prev"] + traj_chunks
-
-                    # Make sure there are trajectory chunks to process.
+                    # On a restart, the chunks are added to the end of any
+                    # existing final trajectory.
                     if len(traj_chunks) > 0:
-                        # Load the topology and chunked trajectory files.
-                        mols = _sr.load([topology0] + traj_chunks)
-
-                        # Save the final trajectory to a single file.
-                        _sr.save(mols.trajectory(), traj_filename, format=["DCD"])
-
-                        # Now remove the chunked trajectory files.
-                        for chunk in traj_chunks:
-                            _Path(chunk).unlink()
+                        self._join_trajectory_chunks(
+                            traj_chunks, traj_filename, append=self._config.restart
+                        )
 
                 # Write the checkpoint system to file.
                 self._write_checkpoint_system(
@@ -2830,6 +2813,53 @@ class RunnerBase:
             return index, e
 
         return index, None
+
+    def _join_trajectory_chunks(self, chunks, filename, append=False):
+        """
+        Join the trajectory chunks, in order, into the final trajectory, then
+        remove them. The first frame is saved after one 'frame_frequency', and
+        the rest follow at the same interval.
+
+        Parameters
+        ----------
+
+        chunks: list of str
+            The DCD files to join, in order.
+
+        filename: str
+            The final trajectory file.
+
+        append: bool
+            Whether to add the chunks to the end of an existing final
+            trajectory, e.g. on a restart.
+        """
+        from os import replace as _replace
+
+        from sire.legacy.IO import DCD as _DCD
+
+        path = _Path(filename)
+        if append and path.exists() and path.stat().st_size > 0:
+            inputs = [filename] + chunks
+        else:
+            inputs = chunks
+
+        # Write to a temporary file, so a failure can't leave a partial
+        # trajectory for a restart to build on.
+        temp_filename = f"{filename}.tmp"
+        try:
+            _DCD.concatenate(
+                inputs,
+                temp_filename,
+                self._config.frame_frequency,
+                self._config.frame_frequency,
+            )
+        except Exception:
+            _Path(temp_filename).unlink(missing_ok=True)
+            raise
+        _replace(temp_filename, filename)
+
+        for chunk in chunks:
+            _Path(chunk).unlink()
 
     def _write_checkpoint_system(self, system, index, context=None, gcmc_sampler=None):
         """

@@ -21,7 +21,6 @@
 
 __all__ = ["RepexRunner"]
 
-from contextlib import nullcontext as _nullcontext
 from filelock import FileLock as _FileLock
 from numba import njit as _njit
 from shutil import copyfile as _copyfile
@@ -482,8 +481,7 @@ class RepexRunner(_RunnerBase):
 
         from threading import Lock
 
-        # Create a lock to guard the committed systems, which also makes the
-        # replicas take turns at the final checkpoint.
+        # Create a lock to guard the committed systems.
         self._lock = Lock()
 
         # Systems committed while a replica was resident in its slot, awaiting
@@ -2555,20 +2553,22 @@ class RepexRunner(_RunnerBase):
                 system, speed = committed
 
             # Call the base class checkpoint method to save the system state.
-            # The final block reassembles each trajectory, which loads the
-            # topology, so replicas take turns to bound the memory used.
-            with self._lock if is_final_block else _nullcontext():
-                index, error = super()._checkpoint(
-                    system,
-                    index,
-                    block,
-                    speed,
-                    is_final_block=is_final_block,
-                    num_energy_rows=num_energy_rows,
-                )
+            index, error = super()._checkpoint(
+                system,
+                index,
+                block,
+                speed,
+                is_final_block=is_final_block,
+                num_energy_rows=num_energy_rows,
+            )
 
             if error is not None:
                 return index, error
+
+            # Free the committed system with the GIL released, before deleting
+            # frames, which would otherwise copy every molecule it shares.
+            system_time = system.time()
+            system._free()
 
             # Delete the trajectory frames from the Sire system within the
             # dynamics object. A replica committed earlier, with shared
@@ -2602,7 +2602,7 @@ class RepexRunner(_RunnerBase):
                 )
                 _logger.info(
                     f"Current number of waters in GCMC volume at {_lam_sym} = {lam:.5f} "
-                    f"(time = {system.time().to('ns'):.4f} ns) is {num_waters}{acc_str}"
+                    f"(time = {system_time.to('ns'):.4f} ns) is {num_waters}{acc_str}"
                 )
 
             # Log terminal flip acceptance rate for this replica.
@@ -2632,8 +2632,6 @@ class RepexRunner(_RunnerBase):
         skipped automatically.
         """
         from glob import glob as _glob_local
-        from pathlib import Path as _Path_local
-        from shutil import copyfile as _copyfile_local
 
         if not self._config.save_trajectories:
             return
@@ -2643,23 +2641,10 @@ class RepexRunner(_RunnerBase):
             chunk_pattern = f"{self._filenames[i]['trajectory_chunk']}*"
             traj_chunks = sorted(_glob_local(chunk_pattern))
 
-            # On a restart, prepend an existing final DCD as .prev so frames
-            # from a previous (possibly partial) consolidation are preserved.
-            path = _Path_local(traj_filename)
-            if path.exists() and path.stat().st_size > 0:
-                prev = f"{traj_filename}.prev"
-                _copyfile_local(traj_filename, prev)
-                traj_chunks = [prev] + traj_chunks
-
             if not traj_chunks:
                 continue
 
-            topology0 = self._filenames["topology0"]
-            mols = _sr.load([topology0] + traj_chunks)
-            _sr.save(mols.trajectory(), traj_filename, format=["DCD"])
-
-            for chunk in traj_chunks:
-                _Path_local(chunk).unlink()
+            self._join_trajectory_chunks(traj_chunks, traj_filename, append=True)
 
     def _merge_gcmc_stats(self):
         """

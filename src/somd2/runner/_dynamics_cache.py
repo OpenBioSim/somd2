@@ -156,9 +156,9 @@ class DynamicsCache:
         # be pushed into the context before the next block.
         self._state_moved = [False] * num_replicas
         self._terminal_flip_stats = [[0, 0] for _ in range(num_replicas)]
-        self._num_proposed = _np.matrix(_np.zeros((num_replicas, num_replicas)))
-        self._num_accepted = _np.matrix(_np.zeros((num_replicas, num_replicas)))
-        self._num_swaps = _np.matrix(_np.zeros((num_replicas, num_replicas)))
+        self._num_proposed = _np.zeros((num_replicas, num_replicas))
+        self._num_accepted = _np.zeros((num_replicas, num_replicas))
+        self._num_swaps = _np.zeros((num_replicas, num_replicas))
 
         # Build the slot layout and the per-slot attributes.
         self._build_slot_layout()
