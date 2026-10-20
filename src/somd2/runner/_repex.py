@@ -21,7 +21,6 @@
 
 __all__ = ["RepexRunner"]
 
-from contextlib import nullcontext as _nullcontext
 from filelock import FileLock as _FileLock
 from numba import njit as _njit
 from shutil import copyfile as _copyfile
@@ -482,8 +481,7 @@ class RepexRunner(_RunnerBase):
 
         from threading import Lock
 
-        # Create a lock to guard the committed systems, which also makes the
-        # replicas take turns at the final checkpoint.
+        # Create a lock to guard the committed systems.
         self._lock = Lock()
 
         # Systems committed while a replica was resident in its slot, awaiting
@@ -2555,17 +2553,14 @@ class RepexRunner(_RunnerBase):
                 system, speed = committed
 
             # Call the base class checkpoint method to save the system state.
-            # The final block reassembles each trajectory, which loads the
-            # topology, so replicas take turns to bound the memory used.
-            with self._lock if is_final_block else _nullcontext():
-                index, error = super()._checkpoint(
-                    system,
-                    index,
-                    block,
-                    speed,
-                    is_final_block=is_final_block,
-                    num_energy_rows=num_energy_rows,
-                )
+            index, error = super()._checkpoint(
+                system,
+                index,
+                block,
+                speed,
+                is_final_block=is_final_block,
+                num_energy_rows=num_energy_rows,
+            )
 
             if error is not None:
                 return index, error
@@ -2659,12 +2654,7 @@ class RepexRunner(_RunnerBase):
             if not traj_chunks:
                 continue
 
-            topology0 = self._filenames["topology0"]
-            mols = _sr.load([topology0] + traj_chunks)
-            _sr.save(mols.trajectory(), traj_filename, format=["DCD"])
-
-            for chunk in traj_chunks:
-                _Path_local(chunk).unlink()
+            self._join_trajectory_chunks(traj_chunks, traj_filename)
 
     def _merge_gcmc_stats(self):
         """

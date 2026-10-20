@@ -96,6 +96,11 @@ def test_restart(mols, request):
         # Check that the trajectory is twice as long as the first.
         assert traj_2.num_frames() == 2 * traj_1.num_frames()
 
+        # Frames are a frame_frequency apart, across the restart.
+        for i in range(traj_2.num_frames()):
+            time = traj_2.trajectory()[i].current().time()
+            assert time.to(sr.units.femtosecond) == pytest.approx(4 * i)
+
         config_difftimestep = config_new.copy()
         config_difftimestep["runtime"] = "36fs"
         config_difftimestep["timestep"] = "2fs"

@@ -2734,9 +2734,6 @@ class RunnerBase:
                             format=["DCD"],
                         )
 
-                    # Create the final topology file name.
-                    topology0 = self._filenames["topology0"]
-
                     # Create the final trajectory file name.
                     traj_filename = self._filenames[index]["trajectory"]
 
@@ -2756,15 +2753,7 @@ class RunnerBase:
 
                     # Make sure there are trajectory chunks to process.
                     if len(traj_chunks) > 0:
-                        # Load the topology and chunked trajectory files.
-                        mols = _sr.load([topology0] + traj_chunks)
-
-                        # Save the final trajectory to a single file.
-                        _sr.save(mols.trajectory(), traj_filename, format=["DCD"])
-
-                        # Now remove the chunked trajectory files.
-                        for chunk in traj_chunks:
-                            _Path(chunk).unlink()
+                        self._join_trajectory_chunks(traj_chunks, traj_filename)
 
                 # Write the checkpoint system to file.
                 self._write_checkpoint_system(
@@ -2830,6 +2819,33 @@ class RunnerBase:
             return index, e
 
         return index, None
+
+    def _join_trajectory_chunks(self, chunks, filename):
+        """
+        Join the trajectory chunks, in order, into the final trajectory, then
+        remove them. Frames are 'frame_frequency' apart.
+
+        Parameters
+        ----------
+
+        chunks: list of str
+            The DCD files to join, in order.
+
+        filename: str
+            The final trajectory file.
+        """
+        from os import replace as _replace
+
+        from sire.legacy.IO import DCD as _DCD
+
+        # Write to a temporary file, so a failure can't leave a partial
+        # trajectory for a restart to build on.
+        temp_filename = f"{filename}.tmp"
+        _DCD.concatenate(chunks, temp_filename, self._config.frame_frequency)
+        _replace(temp_filename, filename)
+
+        for chunk in chunks:
+            _Path(chunk).unlink()
 
     def _write_checkpoint_system(self, system, index, context=None, gcmc_sampler=None):
         """
