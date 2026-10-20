@@ -28,6 +28,8 @@ Changelog
 * Require the `runtime`, `checkpoint_frequency`, `energy_frequency`, `frame_frequency`, `gcmc_frequency` and `terminal_flip_frequency` to be multiples of the `timestep` for the regular runner, which runs in whole integration steps. GCMC and terminal flip moves now keep their frequency across checkpoints [#248](https://github.com/OpenBioSim/somd2/pull/248).
 * Speed up checkpointing, which could take minutes for large systems. Sire now uses every CPU thread while checkpoint files are written, unless `max_sire_threads` is set, and replica exchange checkpoints replicas in parallel, writing the shared GCMC topologies once rather than once per replica. The regular runner's worker processes now also apply the Sire thread limit, which previously only took effect in the parent process [#251](https://github.com/OpenBioSim/somd2/pull/251).
 * Reduce the setup time of replica exchange simulations that re-use OpenMM contexts across lambda values. Minimisation and equilibration now create their dynamics objects once per context, rather than once per replica [#255](https://github.com/OpenBioSim/somd2/pull/255).
+* Further speed up checkpointing, and join the final trajectory without reloading the topology [#257](https://github.com/OpenBioSim/somd2/pull/257).
+* Record frame times in final trajectories, rather than zero for every frame [#257](https://github.com/OpenBioSim/somd2/pull/257).
 
 [2026.2.0](https://github.com/openbiosim/somd2/compare/2026.1.0...2026.2.0) - Sep 2026
 --------------------------------------------------------------------------------------
