@@ -261,9 +261,22 @@ class RepexRunner(_RunnerBase):
             # Update the timestep.
             timestep = self._config.equilibration_timestep
 
-        # Update the initial constraint values.
-        self._initial_constraint = constraint
-        self._initial_perturbable_constraint = perturbable_constraint
+        # Equilibration and production constraints, and whether the initial
+        # contexts must be rebuilt to use them.
+        production_constraints = (
+            self._config.constraint,
+            self._config.perturbable_constraint,
+        )
+        if self._config.equilibration_constraints:
+            self._equilibration_constraints = production_constraints
+        else:
+            self._equilibration_constraints = ("none", "none")
+
+        initial_constraints = (constraint, perturbable_constraint)
+        self._is_equilibration_rebuild = (
+            initial_constraints != self._equilibration_constraints
+        )
+        self._is_production_rebuild = initial_constraints != production_constraints
 
         # Copy the dynamics keyword arguments.
         dynamics_kwargs = self._dynamics_kwargs.copy()
@@ -1667,7 +1680,7 @@ class RepexRunner(_RunnerBase):
             slot = self._dynamics_cache.slot_for(index)
             dynamics, gcmc_sampler = self._dynamics_cache.get(slot)
 
-            if gcmc_sampler is not None and not self._is_restart:
+            if gcmc_sampler is not None:
                 gcmc_sampler.push()
                 try:
                     _logger.info(
@@ -1709,15 +1722,19 @@ class RepexRunner(_RunnerBase):
         """
         results = [self._minimise(index) for index in replicas]
 
-        constraints_changed = (self._initial_constraint != self._config.constraint) or (
-            self._initial_perturbable_constraint != self._config.perturbable_constraint
-        )
-
-        if not self._is_equilibration and constraints_changed:
+        if not self._is_equilibration and self._is_production_rebuild:
+            # Rebuild from the last replica's stored state, which is its
+            # starting state if its minimisation failed.
+            index = replicas[-1]
             try:
-                self._rebuild_dynamics(replicas[-1])
+                self._dynamics_cache.load_replica(index, force=True)
+                self._rebuild_dynamics(index)
             except Exception as e:
-                results.append((False, replicas[-1], e))
+                _logger.error(
+                    f"Could not create the production dynamics object for "
+                    f"{_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
+                )
+                raise
 
         return results
 
@@ -1760,6 +1777,15 @@ class RepexRunner(_RunnerBase):
         if gcmc_sampler is not None:
             self._reset_gcmc_sampler(gcmc_sampler, dynamics)
 
+        # A context built at the shared constraint lambda value is moved to the
+        # replica's own, since load_replica() skips this for a resident replica.
+        if dynamics_kwargs["lambda_value"] != self._lambda_values[index]:
+            dynamics.set_lambda(
+                self._lambda_values[index],
+                rest2_scale=self._rest2_scale_factors[index],
+                update_constraints=self._config.update_constraints,
+            )
+
         # Set the new dynamics object. Its energy trajectory is empty, but none
         # are recorded during setup, and load_replica() re-attaches each one.
         self._dynamics_cache.set(slot, dynamics)
@@ -1793,8 +1819,9 @@ class RepexRunner(_RunnerBase):
         _logger.info(f"Equilibrating at {_lam_sym} = {self._lambda_values[index]:.5f}")
 
         try:
-            # Make the replica resident in its slot.
-            self._dynamics_cache.load_replica(index)
+            # Make the replica resident in its slot, with its own clock.
+            clock = self._dynamics_cache.get_clock(index)
+            self._dynamics_cache.load_replica(index, clock=clock)
 
             # Get the dynamics object (and GCMC sampler).
             slot = self._dynamics_cache.slot_for(index)
@@ -1802,7 +1829,8 @@ class RepexRunner(_RunnerBase):
 
             # Equilibration doesn't count towards the simulation time, so the
             # clock is restored afterwards.
-            clock = dynamics._get_clock()
+            if clock is None:
+                clock = dynamics._get_clock()
 
             if gcmc_sampler is not None:
                 gcmc_sampler.push()
@@ -1853,33 +1881,25 @@ class RepexRunner(_RunnerBase):
         list of tuple
             The success, index and exception for each replica equilibrated.
         """
-        # Work out whether the constraints have changed from the initial minimisation.
-        constraints_changed = False
-        if self._config.minimise:
-            constraint = self._config.constraint
-            perturbable_constraint = self._config.perturbable_constraint
-
-            if not self._config.equilibration_constraints:
-                constraint = "none"
-                perturbable_constraint = "none"
-
-            constraints_changed = (self._initial_constraint != constraint) or (
-                self._initial_perturbable_constraint != perturbable_constraint
-            )
-
         # Rebuild the slot's dynamics object for equilibration, starting from
         # the first replica.
-        if constraints_changed:
+        if self._is_equilibration_rebuild:
+            index = replicas[0]
+            constraint, perturbable_constraint = self._equilibration_constraints
             try:
-                self._dynamics_cache.load_replica(replicas[0])
+                self._dynamics_cache.load_replica(index)
                 self._rebuild_dynamics(
-                    replicas[0],
+                    index,
                     timestep=self._config._equilibration_timestep,
                     constraint=constraint,
                     perturbable_constraint=perturbable_constraint,
                 )
             except Exception as e:
-                return [(False, replicas[0], e)]
+                _logger.error(
+                    f"Could not create the equilibration dynamics object for "
+                    f"{_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
+                )
+                raise
 
         results = []
         for index in replicas:
@@ -1889,10 +1909,15 @@ class RepexRunner(_RunnerBase):
 
         # Rebuild the slot's dynamics object for production, from the last
         # replica, which is still resident.
+        index = replicas[-1]
         try:
-            self._rebuild_dynamics(replicas[-1])
+            self._rebuild_dynamics(index)
         except Exception as e:
-            results.append((False, replicas[-1], e))
+            _logger.error(
+                f"Could not create the production dynamics object for "
+                f"{_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
+            )
+            raise
 
         return results
 

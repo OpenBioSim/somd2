@@ -1013,15 +1013,19 @@ def test_repex_concurrent_slots(ethane_methanol, max_contexts):
         assert not runner._config.minimisation_constraints
         assert runner._config.equilibration_constraints
 
-        # Every batch of slots set up at once, and every pass of commits, must
-        # contain at most one replica per slot.
-        batches = [
-            [group[0] for group in batch]
-            for batch in runner._setup_batches(runner._replica_devices())
-        ]
-        batches += runner._replica_passes(0) + runner._replica_passes(1)
-        for batch in batches:
-            slots = [runner._dynamics_cache.slot_for(r) for r in batch]
+        # Every batch of slots set up at once must hold distinct slots, at most
+        # oversubscription_factor on each GPU.
+        cache = runner._dynamics_cache
+        for batch in runner._setup_batches(runner._replica_devices()):
+            slots = [cache.slot_for(group[0]) for group in batch]
+            assert len(slots) == len(set(slots)), f"batch {batch} repeats a slot"
+            devices = [cache.device_for(slot) for slot in slots]
+            for device in set(devices):
+                assert devices.count(device) <= config["oversubscription_factor"]
+
+        # Every pass of commits must contain at most one replica per slot.
+        for batch in runner._replica_passes(0) + runner._replica_passes(1):
+            slots = [cache.slot_for(r) for r in batch]
             assert len(slots) == len(set(slots)), f"batch {batch} shares a slot"
 
         runner.run()

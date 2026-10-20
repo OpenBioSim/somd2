@@ -908,7 +908,7 @@ class DynamicsCache:
         """
         self._states = states
 
-    def load_replica(self, replica, clock=None):
+    def load_replica(self, replica, clock=None, force=False):
         """
         Make a replica resident in its slot, ready for a dynamics block.
 
@@ -932,6 +932,10 @@ class DynamicsCache:
         clock: dict
             The simulation clock to restore, as returned by
             Dynamics._get_clock(). If None, the slot's clock is left alone.
+
+        force: bool
+            Whether to push the replica's stored state even if it is already
+            resident, e.g. when a failed step left the context in a bad state.
         """
         slot = self._replica_slot[replica]
         dynamics = self._dynamics[slot]
@@ -942,7 +946,7 @@ class DynamicsCache:
 
         # The slot needs new positions and velocities if it is being handed a
         # different replica, or if the last mix moved this replica's state.
-        if resident != replica or self._state_moved[replica]:
+        if resident != replica or self._state_moved[replica] or force:
             self._apply_openmm_state(dynamics.context(), self._openmm_states[replica])
 
             # Positions have changed underneath the context, so any cached
