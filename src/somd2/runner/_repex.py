@@ -207,19 +207,10 @@ class RepexRunner(_RunnerBase):
             else None
         )
 
-        # Auto-generate a Boresch restraint for ABFE runs with no user-supplied
-        # restraint. This must happen before the dynamics cache is built below,
+        # Add the Boresch restraint before the dynamics cache is built below,
         # since the per-replica OpenMM contexts it creates are fixed at
         # construction time and won't pick up a restraint added afterwards.
-        if self._is_abfe_bound and self._config.restraints is None:
-            try:
-                restraints = self._generate_boresch_restraint(device=0)
-            except Exception as e:
-                msg = f"Unable to generate Boresch restraint for ABFE simulation: {e}"
-                _logger.error(msg)
-                raise RuntimeError(msg)
-            self._config.restraints = restraints
-            self._dynamics_kwargs["restraints"] = restraints
+        self._add_boresch_restraint(device=0)
 
         # Store the name of the dynamics cache pickle file.
         self._repex_state = self._config.output_directory / "repex_state.pkl"

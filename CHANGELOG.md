@@ -30,6 +30,7 @@ Changelog
 * Reduce the setup time of replica exchange simulations that re-use OpenMM contexts across lambda values. Minimisation and equilibration now create their dynamics objects once per context, rather than once per replica [#255](https://github.com/OpenBioSim/somd2/pull/255).
 * Further speed up checkpointing, and join the final trajectory without reloading the topology [#257](https://github.com/OpenBioSim/somd2/pull/257).
 * Record frame times in final trajectories, rather than zero for every frame [#257](https://github.com/OpenBioSim/somd2/pull/257).
+* Fixed the Boresch restraint for ABFE and the Morse restraints for ring-breaking perturbations not being generated when any other restraint was passed. They are now generated unless restraints of the same type are passed, and added to the others [#259](https://github.com/OpenBioSim/somd2/pull/259).
 
 [2026.2.0](https://github.com/openbiosim/somd2/compare/2026.1.0...2026.2.0) - Sep 2026
 --------------------------------------------------------------------------------------
