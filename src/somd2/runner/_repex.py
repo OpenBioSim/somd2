@@ -1038,14 +1038,7 @@ class RepexRunner(_RunnerBase):
             for batch in self._setup_batches(replica_devices):
                 try:
                     for results in dynamics_executor.map(self._minimise_slot, batch):
-                        for success, index, e in results:
-                            if not success:
-                                msg = f"Minimisation failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
-                                if self._config.minimisation_errors:
-                                    _logger.error(msg)
-                                    raise e
-                                else:
-                                    _logger.warning(msg)
+                        self._report_minimisation(results)
                 except KeyboardInterrupt:
                     dynamics_executor.shutdown(wait=False, cancel_futures=True)
                     _logger.error("Minimisation cancelled. Exiting.")
@@ -1698,9 +1691,32 @@ class RepexRunner(_RunnerBase):
             self._dynamics_cache.store_replica(index)
 
         except Exception as e:
+            # The next load restores the replica's stored state over whatever
+            # the failure left in the context.
+            self._dynamics_cache.release(self._dynamics_cache.slot_for(index))
             return False, index, e
 
         return True, index, None
+
+    def _report_minimisation(self, results):
+        """
+        Log any failed minimisations, raising the first error if they are
+        treated as errors.
+
+        Parameters
+        ----------
+
+        results: list of tuple
+            The success, index and exception for each replica.
+        """
+        for success, index, e in results:
+            if not success:
+                msg = f"Minimisation failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
+                if self._config.minimisation_errors:
+                    _logger.error(msg)
+                    raise e
+                else:
+                    _logger.warning(msg)
 
     def _minimise_slot(self, replicas):
         """
@@ -1722,14 +1738,20 @@ class RepexRunner(_RunnerBase):
         """
         results = [self._minimise(index) for index in replicas]
 
+        # There's no need to rebuild if a failed minimisation stops the run.
+        is_failed = not all(success for success, _, _ in results)
+        if is_failed and self._config.minimisation_errors:
+            return results
+
         if not self._is_equilibration and self._is_production_rebuild:
-            # Rebuild from the last replica's stored state, which is its
-            # starting state if its minimisation failed.
+            # Load a valid state to build from, in case the last minimisation
+            # failed and released the slot.
             index = replicas[-1]
             try:
-                self._dynamics_cache.load_replica(index, force=True)
+                self._dynamics_cache.load_replica(index)
                 self._rebuild_dynamics(index)
             except Exception as e:
+                self._report_minimisation(results)
                 _logger.error(
                     f"Could not create the production dynamics object for "
                     f"{_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
@@ -1741,8 +1763,8 @@ class RepexRunner(_RunnerBase):
     def _rebuild_dynamics(self, index, **overrides):
         """
         Replace the dynamics object of a replica's slot with a new one, built
-        from the replica's state, e.g. to change the constraints or timestep.
-        The replica must be resident in its slot.
+        from the slot's current state, e.g. to change the constraints or
+        timestep. Afterwards the slot holds no replica.
 
         Parameters
         ----------
@@ -1777,17 +1799,8 @@ class RepexRunner(_RunnerBase):
         if gcmc_sampler is not None:
             self._reset_gcmc_sampler(gcmc_sampler, dynamics)
 
-        # A context built at the shared constraint lambda value is moved to the
-        # replica's own, since load_replica() skips this for a resident replica.
-        if dynamics_kwargs["lambda_value"] != self._lambda_values[index]:
-            dynamics.set_lambda(
-                self._lambda_values[index],
-                rest2_scale=self._rest2_scale_factors[index],
-                update_constraints=self._config.update_constraints,
-            )
-
-        # Set the new dynamics object. Its energy trajectory is empty, but none
-        # are recorded during setup, and load_replica() re-attaches each one.
+        # Set the new dynamics object. The slot then holds no replica, so the
+        # next load sets up its state, lambda value and energy trajectory.
         self._dynamics_cache.set(slot, dynamics)
 
         _logger.info(

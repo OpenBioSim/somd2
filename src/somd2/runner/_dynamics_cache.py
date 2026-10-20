@@ -731,7 +731,8 @@ class DynamicsCache:
 
     def set(self, slot, dynamics):
         """
-        Set the dynamics object for a given slot.
+        Set the dynamics object for a given slot. The slot then holds no
+        replica, so the next one loaded into it is set up in full.
 
         Parameters
         ----------
@@ -743,6 +744,21 @@ class DynamicsCache:
             The dynamics object.
         """
         self._dynamics[slot] = dynamics
+        self.release(slot)
+
+    def release(self, slot):
+        """
+        Mark a slot as holding no replica, so that the next replica loaded
+        into it has its state, lambda value and GCMC water state pushed in
+        full, e.g. after a failed step left the context in a bad state.
+
+        Parameters
+        ----------
+
+        slot: int
+            The index of the slot.
+        """
+        self._slot_replica[slot] = None
 
     def delete(self, slot):
         """
@@ -908,7 +924,7 @@ class DynamicsCache:
         """
         self._states = states
 
-    def load_replica(self, replica, clock=None, force=False):
+    def load_replica(self, replica, clock=None):
         """
         Make a replica resident in its slot, ready for a dynamics block.
 
@@ -932,10 +948,6 @@ class DynamicsCache:
         clock: dict
             The simulation clock to restore, as returned by
             Dynamics._get_clock(). If None, the slot's clock is left alone.
-
-        force: bool
-            Whether to push the replica's stored state even if it is already
-            resident, e.g. when a failed step left the context in a bad state.
         """
         slot = self._replica_slot[replica]
         dynamics = self._dynamics[slot]
@@ -946,7 +958,7 @@ class DynamicsCache:
 
         # The slot needs new positions and velocities if it is being handed a
         # different replica, or if the last mix moved this replica's state.
-        if resident != replica or self._state_moved[replica] or force:
+        if resident != replica or self._state_moved[replica]:
             self._apply_openmm_state(dynamics.context(), self._openmm_states[replica])
 
             # Positions have changed underneath the context, so any cached
