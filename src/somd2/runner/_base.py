@@ -2742,18 +2742,12 @@ class RunnerBase:
                         _glob(f"{self._filenames[index]['trajectory_chunk']}*")
                     )
 
-                    # If this is a restart, then we need to check for an existing
-                    # trajectory file with the same name. If it exists and is non-empty,
-                    # then copy it to a backup file and prepend it to the list of chunks.
-                    if self._config.restart:
-                        path = _Path(traj_filename)
-                        if path.exists() and path.stat().st_size > 0:
-                            _copyfile(traj_filename, f"{traj_filename}.prev")
-                            traj_chunks = [f"{traj_filename}.prev"] + traj_chunks
-
-                    # Make sure there are trajectory chunks to process.
+                    # On a restart, the chunks are added to the end of any
+                    # existing final trajectory.
                     if len(traj_chunks) > 0:
-                        self._join_trajectory_chunks(traj_chunks, traj_filename)
+                        self._join_trajectory_chunks(
+                            traj_chunks, traj_filename, append=self._config.restart
+                        )
 
                 # Write the checkpoint system to file.
                 self._write_checkpoint_system(
@@ -2820,10 +2814,11 @@ class RunnerBase:
 
         return index, None
 
-    def _join_trajectory_chunks(self, chunks, filename):
+    def _join_trajectory_chunks(self, chunks, filename, append=False):
         """
         Join the trajectory chunks, in order, into the final trajectory, then
-        remove them. Frames are 'frame_frequency' apart.
+        remove them. The first frame is saved after one 'frame_frequency', and
+        the rest follow at the same interval.
 
         Parameters
         ----------
@@ -2833,15 +2828,34 @@ class RunnerBase:
 
         filename: str
             The final trajectory file.
+
+        append: bool
+            Whether to add the chunks to the end of an existing final
+            trajectory, e.g. on a restart.
         """
         from os import replace as _replace
 
         from sire.legacy.IO import DCD as _DCD
 
+        path = _Path(filename)
+        if append and path.exists() and path.stat().st_size > 0:
+            inputs = [filename] + chunks
+        else:
+            inputs = chunks
+
         # Write to a temporary file, so a failure can't leave a partial
         # trajectory for a restart to build on.
         temp_filename = f"{filename}.tmp"
-        _DCD.concatenate(chunks, temp_filename, self._config.frame_frequency)
+        try:
+            _DCD.concatenate(
+                inputs,
+                temp_filename,
+                self._config.frame_frequency,
+                self._config.frame_frequency,
+            )
+        except Exception:
+            _Path(temp_filename).unlink(missing_ok=True)
+            raise
         _replace(temp_filename, filename)
 
         for chunk in chunks:

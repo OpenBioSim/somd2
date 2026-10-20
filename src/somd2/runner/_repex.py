@@ -2632,8 +2632,6 @@ class RepexRunner(_RunnerBase):
         skipped automatically.
         """
         from glob import glob as _glob_local
-        from pathlib import Path as _Path_local
-        from shutil import copyfile as _copyfile_local
 
         if not self._config.save_trajectories:
             return
@@ -2643,18 +2641,10 @@ class RepexRunner(_RunnerBase):
             chunk_pattern = f"{self._filenames[i]['trajectory_chunk']}*"
             traj_chunks = sorted(_glob_local(chunk_pattern))
 
-            # On a restart, prepend an existing final DCD as .prev so frames
-            # from a previous (possibly partial) consolidation are preserved.
-            path = _Path_local(traj_filename)
-            if path.exists() and path.stat().st_size > 0:
-                prev = f"{traj_filename}.prev"
-                _copyfile_local(traj_filename, prev)
-                traj_chunks = [prev] + traj_chunks
-
             if not traj_chunks:
                 continue
 
-            self._join_trajectory_chunks(traj_chunks, traj_filename)
+            self._join_trajectory_chunks(traj_chunks, traj_filename, append=True)
 
     def _merge_gcmc_stats(self):
         """
