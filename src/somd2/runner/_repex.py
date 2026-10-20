@@ -592,11 +592,8 @@ class DynamicsCache:
                 f"Created dynamics object for lambda {lam:.5f} on device {device}"
             )
 
-            # Leave the slot marked as holding no replica, so that the first
-            # call to load_replica() does the full setup (lambda value, GCMC
-            # parameters, ghost file and sampling statistics) rather than
-            # assuming the seeding replica is already fully installed.
-            self._slot_replica[i] = None
+            # The first load sets up the seeding replica in full.
+            self.release(i)
 
         # Give each replica its own energy trajectory. These are seeded from a
         # slot's own so that the "ensemble" property is carried over. A slot
@@ -676,6 +673,21 @@ class DynamicsCache:
             The dynamics object.
         """
         self._dynamics[slot] = dynamics
+
+    def release(self, slot):
+        """
+        Mark a slot as holding no replica, so that the next replica loaded into
+        it has its state pushed and its lambda value, GCMC water state, ghost
+        file and energy trajectory set, e.g. after the slot's dynamics object
+        is replaced or a failed step left its context in a bad state.
+
+        Parameters
+        ----------
+
+        slot: int
+            The index of the slot.
+        """
+        self._slot_replica[slot] = None
 
     def delete(self, slot):
         """
@@ -1305,9 +1317,22 @@ class RepexRunner(_RunnerBase):
             # Update the timestep.
             timestep = self._config.equilibration_timestep
 
-        # Update the initial constraint values.
-        self._initial_constraint = constraint
-        self._initial_perturbable_constraint = perturbable_constraint
+        # Equilibration and production constraints, and whether the initial
+        # contexts must be rebuilt to use them.
+        production_constraints = (
+            self._config.constraint,
+            self._config.perturbable_constraint,
+        )
+        if self._config.equilibration_constraints:
+            self._equilibration_constraints = production_constraints
+        else:
+            self._equilibration_constraints = ("none", "none")
+
+        initial_constraints = (constraint, perturbable_constraint)
+        self._is_equilibration_rebuild = (
+            initial_constraints != self._equilibration_constraints
+        )
+        self._is_production_rebuild = initial_constraints != production_constraints
 
         # Copy the dynamics keyword arguments.
         dynamics_kwargs = self._dynamics_kwargs.copy()
@@ -1634,6 +1659,31 @@ class RepexRunner(_RunnerBase):
             for i in range(ceil(len(batch) / num_workers)):
                 yield batch[i * num_workers : (i + 1) * num_workers]
 
+    def _setup_batches(self, num_workers):
+        """
+        Yield batches of slots to minimise or equilibrate at once. Each slot is
+        given by the replicas it hosts, which are set up one after another.
+
+        Slots are spread over the GPUs in turn, so a batch of 'num_workers'
+        consecutive slots has at most 'oversubscription_factor' on each GPU.
+
+        Parameters
+        ----------
+
+        num_workers: int
+            The maximum number of slots in a batch.
+
+        Yields
+        ------
+
+        list of list of int
+            A batch of slots.
+        """
+        groups = self._dynamics_cache._groups
+
+        for i in range(0, len(groups), num_workers):
+            yield groups[i : i + num_workers]
+
     def _map_replicas(self, executor, step, func, replicas, *args):
         """
         Run a step for each replica in a thread pool, letting every call
@@ -1874,38 +1924,27 @@ class RepexRunner(_RunnerBase):
 
         # Minimise at each lambda value. Don't minimise on restart.
         if self._config.minimise and not self._is_restart:
-            for batch in self._safe_batches(num_workers):
+            for batch in self._setup_batches(num_workers):
                 with ThreadPoolExecutor(max_workers=num_workers) as executor:
                     try:
-                        for success, index, e in executor.map(
-                            self._minimise,
-                            batch,
-                        ):
-                            if not success:
-                                msg = f"Minimisation failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
-                                if self._config.minimisation_errors:
-                                    _logger.error(msg)
-                                    raise e
-                                else:
-                                    _logger.warning(msg)
+                        for results in executor.map(self._minimise_slot, batch):
+                            self._report_minimisation(results)
                     except KeyboardInterrupt:
                         _logger.error("Minimisation cancelled. Exiting.")
                         _sys.exit(1)
 
         # Equilibrate the system.
         if self._is_equilibration and not self._is_restart:
-            for batch in self._safe_batches(num_workers):
+            for batch in self._setup_batches(num_workers):
                 with ThreadPoolExecutor(max_workers=num_workers) as executor:
                     try:
-                        for success, index, e in executor.map(
-                            self._equilibrate,
-                            batch,
-                        ):
-                            if not success:
-                                _logger.error(
-                                    f"Equilibration failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
-                                )
-                                raise e
+                        for results in executor.map(self._equilibrate_slot, batch):
+                            for success, index, e in results:
+                                if not success:
+                                    _logger.error(
+                                        f"Equilibration failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
+                                    )
+                                    raise e
                     except KeyboardInterrupt:
                         _logger.error("Equilibration cancelled. Exiting.")
                         _sys.exit(1)
@@ -2389,7 +2428,7 @@ class RepexRunner(_RunnerBase):
             slot = self._dynamics_cache.slot_for(index)
             dynamics, gcmc_sampler = self._dynamics_cache.get(slot)
 
-            if gcmc_sampler is not None and not self._is_restart:
+            if gcmc_sampler is not None:
                 gcmc_sampler.push()
                 try:
                     _logger.info(
@@ -2403,61 +2442,126 @@ class RepexRunner(_RunnerBase):
             # Minimise.
             dynamics.minimise(timeout=self._config.timeout)
 
-            # If we're not equilibrating and the production constraints will change,
-            # then we need to rebuild the context.
-            if not self._is_equilibration:
-                constraints_changed = (
-                    self._initial_constraint != self._config.constraint
-                ) or (
-                    self._initial_perturbable_constraint
-                    != self._config.perturbable_constraint
-                )
-
-                if constraints_changed:
-                    # Commit the current system.
-                    system = dynamics.commit()
-
-                    # Delete the dynamics object.
-                    self._dynamics_cache.delete(slot)
-
-                    # Work out the device index.
-                    device = slot % self._num_gpus
-
-                    # Copy the dynamics keyword arguments.
-                    dynamics_kwargs = self._dynamics_kwargs.copy()
-
-                    # Overload the device and lambda value.
-                    dynamics_kwargs["device"] = device
-                    dynamics_kwargs["lambda_value"] = self._build_lambda(index)
-                    dynamics_kwargs["rest2_scale"] = self._rest2_scale_factors[index]
-
-                    # Create the production dynamics object.
-                    dynamics = system.dynamics(**dynamics_kwargs)
-
-                    # Reset the GCMC water state. The dynamics object is created from
-                    # the original Sire system, so the water state in the context does
-                    # not match the current GCMC water state.
-                    if gcmc_sampler is not None:
-                        self._reset_gcmc_sampler(gcmc_sampler, dynamics)
-
-                    # Set the new dynamics object. The rebuilt object has a
-                    # fresh, empty energy trajectory, but no energies are
-                    # recorded during minimisation or equilibration, and
-                    # load_replica() re-attaches the replica's trajectory
-                    # before the first production block.
-                    self._dynamics_cache.set(slot, dynamics)
-
-                    _logger.info(
-                        f"Created dynamics object for {_lam_sym} = {self._lambda_values[index]:.5f}"
-                    )
-
             # Save the minimised state back out of the slot.
             self._dynamics_cache.store_replica(index)
 
         except Exception as e:
+            # The next load restores the replica's stored state over whatever
+            # the failure left in the context.
+            self._dynamics_cache.release(self._dynamics_cache.slot_for(index))
             return False, index, e
 
         return True, index, None
+
+    def _report_minimisation(self, results):
+        """
+        Log any failed minimisations, raising the first error if they are
+        treated as errors.
+
+        Parameters
+        ----------
+
+        results: list of tuple
+            The success, index and exception for each replica.
+        """
+        for success, index, e in results:
+            if not success:
+                msg = f"Minimisation failed for {_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
+                if self._config.minimisation_errors:
+                    _logger.error(msg)
+                    raise e
+                else:
+                    _logger.warning(msg)
+
+    def _minimise_slot(self, replicas):
+        """
+        Minimise the replicas hosted by a slot, one after another. If there is
+        no equilibration and the production constraints differ from those used
+        for minimisation, the slot is then given a production dynamics object.
+
+        Parameters
+        ----------
+
+        replicas: list of int
+            The replicas hosted by the slot.
+
+        Returns
+        -------
+
+        list of tuple
+            The success, index and exception for each replica.
+        """
+        results = [self._minimise(index) for index in replicas]
+
+        # There's no need to rebuild if a failed minimisation stops the run.
+        is_failed = not all(success for success, _, _ in results)
+        if is_failed and self._config.minimisation_errors:
+            return results
+
+        if not self._is_equilibration and self._is_production_rebuild:
+            # Load a valid state to build from, in case the last minimisation
+            # failed and released the slot.
+            index = replicas[-1]
+            try:
+                self._dynamics_cache.load_replica(index)
+                self._rebuild_dynamics(index)
+            except Exception as e:
+                self._report_minimisation(results)
+                _logger.error(
+                    f"Could not create the production dynamics object for "
+                    f"{_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
+                )
+                raise
+
+        return results
+
+    def _rebuild_dynamics(self, index, **overrides):
+        """
+        Replace the dynamics object of a replica's slot with a new one, built
+        from the slot's current state, e.g. to change the constraints or
+        timestep. Afterwards the slot holds no replica.
+
+        Parameters
+        ----------
+
+        index: int
+            The index of the replica.
+
+        overrides: dict
+            Dynamics keyword arguments that replace those used for production.
+        """
+        slot = self._dynamics_cache.slot_for(index)
+        dynamics, gcmc_sampler = self._dynamics_cache.get(slot)
+
+        # Commit the current system.
+        system = dynamics.commit()
+
+        # Delete the current dynamics object.
+        self._dynamics_cache.delete(slot)
+
+        # Copy the dynamics keyword arguments, overloading the device and lambda value.
+        dynamics_kwargs = self._dynamics_kwargs.copy()
+        dynamics_kwargs["device"] = slot % self._num_gpus
+        dynamics_kwargs["lambda_value"] = self._build_lambda(index)
+        dynamics_kwargs["rest2_scale"] = self._rest2_scale_factors[index]
+        dynamics_kwargs.update(overrides)
+
+        # Create the new dynamics object.
+        dynamics = system.dynamics(**dynamics_kwargs)
+
+        # Reset the GCMC water state. The dynamics object is created from the
+        # Sire system, so the water state in the context does not match it.
+        if gcmc_sampler is not None:
+            self._reset_gcmc_sampler(gcmc_sampler, dynamics)
+
+        # Set the new dynamics object, holding no replica, so that the next load
+        # sets up its state, lambda value and energy trajectory.
+        self._dynamics_cache.set(slot, dynamics)
+        self._dynamics_cache.release(slot)
+
+        _logger.info(
+            f"Created dynamics object for {_lam_sym} = {self._lambda_values[index]:.5f}"
+        )
 
     def _equilibrate(self, index):
         """
@@ -2491,6 +2595,10 @@ class RepexRunner(_RunnerBase):
             slot = self._dynamics_cache.slot_for(index)
             dynamics, gcmc_sampler = self._dynamics_cache.get(slot)
 
+            # Equilibration doesn't count towards the simulation time, so the
+            # clock is restored afterwards.
+            clock = dynamics._get_clock()
+
             if gcmc_sampler is not None:
                 gcmc_sampler.push()
                 try:
@@ -2502,58 +2610,6 @@ class RepexRunner(_RunnerBase):
                 finally:
                     gcmc_sampler.pop()
 
-                # Store the current water state.
-                water_state = gcmc_sampler.water_state()
-
-            # Work out whether the constraints have changed from the initial minimisation.
-            if self._config.minimise:
-                constraint = self._config.constraint
-                perturbable_constraint = self._config.perturbable_constraint
-
-                if not self._config.equilibration_constraints:
-                    constraint = "none"
-                    perturbable_constraint = "none"
-
-                constraints_changed = (self._initial_constraint != constraint) or (
-                    self._initial_perturbable_constraint != perturbable_constraint
-                )
-
-                # We need to create a new dynamics object if the constraints have changed.
-                if constraints_changed:
-                    _logger.info(
-                        f"Created dynamics object for {_lam_sym} = {self._lambda_values[index]:.5f}"
-                    )
-
-                    # Commit the current system.
-                    system = dynamics.commit()
-
-                    # Delete the current dynamics object.
-                    self._dynamics_cache.delete(slot)
-
-                    # Work out the device index.
-                    device = slot % self._num_gpus
-
-                    # Copy the dynamics keyword arguments.
-                    dynamics_kwargs = self._dynamics_kwargs.copy()
-
-                    # Overload the device and lambda value.
-                    dynamics_kwargs["device"] = device
-                    dynamics_kwargs["lambda_value"] = self._build_lambda(index)
-                    dynamics_kwargs["rest2_scale"] = self._rest2_scale_factors[index]
-                    dynamics_kwargs["timestep"] = self._config._equilibration_timestep
-                    dynamics_kwargs["constraint"] = constraint
-                    dynamics_kwargs["perturbable_constraint"] = perturbable_constraint
-
-                    # Create the new dynamics object.
-                    dynamics = system.dynamics(**dynamics_kwargs)
-
-                    # Reset the GCMC water state.
-                    if gcmc_sampler is not None:
-                        self._reset_gcmc_sampler(gcmc_sampler, dynamics)
-
-                    # Update the dynamics object in the cache.
-                    self._dynamics_cache.set(slot, dynamics)
-
             # Equilibrate.
             dynamics.run(
                 self._config.equilibration_time,
@@ -2564,44 +2620,7 @@ class RepexRunner(_RunnerBase):
                 save_crash_report=self._config.save_crash_report,
             )
 
-            # Commit the system.
-            system = dynamics.commit()
-
-            # Reset the timer.
-            if self._initial_time[index].value() != 0:
-                system.set_time(self._initial_time[index])
-            else:
-                system.set_time(_sr.u("0ps"))
-
-            # Delete the dynamics object.
-            self._dynamics_cache.delete(slot)
-
-            # Work out the device index.
-            device = slot % self._num_gpus
-
-            # Copy the dynamics keyword arguments.
-            dynamics_kwargs = self._dynamics_kwargs.copy()
-
-            # Overload the device and lambda value.
-            dynamics_kwargs["device"] = device
-            dynamics_kwargs["lambda_value"] = self._build_lambda(index)
-            dynamics_kwargs["rest2_scale"] = self._rest2_scale_factors[index]
-
-            # Create the production dynamics object.
-            dynamics = system.dynamics(**dynamics_kwargs)
-
-            # Reset the GCMC water state. The dynamics object is created from
-            # the original Sire system, so the water state in the context does
-            # not match the current GCMC water state.
-            if gcmc_sampler is not None:
-                self._reset_gcmc_sampler(gcmc_sampler, dynamics)
-
-            # Set the new dynamics object.
-            self._dynamics_cache.set(slot, dynamics)
-
-            _logger.info(
-                f"Created dynamics object for {_lam_sym} = {self._lambda_values[index]:.5f}"
-            )
+            dynamics._set_clock(clock)
 
             # Save the equilibrated state back out of the slot.
             self._dynamics_cache.store_replica(index)
@@ -2610,6 +2629,64 @@ class RepexRunner(_RunnerBase):
             return False, index, e
 
         return True, index, None
+
+    def _equilibrate_slot(self, replicas):
+        """
+        Equilibrate the replicas hosted by a slot, one after another, in a
+        single dynamics object, then give the slot one for production. This
+        creates two dynamics objects per slot, rather than per replica.
+
+        Parameters
+        ----------
+
+        replicas: list of int
+            The replicas hosted by the slot.
+
+        Returns
+        -------
+
+        list of tuple
+            The success, index and exception for each replica equilibrated.
+        """
+        # Rebuild the slot's dynamics object for equilibration, starting from
+        # the first replica.
+        if self._is_equilibration_rebuild:
+            index = replicas[0]
+            constraint, perturbable_constraint = self._equilibration_constraints
+            try:
+                self._dynamics_cache.load_replica(index)
+                self._rebuild_dynamics(
+                    index,
+                    timestep=self._config._equilibration_timestep,
+                    constraint=constraint,
+                    perturbable_constraint=perturbable_constraint,
+                )
+            except Exception as e:
+                _logger.error(
+                    f"Could not create the equilibration dynamics object for "
+                    f"{_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
+                )
+                raise
+
+        results = []
+        for index in replicas:
+            results.append(self._equilibrate(index))
+            if not results[-1][0]:
+                return results
+
+        # Rebuild the slot's dynamics object for production, from the last
+        # replica, which is still resident.
+        index = replicas[-1]
+        try:
+            self._rebuild_dynamics(index)
+        except Exception as e:
+            _logger.error(
+                f"Could not create the production dynamics object for "
+                f"{_lam_sym} = {self._lambda_values[index]:.5f}: {e}"
+            )
+            raise
+
+        return results
 
     def _compute_energies(self, index):
         """
