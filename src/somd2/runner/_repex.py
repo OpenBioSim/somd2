@@ -2570,9 +2570,8 @@ class RepexRunner(_RunnerBase):
             if error is not None:
                 return index, error
 
-            # Free the committed system with the GIL released. This comes
-            # before the frames are deleted below, which would otherwise copy
-            # every molecule that is still shared with it.
+            # Free the committed system with the GIL released, before deleting
+            # frames, which would otherwise copy every molecule it shares.
             system_time = system.time()
             system._free()
 

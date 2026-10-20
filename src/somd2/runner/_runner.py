@@ -1188,9 +1188,8 @@ class Runner(_RunnerBase):
 
                 self._log_samplers(window, system)
 
-                # Free the committed system before deleting the trajectory
-                # frames from the dynamics object, which would otherwise copy
-                # every molecule that is still shared with it.
+                # Free the committed system before deleting the frames, which
+                # would otherwise copy every molecule it shares.
                 del system
                 dynamics._d._sire_mols.delete_all_frames()
 
