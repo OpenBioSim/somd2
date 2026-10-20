@@ -296,13 +296,17 @@ class RunnerBase:
             self._config._extra_args["num_gcmc_waters"] = self._config.gcmc_num_waters
 
         # Auto-generate Morse restraints for ring-breaking perturbations with no
-        # user-supplied restraint. This is done before any modification of the
-        # bonded terms, and before the reference system is stored and the restart
-        # checks are performed, since the hard restraint replaces a bond in the
-        # system, which must match the checkpoints.
-        if self._is_ring_break and self._config.restraints is None:
+        # user-supplied Morse restraints. This is done before any modification of
+        # the bonded terms, and before the reference system is stored and the
+        # restart checks are performed, since the hard restraint replaces a bond
+        # in the system, which must match the checkpoints.
+        if self._is_ring_break and not self._has_restraints(
+            _sr.mm.MorsePotentialRestraints
+        ):
             try:
-                self._config.restraints = self._generate_morse_restraints()
+                self._config.restraints = (
+                    self._config.restraints or []
+                ) + self._generate_morse_restraints()
             except Exception as e:
                 msg = (
                     "Unable to generate Morse restraints for ring-breaking "
@@ -1103,11 +1107,47 @@ class RunnerBase:
             "reverse_ring_break_morph",
         )
 
+    def _has_restraints(self, restraint_type):
+        """
+        Return whether any of the user-supplied restraints are of the given type.
+        """
+        return any(
+            isinstance(restraint, restraint_type)
+            for restraint in self._config.restraints or []
+        )
+
+    def _add_boresch_restraint(self, device=None):
+        """
+        Generate a Boresch restraint for an ABFE bound leg with no user-supplied
+        Boresch restraint, and add it to the restraints passed to the dynamics.
+        It isn't added to the config, since it is generated after the config is
+        written, and is instead saved separately for reuse on restart.
+
+        Parameters
+        ----------
+
+        device : int, optional
+            GPU device number to use for the restraint-search run.
+        """
+        if not self._is_abfe_bound or self._has_restraints(_sr.mm.BoreschRestraints):
+            return
+
+        try:
+            restraints = self._generate_boresch_restraint(device=device)
+        except Exception as e:
+            msg = f"Unable to generate Boresch restraint for ABFE simulation: {e}"
+            _logger.error(msg)
+            raise RuntimeError(msg)
+
+        self._dynamics_kwargs["restraints"] = (
+            self._dynamics_kwargs["restraints"] or []
+        ) + [restraints]
+
     def _generate_morse_restraints(self):
         """
         Return the pair of Morse restraints required by the 'ring_break_morph'
         lambda schedule, or its reverse. Called automatically when running a
-        ring-breaking simulation with no user-supplied restraint.
+        ring-breaking simulation with no user-supplied Morse restraints.
 
         The "hard" restraint directly replaces the harmonic bond that is broken
         (or formed) by the perturbation, inheriting its force constant and
@@ -1131,7 +1171,7 @@ class RunnerBase:
         from sire.restraints import morse_potential as _morse_potential
 
         _logger.info(
-            "No restraints supplied for ring-breaking perturbation. "
+            "No Morse restraints supplied for ring-breaking perturbation. "
             "Generating default Morse restraints."
         )
 
@@ -1194,8 +1234,8 @@ class RunnerBase:
         Return a Boresch restraint for the ABFE simulation, either by loading
         one saved from a previous run or by running a short lambda=0 trajectory.
         Called automatically before minimisation/equilibration of the production
-        windows/replicas when the simulation is ABFE and no restraint has been
-        supplied.
+        windows/replicas when the simulation is ABFE and no Boresch restraint has
+        been supplied.
 
         The input system is assumed to already be equilibrated (SOMD2 does not
         run a separate equilibration stage for the restraint search); it is
@@ -1267,7 +1307,7 @@ class RunnerBase:
             return restraints
 
         _logger.info(
-            "No restraint supplied for ABFE. Running Boresch restraint search."
+            "No Boresch restraint supplied for ABFE. Running Boresch restraint search."
         )
 
         # Both protocols need a minimum number of trajectory frames.
