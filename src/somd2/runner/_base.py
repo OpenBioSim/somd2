@@ -939,11 +939,6 @@ class RunnerBase:
                 self._config.opencl_platform_index
             )
 
-        # Set the initial constraint values. This can be modified
-        # by minimisation and equilibration option.
-        self._initial_constraint = self._config.constraint
-        self._initial_perturbable_constraint = self._config.perturbable_constraint
-
         # Common kwargs shared by both dynamics and GCMC sampling.
         self._common_kwargs = {
             "cutoff": self._config.cutoff,
