@@ -623,11 +623,8 @@ class DynamicsCache:
                 f"Created dynamics object for lambda {lam:.5f} on device {device}"
             )
 
-            # Leave the slot marked as holding no replica, so that the first
-            # call to load_replica() does the full setup (lambda value, GCMC
-            # parameters, ghost file and sampling statistics) rather than
-            # assuming the seeding replica is already fully installed.
-            self._slot_replica[i] = None
+            # The first load sets up the seeding replica in full.
+            self.release(i)
 
         # Give each replica its own energy trajectory. These are seeded from a
         # slot's own so that the "ensemble" property is carried over. A slot
@@ -731,8 +728,7 @@ class DynamicsCache:
 
     def set(self, slot, dynamics):
         """
-        Set the dynamics object for a given slot. The slot then holds no
-        replica, so the next one loaded into it is set up in full.
+        Set the dynamics object for a given slot.
 
         Parameters
         ----------
@@ -744,13 +740,13 @@ class DynamicsCache:
             The dynamics object.
         """
         self._dynamics[slot] = dynamics
-        self.release(slot)
 
     def release(self, slot):
         """
-        Mark a slot as holding no replica, so that the next replica loaded
-        into it has its state, lambda value and GCMC water state pushed in
-        full, e.g. after a failed step left the context in a bad state.
+        Mark a slot as holding no replica, so that the next replica loaded into
+        it has its state pushed and its lambda value, GCMC water state, ghost
+        file and energy trajectory set, e.g. after the slot's dynamics object
+        is replaced or a failed step left its context in a bad state.
 
         Parameters
         ----------

@@ -1799,9 +1799,10 @@ class RepexRunner(_RunnerBase):
         if gcmc_sampler is not None:
             self._reset_gcmc_sampler(gcmc_sampler, dynamics)
 
-        # Set the new dynamics object. The slot then holds no replica, so the
-        # next load sets up its state, lambda value and energy trajectory.
+        # Set the new dynamics object, holding no replica, so that the next load
+        # sets up its state, lambda value and energy trajectory.
         self._dynamics_cache.set(slot, dynamics)
+        self._dynamics_cache.release(slot)
 
         _logger.info(
             f"Created dynamics object for {_lam_sym} = {self._lambda_values[index]:.5f}"

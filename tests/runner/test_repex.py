@@ -211,6 +211,60 @@ def _fake_slots(cache, num_slots):
     ]
 
 
+def test_release_restores_resident_replica():
+    """
+    Validate that loading a replica into a released slot sets it up in full,
+    even if it is already resident, e.g. after the slot's dynamics object was
+    rebuilt at another lambda value or a failed step changed its context.
+    """
+    from somd2.runner._dynamics_cache import DynamicsCache
+
+    n = 2
+
+    cache = object.__new__(DynamicsCache)
+    cache._lambdas = [0.0, 1.0]
+    cache._rest2_scale_factors = [1.0] * n
+    cache._num_replicas = n
+    cache._update_constraints = True
+    cache._strided = False
+    cache._energy_trajectories = [None] * n
+    cache._ghost_files = [None] * n
+    cache._state_moved = [False] * n
+    _fake_slots(cache, n)
+
+    cache._openmm_states = [
+        {"positions": np.array([r, 0]), "velocities": np.array([r]), "box": (1, 2, 3)}
+        for r in range(n)
+    ]
+    cache._gcmc_states = [np.eye(n, dtype=int)[r] for r in range(n)]
+
+    replica = 1
+    slot = cache.slot_for(replica)
+    context = cache._dynamics[slot].context()
+    sampler = cache._gcmc_samplers[slot]
+
+    cache.load_replica(replica)
+
+    def disturb():
+        context.positions = np.array([99, 0])
+        context.lam = None
+        sampler.water = np.zeros(n, dtype=int)
+
+    # A resident replica is left alone by a plain load.
+    disturb()
+    cache.load_replica(replica)
+    assert context.positions[0] == 99
+    assert context.lam is None
+
+    # After a release, the same replica is set up in full.
+    disturb()
+    cache.release(slot)
+    cache.load_replica(replica)
+    assert context.positions[0] == replica
+    assert context.lam == cache._lambdas[replica]
+    assert list(sampler.water) == list(cache._gcmc_states[replica])
+
+
 @pytest.mark.parametrize(
     "slot_schedule, inverted",
     [
