@@ -2570,6 +2570,12 @@ class RepexRunner(_RunnerBase):
             if error is not None:
                 return index, error
 
+            # Free the committed system with the GIL released. This comes
+            # before the frames are deleted below, which would otherwise copy
+            # every molecule that is still shared with it.
+            system_time = system.time()
+            system._free()
+
             # Delete the trajectory frames from the Sire system within the
             # dynamics object. A replica committed earlier, with shared
             # contexts, had them cleared then, so its slot isn't touched here.
@@ -2602,7 +2608,7 @@ class RepexRunner(_RunnerBase):
                 )
                 _logger.info(
                     f"Current number of waters in GCMC volume at {_lam_sym} = {lam:.5f} "
-                    f"(time = {system.time().to('ns'):.4f} ns) is {num_waters}{acc_str}"
+                    f"(time = {system_time.to('ns'):.4f} ns) is {num_waters}{acc_str}"
                 )
 
             # Log terminal flip acceptance rate for this replica.
