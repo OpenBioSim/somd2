@@ -1181,16 +1181,18 @@ class Runner(_RunnerBase):
 
                 self._write_checkpoint(window, system, block, speed, is_final_block)
 
-                # Delete all trajectory frames from the Sire system within the
-                # dynamics object.
-                dynamics._d._sire_mols.delete_all_frames()
-
                 _logger.info(
                     f"Finished block {block + 1} of {total_blocks} "
                     f"for {_lam_sym} = {lambda_value:.5f}"
                 )
 
                 self._log_samplers(window, system)
+
+                # Free the committed system before deleting the trajectory
+                # frames from the dynamics object, which would otherwise copy
+                # every molecule that is still shared with it.
+                del system
+                dynamics._d._sire_mols.delete_all_frames()
 
                 if is_final_block:
                     _logger.success(
