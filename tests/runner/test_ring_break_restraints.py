@@ -161,10 +161,10 @@ def test_reverse_schedule_generates_restraints(syk_ring_break_mols):
         assert len(runner._config.restraints) == 2
 
 
-def test_user_restraints_are_not_overridden(syk_ring_break_mols):
+def test_restraints_added_to_user_restraints(syk_ring_break_mols):
     """
-    Ensure that a user-supplied restraint is left alone, and that the system is
-    not modified behind their back.
+    Ensure that the generated Morse restraints are added to a user-supplied
+    restraint of a different type, rather than being skipped.
     """
     import sire as sr
 
@@ -175,13 +175,41 @@ def test_user_restraints_are_not_overridden(syk_ring_break_mols):
         atoms0=0,
         atoms1=1,
         k="10 kcal mol-1 A-2",
+        name="loop",
     )
 
     with tempfile.TemporaryDirectory() as tmpdir:
         runner = Runner(mols, _config(tmpdir, restraints=restraints))
 
-        assert len(runner._config.restraints) == 1
+        assert len(runner._config.restraints) == 3
         assert runner._config.restraints[0] == restraints
+        _restraint(runner._config.restraints, "morse_hard")
+        _restraint(runner._config.restraints, "morse_soft")
+        assert runner._dynamics_kwargs["restraints"] is runner._config.restraints
+
+
+def test_user_morse_restraints_are_not_overridden(syk_ring_break_mols):
+    """
+    Ensure that user-supplied Morse restraints are left alone, and that the
+    system is not modified behind their back.
+    """
+    import sire as sr
+
+    mols = syk_ring_break_mols.clone()
+
+    hard_restraints, mols = sr.restraints.morse_potential(
+        mols,
+        de="150 kcal mol-1",
+        auto_parametrise=True,
+        direct_morse_replacement=True,
+        name="morse_hard",
+    )
+    distance = sr.restraints.distance(mols, atoms0=0, atoms1=1, name="loop")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        runner = Runner(mols, _config(tmpdir, restraints=[distance, hard_restraints]))
+
+        assert runner._config.restraints == [distance, hard_restraints]
 
 
 @pytest.mark.parametrize("schedule", ["standard_morph", "charge_scaled_morph"])
