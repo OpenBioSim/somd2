@@ -38,6 +38,54 @@ def test_too_few_frames_raises(abfe_charge_change_mols):
             runner._generate_boresch_restraint()
 
 
+def test_restraint_added_to_user_restraints(abfe_charge_change_mols, monkeypatch):
+    """A generated Boresch restraint is added to the user's other restraints."""
+    mols = abfe_charge_change_mols.clone()
+    distance = sr.restraints.distance(mols, atoms0=0, atoms1=1, name="loop")
+    boresch = sr.mm.BoreschRestraints()
+
+    monkeypatch.setattr(
+        Runner, "_generate_boresch_restraint", lambda self, device=None: boresch
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = Config(
+            output_directory=tmpdir,
+            platform="cpu",
+            lambda_schedule="decouple",
+            restraints=distance,
+        )
+        runner = Runner(mols, config)
+        runner._add_boresch_restraint()
+
+        assert runner._dynamics_kwargs["restraints"] == [distance, boresch]
+        assert runner._config.restraints == [distance]
+
+
+def test_user_boresch_restraint_is_kept(abfe_charge_change_mols, monkeypatch):
+    """No Boresch restraint is generated when the user supplies one."""
+    mols = abfe_charge_change_mols.clone()
+    distance = sr.restraints.distance(mols, atoms0=0, atoms1=1, name="loop")
+    boresch = sr.mm.BoreschRestraints()
+
+    def generate(self, device=None):
+        raise AssertionError("A Boresch restraint should not be generated.")
+
+    monkeypatch.setattr(Runner, "_generate_boresch_restraint", generate)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = Config(
+            output_directory=tmpdir,
+            platform="cpu",
+            lambda_schedule="decouple",
+            restraints=[distance, boresch],
+        )
+        runner = Runner(mols, config)
+        runner._add_boresch_restraint()
+
+        assert runner._dynamics_kwargs["restraints"] == [distance, boresch]
+
+
 def test_rxrx_unsuitable_falls_back(abfe_charge_change_mols):
     """A ligand with no N/O atoms can't use RXRX, so Aldeghi is used instead."""
     mols = abfe_charge_change_mols.clone()
