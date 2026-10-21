@@ -403,6 +403,13 @@ The swap frequency for replica exchange is controlled by the
 frequency, then swaps between them are attempted. A larger value improves
 performance, but may reduce the efficiency of the exchange.
 
+On GPU platforms, the dynamics can slow down for a while after a context is
+given a very different configuration, as happens when replicas are swapped or
+when a context is re-used for another replica. OpenMM keeps the atom order that
+it built for the previous configuration until its next scheduled reorder, which
+makes the nonbonded calculation less efficient. This is an open issue in OpenMM
+and is being discussed [here](https://github.com/openmm/openmm/issues/5517).
+
 <a id="truncated-mbar-analysis"></a>
 
 ### ✂️ Truncated MBAR analysis
