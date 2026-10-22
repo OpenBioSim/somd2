@@ -597,7 +597,10 @@ class RunnerBase:
                 )
 
                 ion_schedule = _abfe_alchemical_ion(self._config._lambda_schedule)
-            elif schedule_name is None:
+            elif (
+                schedule_name is None
+                and self._config._lambda_schedule != _LambdaSchedule.standard_morph()
+            ):
                 _logger.warning(
                     "Alchemical ions use the 'standard_morph' lambda schedule with a "
                     "custom lambda schedule, so intermediate states will only be "

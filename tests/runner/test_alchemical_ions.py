@@ -196,13 +196,20 @@ def test_alchemical_ion_restart_reuses_same_ion(ethane_methanol_ions):
 
 @pytest.mark.parametrize(
     "schedule_name",
-    ["decouple", "annihilate", "standard_morph", "charge_scaled_morph", "custom"],
+    [
+        "decouple",
+        "annihilate",
+        "standard_morph",
+        "charge_scaled_morph",
+        "custom_standard_morph",
+        "custom",
+    ],
 )
 def test_alchemical_ion_schedule(schedule_name, ethane_methanol_ions):
     """
     Ensure that an alchemical ion follows the ligand's schedule for the morph
     schedules, gets a schedule aligned with the decharge stage for the ABFE
-    schedules, and falls back to a plain morph for custom schedules.
+    schedules, and falls back to a plain morph for other custom schedules.
     """
     from sire.cas import LambdaSchedule
 
@@ -216,11 +223,10 @@ def test_alchemical_ion_schedule(schedule_name, ethane_methanol_ions):
         config = Config(
             output_directory=tmpdir,
             platform="cpu",
-            lambda_schedule=(
-                LambdaSchedule.standard_morph()
-                if schedule_name == "custom"
-                else schedule_name
-            ),
+            lambda_schedule={
+                "custom_standard_morph": LambdaSchedule.standard_morph(),
+                "custom": LambdaSchedule.charge_scaled_morph(0.5),
+            }.get(schedule_name, schedule_name),
             # Force a charge difference so that an alchemical ion is added,
             # even though the fixture itself is charge neutral.
             charge_difference=1,
