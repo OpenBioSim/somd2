@@ -194,15 +194,19 @@ def test_alchemical_ion_restart_reuses_same_ion(ethane_methanol_ions):
         assert ion_number_1 == ion_number_2
 
 
-@pytest.mark.parametrize("schedule_name", ["decouple", "annihilate"])
-def test_alchemical_ion_abfe_schedule(schedule_name, ethane_methanol_ions):
+@pytest.mark.parametrize(
+    "schedule_name",
+    ["decouple", "annihilate", "standard_morph", "charge_scaled_morph", "custom"],
+)
+def test_alchemical_ion_schedule(schedule_name, ethane_methanol_ions):
     """
-    Ensure that an alchemical ion added alongside an ABFE (decouple/annihilate)
-    perturbable molecule gets its own plain morph schedule, rather than
-    inheriting the ghost-atom decoupling/annihilation lever equations meant
-    for the main perturbable molecule.
+    Ensure that an alchemical ion follows the ligand's schedule for the morph
+    schedules, gets a schedule aligned with the decharge stage for the ABFE
+    schedules, and falls back to a plain morph for custom schedules.
     """
     from sire.cas import LambdaSchedule
+
+    from somd2._utils._schedules import abfe_alchemical_ion
 
     # Clone the system (charge-neutral, but with plenty of waters and existing
     # free ions to match parameters against).
@@ -212,7 +216,11 @@ def test_alchemical_ion_abfe_schedule(schedule_name, ethane_methanol_ions):
         config = Config(
             output_directory=tmpdir,
             platform="cpu",
-            lambda_schedule=schedule_name,
+            lambda_schedule=(
+                LambdaSchedule.standard_morph()
+                if schedule_name == "custom"
+                else schedule_name
+            ),
             # Force a charge difference so that an alchemical ion is added,
             # even though the fixture itself is charge neutral.
             charge_difference=1,
@@ -238,16 +246,20 @@ def test_alchemical_ion_abfe_schedule(schedule_name, ethane_methanol_ions):
 
         schedule = runner._config.lambda_schedule
 
-        # The ligand follows the main ABFE schedule directly - no override.
+        # The ligand always follows the main schedule directly.
         assert not schedule.has_molecule_schedule(ligand_idx)
 
-        # The ion has its own molecule-specific schedule, and it is a plain
-        # morph (not the ligand's decharge/decouple or decharge/annihilate
-        # staging).
+        if schedule_name in ("decouple", "annihilate"):
+            expected = abfe_alchemical_ion(schedule)
+        elif schedule_name == "custom":
+            expected = LambdaSchedule.standard_morph()
+        else:
+            assert not schedule.has_molecule_schedule(ion_idx)
+            return
+
         assert schedule.has_molecule_schedule(ion_idx)
         ion_schedule = schedule.get_molecule_schedule(ion_idx)
-        assert ion_schedule.get_stages() == ["morph"]
-        assert ion_schedule.to_string() == LambdaSchedule.standard_morph().to_string()
+        assert ion_schedule.to_string() == expected.to_string()
 
 
 def test_charge_difference_with_virtual_sites(ethane_methanol):
