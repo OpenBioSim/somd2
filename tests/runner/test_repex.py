@@ -1697,10 +1697,12 @@ def _fill_ranking_data(runner, hard_pair, num_samples=200, seed=7):
     rng = np.random.default_rng(seed)
     num_lambda = runner._config.num_lambda
 
+    # Means of +/- dG + sigma^2 / 2 make the forward and reverse estimates agree.
     for k in range(num_lambda - 1):
         sigma = 1.5 if k == hard_pair else 0.1
-        runner._ranker.upper[k] = list(rng.normal(0.5, sigma, num_samples))
-        runner._ranker.lower[k + 1] = list(rng.normal(-0.5, sigma, num_samples))
+        shift = 0.5 * sigma**2
+        runner._ranker.upper[k] = list(rng.normal(0.5 + shift, sigma, num_samples))
+        runner._ranker.lower[k + 1] = list(rng.normal(-0.5 + shift, sigma, num_samples))
 
 
 def test_rank_windows():
@@ -1825,7 +1827,7 @@ def test_rank_windows_fill_windows_stay_cold_candidates():
     """
     runner = _ranking_runner(8, adaptive_min_samples=10)
 
-    # The flagged pair 0 gives windows 0, 1 and 2, so one window is filled.
+    # The hard pair 0 gives windows 0, 1 and 2, so one window is filled.
     _fill_ranking_data(runner, hard_pair=0)
     _rank_twice(runner, num_gpus=2)
 
@@ -2162,7 +2164,7 @@ def test_rank_windows_fills_whole_batches(oversubscription_factor, capacity, num
         8, adaptive_min_samples=10, oversubscription_factor=oversubscription_factor
     )
 
-    # The flagged pair 0 gives windows 0, 1 and 2, one on each of three GPUs.
+    # The hard pair 0 gives windows 0, 1 and 2, one on each of three GPUs.
     _fill_ranking_data(runner, hard_pair=0)
     _rank_twice(runner, num_gpus=4, capacity=capacity)
 
@@ -2180,7 +2182,7 @@ def test_rank_windows_unfilled_with_shared_contexts():
     """
     runner = _ranking_runner(8, is_cached=True, adaptive_min_samples=10)
 
-    # The flagged pair 0 gives windows 0, 1 and 2, one on each of three GPUs.
+    # The hard pair 0 gives windows 0, 1 and 2, one on each of three GPUs.
     _fill_ranking_data(runner, hard_pair=0)
     _rank_twice(runner, num_gpus=4)
 
