@@ -109,6 +109,11 @@ def _jackknife_error(fwd, rev, num_batches=10):
     The standard error of the pair estimate, from a jackknife over contiguous
     batches, which accounts for correlation and the nonlinear average.
     """
+    # Every batch needs a sample, and the error needs at least two batches.
+    num_batches = min(num_batches, len(fwd), len(rev))
+    if num_batches < 2:
+        return _np.inf
+
     f = _np.array_split(fwd, num_batches)
     r = _np.array_split(rev, num_batches)
     estimates = _np.array(
@@ -144,9 +149,8 @@ def is_unconverged(fwd, rev):
     bool
         Whether the pair is unconverged.
     """
-    # The forward and reverse estimates disagree by more than 1 kT. Only checked
-    # when both spreads are at most 2 kT, since beyond that the bias of the
-    # exponential average alone exceeds 1 kT.
+    # The forward and reverse estimates disagree by more than 1 kT, checked only
+    # for spreads up to 2 kT, beyond which the bias of the average can exceed that.
     if (
         max(fwd.std(), rev.std()) <= 2.0
         and abs(exp_estimate(fwd) + exp_estimate(rev)) > 1.0
@@ -155,10 +159,7 @@ def is_unconverged(fwd, rev):
 
     # The estimates from the two halves of the data differ by more than 0.25 kT,
     # and by more than twice their combined standard error.
-    halves = [
-        (_np.array_split(fwd, 2)[half], _np.array_split(rev, 2)[half])
-        for half in range(2)
-    ]
+    halves = list(zip(_np.array_split(fwd, 2), _np.array_split(rev, 2)))
     drift = abs(_pair_estimate(*halves[1]) - _pair_estimate(*halves[0]))
     error = _np.hypot(*(_jackknife_error(f, r) for f, r in halves))
     return drift > 0.25 and drift > 2.0 * error

@@ -2524,8 +2524,9 @@ def test_rank_windows_flags_unconverged_pairs():
 
 def test_wide_converged_pair_is_not_flagged():
     """
-    Validate that a converged pair whose spread is wide enough for the bias of
-    the exponential averages to exceed 1 kT isn't flagged as unconverged.
+    Validate that a converged pair with a wide spread isn't flagged as
+    unconverged, either by the bias of its forward and reverse exponential
+    averages or by drift between the two halves of its data.
     """
     from somd2.runner._adaptive import is_unconverged
 
