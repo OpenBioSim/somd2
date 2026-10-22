@@ -2522,6 +2522,20 @@ def test_rank_windows_flags_unconverged_pairs():
     assert hot is not None and {0, 1, 2}.issubset(hot)
 
 
+def test_wide_converged_pair_is_not_flagged():
+    """
+    Validate that a converged pair whose spread is wide enough for the bias of
+    the exponential averages to exceed 1 kT isn't flagged as unconverged.
+    """
+    from somd2.runner._adaptive import is_unconverged
+
+    rng = np.random.default_rng(0)
+    fwd = rng.normal(8.0, 4.0, 2000)
+    rev = rng.normal(8.0, 4.0, 2000)
+
+    assert not is_unconverged(fwd, rev)
+
+
 def test_checkpoint_without_adaptive_state():
     """
     Validate that a checkpoint written before adaptive replica exchange was

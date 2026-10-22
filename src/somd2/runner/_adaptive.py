@@ -96,7 +96,33 @@ def exp_estimate(du):
     return -(m + _np.log(_np.mean(_np.exp(-du - m))))
 
 
-def is_unconverged(fwd, rev, g_fwd, g_rev):
+def _pair_estimate(fwd, rev):
+    """
+    The reduced free energy difference between a pair of neighbouring windows,
+    averaged over the forward and reverse exponential estimates.
+    """
+    return 0.5 * (exp_estimate(fwd) - exp_estimate(rev))
+
+
+def _jackknife_error(fwd, rev, num_batches=10):
+    """
+    The standard error of the pair estimate, from a jackknife over contiguous
+    batches, which accounts for correlation and the nonlinear average.
+    """
+    f = _np.array_split(fwd, num_batches)
+    r = _np.array_split(rev, num_batches)
+    estimates = _np.array(
+        [
+            _pair_estimate(
+                _np.concatenate(f[:i] + f[i + 1 :]), _np.concatenate(r[:i] + r[i + 1 :])
+            )
+            for i in range(num_batches)
+        ]
+    )
+    return _np.sqrt((num_batches - 1) * estimates.var())
+
+
+def is_unconverged(fwd, rev):
     """
     Whether the free energy difference between a pair of neighbouring windows
     shows signs of poor sampling, regardless of its uncertainty.
@@ -112,33 +138,30 @@ def is_unconverged(fwd, rev, g_fwd, g_rev):
         The reduced energy difference to the lower window, sampled in the upper
         window.
 
-    g_fwd, g_rev: float
-        The statistical inefficiencies of fwd and rev.
-
     Returns
     -------
 
     bool
         Whether the pair is unconverged.
     """
-    # The forward and reverse estimates disagree by more than 1 kT.
-    if abs(exp_estimate(fwd) + exp_estimate(rev)) > 1.0:
+    # The forward and reverse estimates disagree by more than 1 kT. Only checked
+    # when both spreads are at most 2 kT, since beyond that the bias of the
+    # exponential average alone exceeds 1 kT.
+    if (
+        max(fwd.std(), rev.std()) <= 2.0
+        and abs(exp_estimate(fwd) + exp_estimate(rev)) > 1.0
+    ):
         return True
 
     # The estimates from the two halves of the data differ by more than 0.25 kT,
     # and by more than twice their combined standard error.
-    estimates = []
-    errors = []
-    for half in range(2):
-        f = _np.array_split(fwd, 2)[half]
-        r = _np.array_split(rev, 2)[half]
-        estimates.append(0.5 * (exp_estimate(f) - exp_estimate(r)))
-        errors.append(
-            0.5 * _np.sqrt(f.var() * g_fwd / len(f) + r.var() * g_rev / len(r))
-        )
-
-    drift = abs(estimates[0] - estimates[1])
-    return drift > 0.25 and drift > 2.0 * _np.hypot(*errors)
+    halves = [
+        (_np.array_split(fwd, 2)[half], _np.array_split(rev, 2)[half])
+        for half in range(2)
+    ]
+    drift = abs(_pair_estimate(*halves[1]) - _pair_estimate(*halves[0]))
+    error = _np.hypot(*(_jackknife_error(f, r) for f, r in halves))
+    return drift > 0.25 and drift > 2.0 * error
 
 
 def cold_rate(first_cycle, num_cycles, checkpoint_cycles, mix_interval):
@@ -487,7 +510,7 @@ class WindowRanker:
             num_proposed = proposed[k, k + 1]
             if (
                 num_proposed > 0 and accepted[k, k + 1] / num_proposed < 0.05
-            ) or is_unconverged(fwd, rev, g_upper[k], g_lower[k + 1]):
+            ) or is_unconverged(fwd, rev):
                 flagged.append(k)
 
         weights = _np.sqrt(fwd_variance + rev_variance)
