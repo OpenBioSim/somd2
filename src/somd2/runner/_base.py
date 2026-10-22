@@ -586,21 +586,28 @@ class RunnerBase:
 
         # Alchemical ions change their charge alongside the ligand so that the
         # system stays neutral. The morph schedules can be shared, but the ABFE
-        # schedules would hold the ion's epsilon fixed, so need their own.
+        # schedules' ghost-atom equations, e.g. fixed epsilon, are meant for the
+        # ligand, so the ion gets its own schedule aligned with the decharge stage.
         if ion_indices:
             from sire.cas import LambdaSchedule as _LambdaSchedule
 
+            schedule = self._config._lambda_schedule
             schedule_name = self._config._lambda_schedule_name
-            if schedule_name in ("annihilate", "decouple"):
+
+            # Also match ABFE schedules passed as objects, e.g. from decouple().
+            is_abfe = schedule_name in ("annihilate", "decouple") or (
+                schedule_name is None
+                and schedule.get_stages()
+                in (["decharge", "annihilate"], ["decharge", "decouple"])
+            )
+
+            if is_abfe:
                 from .._utils._schedules import (
                     abfe_alchemical_ion as _abfe_alchemical_ion,
                 )
 
-                ion_schedule = _abfe_alchemical_ion(self._config._lambda_schedule)
-            elif (
-                schedule_name is None
-                and self._config._lambda_schedule != _LambdaSchedule.standard_morph()
-            ):
+                ion_schedule = _abfe_alchemical_ion(schedule)
+            elif schedule_name is None and schedule != _LambdaSchedule.standard_morph():
                 _logger.warning(
                     "Alchemical ions use the 'standard_morph' lambda schedule with a "
                     "custom lambda schedule, so intermediate states will only be "
@@ -613,9 +620,7 @@ class RunnerBase:
 
             if ion_schedule is not None:
                 for pert_idx in ion_indices:
-                    self._config._lambda_schedule.set_molecule_schedule(
-                        pert_idx, ion_schedule
-                    )
+                    schedule.set_molecule_schedule(pert_idx, ion_schedule)
 
         # Set the lambda values.
         if self._config.lambda_values:

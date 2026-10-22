@@ -202,6 +202,8 @@ def test_alchemical_ion_restart_reuses_same_ion(ethane_methanol_ions):
         "standard_morph",
         "charge_scaled_morph",
         "custom_standard_morph",
+        "custom_decouple",
+        "custom_annihilate",
         "custom",
     ],
 )
@@ -213,7 +215,7 @@ def test_alchemical_ion_schedule(schedule_name, ethane_methanol_ions):
     """
     from sire.cas import LambdaSchedule
 
-    from somd2._utils._schedules import abfe_alchemical_ion
+    from somd2._utils._schedules import annihilate, decouple
 
     # Clone the system (charge-neutral, but with plenty of waters and existing
     # free ions to match parameters against).
@@ -225,6 +227,8 @@ def test_alchemical_ion_schedule(schedule_name, ethane_methanol_ions):
             platform="cpu",
             lambda_schedule={
                 "custom_standard_morph": LambdaSchedule.standard_morph(),
+                "custom_decouple": decouple(fix_epsilon=False),
+                "custom_annihilate": annihilate(fix_epsilon=False),
                 "custom": LambdaSchedule.charge_scaled_morph(0.5),
             }.get(schedule_name, schedule_name),
             # Force a charge difference so that an alchemical ion is added,
@@ -255,17 +259,23 @@ def test_alchemical_ion_schedule(schedule_name, ethane_methanol_ions):
         # The ligand always follows the main schedule directly.
         assert not schedule.has_molecule_schedule(ligand_idx)
 
-        if schedule_name in ("decouple", "annihilate"):
-            expected = abfe_alchemical_ion(schedule)
-        elif schedule_name == "custom":
-            expected = LambdaSchedule.standard_morph()
-        else:
-            assert not schedule.has_molecule_schedule(ion_idx)
+        ion_schedule = schedule.get_molecule_schedule(ion_idx)
+
+        if schedule_name == "custom":
+            assert ion_schedule.to_string() == (
+                LambdaSchedule.standard_morph().to_string()
+            )
             return
 
-        assert schedule.has_molecule_schedule(ion_idx)
-        ion_schedule = schedule.get_molecule_schedule(ion_idx)
-        assert ion_schedule.to_string() == expected.to_string()
+        # The ion's charge changes at the same rate as the ligand's.
+        for lv in [0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0]:
+            assert ion_schedule.morph("clj", "charge", 0.0, 1.0, lv) == (
+                pytest.approx(schedule.morph("clj", "charge", 0.0, 1.0, lv))
+            )
+
+        # The ion's LJ parameters reach their final values.
+        for lever in ("sigma", "epsilon"):
+            assert ion_schedule.morph("clj", lever, 0.0, 1.0, 1.0) == pytest.approx(1.0)
 
 
 def test_charge_difference_with_virtual_sites(ethane_methanol):
