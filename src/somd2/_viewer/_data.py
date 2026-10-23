@@ -1376,18 +1376,28 @@ class Simulation:
         def load():
             from ..config import Config as _Config
 
+            # Values that can't be read are compared as stored.
+            def restraint_key(value):
+                try:
+                    restraint = _Config._from_string(value, "restraints")
+                    return [str(restraint).splitlines()[0]] + [
+                        str(restraint[i]) for i in range(len(restraint))
+                    ]
+                except Exception:
+                    return value
+
+            def schedule_key(value):
+                try:
+                    return str(_Config._from_hex(value))
+                except Exception:
+                    return value
+
             comparable = {}
             with sire_lock:
                 if restraints:
-                    comparable["restraints"] = []
-                    for value in restraints:
-                        restraint = _Config._from_string(value, "restraints")
-                        comparable["restraints"].append(
-                            [str(restraint).splitlines()[0]]
-                            + [str(restraint[i]) for i in range(len(restraint))]
-                        )
+                    comparable["restraints"] = [restraint_key(v) for v in restraints]
                 if schedule:
-                    comparable["lambda_schedule"] = str(_Config._from_hex(schedule))
+                    comparable["lambda_schedule"] = schedule_key(schedule)
             return comparable
 
         return {

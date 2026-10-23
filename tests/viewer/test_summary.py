@@ -53,3 +53,12 @@ def test_lambda_schedule_compared_by_value(tmp_path):
 
     named = {"lambda_schedule": "standard_morph"}
     assert simulation._comparable(named) is named
+
+
+def test_unreadable_values_compared_as_stored(tmp_path):
+    """
+    Make sure that restraints and schedules that can't be read are compared
+    as stored, rather than failing.
+    """
+    config = {"restraints": ["not a restraint"], "lambda_schedule": "abcd"}
+    assert Simulation(tmp_path, "test")._comparable(config) == config
