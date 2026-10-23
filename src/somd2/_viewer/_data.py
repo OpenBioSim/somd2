@@ -1356,6 +1356,33 @@ class Simulation:
 
         return self._cached("restraints", (str(serialised), _stamp(auto)), load)
 
+    def _comparable(self, config):
+        """
+        Return the config with its restraints in a form that can be compared
+        between runs, since their serialised form differs each time.
+        """
+        serialised = config.get("restraints")
+        if not serialised:
+            return config
+
+        def load():
+            from ..config import Config as _Config
+
+            restraints = []
+            with sire_lock:
+                for value in serialised:
+                    restraint = _Config._from_string(value, "restraints")
+                    restraints.append(
+                        [str(restraint).splitlines()[0]]
+                        + [str(restraint[i]) for i in range(len(restraint))]
+                    )
+            return restraints
+
+        return {
+            **config,
+            "restraints": self._cached("comparable", str(serialised), load),
+        }
+
     def depictions(self):
         """
         Return depictions of the perturbed molecules at each end state.
@@ -1680,7 +1707,9 @@ class Simulation:
                     "name": self.name,
                     "status": progress["status"],
                     "progress": progress["fraction"],
-                    "settings": settings_key(config, _Config._restart_allowed_diffs),
+                    "settings": settings_key(
+                        self._comparable(config), _Config._restart_allowed_diffs
+                    ),
                     "leg_settings": leg_settings_key(
                         config, _Config._restart_allowed_diffs
                     ),
@@ -1726,7 +1755,9 @@ class Simulation:
             fingerprint = self.fingerprint()
             if config is None or not fingerprint or "error" in fingerprint:
                 return None
-            settings = settings_key(config, _Config._restart_allowed_diffs)
+            settings = settings_key(
+                self._comparable(config), _Config._restart_allowed_diffs
+            )
         except Exception:
             # Reported by the run's own summary.
             return None
