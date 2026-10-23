@@ -30,7 +30,6 @@ import json as _json
 import math as _math
 import pickle as _pickle
 import re as _re
-import string as _string
 import threading as _threading
 import time as _time
 from collections import deque as _deque
@@ -1224,9 +1223,8 @@ class Simulation:
                 schedule = _resolve_schedule(config)
             df = schedule.get_lever_values(num_lambda=101)
             levers = {col: df[col].tolist() for col in df.columns if col != "stage"}
-            is_keyword = isinstance(name, str) and len(name) < 64
             return {
-                "name": name if is_keyword else "custom",
+                "name": "custom" if _is_custom_schedule(name) else name,
                 "description": str(schedule),
                 "lambda": df.index.tolist(),
                 "stage": df["stage"].tolist() if "stage" in df.columns else None,
@@ -1365,10 +1363,7 @@ class Simulation:
         """
         restraints = config.get("restraints")
         schedule = config.get("lambda_schedule")
-        # Named schedules are stored as their name, custom ones as hex.
-        if not isinstance(schedule, str) or not all(
-            c in _string.hexdigits for c in schedule
-        ):
+        if not _is_custom_schedule(schedule):
             schedule = None
         if not restraints and not schedule:
             return config
@@ -1380,9 +1375,12 @@ class Simulation:
             def restraint_key(value):
                 try:
                     restraint = _Config._from_string(value, "restraints")
-                    return [str(restraint).splitlines()[0]] + [
-                        str(restraint[i]) for i in range(len(restraint))
-                    ]
+                    uses_pbc = getattr(restraint, "uses_pbc", None)
+                    return [
+                        restraint.what(),
+                        restraint.name(),
+                        uses_pbc() if uses_pbc else None,
+                    ] + [str(restraint[i]) for i in range(len(restraint))]
                 except Exception:
                     return value
 
@@ -1722,7 +1720,8 @@ class Simulation:
             has_topologies = (self.path / "system0.prm7").exists() and (
                 self.path / "system1.prm7"
             ).exists()
-            vacuum = vacuum_settings(config, _Config._restart_allowed_diffs)
+            comparable = self._comparable(config)
+            vacuum = vacuum_settings(comparable, _Config._restart_allowed_diffs)
             return _clean(
                 {
                     "id": self.id,
@@ -1730,10 +1729,10 @@ class Simulation:
                     "status": progress["status"],
                     "progress": progress["fraction"],
                     "settings": settings_key(
-                        self._comparable(config), _Config._restart_allowed_diffs
+                        comparable, _Config._restart_allowed_diffs
                     ),
                     "leg_settings": leg_settings_key(
-                        config, _Config._restart_allowed_diffs
+                        comparable, _Config._restart_allowed_diffs
                     ),
                     "vacuum_settings": vacuum_settings_keys(vacuum),
                     # Used to say which settings stop a vacuum leg matching.
@@ -1983,6 +1982,13 @@ def _config_value(value):
     if isinstance(value, list):
         return [_config_value(v) for v in value]
     return value
+
+
+def _is_custom_schedule(value):
+    """
+    Whether a config's λ schedule is custom, i.e. stored as hex, not a name.
+    """
+    return isinstance(value, str) and len(value) >= 64
 
 
 def _resolve_schedule(config):
