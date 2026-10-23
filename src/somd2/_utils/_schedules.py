@@ -20,6 +20,7 @@
 #####################################################################
 
 __all__ = [
+    "abfe_alchemical_ion",
     "annihilate",
     "decouple",
     "ring_break_morph",
@@ -228,6 +229,40 @@ def decouple(fix_epsilon=True, restraint_lever="split"):
         s.set_equation(
             stage="decharge", lever="restraint", equation=s.initial() * s.lam()
         )
+
+    return s
+
+
+def abfe_alchemical_ion(schedule):
+    """
+    Build the lambda schedule for an alchemical ion used with an ABFE lambda
+    schedule.
+
+    The ion is morphed during the decharge stage, so that the system stays
+    neutral while the ligand is decharged, then held at its final state.
+
+    Parameters
+    ----------
+
+    schedule : sire.legacy.CAS.LambdaSchedule
+        The ABFE lambda schedule used for the ligand.
+
+    Returns
+    -------
+
+    schedule : sire.legacy.CAS.LambdaSchedule
+        The lambda schedule for the alchemical ion.
+    """
+    from sire.cas import LambdaSchedule as _LambdaSchedule
+
+    s = _LambdaSchedule()
+
+    for stage, weight in zip(schedule.get_stages(), schedule.get_stage_weights()):
+        if stage == "decharge":
+            equation = (1 - s.lam()) * s.initial() + s.lam() * s.final()
+        else:
+            equation = s.final()
+        s.add_stage(stage, equation, weight)
 
     return s
 

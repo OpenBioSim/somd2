@@ -1,6 +1,6 @@
 import pytest
 
-from somd2._utils._schedules import annihilate, decouple
+from somd2._utils._schedules import abfe_alchemical_ion, annihilate, decouple
 
 # Lambda schedules are always symmetric between the two stages (decharge is
 # the first stage, annihilate/decouple is the second), so both builders share
@@ -83,6 +83,29 @@ def test_restraint_lever_split(builder):
 
     assert dihedral_values == pytest.approx(_SPLIT_DIHEDRAL, abs=1e-6)
     assert distance_angle_values == pytest.approx(_SPLIT_DISTANCE_ANGLE, abs=1e-6)
+
+
+@pytest.mark.parametrize("builder", BUILDERS)
+@pytest.mark.parametrize("fix_epsilon", [True, False])
+def test_alchemical_ion(builder, fix_epsilon):
+    """
+    The alchemical ion's charge changes at the same rate as the ligand's,
+    keeping the system neutral, and its LJ parameters reach their final values.
+    """
+    schedule = builder(fix_epsilon=fix_epsilon)
+    schedule.set_stage_weight("decharge", 2.0)
+    ion_schedule = abfe_alchemical_ion(schedule)
+
+    assert ion_schedule.get_stages() == schedule.get_stages()
+    assert ion_schedule.get_stage_weights() == schedule.get_stage_weights()
+
+    for lv in _LAMBDA_VALUES:
+        assert ion_schedule.morph("clj", "charge", 0.0, 1.0, lv) == pytest.approx(
+            schedule.morph("clj", "charge", 0.0, 1.0, lv)
+        )
+
+    for lever in ("charge", "sigma", "epsilon"):
+        assert ion_schedule.morph("clj", lever, 0.0, 1.0, 1.0) == pytest.approx(1.0)
 
 
 @pytest.mark.skipif(
