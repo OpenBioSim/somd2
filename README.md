@@ -447,8 +447,9 @@ accounting for the samples each window has already collected and for cold
 windows costing and sampling `--adaptive-mix-interval` times less than hot ones.
 The following are always hot:
 
-- pairs whose forward and reverse free energy estimates disagree, or whose
-  estimate drifts during the simulation,
+- pairs whose estimate drifts during the simulation or, for pairs with narrow
+  energy distributions, whose forward and reverse free energy estimates
+  disagree,
 - pairs that rarely exchange,
 - windows with fewer than `--adaptive-min-samples` statistically independent
   samples since the burn-in,
