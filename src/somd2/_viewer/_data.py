@@ -30,6 +30,7 @@ import json as _json
 import math as _math
 import pickle as _pickle
 import re as _re
+import string as _string
 import threading as _threading
 import time as _time
 from collections import deque as _deque
@@ -1358,29 +1359,40 @@ class Simulation:
 
     def _comparable(self, config):
         """
-        Return the config with its restraints in a form that can be compared
-        between runs, since their serialised form differs each time.
+        Return the config with its restraints and custom λ schedule in a form
+        that can be compared between runs, since their serialised form differs
+        each time.
         """
-        serialised = config.get("restraints")
-        if not serialised:
+        restraints = config.get("restraints")
+        schedule = config.get("lambda_schedule")
+        # Named schedules are stored as their name, custom ones as hex.
+        if not isinstance(schedule, str) or not all(
+            c in _string.hexdigits for c in schedule
+        ):
+            schedule = None
+        if not restraints and not schedule:
             return config
 
         def load():
             from ..config import Config as _Config
 
-            restraints = []
+            comparable = {}
             with sire_lock:
-                for value in serialised:
-                    restraint = _Config._from_string(value, "restraints")
-                    restraints.append(
-                        [str(restraint).splitlines()[0]]
-                        + [str(restraint[i]) for i in range(len(restraint))]
-                    )
-            return restraints
+                if restraints:
+                    comparable["restraints"] = []
+                    for value in restraints:
+                        restraint = _Config._from_string(value, "restraints")
+                        comparable["restraints"].append(
+                            [str(restraint).splitlines()[0]]
+                            + [str(restraint[i]) for i in range(len(restraint))]
+                        )
+                if schedule:
+                    comparable["lambda_schedule"] = str(_Config._from_hex(schedule))
+            return comparable
 
         return {
             **config,
-            "restraints": self._cached("comparable", str(serialised), load),
+            **self._cached("comparable", (str(restraints), schedule), load),
         }
 
     def depictions(self):

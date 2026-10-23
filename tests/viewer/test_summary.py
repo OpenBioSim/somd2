@@ -27,3 +27,29 @@ def test_restraints_compared_by_value(tmp_path, ethane_methanol):
 
     assert keys[0] == keys[1]
     assert keys[0] != keys[2]
+
+
+def test_lambda_schedule_compared_by_value(tmp_path):
+    """
+    Make sure that runs with the same custom λ schedule have the same settings
+    key, and that named schedules are left alone.
+    """
+
+    def config(scale):
+        schedule = sr.cas.LambdaSchedule.standard_morph()
+        schedule.set_equation(
+            stage="morph", lever="charge", equation=scale * schedule.lam()
+        )
+        return {"lambda_schedule": Config._to_hex(schedule)}
+
+    simulation = Simulation(tmp_path, "test")
+    keys = [
+        settings_key(simulation._comparable(config(scale)), set())
+        for scale in (0.5, 0.5, 0.8)
+    ]
+
+    assert keys[0] == keys[1]
+    assert keys[0] != keys[2]
+
+    named = {"lambda_schedule": "standard_morph"}
+    assert simulation._comparable(named) is named
