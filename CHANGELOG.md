@@ -32,6 +32,7 @@ Changelog
 * Record frame times in final trajectories, rather than zero for every frame [#257](https://github.com/OpenBioSim/somd2/pull/257).
 * Fixed the Boresch restraint for ABFE and the Morse restraints for ring-breaking perturbations not being generated when any other restraint was passed. They are now generated unless restraints of the same type are passed, and added to the others [#259](https://github.com/OpenBioSim/somd2/pull/259).
 * Fixed alchemical ions changing their charge linearly over the whole lambda range for the `annihilate`, `decouple`, `charge_scaled_morph`, `ring_break_morph` and `reverse_ring_break_morph` lambda schedules, rather than alongside the perturbable molecule. A warning is raised for custom lambda schedules, where alchemical ions still use the `standard_morph` schedule [#263](https://github.com/OpenBioSim/somd2/pull/263).
+* Add a `ghostly_kwargs` option to pass options to `ghostly` when applying ghost atom modifications, e.g. `--ghostly-kwargs k_soft=3 stiffen_rotamers=true` on the command line. Options are validated against those supported by `ghostly`.
 
 [2026.2.0](https://github.com/openbiosim/somd2/compare/2026.1.0...2026.2.0) - Sep 2026
 --------------------------------------------------------------------------------------

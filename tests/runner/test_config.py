@@ -284,6 +284,48 @@ def test_restraints_input_forms():
             Config(restraints=wrong_path)
 
 
+def test_ghostly_kwargs():
+    """Validate parsing, validation and serialisation of the ghostly options."""
+    import pytest
+
+    kwargs = {"k_soft": 3, "stiffen_rotamers": True}
+
+    assert Config().ghostly_kwargs == {}
+    assert Config(ghostly_kwargs=kwargs).ghostly_kwargs == kwargs
+
+    # Key=value strings, as passed on the command line.
+    parser = Config._create_parser()
+    args = parser.parse_args(["--ghostly-kwargs", "k_soft=3", "stiffen_rotamers=true"])
+    assert Config(ghostly_kwargs=args.ghostly_kwargs).ghostly_kwargs == kwargs
+
+    # Unknown options and values of the wrong type are rejected.
+    with pytest.raises(ValueError, match="not recognised"):
+        Config(ghostly_kwargs={"k_sfot": 3})
+    with pytest.raises(ValueError, match="not recognised"):
+        Config(ghostly_kwargs={"system": None})
+    with pytest.raises(ValueError, match="must be a bool"):
+        Config(ghostly_kwargs={"stiffen_rotamers": 1})
+    with pytest.raises(ValueError, match="must be a number"):
+        Config(ghostly_kwargs={"k_soft": "soft"})
+    with pytest.raises(ValueError, match="key=value"):
+        Config(ghostly_kwargs=["k_soft"])
+
+    # The options survive a round trip through the config dictionary.
+    config = Config(ghostly_kwargs=kwargs)
+    assert Config(**config.as_dict()) == config
+
+    # A change in the options is detected on restart.
+    Runner._compare_configs(
+        config.as_dict(sire_compatible=True),
+        Config(ghostly_kwargs=kwargs).as_dict(sire_compatible=True),
+    )
+    with pytest.raises(ValueError):
+        Runner._compare_configs(
+            config.as_dict(sire_compatible=True),
+            Config(ghostly_kwargs={"k_soft": 4}).as_dict(sire_compatible=True),
+        )
+
+
 def test_help_text_scraping():
     """Validate that help text isn't truncated by the parameter name."""
     parser = Config._create_parser()

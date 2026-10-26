@@ -403,13 +403,16 @@ class RunnerBase:
         elif self._config.ghost_modifications:
             from ghostly import modify
 
+            kwargs = self._config.ghostly_kwargs
             _logger.info("Applying modifications to ghost atom bonded terms.")
+            if kwargs:
+                _logger.info(f"Using ghostly options: {kwargs}")
             try:
-                self._system, self._modifications = modify(self._system)
+                self._system, self._modifications = modify(self._system, **kwargs)
             # Angle optimisation can sometimes fail.
             except Exception as e1:
                 try:
-                    self._system, self._modifications = modify(self._system)
+                    self._system, self._modifications = modify(self._system, **kwargs)
                 except Exception as e2:
                     msg = f"Unable to apply modifications to ghost atom bonded terms: {e1}; {e2}"
                     _logger.error(msg)

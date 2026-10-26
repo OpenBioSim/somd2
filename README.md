@@ -594,6 +594,17 @@ modifications are made with the [ghostly](https://github.com/OpenBioSim/ghostly)
 package, and are enabled by default, but can be disabled with
 `--no-ghost-modifications`.
 
+The default ghostly options can be changed by passing `key=value` pairs to
+`--ghostly-kwargs`:
+
+```
+somd2 perturbable_system.bss --ghostly-kwargs k_soft=3 stiffen_rotamers=true
+```
+
+From Python, or in a YAML config file, pass a dictionary instead, e.g.
+`Config(ghostly_kwargs={"k_soft": 3, "stiffen_rotamers": True})`. Run
+`ghostly --help` to see the available options.
+
 <a id="lambda-schedules"></a>
 
 ## 📈 Lambda schedules
