@@ -605,6 +605,11 @@ From Python, or in a YAML config file, pass a dictionary instead, e.g.
 `Config(ghostly_kwargs={"k_soft": 3, "stiffen_rotamers": True})`. Run
 `ghostly --help` to see the available options.
 
+Systems that have already been modified with ghostly, e.g. by running `ghostly`
+on the input, raise an error unless `--no-ghost-modifications` is set, which
+uses the existing modifications. To apply new modifications on top of the
+existing ones, pass `--ghostly-kwargs force=true`.
+
 <a id="lambda-schedules"></a>
 
 ## 📈 Lambda schedules

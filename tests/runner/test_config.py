@@ -326,6 +326,35 @@ def test_ghostly_kwargs():
         )
 
 
+def test_ghostly_premodified():
+    """Validate handling of systems that have already been modified by ghostly."""
+    import pytest
+
+    from ghostly import modify
+
+    mols = sr.load(sr.expand(sr.tutorial_url, "merged_molecule.s3"))
+    mols, _ = modify(mols)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with pytest.raises(ValueError, match="already been modified"):
+            Runner(mols, Config(platform="cpu", output_directory=tmpdir))
+
+        Runner(
+            mols,
+            Config(platform="cpu", output_directory=tmpdir, ghost_modifications=False),
+        )
+
+        Runner(
+            mols,
+            Config(
+                platform="cpu",
+                output_directory=tmpdir,
+                ghostly_kwargs={"force": True},
+                overwrite=True,
+            ),
+        )
+
+
 def test_help_text_scraping():
     """Validate that help text isn't truncated by the parameter name."""
     parser = Config._create_parser()
