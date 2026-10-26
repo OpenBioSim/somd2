@@ -382,6 +382,13 @@ class RunnerBase:
                 _logger.error(msg)
                 raise RuntimeError(msg)
 
+        if self._config.ghostly_kwargs and (
+            self._config.somd1_compatibility or not self._config.ghost_modifications
+        ):
+            _logger.warning(
+                "'ghostly_kwargs' are ignored since ghost atom modifications aren't applied."
+            )
+
         # We're running in SOMD1 compatibility mode.
         if self._config.somd1_compatibility:
             from .._utils._somd1 import make_compatible
@@ -414,9 +421,9 @@ class RunnerBase:
                     options = modified[0].property("ghostly_options")
                     msg = (
                         f"The system has already been modified by ghostly with options: {options}. "
-                        "Set 'ghost_modifications=False' to use the existing modifications, "
-                        "or pass 'force=True' in 'ghostly_kwargs' to apply new modifications "
-                        "on top of them."
+                        "Set 'ghost_modifications=False' (--no-ghost-modifications) to use the "
+                        "existing modifications, or pass 'force=True' in 'ghostly_kwargs' "
+                        "(--ghostly-kwargs force=true) to apply new modifications on top of them."
                     )
                     _logger.error(msg)
                     raise ValueError(msg)
