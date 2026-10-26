@@ -90,6 +90,7 @@ class Config:
         "pme_grid": "+",
         "rest2_scale": "+",
         "restraints": "+",
+        "ghostly_kwargs": "+",
     }
 
     # Options that are allowed to change when a simulation is restarted.
@@ -163,6 +164,7 @@ class Config:
         include_constrained_energies=False,
         dynamic_constraints=True,
         ghost_modifications=True,
+        ghostly_kwargs=None,
         fix_perturbable_zero_sigmas=True,
         charge_difference=None,
         coalchemical_restraint_dist=None,
@@ -363,6 +365,13 @@ class Config:
             system to avoid spurious coupling between the two, which can lead to
             sampling of non-physical conformations. We implement the recommended
             modifcations from https://pubs.acs.org/doi/10.1021/acs.jctc.0c01328
+
+        ghostly_kwargs: dict
+            Keyword arguments passed to ghostly when applying ghost atom
+            modifications, e.g. {"k_soft": 3, "stiffen_rotamers": True}. On the
+            command line, pass space-separated key=value pairs, e.g.
+            --ghostly-kwargs k_soft=3 stiffen_rotamers=true. Run 'ghostly
+            --help' for the available options.
 
         fix_perturbable_zero_sigmas: bool
             Whether to prevent LJ sigma values being perturbed to zero.
@@ -802,6 +811,7 @@ class Config:
         self.include_constrained_energies = include_constrained_energies
         self.dynamic_constraints = dynamic_constraints
         self.ghost_modifications = ghost_modifications
+        self.ghostly_kwargs = ghostly_kwargs
         self.fix_perturbable_zero_sigmas = fix_perturbable_zero_sigmas
         self.charge_difference = charge_difference
         self.coalchemical_restraint_dist = coalchemical_restraint_dist
@@ -985,6 +995,12 @@ class Config:
         # Serialise restraints.
         if self.restraints is not None:
             d["restraints"] = [self._to_hex(restraint) for restraint in self.restraints]
+
+        # Store the ghostly options as a string within the checkpoint config property.
+        if sire_compatible:
+            import json as _json
+
+            d["ghostly_kwargs"] = _json.dumps(self.ghostly_kwargs, sort_keys=True)
 
         # Use the path for the perturbed_system option, since the system
         # isn't serializable.
@@ -1671,6 +1687,57 @@ class Config:
         if not isinstance(ghost_modifications, bool):
             raise ValueError("'ghost_modifications' must be of type 'bool'")
         self._ghost_modifications = ghost_modifications
+
+    @property
+    def ghostly_kwargs(self):
+        return self._ghostly_kwargs
+
+    @ghostly_kwargs.setter
+    def ghostly_kwargs(self, ghostly_kwargs):
+        import inspect
+        import yaml
+
+        from ghostly import modify
+
+        if ghostly_kwargs is None:
+            ghostly_kwargs = {}
+
+        # Convert key=value strings from the command line, parsing each value
+        # as YAML so that numbers and booleans have the correct type.
+        elif isinstance(ghostly_kwargs, (list, tuple)):
+            kwargs = {}
+            for item in ghostly_kwargs:
+                if not isinstance(item, str) or "=" not in item:
+                    raise ValueError(
+                        f"'ghostly_kwargs' entries must be 'key=value' strings, got: {item}"
+                    )
+                key, value = item.split("=", 1)
+                kwargs[key.strip()] = yaml.safe_load(value)
+            ghostly_kwargs = kwargs
+
+        if not isinstance(ghostly_kwargs, dict):
+            raise TypeError(
+                "'ghostly_kwargs' must be of type 'dict' or a list of 'key=value' strings"
+            )
+
+        params = inspect.signature(modify).parameters
+        for key, value in ghostly_kwargs.items():
+            if key not in params or key == "system":
+                valid = ", ".join(p for p in params if p != "system")
+                raise ValueError(
+                    f"'ghostly_kwargs' option not recognised: {key}. Valid options are: {valid}"
+                )
+            default = params[key].default
+            if isinstance(default, bool):
+                if not isinstance(value, bool):
+                    raise ValueError(f"'ghostly_kwargs' option '{key}' must be a bool")
+            elif isinstance(default, (int, float)):
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise ValueError(
+                        f"'ghostly_kwargs' option '{key}' must be a number"
+                    )
+
+        self._ghostly_kwargs = ghostly_kwargs
 
     @property
     def fix_perturbable_zero_sigmas(self):
