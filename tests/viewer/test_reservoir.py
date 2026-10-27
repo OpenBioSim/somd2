@@ -50,7 +50,7 @@ def test_reservoir_summary(tmp_path):
     )
     log = _monitor(tmp_path, lines)
 
-    summary = Simulation._reservoir(log, [0.0, 0.5, 1.0], False)
+    summary = Simulation._reservoir(log, [0.0, 0.5, 1.0])
 
     assert summary["window"] == 2
     assert summary["swaps"] == 2 and summary["rejected"] == 1
@@ -59,9 +59,33 @@ def test_reservoir_summary(tmp_path):
     assert summary["delta_e_min"] == -2.0 and summary["delta_e_max"] == 10.0
 
     # The first configuration reaches window 0. The second stays at window 2.
+    # Neither has been replaced.
     assert summary["furthest"] == [1, 0, 1]
     assert summary["reached_end"] == 1
+    assert summary["followed"] == 2 and summary["in_progress"] == 2
     assert summary["swap_cycles"] == [0, 1]
+
+
+def test_reservoir_configuration_replaced(tmp_path):
+    """
+    Validate that a configuration is only followed until a later swap into
+    the same replica replaces it.
+    """
+    lines = (
+        _cycle(1, 3, [0, 1, 2])
+        + [_swap(3, "1.00")]
+        + _cycle(2, 3, [0, 1, 2])
+        + [_swap(4, "1.00")]
+        + _cycle(3, 3, [2, 1, 0])
+    )
+    log = _monitor(tmp_path, lines)
+
+    summary = Simulation._reservoir(log, [0.0, 0.5, 1.0])
+
+    # The first configuration is replaced before it moves. The second reaches
+    # window 0 when replicas 0 and 2 exchange.
+    assert summary["furthest"] == [1, 0, 1]
+    assert summary["followed"] == 2 and summary["in_progress"] == 1
 
 
 def test_reservoir_swaps_dropped_on_restart(tmp_path):
@@ -77,4 +101,4 @@ def test_reservoir_swaps_dropped_on_restart(tmp_path):
     )
     log = _monitor(tmp_path, lines)
 
-    assert log.reservoir_swaps == [(0, 3, 1.0, True)]
+    assert log.reservoir_swaps == [(0, 3, 1.0, 1.0, True)]
