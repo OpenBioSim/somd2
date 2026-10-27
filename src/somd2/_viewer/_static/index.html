@@ -1558,6 +1558,19 @@ function renderSamplers(s) {
     for (const row of sm.terminal_flip) html += `<tr><td>${fmtLambda(row.lambda)}</td><td class="num">${row.attempted}</td><td class="num">${row.accepted}</td><td class="num">${fmt(row.acceptance, 3)}</td></tr>`;
     html += `</table></div>`;
   }
+  if (sm.reservoir) {
+    const res = sm.reservoir;
+    const frames = res.num_frames ? `${res.frames_used} of ${res.num_frames}` : `${res.frames_used}`;
+    const deltaE = res.delta_e_mean === null ? "–" : `${fmt(res.delta_e_mean, 1)} (${fmt(res.delta_e_min, 1)} to ${fmt(res.delta_e_max, 1)})`;
+    html += `<h4${sm.gcmc || sm.terminal_flip ? "" : ' style="margin-top:0"'}>Reservoir</h4><div class="table-wrap"><table><tr><th>${LAMBDA}</th><th class="num">swaps</th><th class="num">rejected</th><th class="num">frames used</th><th class="num">ΔE (kJ/mol)</th></tr>`;
+    const rejected = res.rejected ? ' style="color:var(--warn)" title="Swaps whose energy wasn\'t finite, so the reservoir may not match the system"' : "";
+    html += `<tr><td>${fmtLambda(res.lambda)}</td><td class="num">${res.swaps}</td><td class="num"${rejected}>${res.rejected}</td><td class="num">${frames}</td><td class="num">${deltaE}</td></tr></table></div>`;
+    html += `<div class="note">Frames from the reservoir replace the configuration of the decoupled window. Every finite swap is kept, so ΔE, the mean with its range, is only a check that the reservoir matches the system.</div>`;
+    if (res.furthest) {
+      html += `<h4>Furthest window reached</h4><div class="chart" id="reservoir-reach-chart"></div>`;
+      html += `<div class="note">For each swapped-in configuration, the window furthest from the decoupled one that it reached before a later swap replaced it. ${res.reached_end} of ${res.swaps} reached the other end state. Swaps are marked on the replica state trajectories.</div>`;
+    }
+  }
   return html ? card("Monte Carlo samplers", html) : "";
 }
 
@@ -1701,8 +1714,13 @@ function renderCharts(s) {
     const rc = $("#replica-chart");
     if (rc && r.replica_states) {
       const n = r.replica_states.length;
+      const series = r.replica_states.map((path, i) => ({ x: path.map((_, c) => c * r.stride + 1), y: path, color: colour(i, n), name: `replica ${i}`, step: true, width: 1.4 }));
+      const reservoir = s.samplers && s.samplers.reservoir;
+      if (reservoir && reservoir.swap_cycles) {
+        series.push({ x: reservoir.swap_cycles.map((c) => c + 1), y: reservoir.swap_cycles.map(() => reservoir.window), color: css("--fg"), name: "reservoir swap", points: true, opacity: 0, title: (x) => `reservoir swap in cycle ${x}` });
+      }
       lineChart(rc, {
-        series: r.replica_states.map((path, i) => ({ x: path.map((_, c) => c * r.stride + 1), y: path, color: colour(i, n), name: `replica ${i}`, step: true, width: 1.4 })),
+        series,
         xLabel: "cycle", yLabel: "state", yMin: 0, yMax: n - 1, height: 300, legend: n <= 16,
         yFormat: (v) => (Number.isInteger(v) ? String(v) : ""),
       });
@@ -1750,6 +1768,16 @@ function renderCharts(s) {
       xLabel: timed ? "time (ns)" : "checkpoint", yLabel: "waters in region", yMin: 0,
       yFormat: (v) => (Number.isInteger(v) ? String(v) : ""),
       legend: waters.length <= 16,
+    });
+  }
+  const rr = $("#reservoir-reach-chart");
+  const reservoir = s.samplers && s.samplers.reservoir;
+  if (rr && reservoir && reservoir.furthest) {
+    lineChart(rr, {
+      series: [{ x: reservoir.furthest.map((_, i) => i), y: reservoir.furthest, color: css("--accent"), title: (x, y) => `window ${x} (${LAMBDA} = ${fmtLambda(s.lambda_values[x])}): ${y}` }],
+      bars: true, yMin: 0, xMin: -0.5, xMax: reservoir.furthest.length - 0.5,
+      xLabel: "furthest window", yLabel: "configurations", xFormat: (v) => String(Math.round(v)),
+      yFormat: (v) => (Number.isInteger(v) ? String(v) : ""),
     });
   }
 }
