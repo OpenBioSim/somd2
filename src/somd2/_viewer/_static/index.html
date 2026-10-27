@@ -511,7 +511,8 @@ function lineChart(el, opts) {
   if (opts.yLabel) svg += `<text transform="translate(12 ${m.t + ph / 2}) rotate(-90)" text-anchor="middle">${esc(opts.yLabel)}</text>`;
   svg += "</svg>";
   let html = svg;
-  const legend = opts.legend && opts.series.length > 1 ? opts.series.map((s) => ({ name: s.name, color: s.color })) : [];
+  const named = opts.series.filter((s) => !s.noLegend);
+  const legend = opts.legend && named.length > 1 ? named.map((s) => ({ name: s.name, color: s.color })) : [];
   if (legend.length) {
     html += `<div class="legend">${legend.map((s) => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join("")}</div>`;
   }
@@ -1568,7 +1569,8 @@ function renderSamplers(s) {
     html += `<div class="note">Frames from the reservoir replace the configuration of the decoupled window. Every finite swap is kept, so ΔE, the mean with its range, is only a check that the reservoir matches the system.</div>`;
     if (res.furthest) {
       html += `<h4>Furthest window reached</h4><div class="chart" id="reservoir-reach-chart"></div>`;
-      html += `<div class="note">For each swapped-in configuration, the window furthest from the decoupled one that it reached before a later swap replaced it. ${res.reached_end} of ${res.swaps} reached the other end state. Swaps are marked on the replica state trajectories.</div>`;
+      const travelling = res.in_progress ? ` ${res.in_progress} haven't been replaced yet, so they may still travel further.` : "";
+      html += `<div class="note">For each swapped-in configuration, the window furthest from the decoupled one that it has reached, up to when a later swap replaced it. ${res.reached_end} of ${res.followed} reached the other end state.${travelling} Swaps are marked on the replica state trajectories.</div>`;
     }
   }
   return html ? card("Monte Carlo samplers", html) : "";
@@ -1717,7 +1719,7 @@ function renderCharts(s) {
       const series = r.replica_states.map((path, i) => ({ x: path.map((_, c) => c * r.stride + 1), y: path, color: colour(i, n), name: `replica ${i}`, step: true, width: 1.4 }));
       const reservoir = s.samplers && s.samplers.reservoir;
       if (reservoir && reservoir.swap_cycles) {
-        series.push({ x: reservoir.swap_cycles.map((c) => c + 1), y: reservoir.swap_cycles.map(() => reservoir.window), color: css("--fg"), name: "reservoir swap", points: true, opacity: 0, title: (x) => `reservoir swap in cycle ${x}` });
+        series.push({ x: reservoir.swap_cycles.map((c) => c + 1), y: reservoir.swap_cycles.map(() => reservoir.window), color: css("--fg"), name: "reservoir swap", points: true, opacity: 0, noLegend: true, title: (x) => `reservoir swap in cycle ${x}` });
       }
       lineChart(rc, {
         series,
