@@ -37,6 +37,35 @@ def _boresch(anchors, ligand):
     )
 
 
+def _write_openmm_dcd(filename, frames, box, num_atoms):
+    import openmm.app as app
+    from openmm import unit
+
+    topology = app.Topology()
+    residue = topology.addResidue("RES", topology.addChain())
+    for i in range(num_atoms):
+        topology.addAtom(f"A{i}", None, residue)
+    topology.setPeriodicBoxVectors(box * unit.nanometer)
+
+    with open(filename, "wb") as f:
+        dcd = app.DCDFile(f, topology, 0.001)
+        for positions in frames:
+            dcd.writeModel(
+                positions * unit.nanometer, periodicBoxVectors=box * unit.nanometer
+            )
+
+
+@pytest.fixture
+def abfe_runner(abfe_charge_change_mols, tmp_path):
+    """A runner for the bound leg of an ABFE calculation, without a reservoir."""
+    config = Config(
+        output_directory=str(tmp_path / "output"),
+        platform="cpu",
+        lambda_schedule="annihilate",
+    )
+    return Runner(abfe_charge_change_mols.clone(), config)
+
+
 def test_rebuild_ligand_preserves_boresch():
     """The rebuilt ligand has the same Boresch coordinates and shape."""
     rng = np.random.default_rng(42)
@@ -88,29 +117,13 @@ def test_read_sire_dcd(ethane_methanol):
 
 def test_read_openmm_dcd():
     """Frames written by OpenMM, which stores the box angles as cosines."""
-    import openmm.app as app
-    from openmm import unit
-
-    num_atoms = 10
-    topology = app.Topology()
-    residue = topology.addResidue("RES", topology.addChain())
-    for i in range(num_atoms):
-        topology.addAtom(f"A{i}", None, residue)
-
     rng = np.random.default_rng(42)
-    frames = [rng.uniform(0.0, 3.0, (num_atoms, 3)) for _ in range(3)]
+    frames = [rng.uniform(0.0, 3.0, (10, 3)) for _ in range(3)]
     box = np.array([[3.0, 0.0, 0.0], [1.0, 2.8, 0.0], [-1.0, 1.2, 2.5]])
-    topology.setPeriodicBoxVectors(box * unit.nanometer)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         filename = f"{tmpdir}/reservoir.dcd"
-        with open(filename, "wb") as f:
-            dcd = app.DCDFile(f, topology, 0.001)
-            for positions in frames:
-                dcd.writeModel(
-                    positions * unit.nanometer,
-                    periodicBoxVectors=box * unit.nanometer,
-                )
+        _write_openmm_dcd(filename, frames, box, 10)
 
         reader = DCDReader(filename)
         assert reader.num_frames == 3
@@ -147,32 +160,52 @@ def test_reservoir_requires_abfe_bound(ethane_methanol):
                 RepexRunner(ethane_methanol, config)
 
 
-def test_reservoir_mapping_with_alchemical_ions(
-    abfe_charge_change_mols, ethane_methanol
-):
+def test_reservoir_requires_decoupled_window(abfe_runner, tmp_path):
+    filename = str(tmp_path / "reservoir.dcd")
+    _write_openmm_dcd(filename, [np.zeros((10, 3))], np.diag([3.0] * 3), 10)
+
+    abfe_runner._config.reservoir = filename
+    abfe_runner._lambda_values = [0.0, 0.5, 0.9]
+    with pytest.raises(ValueError, match="where the ligand is decoupled"):
+        abfe_runner._check_reservoir()
+
+
+def test_reservoir_rejects_other_restraints(abfe_runner, tmp_path):
+    filename = str(tmp_path / "reservoir.dcd")
+    _write_openmm_dcd(filename, [np.zeros((10, 3))], np.diag([3.0] * 3), 10)
+
+    abfe_runner._config.reservoir = filename
+    abfe_runner._config.restraints = sr.restraints.positional(
+        abfe_runner._system, "atomidx 0"
+    )
+    with pytest.raises(ValueError, match="only be used with a Boresch restraint"):
+        abfe_runner._check_reservoir()
+
+
+def test_reservoir_without_frames_raises(abfe_runner, tmp_path):
+    filename = str(tmp_path / "reservoir.dcd")
+    _write_openmm_dcd(filename, [], np.diag([3.0] * 3), 10)
+
+    abfe_runner._config.reservoir = filename
+    with pytest.raises(ValueError, match="has no frames"):
+        abfe_runner._check_reservoir()
+
+
+def test_reservoir_mapping_with_alchemical_ions(abfe_runner, tmp_path):
     """
     Alchemical ions are appended to the reservoir in their decoupled state
     form, with their dummy atoms moving with them.
     """
-    mols = ethane_methanol.clone()
-    mols.save_frame()
+    filename = str(tmp_path / "reservoir.dcd")
+    _write_openmm_dcd(filename, [np.zeros((10, 3))], np.diag([3.0] * 3), 10)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        filename = f"{tmpdir}/reservoir.dcd"
-        sr.save(mols.trajectory(), filename, format=["DCD"])
+    runner = abfe_runner
+    runner._config.reservoir = filename
 
-        config = Config(
-            output_directory=f"{tmpdir}/output",
-            platform="cpu",
-            lambda_schedule="annihilate",
-        )
-        runner = Runner(abfe_charge_change_mols.clone(), config)
-        runner._config.reservoir = filename
-
-        # The trajectory has the wrong number of atoms, but the mapping is
-        # worked out first.
-        with pytest.raises(ValueError, match="atoms, but"):
-            runner._check_reservoir()
+    # The trajectory has the wrong number of atoms, but the mapping is worked
+    # out first.
+    with pytest.raises(ValueError, match="atoms, but"):
+        runner._check_reservoir()
 
     system = runner._system
     atoms = system.atoms()
