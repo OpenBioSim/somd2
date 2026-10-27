@@ -752,7 +752,10 @@ every ligand with the same charge. The reservoir can't be used with GCMC, with
 restraint, since these would also act on the reservoir frames.
 
 Each swap is logged with the frame that was used, so its progress through the λ
-windows can be followed using the logged replica exchange states.
+windows can be followed using the logged replica exchange states. The
+[viewer](#viewer) shows the swap statistics, marks the swaps on the replica
+state trajectories, and shows how far each swapped-in configuration travelled
+towards the coupled end state before it was replaced.
 
 <a id="ring-breaking-perturbations"></a>
 
@@ -975,8 +978,10 @@ The viewer shows:
 - Energy components as a function of time for each λ window. These are
   written at each checkpoint, or at every energy sample when using
   `--save-energy-components`.
-- GCMC and terminal flip Monte Carlo statistics, if active, including the
-  number of waters in the GCMC region over time.
+- GCMC, terminal flip and [reservoir](#apo-reservoir) Monte Carlo statistics,
+  if active, including the number of waters in the GCMC region over time, and
+  how far each configuration swapped in from the reservoir travelled towards
+  the coupled end state.
 - Any restraints, e.g. a Boresch restraint for an ABFE simulation, or Morse
   restraints for a ring-breaking perturbation.
 - The λ schedule, REST2 scale factors, configuration options, and tuned PME
