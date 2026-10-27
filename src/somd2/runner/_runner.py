@@ -539,7 +539,7 @@ class Runner(_RunnerBase):
             system = self._minimise_window(system, window)
 
         is_equilibrated = (
-            not is_restart and self._config.equilibration_time.value() > 0.0
+            not is_restart and self._equilibration_times[window.index].value() > 0.0
         )
         if is_equilibrated:
             system = self._equilibrate_window(system, window)
@@ -730,7 +730,7 @@ class Runner(_RunnerBase):
             constraint = "none"
             perturbable_constraint = "none"
         # We will be performing an equilibration stage.
-        elif self._config.equilibration_time.value() > 0.0:
+        elif self._equilibration_times[window.index].value() > 0.0:
             # Don't use constraints during equilibration.
             if not self._config.equilibration_constraints:
                 constraint = "none"
@@ -838,7 +838,7 @@ class Runner(_RunnerBase):
 
             # Run without saving energies or frames.
             dynamics.run(
-                self._config.equilibration_time,
+                self._equilibration_times[window.index],
                 energy_frequency=0,
                 frame_frequency=0,
                 save_velocities=False,

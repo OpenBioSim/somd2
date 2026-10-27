@@ -90,6 +90,7 @@ class Config:
         "pme_grid": "+",
         "rest2_scale": "+",
         "restraints": "+",
+        "equilibration_time": "+",
         "ghostly_kwargs": "+",
     }
 
@@ -406,9 +407,11 @@ class Config:
         minimisation_errors: bool
             Whether to raise an exception if a minimisation fails to converge.
 
-        equilibration_time: str
+        equilibration_time: str, list(str)
             Time interval for equilibration. Only simulations starting from
-            scratch will be equilibrated.
+            scratch will be equilibrated. This can either be a single time,
+            used for all lambda windows, or a list of times, one for each
+            lambda window. A window with a time of zero is not equilibrated.
 
         equilibration_timestep: str
             Equilibration timestep. (Can be different to simulation timestep.)
@@ -991,6 +994,9 @@ class Config:
                 d["lambda_schedule"] = "charge_scaled_morph"
             else:
                 d["lambda_schedule"] = self._to_hex(self.lambda_schedule)
+
+        if isinstance(self.equilibration_time, list):
+            d["equilibration_time"] = [t.to_string() for t in self.equilibration_time]
 
         # Serialise restraints.
         if self.restraints is not None:
@@ -1842,22 +1848,37 @@ class Config:
 
     @equilibration_time.setter
     def equilibration_time(self, equilibration_time):
-        if not isinstance(equilibration_time, str):
-            raise TypeError("'equilibration_time' must be of type 'str'")
+        if isinstance(equilibration_time, str):
+            equilibration_time = [equilibration_time]
+        elif not isinstance(equilibration_time, (list, tuple)) or not all(
+            isinstance(x, str) for x in equilibration_time
+        ):
+            raise TypeError(
+                "'equilibration_time' must be of type 'str', or a list of 'str'"
+            )
+
+        if len(equilibration_time) == 0:
+            raise ValueError("'equilibration_time' must not be empty.")
 
         from sire.units import picosecond
 
-        try:
-            t = _sr.u(equilibration_time)
-        except:
-            raise ValueError(
-                f"Unable to parse 'equilibration_time' as a Sire GeneralUnit: {equilibration_time}"
-            )
+        times = []
+        for time in equilibration_time:
+            try:
+                t = _sr.u(time)
+            except:
+                raise ValueError(
+                    f"Unable to parse 'equilibration_time' as a Sire GeneralUnit: {time}"
+                )
 
-        if t.value() != 0 and not t.has_same_units(picosecond):
-            raise ValueError("'equilibration_time' units are invalid.")
+            if t.value() != 0 and not t.has_same_units(picosecond):
+                raise ValueError("'equilibration_time' units are invalid.")
 
-        self._equilibration_time = t
+            times.append(t)
+
+        if len(times) == 1:
+            times = times[0]
+        self._equilibration_time = times
 
     @property
     def equilibration_timestep(self):

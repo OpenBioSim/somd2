@@ -287,6 +287,23 @@ The number of contexts that can be run in parallel is then controlled by the
 More details on MPS, including tuning options, can be found in the following
 [technical blog](https://developer.nvidia.com/blog/maximizing-openmm-molecular-dynamics-throughput-with-nvidia-multi-process-service/).
 
+<a id="equilibration"></a>
+
+## ⏳ Equilibration
+
+Each λ window can be equilibrated after minimisation, which is off by default.
+Use `--equilibration-time` to set how long for, e.g. `--equilibration-time
+100ps`. Equilibration uses a timestep of 2 fs by default, set with
+`--equilibration-timestep`. No energies or frames are saved during
+equilibration, and it doesn't count towards the `--runtime`. Only simulations
+starting from scratch are equilibrated, not restarts.
+
+Passing multiple values to `--equilibration-time` gives each λ window its own
+time, e.g. `--equilibration-time 0ps 100ps 100ps 0ps` for four windows, which
+can be used to equilibrate only the windows that need it. The number of values
+must match the number of λ windows, and windows with a time of zero are not
+equilibrated.
+
 <a id="restarting"></a>
 
 ## 💾 Restarting

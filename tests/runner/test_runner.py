@@ -41,6 +41,30 @@ def test_runtime_remainder(ethane_methanol):
             assert checkpoint_state["time_ps"].item() == pytest.approx(0.020)
 
 
+def test_equilibration_time_per_window(ethane_methanol):
+    """Validate that only windows with a non-zero time are equilibrated."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "4fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "equilibration_time": ["0fs", "4fs"],
+            "platform": "CPU",
+            "max_threads": 1,
+            "num_lambda": 2,
+        }
+
+        runner = Runner(ethane_methanol, Config(**config))
+        runner.run()
+
+        log = (Path(tmpdir) / runner._config.log_file).read_text()
+        assert "Equilibrating at λ = 0.00000" not in log
+        assert "Equilibrating at λ = 1.00000" in log
+
+
 def test_runtime_remainder_with_terminal_flips(phenethyl_mols):
     """
     Validate that blocks which aren't a whole number of terminal flip intervals

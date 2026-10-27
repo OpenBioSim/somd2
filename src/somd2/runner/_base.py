@@ -685,6 +685,21 @@ class RunnerBase:
             _logger.error(msg)
             raise ValueError(msg)
 
+        # Set the equilibration time for each window.
+        if isinstance(self._config.equilibration_time, list):
+            if len(self._config.equilibration_time) != len(self._lambda_values):
+                msg = (
+                    "Length of 'equilibration_time' must match the number of "
+                    f"{_lam_sym} values."
+                )
+                _logger.error(msg)
+                raise ValueError(msg)
+            self._equilibration_times = self._config.equilibration_time
+        else:
+            self._equilibration_times = [self._config.equilibration_time] * len(
+                self._lambda_values
+            )
+
         # Set the REST2 scale factors.
         is_rest2 = False
         if self._config.rest2_scale is not None:
