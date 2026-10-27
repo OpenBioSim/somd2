@@ -1082,6 +1082,8 @@ class RunnerBase:
         alchemical ion that are real at the decoupled end state. Atoms of an
         alchemical ion that are dummies there move with its first real atom.
         """
+        self._reservoir = None
+        self._reservoir_index = None
         self._reservoir_idxs = None
         self._reservoir_ligand_idxs = None
         self._reservoir_dummy_groups = None
@@ -1103,6 +1105,29 @@ class RunnerBase:
 
         if self._config.coalchemical_restraint_dist is not None:
             msg = "'reservoir' can't be used with 'coalchemical_restraint_dist'."
+            _logger.error(msg)
+            raise ValueError(msg)
+
+        # Other restraints would act on the reservoir frames at the decoupled
+        # end state, so they would no longer be Boltzmann samples.
+        if any(
+            not isinstance(restraints, _sr.mm.BoreschRestraints)
+            for restraints in self._config.restraints or []
+        ):
+            msg = "'reservoir' can only be used with a Boresch restraint."
+            _logger.error(msg)
+            raise ValueError(msg)
+
+        # The decoupled end state is at lambda = 0 when the end states are
+        # swapped.
+        decoupled = 0.0 if self._config.swap_end_states else 1.0
+        try:
+            self._reservoir_index = self._lambda_values.index(decoupled)
+        except ValueError:
+            msg = (
+                f"'reservoir' requires a {_lam_sym} value of {decoupled}, where the "
+                "ligand is decoupled."
+            )
             _logger.error(msg)
             raise ValueError(msg)
 
@@ -1128,6 +1153,11 @@ class RunnerBase:
             dcd = _DCDReader(self._config.reservoir)
         except Exception as e:
             msg = f"Unable to read 'reservoir' trajectory: {e}"
+            _logger.error(msg)
+            raise ValueError(msg)
+
+        if dcd.num_frames == 0:
+            msg = "The 'reservoir' trajectory has no frames."
             _logger.error(msg)
             raise ValueError(msg)
 
@@ -1165,6 +1195,8 @@ class RunnerBase:
             )
             _logger.error(msg)
             raise ValueError(msg)
+
+        self._reservoir = dcd
 
         _logger.info(
             f"Using a reservoir of {dcd.num_frames} frames from {self._config.reservoir}"

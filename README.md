@@ -747,8 +747,9 @@ left out of their place in the atom order and added at the end of the reservoir
 in their form at the decoupled end state, e.g. a single Na⁺ for a water that
 becomes an ion, so that the reservoir doesn't depend on which water was chosen.
 Their parameters must match those used by SOMD2. A reservoir can be re-used for
-every ligand with the same charge. The reservoir can't be used with GCMC, or
-with `--coalchemical-restraint-dist`.
+every ligand with the same charge. The reservoir can't be used with GCMC, with
+`--coalchemical-restraint-dist`, or with restraints other than the Boresch
+restraint, since these would also act on the reservoir frames.
 
 Each swap is logged with the frame that was used, so its progress through the λ
 windows can be followed using the logged replica exchange states.

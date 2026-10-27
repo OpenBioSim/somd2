@@ -477,15 +477,12 @@ class RepexRunner(_RunnerBase):
             from ._samplers import ReservoirSampler
 
             self._reservoir_sampler = ReservoirSampler(
-                self._config.reservoir,
+                self._reservoir,
                 self._reservoir_idxs,
                 self._reservoir_ligand_idxs,
                 self._reservoir_dummy_groups,
                 self._boresch_anchors(),
                 float(self._config.temperature.value()),
-            )
-            self._reservoir_index = (
-                0 if self._config.swap_end_states else len(self._lambda_values) - 1
             )
         else:
             self._reservoir_sampler = None
@@ -1615,15 +1612,19 @@ class RepexRunner(_RunnerBase):
                 and is_reservoir
                 and index == self._reservoir_index
             ):
-                frame, delta_e = self._reservoir_sampler.move(dynamics.context())
-                _logger.info(
-                    f"Reservoir frame {frame} swapped in at {_lam_sym} = {lam:.5f} "
-                    f"({_delta_sym} = {delta_e:.2f} kJ/mol)"
+                frame, delta_e, accepted = self._reservoir_sampler.move(
+                    dynamics.context()
                 )
-                if not _np.isfinite(delta_e):
+                if accepted:
+                    _logger.info(
+                        f"Reservoir frame {frame} swapped in at {_lam_sym} = "
+                        f"{lam:.5f} ({_delta_sym} = {delta_e:.2f} kJ/mol)"
+                    )
+                else:
                     _logger.warning(
-                        f"Non-finite energy after reservoir frame {frame} was "
-                        "swapped in. Check that the reservoir atoms match the system."
+                        f"Reservoir frame {frame} was rejected at {_lam_sym} = "
+                        f"{lam:.5f} because its energy isn't finite. Check that "
+                        "the reservoir atoms match the system."
                     )
 
             # Perform the GCMC move before dynamics so that the energies
