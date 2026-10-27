@@ -734,7 +734,7 @@ somd2 bound.s3 --lambda-schedule annihilate --replica-exchange --reservoir apo.d
 
 The reservoir is a DCD trajectory of the system without the ligand, with the
 non-ligand atoms in the same order as the system, and a unit cell for each
-frame, as written by OpenMM or SOMD2. The ligand is moved with each frame so
+frame, as written by OpenMM or Sire. The ligand is moved with each frame so
 that its Boresch restraint coordinates are unchanged, and the swap is always
 accepted. This is only correct if the frames are Boltzmann samples of
 the decoupled end state, so the reservoir must use the same force field,
