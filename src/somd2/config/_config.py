@@ -205,6 +205,8 @@ class Config:
         terminal_flip_frequency=None,
         terminal_flip_angle=None,
         terminal_flip_max_mobile_atoms=None,
+        reservoir=None,
+        reservoir_frequency=None,
         gcmc=False,
         gcmc_frequency=None,
         gcmc_selection=None,
@@ -579,6 +581,23 @@ class Config:
             Groups with more mobile atoms than this threshold are skipped during
             detection. Defaults to None (no limit).
 
+        reservoir: str
+            The path to a DCD trajectory of the system without the ligand, e.g.
+            from an apo simulation. It holds the non-ligand atoms in system
+            order, leaving out any alchemical ions, which are instead placed at
+            the end in their decoupled end state form, e.g. a single Na+ atom
+            for a water that becomes an ion. Its frames must be Boltzmann
+            samples of the same thermodynamic state as the decoupled end state.
+            When set, the configuration of the decoupled replica of an ABFE
+            replica exchange simulation is periodically replaced by a randomly
+            chosen frame, with the ligand moved to keep the Boresch restraint
+            coordinates fixed.
+
+        reservoir_frequency: str
+            Frequency at which to swap a reservoir frame into the decoupled
+            replica. If None, then this will be set to the same as
+            'energy_frequency'. This must be a multiple of 'energy_frequency'.
+
         gcmc: bool
             Whether to perform Grand Canonical Monte Carlo (GCMC) water insertions/deletions.
 
@@ -852,6 +871,8 @@ class Config:
         self.terminal_flip_frequency = terminal_flip_frequency
         self.terminal_flip_angle = terminal_flip_angle
         self.terminal_flip_max_mobile_atoms = terminal_flip_max_mobile_atoms
+        self.reservoir = reservoir
+        self.reservoir_frequency = reservoir_frequency
         self.gcmc = gcmc
         self.gcmc_frequency = gcmc_frequency
         self.gcmc_selection = gcmc_selection
@@ -2479,6 +2500,50 @@ class Config:
                     "'terminal_flip_max_mobile_atoms' must be greater than 0"
                 )
         self._terminal_flip_max_mobile_atoms = terminal_flip_max_mobile_atoms
+
+    @property
+    def reservoir(self):
+        return self._reservoir
+
+    @reservoir.setter
+    def reservoir(self, reservoir):
+        if reservoir is not None:
+            if not isinstance(reservoir, str):
+                raise TypeError("'reservoir' must be of type 'str'")
+
+            import os
+
+            if not os.path.isfile(reservoir):
+                raise ValueError(f"'reservoir' trajectory does not exist: {reservoir}")
+
+        self._reservoir = reservoir
+
+    @property
+    def reservoir_frequency(self):
+        return self._reservoir_frequency
+
+    @reservoir_frequency.setter
+    def reservoir_frequency(self, reservoir_frequency):
+        if reservoir_frequency is not None:
+            if not isinstance(reservoir_frequency, str):
+                raise TypeError("'reservoir_frequency' must be of type 'str'")
+
+            from sire.units import picosecond
+
+            try:
+                t = _sr.u(reservoir_frequency)
+            except Exception:
+                raise ValueError(
+                    f"Unable to parse 'reservoir_frequency' as a Sire GeneralUnit: "
+                    f"{reservoir_frequency}"
+                )
+
+            if t.value() != 0 and not t.has_same_units(picosecond):
+                raise ValueError("'reservoir_frequency' units are invalid.")
+
+            self._reservoir_frequency = t
+        else:
+            self._reservoir_frequency = None
 
     @property
     def gcmc(self):
