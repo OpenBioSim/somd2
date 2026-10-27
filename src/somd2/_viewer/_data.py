@@ -110,6 +110,11 @@ _waters_re = _re.compile(
     r"^Current number of waters in GCMC volume at \S+ = ([\d.]+)"
     r"(?: \(time = ([\d.]+) ns\))? is (\d+)"
 )
+_reservoir_re = _re.compile(
+    r"^Reservoir frame (\d+) (swapped in|was rejected) at \S+ = [\d.]+"
+    r"(?: \(\S+ = (\S+) kJ/mol\))?"
+)
+_reservoir_size_re = _re.compile(r"^Using a reservoir of (\d+) frames")
 
 
 def discover(paths, strict=True):
@@ -284,6 +289,10 @@ class _LogMonitor:
         # The number of waters in the GCMC region at each checkpoint, by λ, as
         # (time in ns, or None if not logged, count).
         self.gcmc_waters = {}
+        # Reservoir swaps, as (cycle, frame, energy change in kJ/mol or None,
+        # accepted), and the number of frames in the reservoir.
+        self.reservoir_swaps = []
+        self.reservoir_frames = None
         self._new_session(None)
 
     def _new_session(self, timestamp):
@@ -343,6 +352,7 @@ class _LogMonitor:
             saved = self._saved_states
             self.rankings = [r for r in self.rankings if r[0] <= saved]
             self.hot_only_cycles = [c for c in self.hot_only_cycles if c < saved]
+            self.reservoir_swaps = [s for s in self.reservoir_swaps if s[0] < saved]
             self._new_session(_parse_timestamp(stamp))
         elif message.startswith(
             ("Saving replica exchange state", "Saving final replica exchange state")
@@ -400,6 +410,19 @@ class _LogMonitor:
             ):
                 counts.pop()
             counts.append((time, int(m.group(3))))
+        elif m := _reservoir_re.match(message):
+            # Logged after the cycle's states, so this is the latest cycle.
+            delta_e = float(m.group(3)) if m.group(3) is not None else None
+            self.reservoir_swaps.append(
+                (
+                    len(self.states) - 1,
+                    int(m.group(1)),
+                    delta_e,
+                    m.group(2) == "swapped in",
+                )
+            )
+        elif m := _reservoir_size_re.match(message):
+            self.reservoir_frames = int(m.group(1))
 
         if level in ("WARNING", "ERROR", "CRITICAL"):
             self.messages.append((_parse_timestamp(stamp), level, message))
@@ -1076,21 +1099,30 @@ class Simulation:
         return result
 
     @staticmethod
-    def _replica_paths(states, num_states, max_points=500):
+    def _state_paths(states, num_states):
         """
         Follow each replica through state space using the logged per-cycle
-        permutations, where states[k] is the source of window k.
+        permutations, where states[k] is the source of window k. Row c holds
+        the state of each replica during cycle c. A malformed permutation
+        leaves the replicas where they were, so rows stay aligned with cycles.
         """
         labels = _np.arange(num_states)
         paths = []
         for perm in states:
-            if len(perm) != num_states:
-                continue
-            labels = labels[perm]
+            if len(perm) == num_states:
+                labels = labels[perm]
             paths.append(_np.argsort(labels))
-        if not paths:
+        return _np.array(paths)
+
+    @staticmethod
+    def _replica_paths(states, num_states, max_points=500):
+        """
+        Summarise the paths of the replicas through state space, and count
+        their round trips.
+        """
+        if not states:
             return {}
-        paths = _np.array(paths)
+        paths = Simulation._state_paths(states, num_states)
 
         round_trips = []
         for r in range(num_states):
@@ -1213,6 +1245,64 @@ class Simulation:
                 }
                 for lam, s in sorted(flips.items())
             ]
+        if config.get("reservoir") and log is not None and log.reservoir_swaps:
+            result["reservoir"] = self._reservoir(
+                log, lambda_values, config.get("swap_end_states", False)
+            )
+        return result
+
+    @staticmethod
+    def _reservoir(log, lambda_values, swap_end_states, max_points=500):
+        """
+        Summarise the reservoir swaps, and how far towards the coupled end
+        state each swapped-in configuration travelled before it was replaced
+        by a later swap.
+        """
+        num_states = len(lambda_values)
+        decoupled = 0.0 if swap_end_states else 1.0
+        window = min(range(num_states), key=lambda i: abs(lambda_values[i] - decoupled))
+
+        swaps = log.reservoir_swaps
+        accepted = [s for s in swaps if s[3]]
+        delta_e = [s[2] for s in accepted if s[2] is not None]
+
+        result = {
+            "lambda": float(lambda_values[window]),
+            "window": window,
+            "swaps": len(accepted),
+            "rejected": len(swaps) - len(accepted),
+            "frames_used": len({s[1] for s in accepted}),
+            "num_frames": log.reservoir_frames,
+            "delta_e_mean": float(_np.mean(delta_e)) if delta_e else None,
+            "delta_e_min": min(delta_e, default=None),
+            "delta_e_max": max(delta_e, default=None),
+        }
+
+        paths = Simulation._state_paths(log.states, num_states)
+        injections = [
+            (cycle, int(_np.flatnonzero(paths[cycle] == window)[0]))
+            for cycle, _, _, _ in accepted
+            if 0 <= cycle < len(paths)
+        ]
+        if not injections:
+            return result
+
+        # Each configuration is followed until a later swap replaces it.
+        furthest = [0] * num_states
+        for k, (cycle, replica) in enumerate(injections):
+            end = next((c for c, r in injections[k + 1 :] if r == replica), len(paths))
+            reached = paths[cycle:end, replica]
+            index = int(reached[_np.argmax(_np.abs(reached - window))])
+            furthest[index] += 1
+
+        stride = max(1, len(injections) // max_points)
+        result.update(
+            {
+                "furthest": furthest,
+                "reached_end": furthest[num_states - 1 - window],
+                "swap_cycles": [c for c, _ in injections[::stride]],
+            }
+        )
         return result
 
     def _schedule(self, config, lambda_energy):
