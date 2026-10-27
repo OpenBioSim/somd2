@@ -110,6 +110,11 @@ class Runner(_RunnerBase):
             _logger.error(msg)
             raise ValueError(msg)
 
+        if config.reservoir is not None:
+            msg = "'reservoir' requires 'replica_exchange' to be enabled."
+            _logger.error(msg)
+            raise ValueError(msg)
+
         # Production is run in whole integration steps. This is checked before
         # the base class writes the config file, so a rejected restart doesn't
         # leave one behind.

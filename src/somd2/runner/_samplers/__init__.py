@@ -19,5 +19,6 @@
 # along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
+from ._reservoir import ReservoirSampler as ReservoirSampler
 from ._terminal_flip import TerminalFlipSampler as TerminalFlipSampler
 from ._terminal_flip import detect_terminal_groups as detect_terminal_groups

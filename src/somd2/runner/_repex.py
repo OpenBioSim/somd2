@@ -33,7 +33,7 @@ import sire as _sr
 
 from somd2 import _logger
 
-from .._utils import _lam_sym
+from .._utils import _delta_sym, _lam_sym
 
 from ._adaptive import WindowRanker as _WindowRanker
 from ._adaptive import cold_rate as _cold_rate
@@ -472,6 +472,24 @@ class RepexRunner(_RunnerBase):
                 attempted, accepted = self._dynamics_cache.terminal_flip_stats[i]
                 self._terminal_flip_samplers[i].reset(attempted, accepted)
 
+        # Create the reservoir sampler for the decoupled replica.
+        if self._config.reservoir is not None:
+            from ._samplers import ReservoirSampler
+
+            self._reservoir_sampler = ReservoirSampler(
+                self._config.reservoir,
+                self._reservoir_idxs,
+                self._reservoir_ligand_idxs,
+                self._reservoir_dummy_groups,
+                self._boresch_anchors(),
+                float(self._config.temperature.value()),
+            )
+            self._reservoir_index = (
+                0 if self._config.swap_end_states else len(self._lambda_values) - 1
+            )
+        else:
+            self._reservoir_sampler = None
+
         from threading import Lock
 
         # Create a lock to guard the committed systems.
@@ -787,7 +805,7 @@ class RepexRunner(_RunnerBase):
         # Record the start time for the production block.
         prod_start = time()
 
-        cycles_per_frame, cycles_per_gcmc, cycles_per_flip = self._move_cycles(cycles)
+        move_cycles = self._move_cycles(cycles)
 
         # The cycles, numbered from one, that end with a checkpoint.
         checkpoint_cycles = self._checkpoint_cycles(cycles, cycles_per_checkpoint)
@@ -869,7 +887,7 @@ class RepexRunner(_RunnerBase):
                 replicas=None if is_full else active,
                 replica_devices=replica_devices,
                 last_cycle=last_cycle,
-                move_cycles=(cycles_per_frame, cycles_per_gcmc, cycles_per_flip),
+                move_cycles=move_cycles,
                 do_checkpoint=do_checkpoint,
             )
 
@@ -1086,8 +1104,8 @@ class RepexRunner(_RunnerBase):
 
     def _move_cycles(self, cycles):
         """
-        Work out the number of cycles between frames, GCMC moves and terminal
-        flip moves.
+        Work out the number of cycles between frames, GCMC moves, terminal
+        flip moves and reservoir swaps.
 
         Parameters
         ----------
@@ -1098,7 +1116,7 @@ class RepexRunner(_RunnerBase):
         Returns
         -------
 
-        cycles_per_frame, cycles_per_gcmc, cycles_per_flip: int
+        cycles_per_frame, cycles_per_gcmc, cycles_per_flip, cycles_per_reservoir: int
             The number of cycles between each. A move that isn't used is never
             due.
         """
@@ -1135,7 +1153,33 @@ class RepexRunner(_RunnerBase):
         else:
             cycles_per_flip = cycles + 1
 
-        return cycles_per_frame, cycles_per_gcmc, cycles_per_flip
+        # Work out the number of cycles per reservoir swap.
+        if self._reservoir_sampler is not None:
+            cycles_per_reservoir = max(
+                1,
+                round(
+                    (
+                        self._config.reservoir_frequency / self._config.energy_frequency
+                    ).value()
+                ),
+            )
+        else:
+            cycles_per_reservoir = cycles + 1
+
+        return cycles_per_frame, cycles_per_gcmc, cycles_per_flip, cycles_per_reservoir
+
+    def _boresch_anchors(self):
+        """
+        Return the indices of the three receptor anchor atoms of the Boresch
+        restraint.
+        """
+        for restraints in self._dynamics_kwargs["restraints"] or []:
+            if isinstance(restraints, _sr.mm.BoreschRestraints):
+                return list(restraints[0].receptor_atoms())
+
+        msg = "'reservoir' requires a Boresch restraint."
+        _logger.error(msg)
+        raise ValueError(msg)
 
     def _start_adaptive(self):
         """
@@ -1200,8 +1244,8 @@ class RepexRunner(_RunnerBase):
             The cycle on which each replica was last propagated, or -1.
 
         move_cycles: tuple of int
-            The number of cycles between frames, GCMC moves and terminal flip
-            moves.
+            The number of cycles between frames, GCMC moves, terminal flip
+            moves and reservoir swaps.
 
         do_checkpoint: bool
             Whether the checkpoint files are written at the end of the cycle.
@@ -1214,7 +1258,9 @@ class RepexRunner(_RunnerBase):
         """
         from itertools import repeat
 
-        cycles_per_frame, cycles_per_gcmc, cycles_per_flip = move_cycles
+        cycles_per_frame, cycles_per_gcmc, cycles_per_flip, cycles_per_reservoir = (
+            move_cycles
+        )
         is_adaptive = self._config.adaptive_repex
         results = []
 
@@ -1227,14 +1273,19 @@ class RepexRunner(_RunnerBase):
             # each GPU is only oversubscribed by a factor of
             # self._config.oversubscription_factor.
             for batch_replicas in self._device_batches(batch, replica_devices):
-                # Whether each replica is due a GCMC or terminal flip move,
-                # including any that fell due while it wasn't propagated.
+                # Whether each replica is due a GCMC move, terminal flip move or
+                # reservoir swap, including any that fell due while it wasn't
+                # propagated.
                 is_gcmc = [
                     self._is_due(last_cycle[r], cycle, cycles_per_gcmc)
                     for r in batch_replicas
                 ]
                 is_terminal_flip = [
                     self._is_due(last_cycle[r], cycle, cycles_per_flip)
+                    for r in batch_replicas
+                ]
+                is_reservoir = [
+                    self._is_due(last_cycle[r], cycle, cycles_per_reservoir)
                     for r in batch_replicas
                 ]
 
@@ -1254,6 +1305,7 @@ class RepexRunner(_RunnerBase):
                         is_gcmc,
                         is_frame,
                         is_terminal_flip,
+                        is_reservoir,
                         repeat(self._config.save_energy_components),
                         repeat(clock),
                         (
@@ -1456,6 +1508,7 @@ class RepexRunner(_RunnerBase):
         is_gcmc=False,
         write_gcmc_ghosts=False,
         is_terminal_flip=False,
+        is_reservoir=False,
         save_energy_components=False,
         clock=None,
         save_frame=None,
@@ -1490,6 +1543,10 @@ class RepexRunner(_RunnerBase):
         is_terminal_flip: bool
             Whether a terminal flip MC move should be performed before the
             dynamics block.
+
+        is_reservoir: bool
+            Whether a reservoir frame should be swapped in before the dynamics
+            block. Only used for the decoupled replica.
 
         save_energy_components: bool
             Whether to save the energy contribution of each force.
@@ -1550,6 +1607,24 @@ class RepexRunner(_RunnerBase):
                 dynamics._d._next_save_frame = None
 
             auto_fix_minimise = self._config.auto_fix_minimise
+
+            # Swap in a reservoir frame before any other move, since it
+            # replaces the whole configuration.
+            if (
+                self._reservoir_sampler is not None
+                and is_reservoir
+                and index == self._reservoir_index
+            ):
+                frame, delta_e = self._reservoir_sampler.move(dynamics.context())
+                _logger.info(
+                    f"Reservoir frame {frame} swapped in at {_lam_sym} = {lam:.5f} "
+                    f"({_delta_sym} = {delta_e:.2f} kJ/mol)"
+                )
+                if not _np.isfinite(delta_e):
+                    _logger.warning(
+                        f"Non-finite energy after reservoir frame {frame} was "
+                        "swapped in. Check that the reservoir atoms match the system."
+                    )
 
             # Perform the GCMC move before dynamics so that the energies
             # computed during dynamics are consistent with the state used

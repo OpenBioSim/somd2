@@ -75,6 +75,7 @@ class RunnerBase:
         # directory.
         self._check_gcmc()
         self._set_terminal_groups()
+        self._check_reservoir()
 
         self._prepare_output_and_restart()
         self._finalise_systems()
@@ -1070,6 +1071,104 @@ class RunnerBase:
                     )
         else:
             self._terminal_groups = []
+
+    def _check_reservoir(self):
+        """
+        Validate the reservoir options and work out how the reservoir atoms
+        map onto the system.
+
+        The reservoir holds the non-ligand atoms that aren't part of an
+        alchemical ion, in system order, followed by the atoms of each
+        alchemical ion that are real at the decoupled end state. Atoms of an
+        alchemical ion that are dummies there move with its first real atom.
+        """
+        self._reservoir_idxs = None
+        self._reservoir_ligand_idxs = None
+        self._reservoir_dummy_groups = None
+
+        if self._config.reservoir is None:
+            return
+
+        if not self._is_abfe_bound:
+            msg = (
+                "'reservoir' can only be used for the bound leg of an ABFE simulation."
+            )
+            _logger.error(msg)
+            raise ValueError(msg)
+
+        if self._config.gcmc:
+            msg = "'reservoir' can't be used with GCMC."
+            _logger.error(msg)
+            raise ValueError(msg)
+
+        if self._config.coalchemical_restraint_dist is not None:
+            msg = "'reservoir' can't be used with 'coalchemical_restraint_dist'."
+            _logger.error(msg)
+            raise ValueError(msg)
+
+        if self._config.reservoir_frequency is None:
+            self._config.reservoir_frequency = str(self._config.energy_frequency)
+            _logger.info(
+                f"'reservoir_frequency' not specified. Setting to 'energy_frequency' "
+                f"of {self._config.energy_frequency}."
+            )
+
+        ratio = (
+            self._config.reservoir_frequency / self._config.energy_frequency
+        ).value()
+
+        if not _isclose(ratio, round(ratio), abs_tol=1e-4):
+            msg = "'reservoir_frequency' must be a multiple of 'energy_frequency'."
+            _logger.error(msg)
+            raise ValueError(msg)
+
+        from ._samplers._reservoir import DCDReader as _DCDReader
+
+        try:
+            dcd = _DCDReader(self._config.reservoir)
+        except Exception as e:
+            msg = f"Unable to read 'reservoir' trajectory: {e}"
+            _logger.error(msg)
+            raise ValueError(msg)
+
+        atoms = self._system.atoms()
+        pert_mols = self._system.molecules("property is_perturbable")
+        ions = [mol for mol in pert_mols if mol.has_property("is_alchemical_ion")]
+        ligand = [mol for mol in pert_mols if not mol.has_property("is_alchemical_ion")]
+
+        self._reservoir_ligand_idxs = atoms.find(ligand[0].atoms())
+        excluded = set(self._reservoir_ligand_idxs)
+
+        appended = []
+        self._reservoir_dummy_groups = []
+        for mol in ions:
+            idxs = atoms.find(mol.atoms())
+            excluded.update(idxs)
+            is_real = [
+                atom.property("element1").num_protons() > 0 for atom in mol.atoms()
+            ]
+            real = [i for i, r in zip(idxs, is_real) if r]
+            dummies = [i for i, r in zip(idxs, is_real) if not r]
+            appended += real
+            if dummies:
+                self._reservoir_dummy_groups.append((real[0], dummies))
+
+        self._reservoir_idxs = [
+            i for i in range(self._system.num_atoms()) if i not in excluded
+        ] + appended
+
+        if dcd.num_atoms != len(self._reservoir_idxs):
+            msg = (
+                f"The 'reservoir' trajectory has {dcd.num_atoms} atoms, but "
+                f"{len(self._reservoir_idxs)} are expected: the non-ligand atoms, "
+                "with any alchemical ions at the end, in their decoupled state form."
+            )
+            _logger.error(msg)
+            raise ValueError(msg)
+
+        _logger.info(
+            f"Using a reservoir of {dcd.num_frames} frames from {self._config.reservoir}"
+        )
 
     def _finalise_systems(self):
         """

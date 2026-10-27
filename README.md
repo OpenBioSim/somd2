@@ -30,6 +30,8 @@ simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and
 - 💧 **[GCMC](#gcmc)**: grand canonical Monte Carlo water sampling.
 - 🔄 **[Terminal ring flips](#terminal-ring-flip-monte-carlo)**: Monte Carlo
   moves to improve sampling of terminal aromatic rings.
+- 🗃️ **[Apo reservoir](#apo-reservoir)**: apo protein conformations swapped
+  into the decoupled replica of an ABFE simulation.
 - 👻 **[Ghost atom modifications](#ghost-atom-modifications)**: modification of
   ghost atom bonded terms to avoid spurious coupling to the physical system.
 - 🖥️ **[Multiple GPUs](#running-somd2-using-one-or-more-gpus)**: λ windows are
@@ -712,6 +714,44 @@ needing to scan the log.
 > [!NOTE]
 > The Beutler soft-core form, enabled with `--softcore-form beutler`, is only
 > supported with the ABFE schedules, or a custom schedule.
+
+<a id="apo-reservoir"></a>
+
+### 🗃️ Apo reservoir
+
+At the decoupled end of the bound leg the ligand doesn't interact with its
+surroundings, so the protein samples its apo ensemble. When protein
+conformational changes are too slow to sample during the ABFE simulation, a
+reservoir of apo conformations, e.g. from a long or enhanced sampling apo
+simulation, can be used to introduce them. With replica exchange, the
+configuration of the decoupled replica is periodically replaced by a frame
+chosen at random from the reservoir, and replica exchange then carries it
+towards the coupled end state:
+
+```
+somd2 bound.s3 --lambda-schedule annihilate --replica-exchange --reservoir apo.dcd --reservoir-frequency "10 ps"
+```
+
+The reservoir is a DCD trajectory of the system without the ligand, with the
+non-ligand atoms in the same order as the system, and a unit cell for each
+frame, as written by OpenMM or SOMD2. The ligand is moved with each frame so
+that its Boresch restraint coordinates are unchanged, and the swap is always
+accepted. This is only correct if the frames are Boltzmann samples of
+the decoupled end state, so the reservoir must use the same force field,
+temperature and pressure, and frames from biased simulations must be
+reweighted first. Since the reservoir doesn't depend on the ligand, it can be
+re-used for every ligand bound to the same target.
+
+For charged ligands, the [alchemical ions](#charge-change-perturbations) are
+left out of their place in the atom order and added at the end of the reservoir
+in their form at the decoupled end state, e.g. a single Na⁺ for a water that
+becomes an ion, so that the reservoir doesn't depend on which water was chosen.
+Their parameters must match those used by SOMD2. A reservoir can be re-used for
+every ligand with the same charge. The reservoir can't be used with GCMC, or
+with `--coalchemical-restraint-dist`.
+
+Each swap is logged with the frame that was used, so its progress through the λ
+windows can be followed using the logged replica exchange states.
 
 <a id="ring-breaking-perturbations"></a>
 
