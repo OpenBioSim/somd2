@@ -355,6 +355,46 @@ def test_ghostly_premodified():
         )
 
 
+def test_equilibration_time(ethane_methanol):
+    """Validate a single equilibration time, and one for each lambda window."""
+    import pytest
+
+    times = ["0ps", "1ps", "2ps"]
+
+    # A single time, as passed on the command line.
+    parser = Config._create_parser()
+    args = parser.parse_args(["--equilibration-time", "1ps"])
+    config = Config(equilibration_time=args.equilibration_time)
+    assert config.equilibration_time == sr.u("1ps")
+    assert Config(**config.as_dict()) == config
+
+    # A time for each window.
+    args = parser.parse_args(["--equilibration-time", *times])
+    config = Config(equilibration_time=args.equilibration_time)
+    assert config.equilibration_time == [sr.u(t) for t in times]
+    assert Config(**config.as_dict()) == config
+
+    with pytest.raises(ValueError, match="units are invalid"):
+        Config(equilibration_time=["1ps", "1A"])
+    with pytest.raises(TypeError):
+        Config(equilibration_time=1)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "platform": "cpu",
+            "output_directory": tmpdir,
+            "num_lambda": 3,
+            "equilibration_time": times,
+        }
+        runner = Runner(ethane_methanol, Config(**config))
+        assert runner._equilibration_times == [sr.u(t) for t in times]
+
+        config["num_lambda"] = 4
+        config["overwrite"] = True
+        with pytest.raises(ValueError, match="Length of 'equilibration_time'"):
+            Runner(ethane_methanol, Config(**config))
+
+
 def test_help_text_scraping():
     """Validate that help text isn't truncated by the parameter name."""
     parser = Config._create_parser()

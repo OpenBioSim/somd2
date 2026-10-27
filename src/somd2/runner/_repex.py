@@ -240,7 +240,9 @@ class RepexRunner(_RunnerBase):
             constraint = "none"
             perturbable_constraint = "none"
 
-        if not self._is_restart and self._config.equilibration_time.value() > 0.0:
+        if not self._is_restart and any(
+            t.value() > 0.0 for t in self._equilibration_times
+        ):
             self._is_equilibration = True
 
             # Don't use constraints during equilibration.
@@ -1819,7 +1821,15 @@ class RepexRunner(_RunnerBase):
         exception: Exception
             The exception if the equilibration failed.
         """
-        _logger.info(f"Equilibrating at {_lam_sym} = {self._lambda_values[index]:.5f}")
+        time = self._equilibration_times[index]
+
+        # The replica is still loaded and stored when its time is zero, so
+        # that the slot's resident replica is the same as for other windows.
+        is_equilibrated = time.value() > 0.0
+        if is_equilibrated:
+            _logger.info(
+                f"Equilibrating at {_lam_sym} = {self._lambda_values[index]:.5f}"
+            )
 
         try:
             # Make the replica resident in its slot, with its own clock.
@@ -1835,7 +1845,7 @@ class RepexRunner(_RunnerBase):
             if clock is None:
                 clock = dynamics._get_clock()
 
-            if gcmc_sampler is not None:
+            if is_equilibrated and gcmc_sampler is not None:
                 gcmc_sampler.push()
                 try:
                     _logger.info(
@@ -1847,14 +1857,15 @@ class RepexRunner(_RunnerBase):
                     gcmc_sampler.pop()
 
             # Equilibrate.
-            dynamics.run(
-                self._config.equilibration_time,
-                energy_frequency=0,
-                frame_frequency=0,
-                save_velocities=False,
-                auto_fix_minimise=self._config.auto_fix_minimise,
-                save_crash_report=self._config.save_crash_report,
-            )
+            if is_equilibrated:
+                dynamics.run(
+                    time,
+                    energy_frequency=0,
+                    frame_frequency=0,
+                    save_velocities=False,
+                    auto_fix_minimise=self._config.auto_fix_minimise,
+                    save_crash_report=self._config.save_crash_report,
+                )
 
             dynamics._set_clock(clock)
 

@@ -1035,7 +1035,8 @@ def test_repex_concurrent_slots(ethane_methanol, max_contexts):
 
     This is also the only test that equilibrates, so it covers moving replicas
     in and out of their slots during equilibration, the context rebuild when
-    the constraints change, and the post-equilibration checkpoint.
+    the constraints change, windows that aren't equilibrated, and the
+    post-equilibration checkpoint.
     """
     num_lambda = 4
 
@@ -1047,7 +1048,7 @@ def test_repex_concurrent_slots(ethane_methanol, max_contexts):
             "energy_frequency": "4fs",
             "checkpoint_frequency": "4fs",
             "frame_frequency": "4fs",
-            "equilibration_time": "4fs",
+            "equilibration_time": ["4fs", "0fs", "4fs", "0fs"],
             "platform": "cuda",
             "max_threads": 1,
             "num_lambda": num_lambda,
