@@ -190,7 +190,7 @@ class ReservoirSampler:
 
     def __init__(
         self,
-        filename,
+        reservoir,
         reservoir_idxs,
         ligand_idxs,
         dummy_groups,
@@ -201,8 +201,8 @@ class ReservoirSampler:
         Parameters
         ----------
 
-        filename : str
-            The path to the reservoir DCD trajectory.
+        reservoir : DCDReader
+            The reservoir trajectory.
 
         reservoir_idxs : list of int
             The index in the system of each atom in the frames.
@@ -220,7 +220,7 @@ class ReservoirSampler:
         temperature : float
             Simulation temperature in Kelvin.
         """
-        self._dcd = DCDReader(filename)
+        self._dcd = reservoir
         self._reservoir_idxs = _np.array(reservoir_idxs)
         self._ligand_idxs = _np.array(ligand_idxs)
         self._dummy_groups = [(p, _np.array(d)) for p, d in dummy_groups]
@@ -229,7 +229,8 @@ class ReservoirSampler:
 
     def move(self, context):
         """
-        Swap a randomly chosen reservoir frame into the context.
+        Swap a randomly chosen reservoir frame into the context. The swap is
+        undone if the new energy isn't finite.
 
         Parameters
         ----------
@@ -245,12 +246,15 @@ class ReservoirSampler:
 
         delta_e : float
             The change in potential energy, in kJ/mol.
+
+        accepted : bool
+            Whether the swap was kept.
         """
         from openmm import unit as _omm_unit
 
         frame = _np.random.randint(self._dcd.num_frames)
 
-        state = context.getState(getPositions=True, getEnergy=True)
+        state = context.getState(getPositions=True, getVelocities=True, getEnergy=True)
         positions = state.getPositions(asNumpy=True).value_in_unit(_omm_unit.nanometer)
         box_old = state.getPeriodicBoxVectors(asNumpy=True).value_in_unit(
             _omm_unit.nanometer
@@ -283,4 +287,8 @@ class ReservoirSampler:
             .value_in_unit(_omm_unit.kilojoule_per_mole)
         )
 
-        return frame, e_new - e_old
+        if not _np.isfinite(e_new):
+            context.setState(state)
+            return frame, e_new - e_old, False
+
+        return frame, e_new - e_old, True
