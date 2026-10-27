@@ -111,7 +111,7 @@ _waters_re = _re.compile(
     r"(?: \(time = ([\d.]+) ns\))? is (\d+)"
 )
 _reservoir_re = _re.compile(
-    r"^Reservoir frame (\d+) (swapped in|was rejected) at \S+ = [\d.]+"
+    r"^Reservoir frame (\d+) (swapped in|was rejected) at \S+ = ([\d.]+)"
     r"(?: \(\S+ = (\S+) kJ/mol\))?"
 )
 _reservoir_size_re = _re.compile(r"^Using a reservoir of (\d+) frames")
@@ -278,6 +278,7 @@ class _LogMonitor:
         self._pending_states = None
         self.states = []
         self._saved_states = 0
+        self._paths = None
         # Adaptive replica exchange rankings, as [cycle, hot or None, cost,
         # variance], and the cycles that propagated only the hot replicas.
         self.rankings = []
@@ -289,8 +290,8 @@ class _LogMonitor:
         # The number of waters in the GCMC region at each checkpoint, by λ, as
         # (time in ns, or None if not logged, count).
         self.gcmc_waters = {}
-        # Reservoir swaps, as (cycle, frame, energy change in kJ/mol or None,
-        # accepted), and the number of frames in the reservoir.
+        # Reservoir swaps, as (cycle, frame, λ, energy change in kJ/mol or
+        # None, accepted), and the number of frames in the reservoir.
         self.reservoir_swaps = []
         self.reservoir_frames = None
         self._new_session(None)
@@ -349,6 +350,7 @@ class _LogMonitor:
             # A restart resumes from the last checkpoint, so the permutations
             # logged after it were discarded.
             del self.states[self._saved_states :]
+            self._paths = None
             saved = self._saved_states
             self.rankings = [r for r in self.rankings if r[0] <= saved]
             self.hot_only_cycles = [c for c in self.hot_only_cycles if c < saved]
@@ -412,11 +414,12 @@ class _LogMonitor:
             counts.append((time, int(m.group(3))))
         elif m := _reservoir_re.match(message):
             # Logged after the cycle's states, so this is the latest cycle.
-            delta_e = float(m.group(3)) if m.group(3) is not None else None
+            delta_e = float(m.group(4)) if m.group(4) is not None else None
             self.reservoir_swaps.append(
                 (
                     len(self.states) - 1,
                     int(m.group(1)),
+                    float(m.group(3)),
                     delta_e,
                     m.group(2) == "swapped in",
                 )
@@ -433,6 +436,32 @@ class _LogMonitor:
         match = _states_re.match(message)
         if match is not None:
             self.states.append([int(x) for x in match.group(1).split()])
+
+    def state_paths(self, num_states):
+        """
+        The state of each replica during each logged cycle, cached until more
+        states are logged.
+        """
+        key = (len(self.states), num_states)
+        if self._paths is None or self._paths[0] != key:
+            self._paths = (key, _state_paths(self.states, num_states))
+        return self._paths[1]
+
+
+def _state_paths(states, num_states):
+    """
+    Follow each replica through state space using the logged per-cycle
+    permutations, where states[k] is the source of window k. Row c holds the
+    state of each replica during cycle c. A malformed permutation leaves the
+    replicas where they were, so rows stay aligned with cycles.
+    """
+    labels = _np.arange(num_states)
+    paths = []
+    for perm in states:
+        if len(perm) == num_states:
+            labels = labels[perm]
+        paths.append(_np.argsort(labels))
+    return _np.array(paths)
 
 
 class Simulation:
@@ -1051,7 +1080,8 @@ class Simulation:
             result["neighbour_acceptance"] = pairs
 
         if log is not None and log.states:
-            result.update(self._replica_paths(log.states, len(lambda_values)))
+            num_states = len(lambda_values)
+            result.update(self._replica_paths(log.state_paths(num_states), num_states))
 
         return result
 
@@ -1099,30 +1129,13 @@ class Simulation:
         return result
 
     @staticmethod
-    def _state_paths(states, num_states):
-        """
-        Follow each replica through state space using the logged per-cycle
-        permutations, where states[k] is the source of window k. Row c holds
-        the state of each replica during cycle c. A malformed permutation
-        leaves the replicas where they were, so rows stay aligned with cycles.
-        """
-        labels = _np.arange(num_states)
-        paths = []
-        for perm in states:
-            if len(perm) == num_states:
-                labels = labels[perm]
-            paths.append(_np.argsort(labels))
-        return _np.array(paths)
-
-    @staticmethod
-    def _replica_paths(states, num_states, max_points=500):
+    def _replica_paths(paths, num_states, max_points=500):
         """
         Summarise the paths of the replicas through state space, and count
         their round trips.
         """
-        if not states:
+        if len(paths) == 0:
             return {}
-        paths = Simulation._state_paths(states, num_states)
 
         round_trips = []
         for r in range(num_states):
@@ -1246,25 +1259,26 @@ class Simulation:
                 for lam, s in sorted(flips.items())
             ]
         if config.get("reservoir") and log is not None and log.reservoir_swaps:
-            result["reservoir"] = self._reservoir(
-                log, lambda_values, config.get("swap_end_states", False)
-            )
+            result["reservoir"] = self._reservoir(log, lambda_values)
         return result
 
     @staticmethod
-    def _reservoir(log, lambda_values, swap_end_states, max_points=500):
+    def _reservoir(log, lambda_values, max_points=500):
         """
         Summarise the reservoir swaps, and how far towards the coupled end
-        state each swapped-in configuration travelled before it was replaced
-        by a later swap.
+        state each swapped-in configuration has travelled, up to when a later
+        swap replaced it.
         """
         num_states = len(lambda_values)
-        decoupled = 0.0 if swap_end_states else 1.0
-        window = min(range(num_states), key=lambda i: abs(lambda_values[i] - decoupled))
-
         swaps = log.reservoir_swaps
-        accepted = [s for s in swaps if s[3]]
-        delta_e = [s[2] for s in accepted if s[2] is not None]
+
+        # The λ of the decoupled window is logged, rounded, with each swap.
+        window = min(
+            range(num_states), key=lambda i: abs(lambda_values[i] - swaps[0][2])
+        )
+
+        accepted = [s for s in swaps if s[4]]
+        delta_e = [s[3] for s in accepted if s[3] is not None]
 
         result = {
             "lambda": float(lambda_values[window]),
@@ -1278,26 +1292,34 @@ class Simulation:
             "delta_e_max": max(delta_e, default=None),
         }
 
-        paths = Simulation._state_paths(log.states, num_states)
+        paths = log.state_paths(num_states)
         injections = [
-            (cycle, int(_np.flatnonzero(paths[cycle] == window)[0]))
-            for cycle, _, _, _ in accepted
-            if 0 <= cycle < len(paths)
+            (s[0], int(_np.flatnonzero(paths[s[0]] == window)[0]))
+            for s in accepted
+            if 0 <= s[0] < len(paths)
         ]
         if not injections:
             return result
 
-        # Each configuration is followed until a later swap replaces it.
+        # Each configuration is followed until a later swap replaces its
+        # replica, found by working backwards through the swaps.
+        ends = [len(paths)] * len(injections)
+        next_swap = {}
+        for k in range(len(injections) - 1, -1, -1):
+            cycle, replica = injections[k]
+            ends[k] = next_swap.get(replica, len(paths))
+            next_swap[replica] = cycle
+
         furthest = [0] * num_states
-        for k, (cycle, replica) in enumerate(injections):
-            end = next((c for c, r in injections[k + 1 :] if r == replica), len(paths))
+        for (cycle, replica), end in zip(injections, ends):
             reached = paths[cycle:end, replica]
-            index = int(reached[_np.argmax(_np.abs(reached - window))])
-            furthest[index] += 1
+            furthest[int(reached[_np.argmax(_np.abs(reached - window))])] += 1
 
         stride = max(1, len(injections) // max_points)
         result.update(
             {
+                "followed": len(injections),
+                "in_progress": ends.count(len(paths)),
                 "furthest": furthest,
                 "reached_end": furthest[num_states - 1 - window],
                 "swap_cycles": [c for c, _ in injections[::stride]],
