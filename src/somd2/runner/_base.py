@@ -1185,6 +1185,10 @@ class RunnerBase:
                 "batch_size": self._config.gcmc_batch_size,
                 "num_attempts": self._config.gcmc_num_attempts,
             }
+            if self._config.platform == "opencl":
+                self._gcmc_kwargs["opencl_platform_index"] = (
+                    self._config.opencl_platform_index
+                )
         else:
             self._gcmc_kwargs = None
 
