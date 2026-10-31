@@ -1721,6 +1721,7 @@ class RunnerBase:
         # trajectory frames so only the single starting snapshot is retained.
         starting_structure = _sr.morph.link_to_reference(starting_structure)
         starting_structure.delete_all_frames()
+        starting_structure.set_time(self._system.time())
         self._system = starting_structure
 
         # Save so that a genuine (checkpointed) restart can reuse the exact same

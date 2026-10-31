@@ -35,6 +35,7 @@ Changelog
 * Add a `ghostly_kwargs` option to pass options to `ghostly` when applying ghost atom modifications, e.g. `--ghostly-kwargs k_soft=3 stiffen_rotamers=true` on the command line. Options are validated against those supported by `ghostly`. Systems that have already been modified with `ghostly` raise an error unless `ghost_modifications` is disabled, or `force=True` is passed in `ghostly_kwargs` [#264](https://github.com/OpenBioSim/somd2/pull/264).
 * Allow `equilibration_time` to be a list of times, one for each lambda window, e.g. `--equilibration-time 0ps 100ps 100ps 0ps` on the command line. Windows with a time of zero are not equilibrated. A single time is still used for every window [#265](https://github.com/OpenBioSim/somd2/pull/265).
 * Pass `opencl_platform_index` to the GCMC sampler, so that GCMC runs on the same OpenCL device as the dynamics when there are multiple OpenCL platforms [#266](https://github.com/OpenBioSim/somd2/pull/266).
+* Fixed energy trajectory times for ABFE bound legs without a Boresch restraint being offset by up to the `restraint_search_time`, since production started from the time of the restraint search frame rather than the input system [#268](https://github.com/OpenBioSim/somd2/pull/268).
 
 [2026.2.0](https://github.com/openbiosim/somd2/compare/2026.1.0...2026.2.0) - Sep 2026
 --------------------------------------------------------------------------------------
