@@ -135,6 +135,17 @@ class RunnerBase:
         # blocks only exist to update the bar.
         _sr.base.ProgressBar.set_silent()
 
+    @staticmethod
+    def _box_vectors(space):
+        """
+        Return the box vector components of a periodic space, in Angstrom.
+        """
+        if hasattr(space, "vector0"):
+            vectors = [space.vector0(), space.vector1(), space.vector2()]
+        else:
+            vectors = [space.dimensions()]
+        return [x.value() for vector in vectors for x in vector]
+
     def _check_inputs(self):
         """
         Check the perturbed system and the frame frequency, log the versions of
@@ -152,6 +163,26 @@ class RunnerBase:
                 )
                 _logger.error(msg)
                 raise ValueError(msg)
+
+            # GCMC in the NVT ensemble needs every replica to share the same box.
+            if self._config.gcmc and self._config.pressure is None:
+                space = self._system.space()
+                pert_space = self._config.perturbed_system.space()
+                vectors = self._box_vectors(space)
+                pert_vectors = self._box_vectors(pert_space)
+                if space.what() != pert_space.what() or not all(
+                    _isclose(a, b, rel_tol=1e-5, abs_tol=1e-5)
+                    for a, b in zip(vectors, pert_vectors)
+                ):
+                    msg = (
+                        f"The periodic box of 'perturbed_system' ({pert_space}) does not "
+                        f"match that of the 'system' ({space}). GCMC in the NVT ensemble "
+                        "needs both end states to share the same box. Rescale the perturbed "
+                        "system to the reference box, or set a pressure to run in the "
+                        "osmotic ensemble."
+                    )
+                    _logger.error(msg)
+                    raise ValueError(msg)
 
         # Log the versions of somd2 and its OpenBioSim dependencies.
         from somd2 import get_versions as _get_versions

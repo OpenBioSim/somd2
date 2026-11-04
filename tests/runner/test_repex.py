@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import platform
 import pytest
 import tempfile
 
@@ -2675,3 +2676,48 @@ def test_adaptive_repex_hot_replicas(ethane_methanol, max_contexts, monkeypatch)
                 [runner._filenames["topology0"], runner._filenames[i]["trajectory"]]
             )
             assert mols.num_frames() == 6
+
+
+@pytest.mark.skipif(
+    platform.system() == "Darwin", reason="GCMC is not supported on macOS."
+)
+@pytest.mark.parametrize(
+    "pressure, dimensions, raises",
+    [
+        ("none", (50, 50, 50), False),
+        ("none", (50.5, 50.5, 50.5), True),
+        ("none", (40, 50, 62.5), True),
+        ("1 atm", (50.5, 50.5, 50.5), False),
+    ],
+)
+def test_perturbed_system_box_gcmc(ethane_methanol, pressure, dimensions, raises):
+    """
+    Validate that a perturbed system with a different box is rejected for GCMC
+    in the NVT ensemble, including a box of the same volume but a different
+    shape, but allowed in the osmotic ensemble.
+    """
+    import sire as sr
+
+    assert [x.value() for x in ethane_methanol.space().dimensions()] == [50, 50, 50]
+
+    perturbed = ethane_methanol.clone()
+    perturbed.set_space(sr.vol.PeriodicBox(sr.maths.Vector(*dimensions)))
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = Config(
+            output_directory=tmpdir,
+            replica_exchange=True,
+            perturbed_system=perturbed,
+            gcmc=True,
+            pressure=pressure,
+        )
+
+        runner = RunnerBase.__new__(RunnerBase)
+        runner._system = ethane_methanol
+        runner._config = config
+
+        if raises:
+            with pytest.raises(ValueError, match="periodic box of 'perturbed_system'"):
+                runner._check_inputs()
+        else:
+            runner._check_inputs()
