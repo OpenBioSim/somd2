@@ -2675,3 +2675,36 @@ def test_adaptive_repex_hot_replicas(ethane_methanol, max_contexts, monkeypatch)
                 [runner._filenames["topology0"], runner._filenames[i]["trajectory"]]
             )
             assert mols.num_frames() == 6
+
+
+@pytest.mark.parametrize(
+    "pressure, scale, raises",
+    [("none", 1.01, True), ("none", 1.0, False), ("1 atm", 1.01, False)],
+)
+def test_perturbed_system_box_gcmc(ethane_methanol, pressure, scale, raises):
+    """
+    Validate that a perturbed system with a different box is rejected for GCMC
+    in the NVT ensemble, but allowed in the osmotic ensemble.
+    """
+    perturbed = ethane_methanol.clone()
+    space = ethane_methanol.space()
+    perturbed.set_space(space.set_volume(scale * space.volume()))
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = Config(
+            output_directory=tmpdir,
+            replica_exchange=True,
+            perturbed_system=perturbed,
+            gcmc=True,
+            pressure=pressure,
+        )
+
+        runner = RunnerBase.__new__(RunnerBase)
+        runner._system = ethane_methanol
+        runner._config = config
+
+        if raises:
+            with pytest.raises(ValueError, match="periodic box of 'perturbed_system'"):
+                runner._check_inputs()
+        else:
+            runner._check_inputs()

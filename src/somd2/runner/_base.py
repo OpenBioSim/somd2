@@ -153,6 +153,26 @@ class RunnerBase:
                 _logger.error(msg)
                 raise ValueError(msg)
 
+            # GCMC in the NVT ensemble needs every replica to share the same box.
+            if self._config.gcmc and self._config.pressure is None:
+                space = self._system.space()
+                pert_space = self._config.perturbed_system.space()
+                volume = space.volume().value()
+                pert_volume = pert_space.volume().value()
+                if (
+                    space.what() != pert_space.what()
+                    or abs(pert_volume - volume) > 1e-5 * volume
+                ):
+                    msg = (
+                        f"The periodic box of 'perturbed_system' ({pert_space}) does not "
+                        f"match that of the 'system' ({space}). GCMC in the NVT ensemble "
+                        "needs both end states to share the same box. Rescale the perturbed "
+                        "system to the reference box, or set a pressure to run in the "
+                        "osmotic ensemble."
+                    )
+                    _logger.error(msg)
+                    raise ValueError(msg)
+
         # Log the versions of somd2 and its OpenBioSim dependencies.
         from somd2 import get_versions as _get_versions
 
