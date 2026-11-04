@@ -23,6 +23,7 @@ __all__ = ["RunnerBase"]
 
 from contextlib import contextmanager as _contextmanager
 from glob import glob as _glob
+from math import isclose as _isclose
 from pathlib import Path as _Path
 from shutil import copyfile as _copyfile
 
@@ -106,6 +107,26 @@ class RunnerBase:
                 )
                 _logger.error(msg)
                 raise ValueError(msg)
+
+            # GCMC in the NVT ensemble needs every replica to share the same box.
+            if self._config.gcmc and self._config.pressure is None:
+                space = self._system.space()
+                pert_space = self._config.perturbed_system.space()
+                vectors = self._box_vectors(space)
+                pert_vectors = self._box_vectors(pert_space)
+                if space.what() != pert_space.what() or not all(
+                    _isclose(a, b, rel_tol=1e-5, abs_tol=1e-5)
+                    for a, b in zip(vectors, pert_vectors)
+                ):
+                    msg = (
+                        f"The periodic box of 'perturbed_system' ({pert_space}) does not "
+                        f"match that of the 'system' ({space}). GCMC in the NVT ensemble "
+                        "needs both end states to share the same box. Rescale the perturbed "
+                        "system to the reference box, or set a pressure to run in the "
+                        "osmotic ensemble."
+                    )
+                    _logger.error(msg)
+                    raise ValueError(msg)
 
         # Log the versions of somd2 and its OpenBioSim dependencies.
         from somd2 import get_versions as _get_versions
@@ -1066,6 +1087,17 @@ class RunnerBase:
                 self._checkpoint_sire_threads = total_threads
             else:
                 self._checkpoint_sire_threads = sire_threads
+
+    @staticmethod
+    def _box_vectors(space):
+        """
+        Return the box vector components of a periodic space, in Angstrom.
+        """
+        if hasattr(space, "vector0"):
+            vectors = [space.vector0(), space.vector1(), space.vector2()]
+        else:
+            vectors = [space.dimensions()]
+        return [x.value() for vector in vectors for x in vector]
 
     @_contextmanager
     def _checkpoint_threads(self):
