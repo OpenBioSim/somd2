@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import platform
 import pytest
 import tempfile
 
@@ -2677,18 +2678,30 @@ def test_adaptive_repex_hot_replicas(ethane_methanol, max_contexts, monkeypatch)
             assert mols.num_frames() == 6
 
 
-@pytest.mark.parametrize(
-    "pressure, scale, raises",
-    [("none", 1.01, True), ("none", 1.0, False), ("1 atm", 1.01, False)],
+@pytest.mark.skipif(
+    platform.system() == "Darwin", reason="GCMC is not supported on macOS."
 )
-def test_perturbed_system_box_gcmc(ethane_methanol, pressure, scale, raises):
+@pytest.mark.parametrize(
+    "pressure, dimensions, raises",
+    [
+        ("none", (50, 50, 50), False),
+        ("none", (50.5, 50.5, 50.5), True),
+        ("none", (40, 50, 62.5), True),
+        ("1 atm", (50.5, 50.5, 50.5), False),
+    ],
+)
+def test_perturbed_system_box_gcmc(ethane_methanol, pressure, dimensions, raises):
     """
     Validate that a perturbed system with a different box is rejected for GCMC
-    in the NVT ensemble, but allowed in the osmotic ensemble.
+    in the NVT ensemble, including a box of the same volume but a different
+    shape, but allowed in the osmotic ensemble.
     """
+    import sire as sr
+
+    assert [x.value() for x in ethane_methanol.space().dimensions()] == [50, 50, 50]
+
     perturbed = ethane_methanol.clone()
-    space = ethane_methanol.space()
-    perturbed.set_space(space.set_volume(scale * space.volume()))
+    perturbed.set_space(sr.vol.PeriodicBox(sr.maths.Vector(*dimensions)))
 
     with tempfile.TemporaryDirectory() as tmpdir:
         config = Config(

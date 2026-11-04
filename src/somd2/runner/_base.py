@@ -135,6 +135,17 @@ class RunnerBase:
         # blocks only exist to update the bar.
         _sr.base.ProgressBar.set_silent()
 
+    @staticmethod
+    def _box_vectors(space):
+        """
+        Return the box vector components of a periodic space, in Angstrom.
+        """
+        if hasattr(space, "vector0"):
+            vectors = [space.vector0(), space.vector1(), space.vector2()]
+        else:
+            vectors = [space.dimensions()]
+        return [x.value() for vector in vectors for x in vector]
+
     def _check_inputs(self):
         """
         Check the perturbed system and the frame frequency, log the versions of
@@ -157,11 +168,11 @@ class RunnerBase:
             if self._config.gcmc and self._config.pressure is None:
                 space = self._system.space()
                 pert_space = self._config.perturbed_system.space()
-                volume = space.volume().value()
-                pert_volume = pert_space.volume().value()
-                if (
-                    space.what() != pert_space.what()
-                    or abs(pert_volume - volume) > 1e-5 * volume
+                vectors = self._box_vectors(space)
+                pert_vectors = self._box_vectors(pert_space)
+                if space.what() != pert_space.what() or not all(
+                    _isclose(a, b, rel_tol=1e-5, abs_tol=1e-5)
+                    for a, b in zip(vectors, pert_vectors)
                 ):
                     msg = (
                         f"The periodic box of 'perturbed_system' ({pert_space}) does not "
