@@ -266,6 +266,236 @@ def test_release_restores_resident_replica():
     assert list(sampler.water) == list(cache._gcmc_states[replica])
 
 
+def test_copy_state():
+    """
+    Validate that a replica whose state is copied from another starts from the
+    source's configuration and water state, even if it is already resident.
+    """
+    from somd2.runner._dynamics_cache import DynamicsCache
+
+    n = 2
+
+    cache = object.__new__(DynamicsCache)
+    cache._lambdas = [0.0, 1.0]
+    cache._rest2_scale_factors = [1.0] * n
+    cache._num_replicas = n
+    cache._update_constraints = True
+    cache._strided = False
+    cache._energy_trajectories = [None] * n
+    cache._ghost_files = [None] * n
+    cache._state_moved = [False] * n
+    _fake_slots(cache, n)
+
+    cache._openmm_states = [
+        {"positions": np.array([r, 0]), "velocities": np.array([r]), "box": (r, r, r)}
+        for r in range(n)
+    ]
+    cache._gcmc_states = [np.eye(n, dtype=int)[r] for r in range(n)]
+
+    cache.load_replica(1)
+    cache.copy_state(0, 1)
+    cache.load_replica(1)
+
+    slot = cache.slot_for(1)
+    context = cache._dynamics[slot].context()
+    assert context.positions[0] == 0
+    assert context.box == (0, 0, 0)
+    assert list(cache._gcmc_samplers[slot].water) == [1, 0]
+
+    # The copy is independent of the source.
+    cache._gcmc_states[0][1] = 1
+    assert list(cache._gcmc_states[1]) == [1, 0]
+
+
+def _plan_setup(num_replicas, num_slots, num_gpus, oversubscription, perturbed):
+    """
+    Plan a chained setup for a fake runner, returning the batches and runner.
+    """
+    from types import SimpleNamespace
+
+    import sire as sr
+
+    from somd2.runner._dynamics_cache import DynamicsCache
+
+    cache = object.__new__(DynamicsCache)
+    cache._num_replicas = num_replicas
+    cache._num_slots = num_slots
+    cache._strided = False
+    cache._build_slot_layout()
+    cache._slot_devices = [s % num_gpus for s in range(num_slots)]
+
+    lambdas = [round(i / (num_replicas - 1), 5) for i in range(num_replicas)]
+
+    # A slot's replicas start from the end state of its middle replica.
+    cache._start_perturbed = [None] * num_replicas
+    for group in cache._groups:
+        is_perturbed = perturbed and lambdas[group[len(group) // 2]] > 0.5
+        for replica in group:
+            cache._start_perturbed[replica] = is_perturbed
+
+    runner = SimpleNamespace(
+        _config=SimpleNamespace(
+            chain_equilibration=True,
+            chain_equilibration_scale=0.25,
+            oversubscription_factor=oversubscription,
+            equilibration_timestep=sr.u("2 fs"),
+        ),
+        _dynamics_cache=cache,
+        _lambda_values=lambdas,
+        _setup_sources=[None] * num_replicas,
+        _equilibration_times=[sr.u("10 ps")] * num_replicas,
+        _is_equilibration=True,
+    )
+
+    devices = [cache.device_for(cache.slot_for(r)) for r in range(num_replicas)]
+
+    return RepexRunner._plan_setup(runner, devices), runner
+
+
+@pytest.mark.parametrize("perturbed", [False, True])
+@pytest.mark.parametrize(
+    "num_replicas, num_slots, num_gpus, oversubscription",
+    [
+        (11, 11, 1, 1),
+        (11, 11, 2, 1),
+        (11, 11, 2, 2),
+        (12, 12, 3, 1),
+        (11, 4, 2, 1),
+        (16, 8, 2, 1),
+        (4, 4, 4, 1),
+    ],
+)
+def test_plan_setup(num_replicas, num_slots, num_gpus, oversubscription, perturbed):
+    """
+    Validate that a chained setup runs every slot once within the GPU limits,
+    and that each replica starts from one on the same end state that is set up
+    before it, with the equilibration time scaled.
+    """
+    batches, runner = _plan_setup(
+        num_replicas, num_slots, num_gpus, oversubscription, perturbed
+    )
+    cache = runner._dynamics_cache
+    sources = runner._setup_sources
+
+    slots = [cache.slot_for(group[0]) for batch in batches for group in batch]
+    assert sorted(slots) == list(range(num_slots))
+
+    done = set()
+    for i, batch in enumerate(batches):
+        devices = [cache.device_for(cache.slot_for(group[0])) for group in batch]
+        assert all(devices.count(d) <= oversubscription for d in devices)
+
+        for group in batch:
+            for j, replica in enumerate(group):
+                source = sources[replica]
+                if source is None:
+                    # Only a replica with nothing set up before it on its own
+                    # end state starts from the input system.
+                    assert not any(
+                        cache.start_perturbed[r] == cache.start_perturbed[replica]
+                        for r in done | set(group[:j])
+                    )
+                else:
+                    assert source in done or source in group[:j]
+                    assert (
+                        cache.start_perturbed[source]
+                        == (cache.start_perturbed[replica])
+                    )
+
+                time = runner._equilibration_times[replica].to("ps")
+                assert time == pytest.approx(10.0 if source is None else 2.5)
+
+        done.update(r for group in batch for r in group)
+
+
+def test_plan_setup_spreads_first_batch():
+    """
+    Validate that the first batch of a chained setup is spread across lambda,
+    and that every replica after it starts from an adjacent one.
+    """
+    batches, runner = _plan_setup(11, 11, 2, 1, False)
+
+    assert batches[0] == [[0], [9]]
+    for replica, source in enumerate(runner._setup_sources):
+        if replica not in (0, 9):
+            assert abs(source - replica) == 1
+
+
+def test_plan_setup_perturbed_starts_at_end_state():
+    """
+    Validate that, when the replicas seeded from the perturbed end state have
+    none set up before them, their chain starts at the end state.
+    """
+    batches, runner = _plan_setup(11, 11, 1, 1, True)
+    sources = runner._setup_sources
+
+    assert sources[10] is None
+    for replica in range(6, 10):
+        assert sources[replica] == replica + 1
+
+
+def test_chain_equilibration_validation(ethane_methanol):
+    """
+    Validate that chained equilibration requires replica exchange and a single
+    equilibration time.
+    """
+    with pytest.raises(ValueError):
+        Config(chain_equilibration_scale=0.0)
+    with pytest.raises(ValueError):
+        Config(chain_equilibration_scale=1.5)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "output_directory": tmpdir,
+            "platform": "CPU",
+            "max_threads": 1,
+            "num_lambda": 3,
+            "chain_equilibration": True,
+        }
+
+        with pytest.raises(ValueError, match="replica_exchange"):
+            RunnerBase(ethane_methanol, Config(**config))
+
+        config["replica_exchange"] = True
+        config["overwrite"] = True
+        config["equilibration_time"] = ["1 ps", "1 ps", "1 ps"]
+        with pytest.raises(ValueError, match="equilibration_time"):
+            RunnerBase(ethane_methanol, Config(**config))
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+@pytest.mark.parametrize(
+    "max_contexts, equilibration_time",
+    [(None, "8fs"), (2, "8fs"), (None, "0fs")],
+)
+def test_repex_chain_equilibration(ethane_methanol, max_contexts, equilibration_time):
+    """
+    Validate that a replica exchange simulation runs with chained setup.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "12fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "platform": "cuda",
+            "max_threads": 1,
+            "num_lambda": 4,
+            "replica_exchange": True,
+            "max_contexts": max_contexts,
+            "equilibration_time": equilibration_time,
+            "chain_equilibration": True,
+        }
+
+        runner = RepexRunner(ethane_methanol, Config(**config))
+        runner.run()
+
+        assert (Path(tmpdir) / "repex_matrix.txt").exists()
+        assert sum(s is not None for s in runner._setup_sources) > 0
+
+
 @pytest.mark.parametrize(
     "slot_schedule, inverted",
     [

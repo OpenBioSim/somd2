@@ -716,6 +716,19 @@ class RunnerBase:
             _logger.error(msg)
             raise ValueError(msg)
 
+        if self._config.chain_equilibration:
+            if not self._config.replica_exchange:
+                msg = "'chain_equilibration' requires 'replica_exchange'."
+                _logger.error(msg)
+                raise ValueError(msg)
+            if isinstance(self._config.equilibration_time, list):
+                msg = (
+                    "'chain_equilibration' can't be used with a list of "
+                    "'equilibration_time' values."
+                )
+                _logger.error(msg)
+                raise ValueError(msg)
+
         # Set the equilibration time for each window.
         if isinstance(self._config.equilibration_time, list):
             if len(self._config.equilibration_time) != len(self._lambda_values):

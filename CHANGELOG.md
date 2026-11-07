@@ -37,6 +37,7 @@ Changelog
 * Pass `opencl_platform_index` to the GCMC sampler, so that GCMC runs on the same OpenCL device as the dynamics when there are multiple OpenCL platforms [#266](https://github.com/OpenBioSim/somd2/pull/266).
 * Fixed energy trajectory times for ABFE bound legs without a Boresch restraint being offset by up to the `restraint_search_time`, since production started from the time of the restraint search frame rather than the input system [#268](https://github.com/OpenBioSim/somd2/pull/268).
 * Raise an error when a `perturbed_system` with a different periodic box from the reference system is used for GCMC in the NVT ensemble, since every replica must share the same box. GCMC in the osmotic ensemble, with a pressure set, is unaffected [#271](https://github.com/OpenBioSim/somd2/pull/271).
+* Add a `chain_equilibration` option for replica exchange, which speeds up setup by starting each replica from a neighbour that has already been set up. Replicas in the first parallel batch, which is spread across lambda, are minimised and equilibrated from the input system. The rest skip minimisation and are equilibrated for `chain_equilibration_scale` times the `equilibration_time`, which defaults to a quarter [#273](https://github.com/OpenBioSim/somd2/pull/273).
 
 [2026.2.0](https://github.com/openbiosim/somd2/compare/2026.1.0...2026.2.0) - Sep 2026
 --------------------------------------------------------------------------------------
