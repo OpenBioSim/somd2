@@ -199,6 +199,10 @@ class RepexRunner(_RunnerBase):
 
         self._set_num_slots()
 
+        # The replica whose state each replica starts from when chaining
+        # equilibration, or None to start from its own.
+        self._setup_sources = [None] * self._num_replicas
+
         # The particles of the bond that is broken or made, whose distance is
         # used to rank the windows for adaptive replica exchange.
         self._ring_pair = (
@@ -1024,9 +1028,12 @@ class RepexRunner(_RunnerBase):
         """
         from itertools import repeat
 
+        if not self._is_restart and (self._config.minimise or self._is_equilibration):
+            batches = self._plan_setup(replica_devices)
+
         # Minimise at each lambda value. Don't minimise on restart.
         if self._config.minimise and not self._is_restart:
-            for batch in self._setup_batches(replica_devices):
+            for batch in batches:
                 try:
                     for results in dynamics_executor.map(self._minimise_slot, batch):
                         self._report_minimisation(results)
@@ -1037,7 +1044,7 @@ class RepexRunner(_RunnerBase):
 
         # Equilibrate the system.
         if self._is_equilibration and not self._is_restart:
-            for batch in self._setup_batches(replica_devices):
+            for batch in batches:
                 try:
                     for results in dynamics_executor.map(self._equilibrate_slot, batch):
                         for success, index, e in results:
@@ -1657,6 +1664,8 @@ class RepexRunner(_RunnerBase):
         _logger.info(f"Minimising at {_lam_sym} = {self._lambda_values[index]:.5f}")
 
         try:
+            self._copy_source(index)
+
             # Make the replica resident in its slot.
             self._dynamics_cache.load_replica(index)
 
@@ -1688,6 +1697,21 @@ class RepexRunner(_RunnerBase):
             return False, index, e
 
         return True, index, None
+
+    def _copy_source(self, index):
+        """
+        Start a replica from the state of the replica it is chained from, if
+        any, when chaining equilibration.
+
+        Parameters
+        ----------
+
+        index: int
+            The index of the replica.
+        """
+        source = self._setup_sources[index]
+        if source is not None:
+            self._dynamics_cache.copy_state(source, index)
 
     def _report_minimisation(self, results):
         """
@@ -1727,6 +1751,11 @@ class RepexRunner(_RunnerBase):
         list of tuple
             The success, index and exception for each replica.
         """
+        # Chained replicas start equilibration from a neighbour's state, so
+        # minimising them would be wasted.
+        if self._is_equilibration:
+            replicas = [r for r in replicas if self._setup_sources[r] is None]
+
         results = [self._minimise(index) for index in replicas]
 
         # There's no need to rebuild if a failed minimisation stops the run.
@@ -1895,6 +1924,9 @@ class RepexRunner(_RunnerBase):
         list of tuple
             The success, index and exception for each replica equilibrated.
         """
+        # Copied before the rebuild, which builds from the first replica's state.
+        self._copy_source(replicas[0])
+
         # Rebuild the slot's dynamics object for equilibration, starting from
         # the first replica.
         if self._is_equilibration_rebuild:
@@ -1916,7 +1948,9 @@ class RepexRunner(_RunnerBase):
                 raise
 
         results = []
-        for index in replicas:
+        for i, index in enumerate(replicas):
+            if i > 0:
+                self._copy_source(index)
             results.append(self._equilibrate(index))
             if not results[-1][0]:
                 return results
@@ -2118,6 +2152,132 @@ class RepexRunner(_RunnerBase):
 
         for batch in self._device_batches(firsts, devices):
             yield [groups[self._dynamics_cache.slot_for(r)] for r in batch]
+
+    def _plan_setup(self, devices):
+        """
+        Work out the batches of slots to minimise and equilibrate at once. When
+        chaining equilibration, also choose the replica that each replica
+        starts from, and shorten the equilibration of those that have one.
+
+        The first batch is spread across lambda. Each later batch takes the
+        slots closest to a replica that is already set up. A replica starts
+        from the closest one that is guaranteed to be set up before it, from
+        an earlier batch or earlier in its own slot, which started from the
+        same end state.
+
+        Parameters
+        ----------
+
+        devices: list of int
+            The GPU that propagates each replica.
+
+        Returns
+        -------
+
+        list of list of list of int
+            The batches of slots, each given by the replicas it hosts.
+        """
+        if not self._config.chain_equilibration:
+            return list(self._setup_batches(devices))
+
+        cache = self._dynamics_cache
+        groups = cache.groups
+        lambdas = self._lambda_values
+        perturbed = cache.start_perturbed
+        per_device = self._config.oversubscription_factor
+
+        # Rounded so that equal spacings tie, leaving the slot index to decide.
+        def gap(a, b):
+            return round(abs(lambdas[a] - lambdas[b]), 8)
+
+        def distance(replica, others):
+            return min((gap(replica, o) for o in others), default=float("inf"))
+
+        def same_side(replica, candidates):
+            return [c for c in candidates if perturbed[c] == perturbed[replica]]
+
+        def nearest(replica, candidates):
+            return min(
+                same_side(replica, candidates),
+                key=lambda c: (gap(replica, c), c),
+                default=None,
+            )
+
+        def device_of(slot):
+            return devices[groups[slot][0]]
+
+        def chain_key(slot):
+            first = groups[slot][0]
+            d = distance(first, same_side(first, done))
+            # With nothing set up on its end state, start from the replica
+            # farthest from those that are, i.e. at the end state itself.
+            return (d, -distance(first, done) if d == float("inf") else 0.0, slot)
+
+        remaining = list(range(len(groups)))
+        done = []
+        batches = []
+
+        while remaining:
+            batch = []
+            used = {}
+
+            def eligible():
+                return [
+                    s
+                    for s in remaining
+                    if s not in batch and used.get(device_of(s), 0) < per_device
+                ]
+
+            while candidates := eligible():
+                if not done:
+                    # Farthest point sampling, starting from the first slot.
+                    chosen = [r for s in batch for r in groups[s]]
+                    slot = max(
+                        candidates,
+                        key=lambda s: (distance(groups[s][0], chosen), -s),
+                    )
+                else:
+                    slot = min(candidates, key=chain_key)
+                batch.append(slot)
+                used[device_of(slot)] = used.get(device_of(slot), 0) + 1
+
+            for slot in batch:
+                group = groups[slot]
+                for i, replica in enumerate(group):
+                    self._setup_sources[replica] = nearest(replica, done + group[:i])
+
+            for slot in batch:
+                remaining.remove(slot)
+                done.extend(groups[slot])
+
+            batches.append([groups[s] for s in sorted(batch)])
+
+        scale = self._config.chain_equilibration_scale
+        for replica, source in enumerate(self._setup_sources):
+            if source is not None:
+                self._equilibration_times[replica] = (
+                    self._equilibration_times[replica] * scale
+                )
+                msg = (
+                    f"{_lam_sym} = {lambdas[replica]:.5f} starts from "
+                    f"{_lam_sym} = {lambdas[source]:.5f}"
+                )
+                if self._is_equilibration:
+                    msg += f", equilibrating for {self._equilibration_times[replica]}"
+                _logger.info(msg)
+
+        timestep = self._config.equilibration_timestep
+        if self._is_equilibration and any(
+            source is not None and self._equilibration_times[replica] < timestep
+            for replica, source in enumerate(self._setup_sources)
+        ):
+            _logger.warning(
+                "Chained replicas are equilibrated for less than one "
+                f"'equilibration_timestep' ({timestep}). Increase "
+                "'equilibration_time' or 'chain_equilibration_scale'."
+            )
+
+        return batches
 
     def _window_samples(self):
         """

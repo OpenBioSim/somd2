@@ -402,6 +402,9 @@ class DynamicsCache:
                 str(output_directory / f"gcmc_ghosts_{lam:.5f}.txt") for lam in lambdas
             ]
 
+        # Whether each replica starts from the perturbed end state coordinates.
+        self._start_perturbed = [False] * num_replicas
+
         # Create the dynamics objects in serial. Each slot is created at the
         # lambda value of the first replica that it hosts.
         for i in range(self._num_slots):
@@ -455,6 +458,8 @@ class DynamicsCache:
             # starting coordinates and periodic space.
             elif perturbed_system is not None and seed_perturbed:
                 mols = perturbed_system
+                for replica in self._groups[i]:
+                    self._start_perturbed[replica] = True
             else:
                 mols = system
 
@@ -852,6 +857,26 @@ class DynamicsCache:
             # Legacy openmm.State from checkpoint files written before this
             # format change.
             context.setState(state)
+
+    def copy_state(self, source, target):
+        """
+        Copy the stored state of one replica to another, so that the target
+        starts from the source's positions, velocities, box and GCMC water
+        state when it is next loaded.
+
+        Parameters
+        ----------
+
+        source: int
+            The index of the replica to copy from.
+
+        target: int
+            The index of the replica to copy to.
+        """
+        self._openmm_states[target] = dict(self._openmm_states[source])
+        if self._gcmc_states[source] is not None:
+            self._gcmc_states[target] = self._gcmc_states[source].copy()
+        self._state_moved[target] = True
 
     def save_gcmc_state(self, slot, replica):
         """
@@ -1260,6 +1285,13 @@ class DynamicsCache:
         The replicas hosted by each slot.
         """
         return self._groups
+
+    @property
+    def start_perturbed(self):
+        """
+        Whether each replica starts from the perturbed end state coordinates.
+        """
+        return self._start_perturbed
 
     @property
     def time(self):

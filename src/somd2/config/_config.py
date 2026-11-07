@@ -103,6 +103,8 @@ class Config:
             "equilibration_time",
             "equilibration_timestep",
             "equilibration_constraints",
+            "chain_equilibration",
+            "chain_equilibration_scale",
             "energy_frequency",
             "frame_frequency",
             "save_velocities",
@@ -176,6 +178,8 @@ class Config:
         equilibration_time="0 ps",
         equilibration_timestep="2 fs",
         equilibration_constraints=True,
+        chain_equilibration=False,
+        chain_equilibration_scale=0.25,
         energy_frequency="1 ps",
         save_trajectories=True,
         frame_frequency="100 ps",
@@ -420,6 +424,23 @@ class Config:
             Whether to use constraints during equilibration. If False, then no constraints
             will be used. If True, then the values specified by 'constraint' and
             'perturbable_constraint' will be used.
+
+        chain_equilibration: bool
+            Whether to start each replica from the state of a neighbouring one
+            that has already been set up, for replica exchange simulations. The
+            replicas set up in the first parallel batch, which are spread across
+            lambda, are minimised and equilibrated from the input system. Every
+            other replica starts from the equilibrated state of the closest one
+            already set up, and is equilibrated for 'chain_equilibration_scale'
+            times the 'equilibration_time', without minimisation. If there is no
+            equilibration, then each replica is minimised from the minimised
+            state of its neighbour instead. Replicas never start from one that
+            was seeded from the other end state by 'perturbed_system'.
+
+        chain_equilibration_scale: float
+            The fraction of the 'equilibration_time' for which replicas started
+            from a neighbour's state are equilibrated when 'chain_equilibration'
+            is True.
 
         energy_frequency: str
             Frequency at which to output energy data. If running using 'replica_exchange',
@@ -825,6 +846,8 @@ class Config:
         self.equilibration_time = equilibration_time
         self.equilibration_timestep = equilibration_timestep
         self.equilibration_constraints = equilibration_constraints
+        self.chain_equilibration = chain_equilibration
+        self.chain_equilibration_scale = chain_equilibration_scale
         self.energy_frequency = energy_frequency
         self.save_trajectories = save_trajectories
         self.frame_frequency = frame_frequency
@@ -1923,6 +1946,32 @@ class Config:
                 "Equilibration constraints are recommeded for stability when "
                 "using a timestep greater than 1fs."
             )
+
+    @property
+    def chain_equilibration(self):
+        return self._chain_equilibration
+
+    @chain_equilibration.setter
+    def chain_equilibration(self, chain_equilibration):
+        if not isinstance(chain_equilibration, bool):
+            raise ValueError("'chain_equilibration' must be of type 'bool'")
+        self._chain_equilibration = chain_equilibration
+
+    @property
+    def chain_equilibration_scale(self):
+        return self._chain_equilibration_scale
+
+    @chain_equilibration_scale.setter
+    def chain_equilibration_scale(self, chain_equilibration_scale):
+        if isinstance(chain_equilibration_scale, bool):
+            raise ValueError("'chain_equilibration_scale' must be a float")
+        try:
+            chain_equilibration_scale = float(chain_equilibration_scale)
+        except Exception:
+            raise ValueError("'chain_equilibration_scale' must be a float")
+        if not 0.0 < chain_equilibration_scale <= 1.0:
+            raise ValueError("'chain_equilibration_scale' must be in (0, 1]")
+        self._chain_equilibration_scale = chain_equilibration_scale
 
     @property
     def energy_frequency(self):
