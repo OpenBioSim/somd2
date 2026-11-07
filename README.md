@@ -304,6 +304,20 @@ can be used to equilibrate only the windows that need it. The number of values
 must match the number of λ windows, and windows with a time of zero are not
 equilibrated.
 
+For [replica exchange](#replica-exchange) simulations, setup can be sped up
+with `--chain-equilibration`, which starts each window from a neighbour that
+has already been set up. The windows set up in the first parallel batch, which
+are spread across λ, are minimised and equilibrated from the input system as
+usual. Every other window starts from the equilibrated state of the closest
+one already set up, skips minimisation, and is equilibrated for a fraction of
+the `--equilibration-time`, set with `--chain-equilibration-scale`, which
+defaults to 0.25. Without equilibration, each window is instead minimised from
+its neighbour's minimised state. When `--perturbed-system` is used, windows
+only start from neighbours seeded from the same end state. Starting windows
+from similar structures may need longer production sampling to decorrelate,
+so this is best suited to quick calculations. It can't be combined with a
+separate `--equilibration-time` for each window.
+
 <a id="restarting"></a>
 
 ## 💾 Restarting
