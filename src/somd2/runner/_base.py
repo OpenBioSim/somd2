@@ -1224,6 +1224,7 @@ class RunnerBase:
                 "restart": self._is_restart,
                 "softcore_form": self._config.softcore_form,
                 "taylor_power": self._config.taylor_power,
+                "beutler_alpha": self._config.beutler_alpha,
                 "standard_volume": str(self._config.gcmc_standard_volume),
                 "tolerance": self._config.gcmc_tolerance,
                 "batch_size": self._config.gcmc_batch_size,
