@@ -77,6 +77,7 @@ class RunnerBase:
         self._set_terminal_groups()
 
         self._prepare_output_and_restart()
+        self._check_gcmc_bulk_moves()
         self._finalise_systems()
         self._set_dynamics_kwargs()
         self._limit_sire_threads()
@@ -1064,6 +1065,29 @@ class RunnerBase:
 
             # Store the excess chemcical potential value.
             self._mu_ex = self._config.gcmc_excess_chemical_potential.value()
+
+    def _check_gcmc_bulk_moves(self):
+        """
+        Warn when whole-box GCMC moves are used with a pressure set. This runs
+        after the restart check, which can change the bulk sampling probability.
+        """
+        if not self._config.gcmc or self._config.pressure is None:
+            return
+
+        if self._config.gcmc_selection is None:
+            _logger.warning(
+                "Every GCMC move samples the whole box when 'gcmc_selection' "
+                "is None. With a pressure set, the number of bulk waters can "
+                "drift. Set a 'gcmc_selection', or 'pressure=None' to run in "
+                "the NVT ensemble."
+            )
+        elif self._config.gcmc_bulk_sampling_probability > 0.0:
+            _logger.warning(
+                "Bulk GCMC moves are used with a pressure set, so the number "
+                "of bulk waters can drift. Set "
+                "'gcmc_bulk_sampling_probability=0', or 'pressure=None' to "
+                "run in the NVT ensemble."
+            )
 
     def _set_terminal_groups(self):
         """
@@ -2383,6 +2407,31 @@ class RunnerBase:
 
         return True, systems
 
+    def _inherit_bulk_sampling_probability(self, config):
+        """
+        When the GCMC bulk sampling probability is "auto", keep the value of the
+        last run, so that the run stays in one ensemble.
+
+        Parameters
+        ----------
+
+        config: dict
+            The current config dictionary, which is updated to match.
+        """
+        last = _Config._unwrap(self._last_config.get("gcmc_bulk_sampling_probability"))
+        if last is None or _Config._is_auto(last):
+            return
+        if not _Config._is_auto(self._config._gcmc_bulk_sampling_probability):
+            return
+
+        value = float(last)
+        self._config.gcmc_bulk_sampling_probability = value
+        config["gcmc_bulk_sampling_probability"] = value
+        if self._config.gcmc:
+            _logger.info(
+                f"Using 'gcmc_bulk_sampling_probability={value}' from the last run."
+            )
+
     @staticmethod
     def _compare_configs(config1, config2):
         """
@@ -2413,6 +2462,29 @@ class RunnerBase:
 
                 # Early exit equivalence check.
                 if v1 == v2:
+                    continue
+
+                # Compare the resolved values, so that "auto" matches the
+                # explicit value it stands for. A changed pressure is reported
+                # by its own check instead.
+                if key == "gcmc_bulk_sampling_probability":
+                    if (_Config._unwrap(config1.get("pressure")) or None) != (
+                        _Config._unwrap(config2.get("pressure")) or None
+                    ):
+                        continue
+                    p1 = _Config._resolve_bulk_sampling_probability(
+                        v1, config1.get("pressure")
+                    )
+                    p2 = _Config._resolve_bulk_sampling_probability(
+                        v2, config2.get("pressure")
+                    )
+                    if not _isclose(p1, p2):
+                        raise ValueError(
+                            f"{key} has changed since the last run ({p1} vs {p2}). "
+                            "This is not allowed when using the restart option. "
+                            f"Set gcmc_bulk_sampling_probability={p1} to continue "
+                            "the run."
+                        )
                     continue
 
                 # Custom lambda schedules are stored as a hexademical string of
@@ -2556,6 +2628,7 @@ class RunnerBase:
                     "Cannot validate restart config without a config.yaml file."
                 )
 
+        self._inherit_bulk_sampling_probability(config)
         self._compare_configs(self._last_config, config)
 
         # Adaptive replica exchange derives each window's sample count from its
