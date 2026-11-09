@@ -76,13 +76,12 @@ class Config:
         "log_level": [level.lower() for level in _logger._core.levels],
         "softcore_form": ["auto", "zacharias", "taylor", "beutler"],
         "precision": ["single", "mixed", "double"],
-        "gcmc_bulk_sampling_probability": ["auto"],
     }
 
     # Options that advertise a set of choices, but which also accept other
     # forms, e.g. the path to a stream file. These are validated by the setter,
     # rather than by argparse.
-    _open_choices = ["lambda_schedule", "gcmc_bulk_sampling_probability"]
+    _open_choices = ["lambda_schedule"]
 
     # A dictionary of nargs for the various options.
     _nargs = {
@@ -217,7 +216,7 @@ class Config:
         gcmc_standard_volume="30.543 A^3",
         gcmc_num_waters=20,
         gcmc_radius="4 A",
-        gcmc_bulk_sampling_probability="auto",
+        gcmc_bulk_sampling_probability=0.1,
         gcmc_tolerance=0.0,
         gcmc_batch_size=1000,
         gcmc_num_attempts=10000,
@@ -265,7 +264,8 @@ class Config:
 
         pressure: str
             Simulation pressure. (Simulations will run in the NVT ensemble unless
-            a pressure is specified.)
+            a pressure is specified. GCMC simulations always run in the NVT
+            ensemble, so the pressure is ignored.)
 
         surface_tension: str
             Surface tension to use for NPT simulations with a membrane barostat.
@@ -603,6 +603,7 @@ class Config:
 
         gcmc: bool
             Whether to perform Grand Canonical Monte Carlo (GCMC) water insertions/deletions.
+            GCMC simulations always run in the NVT ensemble.
 
         gcmc_frequency: str
             Frequency at which to attempt GCMC moves. If None, then this will be set to the
@@ -629,14 +630,11 @@ class Config:
         gcmc_radius: str
             The radius of the GCMC sphere.
 
-        gcmc_bulk_sampling_probability: float, str
+        gcmc_bulk_sampling_probability: float
             The probability of performing bulk GCMC moves, i.e. within the entire simulation
-            box rather than the GCMC sphere. These maintain the bulk density in the NVT
-            ensemble, i.e. acting as a barostat, so aren't needed when a pressure is set.
-            The default, "auto", uses 0.1 when 'pressure' is None and 0 otherwise. On
-            restart, "auto" keeps the value of the last run, and other values can't
-            change. (This option has no effect when 'gcmc_selection=None', where every
-            move is a bulk move.)
+            box rather than the GCMC sphere. These can be used to maintain a constant bulk
+            density, i.e. acting as a barostat. (This option has no affect when
+            'gcmc_selection=None'.)
 
         gcmc_tolerance: float
             The tolerance for the GCMC acceptance probability, i.e. the minimum probability
@@ -2678,58 +2676,16 @@ class Config:
 
     @property
     def gcmc_bulk_sampling_probability(self):
-        # Resolved on read, so that "auto" follows later changes to the pressure.
-        return self._resolve_bulk_sampling_probability(
-            self._gcmc_bulk_sampling_probability, getattr(self, "_pressure", None)
-        )
-
-    @staticmethod
-    def _is_auto(value):
-        """
-        Whether an option value is "auto", in any case.
-        """
-        return isinstance(value, str) and value.strip().lower() == "auto"
-
-    @staticmethod
-    def _unwrap(value):
-        """
-        Convert a value from a config stored as a Sire property, e.g. in a
-        checkpoint file, to a Python value. Units are converted to strings.
-        """
-        from sire.units import GeneralUnit as _GeneralUnit
-
-        if isinstance(value, _GeneralUnit):
-            return str(value)
-        try:
-            return value.value()
-        except AttributeError:
-            return value
-
-    @staticmethod
-    def _resolve_bulk_sampling_probability(probability, pressure):
-        """
-        Resolve a GCMC bulk sampling probability, which may be "auto", for the
-        given pressure. Bulk moves act as a barostat, so aren't used with one.
-        """
-        probability = Config._unwrap(probability)
-        if Config._is_auto(probability):
-            # A stored config records no pressure as None or False.
-            return 0.1 if not Config._unwrap(pressure) else 0.0
-        return float(probability)
+        return self._gcmc_bulk_sampling_probability
 
     @gcmc_bulk_sampling_probability.setter
     def gcmc_bulk_sampling_probability(self, gcmc_bulk_sampling_probability):
-        if self._is_auto(gcmc_bulk_sampling_probability):
-            self._gcmc_bulk_sampling_probability = "auto"
-            return
         if not isinstance(gcmc_bulk_sampling_probability, float):
             try:
                 gcmc_bulk_sampling_probability = float(gcmc_bulk_sampling_probability)
             except Exception:
-                raise ValueError(
-                    "'gcmc_bulk_sampling_probability' must be a float or 'auto'"
-                )
-        if not 0.0 <= gcmc_bulk_sampling_probability <= 1.0:
+                raise ValueError("'gcmc_bulk_sampling_probability' must be a float")
+        if gcmc_bulk_sampling_probability < 0.0 or gcmc_bulk_sampling_probability > 1.0:
             raise ValueError(
                 "'gcmc_bulk_sampling_probability' must be between 0.0 and 1.0"
             )

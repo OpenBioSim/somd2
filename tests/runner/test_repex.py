@@ -2917,14 +2917,14 @@ def test_adaptive_repex_hot_replicas(ethane_methanol, max_contexts, monkeypatch)
         ("none", (50, 50, 50), False),
         ("none", (50.5, 50.5, 50.5), True),
         ("none", (40, 50, 62.5), True),
-        ("1 atm", (50.5, 50.5, 50.5), False),
+        ("1 atm", (50.5, 50.5, 50.5), True),
     ],
 )
 def test_perturbed_system_box_gcmc(ethane_methanol, pressure, dimensions, raises):
     """
-    Validate that a perturbed system with a different box is rejected for GCMC
-    in the NVT ensemble, including a box of the same volume but a different
-    shape, but allowed in the osmotic ensemble.
+    Validate that a perturbed system with a different box is rejected for GCMC,
+    which runs in the NVT ensemble, including a box of the same volume but a
+    different shape, and whether or not a pressure is set.
     """
     import sire as sr
 
