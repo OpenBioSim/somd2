@@ -40,6 +40,7 @@ Changelog
 * Add a `chain_equilibration` option for replica exchange, which speeds up setup by starting each replica from a neighbour that has already been set up. Replicas in the first parallel batch, which is spread across lambda, are minimised and equilibrated from the input system. The rest skip minimisation and are equilibrated for `chain_equilibration_scale` times the `equilibration_time`, which defaults to a quarter [#273](https://github.com/OpenBioSim/somd2/pull/273).
 * Pass `beutler_alpha` to the GCMC sampler, which otherwise used its own default for the Beutler soft-core form [#275](https://github.com/OpenBioSim/somd2/pull/275).
 * Run GCMC simulations in the NVT ensemble, ignoring the pressure, since the osmotic ensemble isn't valid for GCMC of solvent water: the number of waters is barely fixed, so it drifts. GCMC runs started with a pressure can't be restarted [#281](https://github.com/OpenBioSim/somd2/pull/281).
+* Added support for Python 3.13 and 3.14, and dropped support for Python 3.10 and 3.11.
 
 [2026.2.0](https://github.com/openbiosim/somd2/compare/2026.1.0...2026.2.0) - Sep 2026
 --------------------------------------------------------------------------------------
