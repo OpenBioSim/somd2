@@ -1,4 +1,3 @@
-import pytest
 import tempfile
 
 import sire as sr
@@ -259,54 +258,28 @@ def test_help_text_scraping():
     assert "a list of sets" in action.help
 
 
-def test_auto_gcmc_bulk_sampling_probability():
+def test_gcmc_runs_in_nvt(ethane_methanol):
     """
-    Validate that the "auto" bulk sampling probability follows the pressure,
-    that an explicit value is never overridden, and that "auto" is kept when
-    the config is written out.
+    Validate that GCMC simulations ignore the pressure, and that a GCMC run
+    started with a pressure can't be restarted, whether the last config is
+    read from a config file or from a checkpoint.
+
+    The runner is created on the CPU platform, so it is rejected after the
+    pressure is handled, since GCMC needs a GPU.
     """
-    config = Config()
-    assert config._gcmc_bulk_sampling_probability == "auto"
-    assert config.gcmc_bulk_sampling_probability == 0.0
-    assert config.as_dict()["gcmc_bulk_sampling_probability"] == "auto"
-
-    config.pressure = None
-    assert config.gcmc_bulk_sampling_probability == 0.1
-
-    config.gcmc_bulk_sampling_probability = 0.2
-    config.pressure = "1 atm"
-    assert config.gcmc_bulk_sampling_probability == 0.2
-
-    config.gcmc_bulk_sampling_probability = "AUTO"
-    assert config.gcmc_bulk_sampling_probability == 0.0
-
-    with pytest.raises(ValueError):
-        config.gcmc_bulk_sampling_probability = "nan"
-
-
-@pytest.mark.parametrize(
-    "pressure,last,new,expected",
-    [
-        ("1 atm", "auto", "auto", 0.0),
-        ("1 atm", 0.0, "auto", 0.0),
-        ("1 atm", 0.1, "auto", 0.1),
-        (None, 0.1, "auto", 0.1),
-        ("1 atm", 0.1, 0.0, None),
-        ("1 atm", "auto", 0.1, None),
-    ],
-)
-def test_gcmc_bulk_sampling_probability_restart(pressure, last, new, expected):
-    """
-    Validate that, on restart, "auto" keeps the bulk sampling probability of the
-    last run and that any other change is refused, for a last config read from
-    a config file and from a checkpoint, where it is stored as a Sire property.
-    An expected value of None means the restart is refused.
-    """
-    from types import SimpleNamespace
+    import pytest
 
     from somd2.runner._base import RunnerBase
 
-    old = Config(pressure=pressure, gcmc_bulk_sampling_probability=last)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = Config(output_directory=tmpdir, gcmc=True, platform="cpu")
+        assert config.pressure is not None
+        with pytest.raises(ValueError, match="require the CUDA or OpenCL platform"):
+            RunnerBase(ethane_methanol, config)
+        assert config.pressure is None
+
+    old = Config(gcmc=True)
+    new = Config(gcmc=True, pressure=None)
 
     # The config as stored in a checkpoint file.
     system = sr.system.System()
@@ -317,42 +290,7 @@ def test_gcmc_bulk_sampling_probability_restart(pressure, last, new, expected):
         (old.as_dict(), False),
         (checkpoint_config, True),
     ):
-        runner = SimpleNamespace(
-            _config=Config(pressure=pressure, gcmc_bulk_sampling_probability=new),
-            _last_config=last_config,
-        )
-        config = runner._config.as_dict(sire_compatible=sire_compatible)
-
-        RunnerBase._inherit_bulk_sampling_probability(runner, config)
-
-        if expected is None:
-            with pytest.raises(ValueError, match="gcmc_bulk_sampling_probability="):
-                RunnerBase._compare_configs(runner._last_config, config)
-        else:
-            RunnerBase._compare_configs(runner._last_config, config)
-            assert runner._config.gcmc_bulk_sampling_probability == expected
-
-
-def test_gcmc_bulk_sampling_probability_restart_pressure_change():
-    """
-    Validate that a changed pressure on restart is reported as such, rather
-    than as a change to the resolved bulk sampling probability.
-    """
-    from somd2.runner._base import RunnerBase
-
-    old = Config(pressure=None, gcmc_bulk_sampling_probability=0.1)
-    new = Config(pressure="1 atm")
-
-    # The config as stored in a checkpoint file.
-    system = sr.system.System()
-    system.set_property("config", old.as_dict(sire_compatible=True))
-    checkpoint_config = dict(system.property("config"))
-
-    for last_config, sire_compatible in (
-        (old.as_dict(), False),
-        (checkpoint_config, True),
-    ):
-        with pytest.raises(ValueError, match="^pressure has changed"):
+        with pytest.raises(ValueError, match="run in the NVT ensemble"):
             RunnerBase._compare_configs(
                 last_config, new.as_dict(sire_compatible=sire_compatible)
             )
