@@ -1195,14 +1195,14 @@ def test_repex_perturbed_system_seeding(ethane_methanol, swap_end_states):
         ("none", (50, 50, 50), False),
         ("none", (50.5, 50.5, 50.5), True),
         ("none", (40, 50, 62.5), True),
-        ("1 atm", (50.5, 50.5, 50.5), False),
+        ("1 atm", (50.5, 50.5, 50.5), True),
     ],
 )
 def test_perturbed_system_box_gcmc(ethane_methanol, pressure, dimensions, raises):
     """
-    Validate that a perturbed system with a different box is rejected for GCMC
-    in the NVT ensemble, including a box of the same volume but a different
-    shape, but allowed in the osmotic ensemble.
+    Validate that a perturbed system with a different box is rejected for GCMC,
+    which runs in the NVT ensemble, including a box of the same volume but a
+    different shape, and whether or not a pressure is set.
 
     The runner is created on the CPU platform, so a system that passes the box
     check is instead rejected later on, since GCMC needs a GPU.
