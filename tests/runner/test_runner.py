@@ -9,6 +9,15 @@ from somd2.config import Config
 from somd2.io import parquet_to_dataframe
 
 
+class _FailingRunner(Runner):
+    """A runner whose first window fails. Module level so it can be pickled."""
+
+    def _run(self, system, index, **kwargs):
+        if index == 0:
+            raise RuntimeError("Forced failure")
+        return super()._run(system, index, **kwargs)
+
+
 def test_runtime_remainder(ethane_methanol):
     """
     Validate that a runtime that isn't a multiple of the checkpoint frequency
@@ -39,6 +48,32 @@ def test_runtime_remainder(ethane_methanol):
 
             checkpoint_state = np.load(Path(tmpdir) / f"checkpoint_{lam}.npz")
             assert checkpoint_state["time_ps"].item() == pytest.approx(0.020)
+
+
+def test_failed_window(ethane_methanol):
+    """
+    Validate that a failed window doesn't stop the others from running, and
+    that the run raises an error naming the failed window.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = {
+            "runtime": "4fs",
+            "restart": False,
+            "output_directory": tmpdir,
+            "energy_frequency": "4fs",
+            "checkpoint_frequency": "4fs",
+            "frame_frequency": "4fs",
+            "platform": "CPU",
+            "max_threads": 1,
+            "num_lambda": 2,
+        }
+
+        runner = _FailingRunner(ethane_methanol, Config(**config))
+        with pytest.raises(RuntimeError, match="Failed for λ = 0.0"):
+            runner.run()
+
+        assert not (Path(tmpdir) / "energy_traj_0.00000.parquet").exists()
+        assert (Path(tmpdir) / "energy_traj_1.00000.parquet").exists()
 
 
 def test_equilibration_time_per_window(ethane_methanol):

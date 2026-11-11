@@ -266,14 +266,16 @@ class Runner(_RunnerBase):
 
         # All other platforms.
         else:
-            self._max_workers = 1
+            self.max_workers = 1
 
         self._add_boresch_restraint(device=self._gpu_pool[0] if self._is_gpu else None)
 
         import concurrent.futures as _futures
         import multiprocessing as _mp
 
-        success = True
+        failed = []
+        interrupted = False
+        total_time = 0
         with _futures.ProcessPoolExecutor(
             max_workers=self.max_workers, mp_context=_mp.get_context("spawn")
         ) as executor:
@@ -290,34 +292,47 @@ class Runner(_RunnerBase):
                             f"Exception raised for {_lam_sym} = {lambda_value}: {e}"
                         )
                         success = False
+                    if success:
+                        total_time += time.to("ns")
+                    else:
+                        failed.append(lambda_value)
 
             # Kill all current and future jobs if keyboard interrupt.
             except KeyboardInterrupt:
                 _logger.error("Cancelling job...")
                 for pid in executor._processes:
                     executor._processes[pid].terminate()
-                success = False
+                interrupted = True
 
-        if success:
-            # Record the end time.
-            end = _timer()
+        if interrupted:
+            raise RuntimeError("Simulation was cancelled.")
 
-            # Work how many fractional days the simulation took.
-            days = (end - start) / 86400
-
-            # Calculate the speed in nanoseconds per day.
-            speed = time.to("ns") / days
-
-            # Log the speed.
-            _logger.info(f"Overall performance: {speed:.2f} ns day-1")
-
-            # Log the run time in minutes.
-            _logger.success(
-                f"Simulation finished. Run time: {(end - start) / 60:.2f} minutes"
+        if failed:
+            failed = ", ".join(str(lam) for lam in sorted(failed))
+            raise RuntimeError(
+                f"Failed for {_lam_sym} = {failed}. These windows can be re-run "
+                "using '--lambda-values' with '--restart'."
             )
 
-            # Cleanup backup files.
-            self._cleanup()
+        # Record the end time.
+        end = _timer()
+
+        # Work how many fractional days the simulation took.
+        days = (end - start) / 86400
+
+        # Calculate the speed in nanoseconds per day, summed over all windows.
+        speed = total_time / days
+
+        # Log the speed.
+        _logger.info(f"Overall performance: {speed:.2f} ns day-1")
+
+        # Log the run time in minutes.
+        _logger.success(
+            f"Simulation finished. Run time: {(end - start) / 60:.2f} minutes"
+        )
+
+        # Cleanup backup files.
+        self._cleanup()
 
     def _check_restart(self):
         """
