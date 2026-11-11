@@ -123,7 +123,11 @@ class RunnerBase:
             msg = "'config' must be of type 'somd2.config.Config'"
             _logger.error(msg)
             raise TypeError(msg)
-        self._config = config
+        # Copy the config, since the runner modifies it, e.g. the lambda schedule.
+        # Pickle it, as for worker processes, since Sire objects can't be deep copied.
+        import pickle as _pickle
+
+        self._config = _pickle.loads(_pickle.dumps(config))
         self._config._extra_args = {}
 
         # Create the output directory and configure the logger now that the
@@ -605,6 +609,106 @@ class RunnerBase:
 
         return ion_indices
 
+    def _apply_torsion_window(self):
+        """
+        Change torsions over part of each morph stage when an angle of a
+        perturbable molecule becomes linear at one end state, according to
+        the 'torsion_window' option.
+        """
+        mode = self._config.torsion_window
+        self._config._torsion_windows = ""
+
+        if mode == "false":
+            return
+        if self._config._lambda_schedule_name in ("annihilate", "decouple"):
+            if mode == "true":
+                _logger.warning(
+                    "'torsion_window' is ignored for the "
+                    f"'{self._config._lambda_schedule_name}' lambda schedule."
+                )
+            return
+
+        from .._utils._linear_angles import find_linear_angles, torsion_window_bounds
+        from .._utils._schedules import windowed_torsions
+
+        schedule = self._config._lambda_schedule
+        perturbable = self._system.molecules()["perturbable"].molecules()
+
+        windows = {}
+        for idx, mol in enumerate(perturbable):
+            found = []
+            for angle, state, bent_terms, linear_terms in find_linear_angles(mol):
+                atoms = "-".join(str(i) for i in angle)
+                if linear_terms:
+                    _logger.warning(
+                        f"A non-zero torsion or improper passes through angle {atoms} "
+                        f"of perturbable molecule {idx} at {_lam_sym} = {state}, where "
+                        "the angle is linear. The lambda schedule can't prevent its "
+                        "force diverging."
+                    )
+                if bent_terms or mode == "true":
+                    found.append((atoms, state))
+            if not found:
+                continue
+
+            start, end = torsion_window_bounds({state for _, state in found})
+            base = (
+                schedule.get_molecule_schedule(idx)
+                if schedule.has_molecule_schedule(idx)
+                else schedule
+            ).clone()
+            for other in range(len(perturbable)):
+                if base.has_molecule_schedule(other):
+                    base.remove_molecule_schedule(other)
+
+            try:
+                mol_schedule = windowed_torsions(base, start, end)
+            except ValueError as e:
+                msg = f"Unable to apply 'torsion_window' to perturbable molecule {idx}: {e}"
+                if mode == "true":
+                    _logger.error(msg)
+                    raise ValueError(msg)
+                _logger.warning(msg)
+                continue
+
+            # Torsions that don't change need no window.
+            if mol_schedule == base:
+                continue
+
+            windows[idx] = (mol_schedule, start, end, found)
+
+        if not windows:
+            if mode == "true":
+                _logger.warning(
+                    "'torsion_window' is enabled, but no torsions of a perturbable "
+                    "molecule with an angle that becomes linear change, so the "
+                    "lambda schedule is unchanged."
+                )
+            return
+
+        for idx, (mol_schedule, start, end, found) in windows.items():
+            schedule.set_molecule_schedule(idx, mol_schedule)
+            angles = ", ".join(
+                f"{atoms} ({_lam_sym} = {state})" for atoms, state in found
+            )
+            _logger.info(
+                f"Angles of perturbable molecule {idx} become linear at one end "
+                f"state (atom indices within the molecule): {angles}. Its torsions "
+                f"and impropers will change over the fraction [{start}, {end}] of "
+                "each stage in which they change."
+            )
+            if len({state for _, state in found}) > 1:
+                _logger.warning(
+                    f"Angles of perturbable molecule {idx} become linear at both end "
+                    "states, so its torsions change over the middle of each stage. "
+                    "This leaves them less margin before the angles are near "
+                    "linear, so check this perturbation for instabilities."
+                )
+
+        self._config._torsion_windows = ";".join(
+            f"{idx}:{start}-{end}" for idx, (_, start, end, _) in windows.items()
+        )
+
     def _set_schedule(self, pert_idxs, ion_indices):
         """
         Set the soft-core form, the lambda schedule and values, and the REST2
@@ -686,6 +790,8 @@ class RunnerBase:
             if ion_schedule is not None:
                 for pert_idx in ion_indices:
                     schedule.set_molecule_schedule(pert_idx, ion_schedule)
+
+        self._apply_torsion_window()
 
         # Set the lambda values.
         if self._config.lambda_values:
@@ -2401,6 +2507,16 @@ class RunnerBase:
             raise TypeError("'config2' must be of type 'dict'")
 
         from sire.units import GeneralUnit as _GeneralUnit
+
+        legacy = _Config._restart_legacy_values["torsion_windows"]
+        windows = config2.get("torsion_windows", legacy)
+        if "torsion_windows" not in config1 and windows != legacy:
+            raise ValueError(
+                "Angles that become linear were detected, so torsion windows "
+                f"would be applied ({windows}), but the simulation was started "
+                "before 'torsion_window' existed. Set 'torsion_window' to "
+                "'false' to restart it."
+            )
 
         allowed_diffs = _Config._restart_allowed_diffs
         for key in config1.keys():
