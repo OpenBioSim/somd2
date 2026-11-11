@@ -65,10 +65,11 @@ def test_torsion_window():
         torsion_window(set())
 
 
-def _linearise(mol, angle, state, remove_terms=False):
+def _linearise(mol, angle, state, remove_terms=()):
     """
     Set the equilibrium value of an angle to 180 degrees at an end state, and
-    optionally remove the dihedrals and impropers that pass through it.
+    remove the dihedrals and impropers that pass through it at the given end
+    states.
     """
     info = mol.info()
     theta = Symbol("theta")
@@ -85,20 +86,19 @@ def _linearise(mol, angle, state, remove_terms=False):
 
     cursor = mol.edit().set_property(f"angle{state}", angles).molecule()
 
-    if remove_terms:
-        for name in ("dihedral", "improper"):
-            for s in (0, 1):
-                terms = FourAtomFunctions(info)
-                for p in mol.property(f"{name}{s}").potentials():
-                    idx = [
-                        info.atom_idx(a)
-                        for a in (p.atom0(), p.atom1(), p.atom2(), p.atom3())
-                    ]
-                    values = [i.value() for i in idx]
-                    if atoms in (set(values[:3]), set(values[1:])):
-                        continue
-                    terms.set(*idx, p.function())
-                cursor = cursor.set_property(f"{name}{s}", terms).molecule()
+    for name in ("dihedral", "improper"):
+        for s in remove_terms:
+            terms = FourAtomFunctions(info)
+            for p in mol.property(f"{name}{s}").potentials():
+                idx = [
+                    info.atom_idx(a)
+                    for a in (p.atom0(), p.atom1(), p.atom2(), p.atom3())
+                ]
+                values = [i.value() for i in idx]
+                if atoms in (set(values[:3]), set(values[1:])):
+                    continue
+                terms.set(*idx, p.function())
+            cursor = cursor.set_property(f"{name}{s}", terms).molecule()
 
     return cursor.commit()
 
@@ -117,6 +117,17 @@ def _spanned_angle(mol):
     raise ValueError("No non-zero dihedrals")
 
 
+def _linear_system(mols, remove_terms=(1,)):
+    """
+    Return a copy of the system with an angle of the perturbable molecule made
+    linear at lambda = 1.
+    """
+    mols = mols.clone()
+    mol = mols.molecules("property is_perturbable")[0]
+    mols.update(_linearise(mol, _spanned_angle(mol), 1, remove_terms))
+    return mols
+
+
 def test_find_linear_angles(diphenylethane_mols):
     mol = diphenylethane_mols.molecules("property is_perturbable")[0]
     assert find_linear_angles(mol) == []
@@ -124,36 +135,104 @@ def test_find_linear_angles(diphenylethane_mols):
     angle = _spanned_angle(mol)
     key = (min(angle[0], angle[2]), angle[1], max(angle[0], angle[2]))
 
-    linear = _linearise(mol, angle, 1)
-    assert find_linear_angles(linear) == [(key, 1)]
+    # Terms through the angle at the linear end state are flagged.
+    assert find_linear_angles(_linearise(mol, angle, 1)) == [(key, 1, True)]
 
-    bare = _linearise(mol, angle, 0, remove_terms=True)
+    linear = _linearise(mol, angle, 1, remove_terms=(1,))
+    assert find_linear_angles(linear) == [(key, 1, False)]
+
+    # Terms only at the linear end state don't trigger detection.
+    linear = _linearise(mol, angle, 1, remove_terms=(0,))
+    assert find_linear_angles(linear) == []
+    assert find_linear_angles(linear, require_terms=False) == [(key, 1, True)]
+
+    bare = _linearise(mol, angle, 0, remove_terms=(0, 1))
     assert find_linear_angles(bare) == []
-    assert find_linear_angles(bare, require_terms=False) == [(key, 0)]
+    assert find_linear_angles(bare, require_terms=False) == [(key, 0, False)]
+
+
+def test_find_linear_angles_no_angles(diphenylethane_mols):
+    mol = diphenylethane_mols.molecules("property is_perturbable")[0]
+    mol = mol.edit().remove_property("angle1").molecule().commit()
+    assert find_linear_angles(mol) == []
+
+
+def test_linear_torsions_unsupported():
+    schedule = LambdaSchedule.standard_morph()
+    schedule.set_equation(
+        stage="morph", force="torsion", lever="torsion_k", equation=schedule.final()
+    )
+    with pytest.raises(ValueError, match="force-specific"):
+        linear_torsions(schedule, 0.0, 0.5)
+
+    schedule = LambdaSchedule.standard_morph()
+    schedule.set_constant("scale", 0.5)
+    schedule.set_equation(
+        stage="morph",
+        lever="torsion_k",
+        equation=schedule.get_constant_symbol("scale") * schedule.final(),
+    )
+    with pytest.raises(ValueError, match="symbols"):
+        linear_torsions(schedule, 0.0, 0.5)
+
+
+def _runner(mols, tmpdir, **kwargs):
+    from somd2.config import Config
+    from somd2.runner import Runner
+
+    config = Config(
+        platform="cpu", output_directory=tmpdir, ghost_modifications=False, **kwargs
+    )
+    return config, Runner(mols, config)
 
 
 @pytest.mark.parametrize("mode", ["auto", "false"])
 def test_runner_linear_torsions(diphenylethane_mols, mode):
     """
-    The runner changes the schedule only when the option allows it.
+    The runner gives the affected molecule its own schedule only when the
+    option allows it, and leaves the user's config unchanged.
     """
-    from somd2.config import Config
-    from somd2.runner import Runner
-
-    mols = diphenylethane_mols.clone()
-    mol = mols.molecules("property is_perturbable")[0]
-    mols.update(_linearise(mol, _spanned_angle(mol), 1))
+    mols = _linear_system(diphenylethane_mols)
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        config = Config(
-            platform="cpu",
-            output_directory=tmpdir,
-            linear_torsions=mode,
-            ghost_modifications=False,
-        )
-        runner = Runner(mols, config)
+        config, runner = _runner(mols, tmpdir, linear_torsions=mode)
+        schedule = runner._config.lambda_schedule
 
-        expected = [4.0, 0.0] if mode == "auto" else [4.0, 2.0]
-        assert _torsion_k(runner._config.lambda_schedule, [0.0, 0.5]) == (
-            pytest.approx(expected)
+        assert _torsion_k(schedule, [0.0, 0.5]) == pytest.approx([4.0, 2.0])
+        assert schedule.has_molecule_schedule(0) == (mode == "auto")
+        if mode == "auto":
+            assert _torsion_k(schedule.get_molecule_schedule(0), [0.0, 0.5]) == (
+                pytest.approx([4.0, 0.0])
+            )
+
+        assert not config.lambda_schedule.has_molecule_schedule(0)
+        assert runner._config.as_dict()["linear_torsions"] == (
+            "true" if mode == "auto" else "false"
         )
+
+
+def test_runner_linear_torsions_true_fails(diphenylethane_mols):
+    """
+    A window that can't be applied is an error when the option is forced on.
+    """
+    schedule = LambdaSchedule.standard_morph()
+    schedule.set_equation(
+        stage="morph", lever="torsion_k", equation=schedule.lam() ** 2
+    )
+    mols = _linear_system(diphenylethane_mols)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with pytest.raises(ValueError, match="linear_torsions"):
+            _runner(mols, tmpdir, linear_torsions="true", lambda_schedule=schedule)
+
+
+def test_restart_legacy_linear_torsions():
+    """
+    Restarting a simulation saved before the option existed requires the
+    option's behaviour at the time.
+    """
+    from somd2.runner._base import RunnerBase
+
+    RunnerBase._compare_configs({}, {"linear_torsions": "false"})
+    with pytest.raises(ValueError, match="linear_torsions"):
+        RunnerBase._compare_configs({}, {"linear_torsions": "true"})

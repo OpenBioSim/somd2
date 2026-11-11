@@ -666,12 +666,14 @@ When an angle becomes linear at one end state, e.g. a C=C bond that becomes a
 C≡C bond, the forces from torsions and impropers through it diverge as its
 atoms become collinear, which can crash simulations at intermediate λ. By
 default (`--linear-torsions auto`), SOMD2 detects angles that are linear at
-only one end state and have a non-zero torsion or improper through them, and
-then changes all torsions and impropers over only part of each stage of the
-schedule: the first half when the angles are linear at λ = 1, the second half
-when they are linear at λ = 0, or the middle half when both occur. The angles
+only one end state and have a non-zero torsion or improper through them at the
+other end state. The torsions and impropers of each affected molecule then
+change over only part of each stage of the schedule: the first half when its
+angles are linear at λ = 1, the second half when they are linear at λ = 0, or
+the middle half when both occur. Other molecules are unaffected, and the angles
 are logged. Use `--linear-torsions true` to apply this whenever an angle becomes
-linear, or `false` to disable it.
+linear, or `false` to disable it. Simulations started before this option
+existed must be restarted with `--linear-torsions false`.
 
 <a id="absolute-binding-free-energies"></a>
 

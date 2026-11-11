@@ -482,9 +482,26 @@ def linear_torsions(schedule, start, end):
     def close(a, b):
         return all(abs(x - y) < 1e-8 for x, y in zip(a, b))
 
+    allowed = {str(symbol) for symbol in (lam, initial, final)}
+
     for stage in s.get_stages():
         for lever in ("torsion_k", "torsion_phase"):
-            v = values(s.get_equation(stage=stage, lever=lever))
+            if any(
+                s.has_force_specific_equation(stage, force, lever)
+                for force in s.get_forces()
+            ):
+                raise ValueError(
+                    f"The '{lever}' lever in stage '{stage}' has a force-specific "
+                    "equation, so the torsion window can't be applied."
+                )
+            equation = s.get_equation(stage=stage, lever=lever)
+            if not {str(symbol) for symbol in equation.symbols()} <= allowed:
+                raise ValueError(
+                    f"The '{lever}' lever in stage '{stage}' depends on symbols "
+                    "other than lambda, initial and final, so the torsion window "
+                    "can't be applied."
+                )
+            v = values(equation)
             if close(v, linear):
                 s.set_equation(stage=stage, lever=lever, equation=target)
             elif not (close(v, staged) or close(v, [v[0]] * len(v))):

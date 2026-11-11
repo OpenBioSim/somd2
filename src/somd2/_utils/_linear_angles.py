@@ -38,8 +38,8 @@ def find_linear_angles(mol, require_terms=True, max_angle=_LINEAR_ANGLE):
 
     require_terms : bool
         Whether to only return angles that a non-zero dihedral or improper
-        passes through at either end state, i.e. with three consecutive atoms
-        of the term being the atoms of the angle.
+        passes through at the end state where the angle isn't linear, i.e.
+        with three consecutive atoms of the term being the atoms of the angle.
 
     max_angle : float
         The equilibrium angle, in degrees, at or above which an angle is
@@ -48,9 +48,10 @@ def find_linear_angles(mol, require_terms=True, max_angle=_LINEAR_ANGLE):
     Returns
     -------
 
-    angles : list of ((int, int, int), int)
+    angles : list of ((int, int, int), int, bool)
         The atom indices of each angle, with the central atom in the middle,
-        and the end state at which it is linear.
+        the end state at which it is linear, and whether a non-zero dihedral
+        or improper passes through it at that end state.
     """
     from math import degrees
 
@@ -60,9 +61,15 @@ def find_linear_angles(mol, require_terms=True, max_angle=_LINEAR_ANGLE):
     info = mol.info()
     theta = Symbol("theta")
 
+    def potentials(name):
+        try:
+            return mol.property(name).potentials()
+        except Exception:
+            return []
+
     def theta0s(state):
         result = {}
-        for p in mol.property(f"angle{state}").potentials():
+        for p in potentials(f"angle{state}"):
             i, j, k = (
                 info.atom_idx(a).value() for a in (p.atom0(), p.atom1(), p.atom2())
             )
@@ -73,36 +80,39 @@ def find_linear_angles(mol, require_terms=True, max_angle=_LINEAR_ANGLE):
             result[(min(i, k), j, max(i, k))] = theta0
         return result
 
-    theta0 = [theta0s(0), theta0s(1)]
-
-    angles = []
-    for key in sorted(theta0[0].keys() & theta0[1].keys()):
-        linear0 = theta0[0][key] >= max_angle
-        linear1 = theta0[1][key] >= max_angle
-        if linear0 != linear1:
-            angles.append((key, 0 if linear0 else 1))
-
-    if not require_terms or not angles:
-        return angles
-
-    spanned = set()
-    for state in (0, 1):
+    def spanned(state):
+        result = set()
         for name in ("dihedral", "improper"):
-            try:
-                potentials = mol.property(f"{name}{state}").potentials()
-            except Exception:
-                continue
-            for p in potentials:
+            for p in potentials(f"{name}{state}"):
                 if p.function().is_zero():
                     continue
                 idx = [
                     info.atom_idx(a).value()
                     for a in (p.atom0(), p.atom1(), p.atom2(), p.atom3())
                 ]
-                spanned.add(frozenset(idx[:3]))
-                spanned.add(frozenset(idx[1:]))
+                result.add(frozenset(idx[:3]))
+                result.add(frozenset(idx[1:]))
+        return result
 
-    return [(key, state) for key, state in angles if frozenset(key) in spanned]
+    theta0 = [theta0s(0), theta0s(1)]
+
+    linear = []
+    for key in sorted(theta0[0].keys() & theta0[1].keys()):
+        linear0 = theta0[0][key] >= max_angle
+        linear1 = theta0[1][key] >= max_angle
+        if linear0 != linear1:
+            linear.append((key, 0 if linear0 else 1))
+
+    if not linear:
+        return []
+
+    terms = [spanned(0), spanned(1)]
+
+    return [
+        (key, state, frozenset(key) in terms[state])
+        for key, state in linear
+        if not require_terms or frozenset(key) in terms[1 - state]
+    ]
 
 
 def torsion_window(states):

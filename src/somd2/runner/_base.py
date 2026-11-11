@@ -123,7 +123,12 @@ class RunnerBase:
             msg = "'config' must be of type 'somd2.config.Config'"
             _logger.error(msg)
             raise TypeError(msg)
-        self._config = config
+        # The runner modifies its config, e.g. the lambda schedule, so work on a
+        # copy to keep the user's config unchanged. Sire objects don't support
+        # deepcopy, but the config pickles, as for spawned worker processes.
+        import pickle as _pickle
+
+        self._config = _pickle.loads(_pickle.dumps(config))
         self._config._extra_args = {}
 
         # Create the output directory and configure the logger now that the
@@ -612,21 +617,62 @@ class RunnerBase:
         the 'linear_torsions' option.
         """
         mode = self._config.linear_torsions
-        if mode == "false" or self._config._lambda_schedule_name in (
-            "annihilate",
-            "decouple",
-        ):
+        self._config._linear_torsions_applied = False
+
+        if mode == "false":
+            return
+        if self._config._lambda_schedule_name in ("annihilate", "decouple"):
+            if mode == "true":
+                _logger.warning(
+                    "'linear_torsions' is ignored for the "
+                    f"'{self._config._lambda_schedule_name}' lambda schedule."
+                )
             return
 
         from .._utils._linear_angles import find_linear_angles, torsion_window
         from .._utils._schedules import linear_torsions
 
-        found = []
-        for mol in self._system["property is_perturbable"].molecules():
-            for angle, state in find_linear_angles(mol, require_terms=mode == "auto"):
-                found.append((mol.number().value(), angle, state))
+        schedule = self._config._lambda_schedule
+        perturbable = self._system.molecules()["perturbable"].molecules()
 
-        if not found:
+        windows = {}
+        for idx, mol in enumerate(perturbable):
+            found = find_linear_angles(mol, require_terms=mode == "auto")
+            if not found:
+                continue
+
+            for angle, state, singular in found:
+                if singular:
+                    _logger.warning(
+                        f"A non-zero torsion or improper passes through angle "
+                        f"{'-'.join(str(i) for i in angle)} of perturbable molecule "
+                        f"{idx} at {_lam_sym} = {state}, where the angle is linear. "
+                        "The lambda schedule can't prevent its force diverging."
+                    )
+
+            start, end = torsion_window({state for _, state, _ in found})
+            base = (
+                schedule.get_molecule_schedule(idx)
+                if schedule.has_molecule_schedule(idx)
+                else schedule
+            )
+            try:
+                mol_schedule = linear_torsions(base, start, end)
+            except ValueError as e:
+                msg = f"Unable to apply 'linear_torsions' to perturbable molecule {idx}: {e}"
+                if mode == "true":
+                    _logger.error(msg)
+                    raise ValueError(msg)
+                _logger.warning(msg)
+                continue
+
+            for other in range(len(perturbable)):
+                if mol_schedule.has_molecule_schedule(other):
+                    mol_schedule.remove_molecule_schedule(other)
+
+            windows[idx] = (mol_schedule, start, end, found)
+
+        if not windows:
             if mode == "true":
                 _logger.warning(
                     "'linear_torsions' is enabled, but no angle of a perturbable "
@@ -634,24 +680,20 @@ class RunnerBase:
                 )
             return
 
-        start, end = torsion_window({state for _, _, state in found})
-        try:
-            schedule = linear_torsions(self._config._lambda_schedule, start, end)
-        except ValueError as e:
-            _logger.warning(f"Unable to apply 'linear_torsions': {e}")
-            return
-        self._config._lambda_schedule = schedule
+        for idx, (mol_schedule, start, end, found) in windows.items():
+            schedule.set_molecule_schedule(idx, mol_schedule)
+            angles = ", ".join(
+                f"{'-'.join(str(i) for i in angle)} ({_lam_sym} = {state})"
+                for angle, state, _ in found
+            )
+            _logger.info(
+                f"Angles of perturbable molecule {idx} become linear at one end "
+                f"state (atom indices within the molecule): {angles}. Its torsions "
+                f"and impropers will change over the fraction [{start}, {end}] of "
+                "each stage in which they change."
+            )
 
-        angles = ", ".join(
-            f"molecule {num} atoms {'-'.join(str(i) for i in angle)} "
-            f"({_lam_sym} = {state})"
-            for num, angle, state in found
-        )
-        _logger.info(
-            f"Angles become linear at one end state: {angles}. Torsions and "
-            f"impropers will change over the fraction [{start}, {end}] of each "
-            "stage in which they change."
-        )
+        self._config._linear_torsions_applied = True
 
     def _set_schedule(self, pert_idxs, ion_indices):
         """
@@ -2451,6 +2493,14 @@ class RunnerBase:
             raise TypeError("'config2' must be of type 'dict'")
 
         from sire.units import GeneralUnit as _GeneralUnit
+
+        for key, legacy in _Config._restart_legacy_values.items():
+            if key not in config1 and config2.get(key, legacy) != legacy:
+                raise ValueError(
+                    f"{key} is '{config2[key]}', but the simulation was started "
+                    f"before this option existed, when it was '{legacy}'. Set "
+                    f"{key} to '{legacy}' to restart it."
+                )
 
         allowed_diffs = _Config._restart_allowed_diffs
         for key in config1.keys():
