@@ -254,17 +254,17 @@ class Runner(_RunnerBase):
             # If the number of lambda windows is greater than the number of threads, then
             # the number of threads per worker is set to 1.
             if self._config.num_lambda > self._config.max_threads:
-                self.max_workers = self._config.max_threads
+                self._max_workers = self._config.max_threads
                 threads_per_worker = 1
             # Otherwise, divide the number of threads equally between workers.
             else:
-                self.max_workers = self._config.num_lambda
+                self._max_workers = self._config.num_lambda
                 threads_per_worker = self._config.max_threads // self._config.num_lambda
             self._config._extra_args["threads"] = threads_per_worker
 
         # GPU platform.
         elif self._is_gpu:
-            self.max_workers = len(self._gpu_pool)
+            self._max_workers = len(self._gpu_pool)
 
         # All other platforms.
         else:
@@ -275,9 +275,11 @@ class Runner(_RunnerBase):
         import concurrent.futures as _futures
         import multiprocessing as _mp
 
-        success = True
+        failed = []
+        interrupted = False
+        total_time = 0
         with _futures.ProcessPoolExecutor(
-            max_workers=self.max_workers, mp_context=_mp.get_context("spawn")
+            max_workers=self._max_workers, mp_context=_mp.get_context("spawn")
         ) as executor:
             jobs = {}
             for index, lambda_value in enumerate(self._lambda_values):
@@ -292,34 +294,47 @@ class Runner(_RunnerBase):
                             f"Exception raised for {_lam_sym} = {lambda_value}: {e}"
                         )
                         success = False
+                    if success:
+                        total_time += time.to("ns")
+                    else:
+                        failed.append(lambda_value)
 
             # Kill all current and future jobs if keyboard interrupt.
             except KeyboardInterrupt:
                 _logger.error("Cancelling job...")
                 for pid in executor._processes:
                     executor._processes[pid].terminate()
-                success = False
+                interrupted = True
 
-        if success:
-            # Record the end time.
-            end = _timer()
+        if interrupted:
+            raise RuntimeError("Simulation was cancelled.")
 
-            # Work how many fractional days the simulation took.
-            days = (end - start) / 86400
-
-            # Calculate the speed in nanoseconds per day.
-            speed = time.to("ns") / days
-
-            # Log the speed.
-            _logger.info(f"Overall performance: {speed:.2f} ns day-1")
-
-            # Log the run time in minutes.
-            _logger.success(
-                f"Simulation finished. Run time: {(end - start) / 60:.2f} minutes"
+        if failed:
+            failed = ", ".join(str(lam) for lam in sorted(failed))
+            raise RuntimeError(
+                f"Failed for {_lam_sym} = {failed}. These windows can be re-run "
+                "using '--lambda-values' with '--restart'."
             )
 
-            # Cleanup backup files.
-            self._cleanup()
+        # Record the end time.
+        end = _timer()
+
+        # Work how many fractional days the simulation took.
+        days = (end - start) / 86400
+
+        # Calculate the speed in nanoseconds per day, summed over all windows.
+        speed = total_time / days
+
+        # Log the speed.
+        _logger.info(f"Overall performance: {speed:.2f} ns day-1")
+
+        # Log the run time in minutes.
+        _logger.success(
+            f"Simulation finished. Run time: {(end - start) / 60:.2f} minutes"
+        )
+
+        # Cleanup backup files.
+        self._cleanup()
 
     def _check_restart(self):
         """
