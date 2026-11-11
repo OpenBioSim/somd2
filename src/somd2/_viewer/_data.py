@@ -1223,9 +1223,28 @@ class Simulation:
                 schedule = _resolve_schedule(config)
             df = schedule.get_lever_values(num_lambda=101)
             levers = {col: df[col].tolist() for col in df.columns if col != "stage"}
+            label = "custom" if _is_custom_schedule(name) else name
+            description = str(schedule)
+
+            windows = _torsion_windows(config)
+            if windows:
+                from .._utils._schedules import windowed_torsions
+
+                for idx, start, end in windows:
+                    with sire_lock:
+                        windowed = windowed_torsions(schedule, start, end)
+                    values = windowed.get_lever_values(num_lambda=101)
+                    for lever in ("torsion_k", "torsion_phase"):
+                        if lever in values.columns:
+                            levers[f"{lever} (molecule {idx})"] = values[lever].tolist()
+                label += " + torsion window"
+                description += "\nTorsion windows: " + ", ".join(
+                    f"molecule {idx} [{start}, {end}]" for idx, start, end in windows
+                )
+
             return {
-                "name": "custom" if _is_custom_schedule(name) else name,
-                "description": str(schedule),
+                "name": label,
+                "description": description,
                 "lambda": df.index.tolist(),
                 "stage": df["stage"].tolist() if "stage" in df.columns else None,
                 "levers": levers,
@@ -1239,6 +1258,7 @@ class Simulation:
                 "softcore_form",
                 "beutler_fix_epsilon",
                 "restraints",
+                "torsion_windows",
             )
         )
         try:
@@ -1989,6 +2009,20 @@ def _is_custom_schedule(value):
     Whether a config's λ schedule is custom, i.e. stored as hex, not a name.
     """
     return isinstance(value, str) and len(value) >= 64
+
+
+def _torsion_windows(config):
+    """
+    Return the torsion windows a runner recorded in a config, as a list of
+    (perturbable molecule index, start, end).
+    """
+    windows = []
+    for entry in str(config.get("torsion_windows") or "").split(";"):
+        if entry:
+            idx, window = entry.split(":")
+            start, end = window.split("-")
+            windows.append((int(idx), float(start), float(end)))
+    return windows
 
 
 def _resolve_schedule(config):
