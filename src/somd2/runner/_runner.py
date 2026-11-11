@@ -252,21 +252,21 @@ class Runner(_RunnerBase):
             # If the number of lambda windows is greater than the number of threads, then
             # the number of threads per worker is set to 1.
             if self._config.num_lambda > self._config.max_threads:
-                self.max_workers = self._config.max_threads
+                self._max_workers = self._config.max_threads
                 threads_per_worker = 1
             # Otherwise, divide the number of threads equally between workers.
             else:
-                self.max_workers = self._config.num_lambda
+                self._max_workers = self._config.num_lambda
                 threads_per_worker = self._config.max_threads // self._config.num_lambda
             self._config._extra_args["threads"] = threads_per_worker
 
         # GPU platform.
         elif self._is_gpu:
-            self.max_workers = len(self._gpu_pool)
+            self._max_workers = len(self._gpu_pool)
 
         # All other platforms.
         else:
-            self.max_workers = 1
+            self._max_workers = 1
 
         self._add_boresch_restraint(device=self._gpu_pool[0] if self._is_gpu else None)
 
@@ -277,7 +277,7 @@ class Runner(_RunnerBase):
         interrupted = False
         total_time = 0
         with _futures.ProcessPoolExecutor(
-            max_workers=self.max_workers, mp_context=_mp.get_context("spawn")
+            max_workers=self._max_workers, mp_context=_mp.get_context("spawn")
         ) as executor:
             jobs = {}
             for index, lambda_value in enumerate(self._lambda_values):
