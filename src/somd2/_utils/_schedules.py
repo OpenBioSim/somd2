@@ -23,7 +23,7 @@ __all__ = [
     "abfe_alchemical_ion",
     "annihilate",
     "decouple",
-    "linear_torsions",
+    "windowed_torsions",
     "ring_break_morph",
     "reverse_ring_break_morph",
 ]
@@ -431,7 +431,7 @@ def reverse_ring_break_morph():
     return ring_break_morph().reverse()
 
 
-def linear_torsions(schedule, start, end):
+def windowed_torsions(schedule, start, end):
     """
     Return a copy of a lambda schedule in which the torsion levers change over
     the fraction [start, end] of each stage where they change linearly, and

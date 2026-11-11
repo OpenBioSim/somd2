@@ -609,27 +609,27 @@ class RunnerBase:
 
         return ion_indices
 
-    def _apply_linear_torsions(self):
+    def _apply_torsion_window(self):
         """
         Change torsions over part of each morph stage when an angle of a
         perturbable molecule becomes linear at one end state, according to
-        the 'linear_torsions' option.
+        the 'torsion_window' option.
         """
-        mode = self._config.linear_torsions
-        self._config._linear_torsion_windows = ""
+        mode = self._config.torsion_window
+        self._config._torsion_windows = ""
 
         if mode == "false":
             return
         if self._config._lambda_schedule_name in ("annihilate", "decouple"):
             if mode == "true":
                 _logger.warning(
-                    "'linear_torsions' is ignored for the "
+                    "'torsion_window' is ignored for the "
                     f"'{self._config._lambda_schedule_name}' lambda schedule."
                 )
             return
 
-        from .._utils._linear_angles import find_linear_angles, torsion_window
-        from .._utils._schedules import linear_torsions
+        from .._utils._linear_angles import find_linear_angles, torsion_window_bounds
+        from .._utils._schedules import windowed_torsions
 
         schedule = self._config._lambda_schedule
         perturbable = self._system.molecules()["perturbable"].molecules()
@@ -651,7 +651,7 @@ class RunnerBase:
             if not found:
                 continue
 
-            start, end = torsion_window({state for _, state in found})
+            start, end = torsion_window_bounds({state for _, state in found})
             base = (
                 schedule.get_molecule_schedule(idx)
                 if schedule.has_molecule_schedule(idx)
@@ -662,9 +662,9 @@ class RunnerBase:
                     base.remove_molecule_schedule(other)
 
             try:
-                mol_schedule = linear_torsions(base, start, end)
+                mol_schedule = windowed_torsions(base, start, end)
             except ValueError as e:
-                msg = f"Unable to apply 'linear_torsions' to perturbable molecule {idx}: {e}"
+                msg = f"Unable to apply 'torsion_window' to perturbable molecule {idx}: {e}"
                 if mode == "true":
                     _logger.error(msg)
                     raise ValueError(msg)
@@ -680,7 +680,7 @@ class RunnerBase:
         if not windows:
             if mode == "true":
                 _logger.warning(
-                    "'linear_torsions' is enabled, but no torsions of a perturbable "
+                    "'torsion_window' is enabled, but no torsions of a perturbable "
                     "molecule with an angle that becomes linear change, so the "
                     "lambda schedule is unchanged."
                 )
@@ -705,7 +705,7 @@ class RunnerBase:
                     "linear, so check this perturbation for instabilities."
                 )
 
-        self._config._linear_torsion_windows = ";".join(
+        self._config._torsion_windows = ";".join(
             f"{idx}:{start}-{end}" for idx, (_, start, end, _) in windows.items()
         )
 
@@ -791,7 +791,7 @@ class RunnerBase:
                 for pert_idx in ion_indices:
                     schedule.set_molecule_schedule(pert_idx, ion_schedule)
 
-        self._apply_linear_torsions()
+        self._apply_torsion_window()
 
         # Set the lambda values.
         if self._config.lambda_values:
@@ -2508,13 +2508,13 @@ class RunnerBase:
 
         from sire.units import GeneralUnit as _GeneralUnit
 
-        legacy = _Config._restart_legacy_values["linear_torsion_windows"]
-        windows = config2.get("linear_torsion_windows", legacy)
-        if "linear_torsion_windows" not in config1 and windows != legacy:
+        legacy = _Config._restart_legacy_values["torsion_windows"]
+        windows = config2.get("torsion_windows", legacy)
+        if "torsion_windows" not in config1 and windows != legacy:
             raise ValueError(
                 "Angles that become linear were detected, so torsion windows "
                 f"would be applied ({windows}), but the simulation was started "
-                "before 'linear_torsions' existed. Set 'linear_torsions' to "
+                "before 'torsion_window' existed. Set 'torsion_window' to "
                 "'false' to restart it."
             )
 

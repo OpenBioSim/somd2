@@ -75,7 +75,7 @@ class Config:
         ],
         "log_level": [level.lower() for level in _logger._core.levels],
         "softcore_form": ["auto", "zacharias", "taylor", "beutler"],
-        "linear_torsions": ["auto", "true", "false"],
+        "torsion_window": ["auto", "true", "false"],
         "precision": ["single", "mixed", "double"],
     }
 
@@ -131,13 +131,13 @@ class Config:
             "restraint_search_frequency",
             "gcmc_batch_size",
             "gcmc_num_attempts",
-            "linear_torsions",
+            "torsion_window",
         ]
     )
 
     # Values recorded by runners that didn't exist when a simulation was
     # started, which restarts must match when the saved config lacks them.
-    _restart_legacy_values = {"linear_torsion_windows": ""}
+    _restart_legacy_values = {"torsion_windows": ""}
 
     def __init__(
         self,
@@ -164,7 +164,7 @@ class Config:
         lambda_energy=None,
         lambda_schedule="standard_morph",
         charge_scale_factor=0.2,
-        linear_torsions="auto",
+        torsion_window="auto",
         swap_end_states=False,
         shift_coulomb="1 A",
         shift_delta="1.5 A",
@@ -339,7 +339,7 @@ class Config:
         charge_scale_factor: float
             Factor by which to scale charges for charge scaled morph.
 
-        linear_torsions: str
+        torsion_window: str
             Whether to change torsions and impropers over only part of each
             morph stage, so that those through an angle that becomes linear at
             one end state are at that end state's values while the angle is
@@ -844,7 +844,7 @@ class Config:
         self.lambda_values = lambda_values
         self.lambda_energy = lambda_energy
         self.charge_scale_factor = charge_scale_factor
-        self.linear_torsions = linear_torsions
+        self.torsion_window = torsion_window
         self.swap_end_states = swap_end_states
         self.shift_coulomb = shift_coulomb
         self.shift_delta = shift_delta
@@ -982,7 +982,7 @@ class Config:
         d = _yaml_to_dict(path)
 
         # Recorded by a runner, rather than set by the user.
-        d.pop("linear_torsion_windows", None)
+        d.pop("torsion_windows", None)
 
         return Config(**d)
 
@@ -1581,22 +1581,22 @@ class Config:
             )
 
     @property
-    def linear_torsions(self):
-        return self._linear_torsions
+    def torsion_window(self):
+        return self._torsion_window
 
-    @linear_torsions.setter
-    def linear_torsions(self, linear_torsions):
-        if isinstance(linear_torsions, bool):
-            linear_torsions = str(linear_torsions)
-        if not isinstance(linear_torsions, str):
-            raise TypeError("'linear_torsions' must be of type 'str' or 'bool'")
-        linear_torsions = linear_torsions.lower().replace(" ", "")
-        if linear_torsions not in self._choices["linear_torsions"]:
+    @torsion_window.setter
+    def torsion_window(self, torsion_window):
+        if isinstance(torsion_window, bool):
+            torsion_window = str(torsion_window)
+        if not isinstance(torsion_window, str):
+            raise TypeError("'torsion_window' must be of type 'str' or 'bool'")
+        torsion_window = torsion_window.lower().replace(" ", "")
+        if torsion_window not in self._choices["torsion_window"]:
             raise ValueError(
-                "'linear_torsions' not recognised. Valid options are: "
-                f"{', '.join(self._choices['linear_torsions'])}"
+                "'torsion_window' not recognised. Valid options are: "
+                f"{', '.join(self._choices['torsion_window'])}"
             )
-        self._linear_torsions = linear_torsions
+        self._torsion_window = torsion_window
 
     @property
     def swap_end_states(self):

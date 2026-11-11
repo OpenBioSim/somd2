@@ -19,7 +19,7 @@
 # along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
-__all__ = ["find_linear_angles", "torsion_window"]
+__all__ = ["find_linear_angles", "torsion_window_bounds"]
 
 # Angles with an equilibrium value of at least this many degrees are linear.
 _LINEAR_ANGLE = 170.0
@@ -110,7 +110,7 @@ def find_linear_angles(mol, max_angle=_LINEAR_ANGLE):
     ]
 
 
-def torsion_window(states):
+def torsion_window_bounds(states):
     """
     Return the fraction of each morph stage over which torsions should change,
     given the end states at which angles become linear.

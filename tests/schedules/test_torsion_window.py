@@ -6,8 +6,8 @@ from sire.cas import LambdaSchedule
 from sire.legacy.CAS import Symbol
 from sire.legacy.MM import AmberAngle, FourAtomFunctions, ThreeAtomFunctions
 
-from somd2._utils._linear_angles import find_linear_angles, torsion_window
-from somd2._utils._schedules import linear_torsions, ring_break_morph
+from somd2._utils._linear_angles import find_linear_angles, torsion_window_bounds
+from somd2._utils._schedules import ring_break_morph, windowed_torsions
 
 
 def _torsion_k(schedule, lambda_values):
@@ -22,56 +22,56 @@ def _torsion_k(schedule, lambda_values):
         ((0.25, 0.75), [4.0, 4.0, 2.0, 0.0, 0.0]),
     ],
 )
-def test_linear_torsions_window(window, expected):
+def test_windowed_torsions_window(window, expected):
     """
     Torsions change over the window only, and other levers are unchanged.
     """
-    schedule = linear_torsions(LambdaSchedule.standard_morph(), *window)
+    schedule = windowed_torsions(LambdaSchedule.standard_morph(), *window)
     assert _torsion_k(schedule, [0.0, 0.25, 0.5, 0.75, 1.0]) == pytest.approx(expected)
     assert schedule.morph("*", "angle_size", 2.0, 4.0, 0.25) == pytest.approx(2.5)
 
 
-def test_linear_torsions_stages():
+def test_windowed_torsions_stages():
     """
     The window applies within each stage in which the torsions change linearly.
     """
-    schedule = linear_torsions(ring_break_morph(), 0.0, 0.5)
+    schedule = windowed_torsions(ring_break_morph(), 0.0, 0.5)
     values = _torsion_k(schedule, [0.2, 0.4, 0.5, 0.6])
     assert values == pytest.approx([4.0, 2.592, 0.0, 0.0])
 
 
-def test_linear_torsions_smoothstep():
+def test_windowed_torsions_smoothstep():
     """
     Torsions follow a smoothstep within the window.
     """
-    schedule = linear_torsions(LambdaSchedule.standard_morph(), 0.0, 0.5)
+    schedule = windowed_torsions(LambdaSchedule.standard_morph(), 0.0, 0.5)
     values = _torsion_k(schedule, [0.125, 0.375])
     assert values == pytest.approx([3.375, 0.625])
 
 
-def test_linear_torsions_idempotent():
-    schedule = linear_torsions(LambdaSchedule.standard_morph(), 0.0, 0.5)
-    assert linear_torsions(schedule, 0.0, 0.5) == schedule
+def test_windowed_torsions_idempotent():
+    schedule = windowed_torsions(LambdaSchedule.standard_morph(), 0.0, 0.5)
+    assert windowed_torsions(schedule, 0.0, 0.5) == schedule
 
 
-def test_linear_torsions_invalid():
+def test_windowed_torsions_invalid():
     with pytest.raises(ValueError):
-        linear_torsions(LambdaSchedule.standard_morph(), 0.5, 0.5)
+        windowed_torsions(LambdaSchedule.standard_morph(), 0.5, 0.5)
 
     schedule = LambdaSchedule.standard_morph()
     schedule.set_equation(
         stage="morph", lever="torsion_k", equation=schedule.lam() ** 2
     )
     with pytest.raises(ValueError):
-        linear_torsions(schedule, 0.0, 0.5)
+        windowed_torsions(schedule, 0.0, 0.5)
 
 
-def test_torsion_window():
-    assert torsion_window({1}) == (0.0, 0.5)
-    assert torsion_window({0}) == (0.5, 1.0)
-    assert torsion_window({0, 1}) == (0.25, 0.75)
+def test_torsion_window_bounds():
+    assert torsion_window_bounds({1}) == (0.0, 0.5)
+    assert torsion_window_bounds({0}) == (0.5, 1.0)
+    assert torsion_window_bounds({0, 1}) == (0.25, 0.75)
     with pytest.raises(ValueError):
-        torsion_window(set())
+        torsion_window_bounds(set())
 
 
 def _linearise(mol, angle, state, remove_terms=()):
@@ -162,13 +162,13 @@ def test_find_linear_angles_no_angles(diphenylethane_mols):
     assert find_linear_angles(mol) == []
 
 
-def test_linear_torsions_unsupported():
+def test_windowed_torsions_unsupported():
     schedule = LambdaSchedule.standard_morph()
     schedule.set_equation(
         stage="morph", force="torsion", lever="torsion_k", equation=schedule.final()
     )
     with pytest.raises(ValueError, match="force-specific"):
-        linear_torsions(schedule, 0.0, 0.5)
+        windowed_torsions(schedule, 0.0, 0.5)
 
     schedule = LambdaSchedule.standard_morph()
     schedule.set_constant("scale", 0.5)
@@ -178,7 +178,7 @@ def test_linear_torsions_unsupported():
         equation=schedule.get_constant_symbol("scale") * schedule.final(),
     )
     with pytest.raises(ValueError, match="symbols"):
-        linear_torsions(schedule, 0.0, 0.5)
+        windowed_torsions(schedule, 0.0, 0.5)
 
 
 def _runner(mols, tmpdir, **kwargs):
@@ -192,7 +192,7 @@ def _runner(mols, tmpdir, **kwargs):
 
 
 @pytest.mark.parametrize("mode", ["auto", "false"])
-def test_runner_linear_torsions(diphenylethane_mols, mode):
+def test_runner_torsion_window(diphenylethane_mols, mode):
     """
     The runner gives the affected molecule its own schedule only when the
     option allows it, records the window, and leaves the user's config
@@ -203,7 +203,7 @@ def test_runner_linear_torsions(diphenylethane_mols, mode):
     mols = _linear_system(diphenylethane_mols)
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        config, runner = _runner(mols, tmpdir, linear_torsions=mode)
+        config, runner = _runner(mols, tmpdir, torsion_window=mode)
         schedule = runner._config.lambda_schedule
 
         assert _torsion_k(schedule, [0.0, 0.5]) == pytest.approx([4.0, 2.0])
@@ -216,16 +216,16 @@ def test_runner_linear_torsions(diphenylethane_mols, mode):
         assert not config.lambda_schedule.has_molecule_schedule(0)
 
         d = runner._config.as_dict()
-        assert d["linear_torsions"] == mode
-        assert d["linear_torsion_windows"] == ("0:0.0-0.5" if mode == "auto" else "")
+        assert d["torsion_window"] == mode
+        assert d["torsion_windows"] == ("0:0.0-0.5" if mode == "auto" else "")
 
         from somd2.io import dict_to_yaml
 
         dict_to_yaml(d, "saved.yaml", tmpdir)
-        assert Config.from_yaml(f"{tmpdir}/saved.yaml").linear_torsions == mode
+        assert Config.from_yaml(f"{tmpdir}/saved.yaml").torsion_window == mode
 
 
-def test_runner_linear_torsions_constant(diphenylethane_mols):
+def test_runner_torsion_window_constant(diphenylethane_mols):
     """
     No window is applied when the schedule doesn't change the torsions.
     """
@@ -237,10 +237,10 @@ def test_runner_linear_torsions_constant(diphenylethane_mols):
     with tempfile.TemporaryDirectory() as tmpdir:
         _, runner = _runner(mols, tmpdir, lambda_schedule=schedule)
         assert not runner._config.lambda_schedule.has_molecule_schedule(0)
-        assert runner._config.as_dict()["linear_torsion_windows"] == ""
+        assert runner._config.as_dict()["torsion_windows"] == ""
 
 
-def test_runner_linear_torsions_true_fails(diphenylethane_mols):
+def test_runner_torsion_window_true_fails(diphenylethane_mols):
     """
     A window that can't be applied is an error when the option is forced on.
     """
@@ -251,23 +251,23 @@ def test_runner_linear_torsions_true_fails(diphenylethane_mols):
     mols = _linear_system(diphenylethane_mols)
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        with pytest.raises(ValueError, match="linear_torsions"):
-            _runner(mols, tmpdir, linear_torsions="true", lambda_schedule=schedule)
+        with pytest.raises(ValueError, match="torsion_window"):
+            _runner(mols, tmpdir, torsion_window="true", lambda_schedule=schedule)
 
 
-def test_restart_legacy_linear_torsions():
+def test_restart_legacy_torsion_window():
     """
     A simulation saved before the option existed can only be restarted without
     torsion windows.
     """
     from somd2.runner._base import RunnerBase
 
-    RunnerBase._compare_configs({}, {"linear_torsion_windows": ""})
-    with pytest.raises(ValueError, match="linear_torsions"):
-        RunnerBase._compare_configs({}, {"linear_torsion_windows": "0:0.0-0.5"})
+    RunnerBase._compare_configs({}, {"torsion_windows": ""})
+    with pytest.raises(ValueError, match="torsion_window"):
+        RunnerBase._compare_configs({}, {"torsion_windows": "0:0.0-0.5"})
 
 
-def test_runner_linear_torsions_both_ends(diphenylethane_mols):
+def test_runner_torsion_window_both_ends(diphenylethane_mols):
     """
     A molecule with angles that become linear at both end states gets the
     middle window and a warning.
@@ -291,7 +291,7 @@ def test_runner_linear_torsions_both_ends(diphenylethane_mols):
 
     with tempfile.TemporaryDirectory() as tmpdir:
         _, runner = _runner(mols, tmpdir)
-        assert runner._config.as_dict()["linear_torsion_windows"] == "0:0.25-0.75"
+        assert runner._config.as_dict()["torsion_windows"] == "0:0.25-0.75"
         log = (runner._config.output_directory / runner._config.log_file).read_text()
         _logger.remove()
 
