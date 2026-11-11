@@ -697,6 +697,13 @@ class RunnerBase:
                 f"and impropers will change over the fraction [{start}, {end}] of "
                 "each stage in which they change."
             )
+            if len({state for _, state in found}) > 1:
+                _logger.warning(
+                    f"Angles of perturbable molecule {idx} become linear at both end "
+                    "states, so its torsions change over the middle of each stage. "
+                    "This leaves them less margin before the angles are near "
+                    "linear, so check this perturbation for instabilities."
+                )
 
         self._config._linear_torsion_windows = ";".join(
             f"{idx}:{start}-{end}" for idx, (_, start, end, _) in windows.items()

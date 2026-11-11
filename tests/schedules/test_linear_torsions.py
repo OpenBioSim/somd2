@@ -265,3 +265,34 @@ def test_restart_legacy_linear_torsions():
     RunnerBase._compare_configs({}, {"linear_torsion_windows": ""})
     with pytest.raises(ValueError, match="linear_torsions"):
         RunnerBase._compare_configs({}, {"linear_torsion_windows": "0:0.0-0.5"})
+
+
+def test_runner_linear_torsions_both_ends(diphenylethane_mols):
+    """
+    A molecule with angles that become linear at both end states gets the
+    middle window and a warning.
+    """
+    from somd2 import _logger
+
+    mols = diphenylethane_mols.clone()
+    mol = mols.molecules("property is_perturbable")[0]
+    info = mol.info()
+
+    angles = []
+    for p in mol.property("dihedral0").potentials():
+        if p.function().is_zero():
+            continue
+        idx = tuple(info.atom_idx(a).value() for a in (p.atom0(), p.atom1(), p.atom2()))
+        if all(set(idx) != set(a) for a in angles):
+            angles.append(idx)
+    mol = _linearise(mol, angles[0], 1)
+    mol = _linearise(mol, angles[1], 0)
+    mols.update(mol)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        _, runner = _runner(mols, tmpdir)
+        assert runner._config.as_dict()["linear_torsion_windows"] == "0:0.25-0.75"
+        log = (runner._config.output_directory / runner._config.log_file).read_text()
+        _logger.remove()
+
+    assert "both end states" in log
