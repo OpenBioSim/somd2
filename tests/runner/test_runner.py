@@ -9,15 +9,6 @@ from somd2.config import Config
 from somd2.io import parquet_to_dataframe
 
 
-class _FailingRunner(Runner):
-    """A runner whose first window fails. Module level so it can be pickled."""
-
-    def _run(self, system, index, **kwargs):
-        if index == 0:
-            raise RuntimeError("Forced failure")
-        return super()._run(system, index, **kwargs)
-
-
 def test_runtime_remainder(ethane_methanol):
     """
     Validate that a runtime that isn't a multiple of the checkpoint frequency
@@ -50,11 +41,31 @@ def test_runtime_remainder(ethane_methanol):
             assert checkpoint_state["time_ps"].item() == pytest.approx(0.020)
 
 
-def test_failed_window(ethane_methanol):
+def test_failed_window(ethane_methanol, monkeypatch):
     """
     Validate that a failed window doesn't stop the others from running, and
     that the run raises an error naming the failed window.
     """
+    import concurrent.futures
+
+    # Run windows in threads so that the patched _run is used.
+    monkeypatch.setattr(
+        concurrent.futures,
+        "ProcessPoolExecutor",
+        lambda max_workers, mp_context: concurrent.futures.ThreadPoolExecutor(
+            max_workers=max_workers
+        ),
+    )
+
+    run = Runner._run
+
+    def failing_run(self, system, index, **kwargs):
+        if index == 0:
+            raise RuntimeError("Forced failure")
+        return run(self, system, index, **kwargs)
+
+    monkeypatch.setattr(Runner, "_run", failing_run)
+
     with tempfile.TemporaryDirectory() as tmpdir:
         config = {
             "runtime": "4fs",
@@ -68,7 +79,7 @@ def test_failed_window(ethane_methanol):
             "num_lambda": 2,
         }
 
-        runner = _FailingRunner(ethane_methanol, Config(**config))
+        runner = Runner(ethane_methanol, Config(**config))
         with pytest.raises(RuntimeError, match="Failed for λ = 0.0"):
             runner.run()
 
