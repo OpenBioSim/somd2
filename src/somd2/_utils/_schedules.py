@@ -438,7 +438,9 @@ def linear_torsions(schedule, start, end):
     are held at their initial and final values either side of it. This keeps
     torsions and impropers through an angle that becomes linear at one end
     state at that end state's values while the angle is near linear, since
-    their forces diverge as its atoms become collinear.
+    their forces diverge as its atoms become collinear. Within the window they
+    follow a smoothstep, which spreads out the costly change to and from zero
+    at its ends.
 
     Parameters
     ----------
@@ -467,7 +469,8 @@ def linear_torsions(schedule, start, end):
     s = schedule.clone()
     lam, initial, final = s.lam(), s.initial(), s.final()
 
-    f = Min(Expression(1), Max(Expression(0), (lam - start) * (1 / (end - start))))
+    x = Min(Expression(1), Max(Expression(0), (lam - start) * (1 / (end - start))))
+    f = x * x * (3 - 2 * x)
     target = (1 - f) * initial + f * final
 
     def values(equation):

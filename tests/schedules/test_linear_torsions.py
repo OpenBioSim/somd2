@@ -37,7 +37,16 @@ def test_linear_torsions_stages():
     """
     schedule = linear_torsions(ring_break_morph(), 0.0, 0.5)
     values = _torsion_k(schedule, [0.2, 0.4, 0.5, 0.6])
-    assert values == pytest.approx([4.0, 2.4, 0.0, 0.0])
+    assert values == pytest.approx([4.0, 2.592, 0.0, 0.0])
+
+
+def test_linear_torsions_smoothstep():
+    """
+    Torsions follow a smoothstep within the window.
+    """
+    schedule = linear_torsions(LambdaSchedule.standard_morph(), 0.0, 0.5)
+    values = _torsion_k(schedule, [0.125, 0.375])
+    assert values == pytest.approx([3.375, 0.625])
 
 
 def test_linear_torsions_idempotent():
