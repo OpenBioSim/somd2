@@ -135,20 +135,16 @@ def test_find_linear_angles(diphenylethane_mols):
     angle = _spanned_angle(mol)
     key = (min(angle[0], angle[2]), angle[1], max(angle[0], angle[2]))
 
-    # Terms through the angle at the linear end state are flagged.
-    assert find_linear_angles(_linearise(mol, angle, 1)) == [(key, 1, True)]
+    assert find_linear_angles(_linearise(mol, angle, 1)) == [(key, 1, True, True)]
 
     linear = _linearise(mol, angle, 1, remove_terms=(1,))
-    assert find_linear_angles(linear) == [(key, 1, False)]
+    assert find_linear_angles(linear) == [(key, 1, True, False)]
 
-    # Terms only at the linear end state don't trigger detection.
     linear = _linearise(mol, angle, 1, remove_terms=(0,))
-    assert find_linear_angles(linear) == []
-    assert find_linear_angles(linear, require_terms=False) == [(key, 1, True)]
+    assert find_linear_angles(linear) == [(key, 1, False, True)]
 
     bare = _linearise(mol, angle, 0, remove_terms=(0, 1))
-    assert find_linear_angles(bare) == []
-    assert find_linear_angles(bare, require_terms=False) == [(key, 0, False)]
+    assert find_linear_angles(bare) == [(key, 0, False, False)]
 
 
 def test_find_linear_angles_no_angles(diphenylethane_mols):
@@ -190,8 +186,11 @@ def _runner(mols, tmpdir, **kwargs):
 def test_runner_linear_torsions(diphenylethane_mols, mode):
     """
     The runner gives the affected molecule its own schedule only when the
-    option allows it, and leaves the user's config unchanged.
+    option allows it, records the window, and leaves the user's config
+    unchanged.
     """
+    from somd2.config import Config
+
     mols = _linear_system(diphenylethane_mols)
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -206,9 +205,30 @@ def test_runner_linear_torsions(diphenylethane_mols, mode):
             )
 
         assert not config.lambda_schedule.has_molecule_schedule(0)
-        assert runner._config.as_dict()["linear_torsions"] == (
-            "true" if mode == "auto" else "false"
-        )
+
+        d = runner._config.as_dict()
+        assert d["linear_torsions"] == mode
+        assert d["linear_torsion_windows"] == ("0:0.0-0.5" if mode == "auto" else "")
+
+        from somd2.io import dict_to_yaml
+
+        dict_to_yaml(d, "saved.yaml", tmpdir)
+        assert Config.from_yaml(f"{tmpdir}/saved.yaml").linear_torsions == mode
+
+
+def test_runner_linear_torsions_constant(diphenylethane_mols):
+    """
+    No window is applied when the schedule doesn't change the torsions.
+    """
+    schedule = LambdaSchedule.standard_morph()
+    for lever in ("torsion_k", "torsion_phase"):
+        schedule.set_equation(stage="morph", lever=lever, equation=schedule.initial())
+    mols = _linear_system(diphenylethane_mols)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        _, runner = _runner(mols, tmpdir, lambda_schedule=schedule)
+        assert not runner._config.lambda_schedule.has_molecule_schedule(0)
+        assert runner._config.as_dict()["linear_torsion_windows"] == ""
 
 
 def test_runner_linear_torsions_true_fails(diphenylethane_mols):
@@ -228,11 +248,11 @@ def test_runner_linear_torsions_true_fails(diphenylethane_mols):
 
 def test_restart_legacy_linear_torsions():
     """
-    Restarting a simulation saved before the option existed requires the
-    option's behaviour at the time.
+    A simulation saved before the option existed can only be restarted without
+    torsion windows.
     """
     from somd2.runner._base import RunnerBase
 
-    RunnerBase._compare_configs({}, {"linear_torsions": "false"})
+    RunnerBase._compare_configs({}, {"linear_torsion_windows": ""})
     with pytest.raises(ValueError, match="linear_torsions"):
-        RunnerBase._compare_configs({}, {"linear_torsions": "true"})
+        RunnerBase._compare_configs({}, {"linear_torsion_windows": "0:0.0-0.5"})

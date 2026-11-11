@@ -131,12 +131,13 @@ class Config:
             "restraint_search_frequency",
             "gcmc_batch_size",
             "gcmc_num_attempts",
+            "linear_torsions",
         ]
     )
 
-    # The behaviour of options added after a simulation was started, which
-    # restarts must match when the saved config doesn't include them.
-    _restart_legacy_values = {"linear_torsions": "false"}
+    # Values recorded by runners that didn't exist when a simulation was
+    # started, which restarts must match when the saved config lacks them.
+    _restart_legacy_values = {"linear_torsion_windows": ""}
 
     def __init__(
         self,
@@ -980,6 +981,9 @@ class Config:
 
         d = _yaml_to_dict(path)
 
+        # Recorded by a runner, rather than set by the user.
+        d.pop("linear_torsion_windows", None)
+
         return Config(**d)
 
     def as_dict(self, sire_compatible=False):
@@ -1018,11 +1022,6 @@ class Config:
 
         # Record the form that is used, so that restarts compare like with like.
         d["softcore_form"] = self.softcore_form
-
-        # Likewise, record whether a runner applied the torsion window.
-        applied = d.pop("linear_torsions_applied", None)
-        if applied is not None:
-            d["linear_torsions"] = str(applied).lower()
 
         # Handle the lambda schedule separately so that we can use simplified
         # keyword options.

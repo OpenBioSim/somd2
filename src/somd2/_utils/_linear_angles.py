@@ -25,21 +25,17 @@ __all__ = ["find_linear_angles", "torsion_window"]
 _LINEAR_ANGLE = 170.0
 
 
-def find_linear_angles(mol, require_terms=True, max_angle=_LINEAR_ANGLE):
+def find_linear_angles(mol, max_angle=_LINEAR_ANGLE):
     """
     Find the angles of a perturbable molecule that are linear at only one end
-    state.
+    state, and whether non-zero dihedrals or impropers pass through them, i.e.
+    have three consecutive atoms that are the atoms of the angle.
 
     Parameters
     ----------
 
     mol : sire.mol.Molecule
         The perturbable molecule.
-
-    require_terms : bool
-        Whether to only return angles that a non-zero dihedral or improper
-        passes through at the end state where the angle isn't linear, i.e.
-        with three consecutive atoms of the term being the atoms of the angle.
 
     max_angle : float
         The equilibrium angle, in degrees, at or above which an angle is
@@ -48,10 +44,11 @@ def find_linear_angles(mol, require_terms=True, max_angle=_LINEAR_ANGLE):
     Returns
     -------
 
-    angles : list of ((int, int, int), int, bool)
+    angles : list of ((int, int, int), int, bool, bool)
         The atom indices of each angle, with the central atom in the middle,
         the end state at which it is linear, and whether a non-zero dihedral
-        or improper passes through it at that end state.
+        or improper passes through it at the other end state and at the end
+        state where it's linear.
     """
     from math import degrees
 
@@ -62,10 +59,9 @@ def find_linear_angles(mol, require_terms=True, max_angle=_LINEAR_ANGLE):
     theta = Symbol("theta")
 
     def potentials(name):
-        try:
-            return mol.property(name).potentials()
-        except Exception:
+        if not mol.has_property(name):
             return []
+        return mol.property(name).potentials()
 
     def theta0s(state):
         result = {}
@@ -109,9 +105,8 @@ def find_linear_angles(mol, require_terms=True, max_angle=_LINEAR_ANGLE):
     terms = [spanned(0), spanned(1)]
 
     return [
-        (key, state, frozenset(key) in terms[state])
+        (key, state, frozenset(key) in terms[1 - state], frozenset(key) in terms[state])
         for key, state in linear
-        if not require_terms or frozenset(key) in terms[1 - state]
     ]
 
 
