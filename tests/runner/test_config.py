@@ -78,7 +78,10 @@ def test_logfile_creation():
         assert not Path.exists(config.output_directory / config.log_file)
 
         # Test that a logfile is created once a runner object is initialised.
-        runner = Runner(mols, Config(output_directory=tmpdir, log_file="test1.log"))
+        runner = Runner(
+            mols,
+            Config(platform="cpu", output_directory=tmpdir, log_file="test1.log"),
+        )
         assert runner._config.log_file is not None
         assert Path.exists(runner._config.output_directory / runner._config.log_file)
 

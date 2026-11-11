@@ -23,6 +23,7 @@ __all__ = [
     "abfe_alchemical_ion",
     "annihilate",
     "decouple",
+    "linear_torsions",
     "ring_break_morph",
     "reverse_ring_break_morph",
 ]
@@ -428,3 +429,68 @@ def reverse_ring_break_morph():
         The lambda schedule.
     """
     return ring_break_morph().reverse()
+
+
+def linear_torsions(schedule, start, end):
+    """
+    Return a copy of a lambda schedule in which the torsion levers change over
+    the fraction [start, end] of each stage where they change linearly, and
+    are held at their initial and final values either side of it. This keeps
+    torsions and impropers through an angle that becomes linear at one end
+    state at that end state's values while the angle is near linear, since
+    their forces diverge as its atoms become collinear.
+
+    Parameters
+    ----------
+
+    schedule : sire.legacy.CAS.LambdaSchedule
+        The lambda schedule.
+
+    start : float
+        The fraction of each stage at which the torsions start to change.
+
+    end : float
+        The fraction of each stage at which the torsions reach their final
+        values.
+
+    Returns
+    -------
+
+    schedule : sire.legacy.CAS.LambdaSchedule
+        The modified lambda schedule.
+    """
+    from sire.legacy.CAS import Expression, Max, Min, Values
+
+    if not 0 <= start < end <= 1:
+        raise ValueError("'start' and 'end' must satisfy 0 <= start < end <= 1")
+
+    s = schedule.clone()
+    lam, initial, final = s.lam(), s.initial(), s.final()
+
+    f = Min(Expression(1), Max(Expression(0), (lam - start) * (1 / (end - start))))
+    target = (1 - f) * initial + f * final
+
+    def values(equation):
+        return [
+            equation.evaluate(Values({lam: x, initial: 2.0, final: 5.0}))
+            for x in (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+        ]
+
+    linear = [2.0 + 3.0 * x for x in (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)]
+    staged = values(target)
+
+    def close(a, b):
+        return all(abs(x - y) < 1e-8 for x, y in zip(a, b))
+
+    for stage in s.get_stages():
+        for lever in ("torsion_k", "torsion_phase"):
+            v = values(s.get_equation(stage=stage, lever=lever))
+            if close(v, linear):
+                s.set_equation(stage=stage, lever=lever, equation=target)
+            elif not (close(v, staged) or close(v, [v[0]] * len(v))):
+                raise ValueError(
+                    f"The '{lever}' lever in stage '{stage}' doesn't change "
+                    "linearly, so the torsion window can't be applied."
+                )
+
+    return s

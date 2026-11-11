@@ -662,6 +662,17 @@ relative binding free energy (RBFE) simulations. The available schedules are:
 For the `annihilate`, `decouple`, and ring-breaking schedules, appropriate
 restraints can be generated automatically. See the sections below.
 
+When an angle becomes linear at one end state, e.g. a C=C bond that becomes a
+C≡C bond, the forces from torsions and impropers through it diverge as its
+atoms become collinear, which can crash simulations at intermediate λ. By
+default (`--linear-torsions auto`), SOMD2 detects angles that are linear at
+only one end state and have a non-zero torsion or improper through them, and
+then changes all torsions and impropers over only part of each stage of the
+schedule: the first half when the angles are linear at λ = 1, the second half
+when they are linear at λ = 0, or the middle half when both occur. The angles
+are logged. Use `--linear-torsions true` to apply this whenever an angle becomes
+linear, or `false` to disable it.
+
 <a id="absolute-binding-free-energies"></a>
 
 ## 🧬 Absolute binding free energies

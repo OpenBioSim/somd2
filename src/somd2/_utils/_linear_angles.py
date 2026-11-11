@@ -1,0 +1,131 @@
+######################################################################
+# SOMD2: GPU accelerated alchemical free-energy engine.
+#
+# Copyright: 2023-2026
+#
+# Authors: The OpenBioSim Team <team@openbiosim.org>
+#
+# SOMD2 is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# SOMD2 is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
+#####################################################################
+
+__all__ = ["find_linear_angles", "torsion_window"]
+
+# Angles with an equilibrium value of at least this many degrees are linear.
+_LINEAR_ANGLE = 170.0
+
+
+def find_linear_angles(mol, require_terms=True, max_angle=_LINEAR_ANGLE):
+    """
+    Find the angles of a perturbable molecule that are linear at only one end
+    state.
+
+    Parameters
+    ----------
+
+    mol : sire.mol.Molecule
+        The perturbable molecule.
+
+    require_terms : bool
+        Whether to only return angles that a non-zero dihedral or improper
+        passes through at either end state, i.e. with three consecutive atoms
+        of the term being the atoms of the angle.
+
+    max_angle : float
+        The equilibrium angle, in degrees, at or above which an angle is
+        linear.
+
+    Returns
+    -------
+
+    angles : list of ((int, int, int), int)
+        The atom indices of each angle, with the central atom in the middle,
+        and the end state at which it is linear.
+    """
+    from math import degrees
+
+    from sire.legacy.CAS import Symbol
+    from sire.legacy.MM import AmberAngle
+
+    info = mol.info()
+    theta = Symbol("theta")
+
+    def theta0s(state):
+        result = {}
+        for p in mol.property(f"angle{state}").potentials():
+            i, j, k = (
+                info.atom_idx(a).value() for a in (p.atom0(), p.atom1(), p.atom2())
+            )
+            try:
+                theta0 = degrees(AmberAngle(p.function(), theta).theta0())
+            except Exception:
+                continue
+            result[(min(i, k), j, max(i, k))] = theta0
+        return result
+
+    theta0 = [theta0s(0), theta0s(1)]
+
+    angles = []
+    for key in sorted(theta0[0].keys() & theta0[1].keys()):
+        linear0 = theta0[0][key] >= max_angle
+        linear1 = theta0[1][key] >= max_angle
+        if linear0 != linear1:
+            angles.append((key, 0 if linear0 else 1))
+
+    if not require_terms or not angles:
+        return angles
+
+    spanned = set()
+    for state in (0, 1):
+        for name in ("dihedral", "improper"):
+            try:
+                potentials = mol.property(f"{name}{state}").potentials()
+            except Exception:
+                continue
+            for p in potentials:
+                if p.function().is_zero():
+                    continue
+                idx = [
+                    info.atom_idx(a).value()
+                    for a in (p.atom0(), p.atom1(), p.atom2(), p.atom3())
+                ]
+                spanned.add(frozenset(idx[:3]))
+                spanned.add(frozenset(idx[1:]))
+
+    return [(key, state) for key, state in angles if frozenset(key) in spanned]
+
+
+def torsion_window(states):
+    """
+    Return the fraction of each morph stage over which torsions should change,
+    given the end states at which angles become linear.
+
+    Parameters
+    ----------
+
+    states : set of int
+        The end states at which angles become linear.
+
+    Returns
+    -------
+
+    window : (float, float)
+        The start and end of the window.
+    """
+    if states == {1}:
+        return 0.0, 0.5
+    if states == {0}:
+        return 0.5, 1.0
+    if states == {0, 1}:
+        return 0.25, 0.75
+    raise ValueError("'states' must be a non-empty subset of {0, 1}")

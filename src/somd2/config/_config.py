@@ -75,6 +75,7 @@ class Config:
         ],
         "log_level": [level.lower() for level in _logger._core.levels],
         "softcore_form": ["auto", "zacharias", "taylor", "beutler"],
+        "linear_torsions": ["auto", "true", "false"],
         "precision": ["single", "mixed", "double"],
     }
 
@@ -158,6 +159,7 @@ class Config:
         lambda_energy=None,
         lambda_schedule="standard_morph",
         charge_scale_factor=0.2,
+        linear_torsions="auto",
         swap_end_states=False,
         shift_coulomb="1 A",
         shift_delta="1.5 A",
@@ -331,6 +333,15 @@ class Config:
 
         charge_scale_factor: float
             Factor by which to scale charges for charge scaled morph.
+
+        linear_torsions: str
+            Whether to change torsions and impropers over only part of each
+            morph stage, so that those through an angle that becomes linear at
+            one end state are at that end state's values while the angle is
+            near linear. Their forces diverge as the angle's atoms become
+            collinear. Valid options are "auto" (default), "true", and "false".
+            "auto" applies it when a non-zero torsion or improper passes through
+            such an angle, and "true" whenever an angle becomes linear.
 
         swap_end_states: bool
             Whether to swap the end states of the alchemical system.
@@ -828,6 +839,7 @@ class Config:
         self.lambda_values = lambda_values
         self.lambda_energy = lambda_energy
         self.charge_scale_factor = charge_scale_factor
+        self.linear_torsions = linear_torsions
         self.swap_end_states = swap_end_states
         self.shift_coulomb = shift_coulomb
         self.shift_delta = shift_delta
@@ -1559,6 +1571,24 @@ class Config:
             self._lambda_schedule = _LambdaSchedule.charge_scaled_morph(
                 self._charge_scale_factor
             )
+
+    @property
+    def linear_torsions(self):
+        return self._linear_torsions
+
+    @linear_torsions.setter
+    def linear_torsions(self, linear_torsions):
+        if isinstance(linear_torsions, bool):
+            linear_torsions = str(linear_torsions)
+        if not isinstance(linear_torsions, str):
+            raise TypeError("'linear_torsions' must be of type 'str' or 'bool'")
+        linear_torsions = linear_torsions.lower().replace(" ", "")
+        if linear_torsions not in self._choices["linear_torsions"]:
+            raise ValueError(
+                "'linear_torsions' not recognised. Valid options are: "
+                f"{', '.join(self._choices['linear_torsions'])}"
+            )
+        self._linear_torsions = linear_torsions
 
     @property
     def swap_end_states(self):

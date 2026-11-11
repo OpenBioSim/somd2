@@ -42,6 +42,7 @@ Changelog
 * Run GCMC simulations in the NVT ensemble, ignoring the pressure, since the osmotic ensemble isn't valid for GCMC of solvent water: the number of waters is barely fixed, so it drifts. GCMC runs started with a pressure can't be restarted [#281](https://github.com/OpenBioSim/somd2/pull/281).
 * Added support for Python 3.13 and 3.14, and dropped support for Python 3.10 and 3.11 [#283](https://github.com/OpenBioSim/somd2/pull/283).
 * Fixed the regular runner reporting success when a lambda window failed, unless it was the last to finish. The other windows still run, then `Runner.run()` raises an error listing the failed windows and `somd2` exits with a non-zero status. The overall performance is now summed over all windows rather than taken from the last to finish [#285](https://github.com/OpenBioSim/somd2/pull/285).
+* Add a `linear_torsions` option, `auto` by default, that changes torsions and impropers over only part of each stage of the lambda schedule when an angle becomes linear at one end state, e.g. for a C=C to C≡C perturbation. Their forces diverge as the angle's atoms become collinear, which crashed simulations at intermediate lambda. `auto` applies it when a non-zero torsion or improper passes through such an angle [#287](https://github.com/OpenBioSim/somd2/pull/287).
 
 [2026.2.0](https://github.com/openbiosim/somd2/compare/2026.1.0...2026.2.0) - Sep 2026
 --------------------------------------------------------------------------------------

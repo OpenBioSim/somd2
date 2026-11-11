@@ -605,6 +605,54 @@ class RunnerBase:
 
         return ion_indices
 
+    def _apply_linear_torsions(self):
+        """
+        Change torsions over part of each morph stage when an angle of a
+        perturbable molecule becomes linear at one end state, according to
+        the 'linear_torsions' option.
+        """
+        mode = self._config.linear_torsions
+        if mode == "false" or self._config._lambda_schedule_name in (
+            "annihilate",
+            "decouple",
+        ):
+            return
+
+        from .._utils._linear_angles import find_linear_angles, torsion_window
+        from .._utils._schedules import linear_torsions
+
+        found = []
+        for mol in self._system["property is_perturbable"].molecules():
+            for angle, state in find_linear_angles(mol, require_terms=mode == "auto"):
+                found.append((mol.number().value(), angle, state))
+
+        if not found:
+            if mode == "true":
+                _logger.warning(
+                    "'linear_torsions' is enabled, but no angle of a perturbable "
+                    "molecule becomes linear, so the lambda schedule is unchanged."
+                )
+            return
+
+        start, end = torsion_window({state for _, _, state in found})
+        try:
+            schedule = linear_torsions(self._config._lambda_schedule, start, end)
+        except ValueError as e:
+            _logger.warning(f"Unable to apply 'linear_torsions': {e}")
+            return
+        self._config._lambda_schedule = schedule
+
+        angles = ", ".join(
+            f"molecule {num} atoms {'-'.join(str(i) for i in angle)} "
+            f"({_lam_sym} = {state})"
+            for num, angle, state in found
+        )
+        _logger.info(
+            f"Angles become linear at one end state: {angles}. Torsions and "
+            f"impropers will change over the fraction [{start}, {end}] of each "
+            "stage in which they change."
+        )
+
     def _set_schedule(self, pert_idxs, ion_indices):
         """
         Set the soft-core form, the lambda schedule and values, and the REST2
@@ -686,6 +734,8 @@ class RunnerBase:
             if ion_schedule is not None:
                 for pert_idx in ion_indices:
                     schedule.set_molecule_schedule(pert_idx, ion_schedule)
+
+        self._apply_linear_torsions()
 
         # Set the lambda values.
         if self._config.lambda_values:
