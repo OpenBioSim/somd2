@@ -18,7 +18,7 @@ simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and
 
 ## ✨ Features
 
-- 🧬 **Perturbations**: relative binding free energies,
+- 🧬 **[Perturbations](#lambda-schedules)**: relative binding free energies,
   [absolute binding free energies](#absolute-binding-free-energies),
   [ring-breaking](#ring-breaking-perturbations),
   [charge-change](#charge-change-perturbations), and protein mutations.
