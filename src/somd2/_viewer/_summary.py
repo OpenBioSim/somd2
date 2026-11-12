@@ -28,6 +28,8 @@ __all__ = ["build_summary", "leg_settings_key", "settings_key", "topology_finger
 import hashlib as _hashlib
 import json as _json
 import math as _math
+import os as _os
+import re as _re
 import threading as _threading
 
 # Thresholds for flagging problems.
@@ -250,6 +252,94 @@ def _common_name(names):
     return names[0] + (f" + {len(names) - 1} more" if len(names) > 1 else "")
 
 
+def _natural_key(text):
+    """
+    A sort key that orders the numbers in a string by value, e.g. 2 before 10.
+    """
+    return [int(t) if t.isdigit() else t for t in _re.split(r"(\d+)", text)]
+
+
+def repeat_names(names):
+    """
+    Name a set of repeats from their run names.
+
+    Parameters
+    ----------
+
+    names: [str]
+        The run names, i.e. paths relative to a root directory.
+
+    Returns
+    -------
+
+    name: str
+        The shared path, with the part that differs shown as a set, e.g.
+        'rep{1,2}/bound' for 'rep1/bound' and 'rep2/bound', or the first and
+        last of more than four variants, e.g. 'rep{1,…,10}/bound'.
+
+    parent: str
+        The directory the runs share, e.g. 'runs' for 'runs/a' and 'runs/b'.
+
+    labels: [str]
+        The part of each name that differs, e.g. '1' and '2'.
+    """
+    if len(set(names)) < 2:
+        parent = names[0].rpartition("/")[0]
+        return names[0], parent, [names[0].rpartition("/")[2] for _ in names]
+
+    # Keep at least one component of each name in the part that differs.
+    parts = [n.split("/") for n in names]
+    lead = 0
+    while all(lead < len(p) - 1 and p[lead] == parts[0][lead] for p in parts):
+        lead += 1
+    trail = 0
+    while all(
+        trail < len(p) - lead - 1 and p[-1 - trail] == parts[0][-1 - trail]
+        for p in parts
+    ):
+        trail += 1
+    middles = ["/".join(p[lead : len(p) - trail]) for p in parts]
+
+    # Don't split a number, or a path, between the shared and differing parts.
+    if any("/" in m for m in middles):
+        prefix = suffix = ""
+    else:
+        prefix = _os.path.commonprefix(middles).rstrip("0123456789")
+        suffix = _os.path.commonprefix([m[len(prefix) :][::-1] for m in middles])
+        suffix = suffix[::-1].lstrip("0123456789")
+    tails = [m[len(prefix) :] for m in middles]
+    labels = [t[: len(t) - len(suffix)] or m for t, m in zip(tails, middles)]
+
+    cores = sorted({t[: len(t) - len(suffix)] for t in tails}, key=_natural_key)
+    if len(cores) > 4:
+        cores = [cores[0], "…", cores[-1]]
+    head = parts[0][:lead]
+    tail = parts[0][len(parts[0]) - trail :]
+    name = "/".join(head + [prefix + "{" + ",".join(cores) + "}" + suffix] + tail)
+    return name, "/".join(head), labels
+
+
+def label_repeats(entries):
+    """
+    Add the name of each set of repeats, the directory its runs share, and the
+    label of each run, to run entries with a 'group' and 'name'. Runs that
+    aren't repeats of another run are left unchanged.
+    """
+    groups = {}
+    for entry in entries:
+        if entry.get("group"):
+            groups.setdefault(entry["group"], []).append(entry)
+    for runs in groups.values():
+        if len(runs) < 2:
+            continue
+        name, parent, labels = repeat_names([r["name"] for r in runs])
+        for run, label in zip(runs, labels):
+            run["group_name"] = name
+            run["group_parent"] = parent
+            run["group_label"] = label
+    return entries
+
+
 def _mean_and_error(values, errors):
     """
     The mean of a set of repeats and its standard error, or the MBAR error
@@ -369,10 +459,11 @@ def build_summary(entries):
             [v for v, _ in corrected], [e for _, e in corrected]
         )
         first = runs[0]["fingerprint"]
+        name, _, labels = repeat_names([r["name"] for r in runs])
         simulations.append(
             {
                 "id": "|".join(key),
-                "name": _common_name([r["name"] for r in runs]),
+                "name": name,
                 "perturbation": first["perturbation"],
                 "leg": first["leg"],
                 "absolute": runs[0]["absolute"],
@@ -384,17 +475,20 @@ def build_summary(entries):
                 "cutoff_type": runs[0]["cutoff_type"],
                 "runs": [
                     {
-                        k: r.get(k)
-                        for k in (
-                            "id",
-                            "name",
-                            "status",
-                            "progress",
-                            "free_energy",
-                            "free_energy_error",
-                        )
+                        **{
+                            k: r.get(k)
+                            for k in (
+                                "id",
+                                "name",
+                                "status",
+                                "progress",
+                                "free_energy",
+                                "free_energy_error",
+                            )
+                        },
+                        "label": label,
                     }
-                    for r in runs
+                    for r, label in zip(runs, labels)
                 ],
                 "progress": _mean_progress(runs),
                 "num_finished": sum(r["status"] == "finished" for r in runs),

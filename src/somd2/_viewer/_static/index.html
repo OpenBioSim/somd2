@@ -756,7 +756,7 @@ function stat(label, value) {
 function navLink(r, label) {
   const pct = r.fraction !== null && r.fraction !== undefined ? Math.round(r.fraction * 100) : 0;
   const dg = r.free_energy !== null && r.free_energy !== undefined ? `ΔG ${fmt(r.free_energy, 2)} ± ${fmt(r.free_energy_error, 2)}` : "";
-  return `<a href="#${r.id}" class="${state.view === "run" && r.id === state.current ? "active" : ""}">
+  return `<a href="#${r.id}" title="${esc(r.name)}" class="${state.view === "run" && r.id === state.current ? "active" : ""}">
     <div class="name">${esc(label)}</div>
     <div class="bar" style="margin-top:6px"><span style="width:${pct}%"></span></div>
     <div class="meta"><span class="status-${r.status}">${esc(r.status)} · ${pct}%</span><span>${dg}</span></div>
@@ -842,28 +842,9 @@ function repeatGroupOf(id) {
   return run && run.group && repeatGroups().has(run.group) ? run.group : null;
 }
 
-// Where a set of repeats is listed, i.e. the directory its runs share, and
-// a label: the path they share below it, their leg, or else the common
-// start of their names, e.g. 'bound' for bound_1 and bound_2.
+// Where a set of repeats is listed and its name, as set by the server.
 function repeatsName(runs) {
-  const parts = runs.map((r) => r.name.split("/"));
-  const lead = [];
-  const shortest = Math.min(...parts.map((p) => p.length));
-  for (let i = 0; i < shortest - 1 && parts.every((p) => p[i] === parts[0][i]); i++) lead.push(parts[0][i]);
-  const rest = parts.map((p) => p.slice(lead.length));
-  const trail = [];
-  const fewest = Math.min(...rest.map((p) => p.length));
-  for (let i = 1; i <= fewest && rest.every((p) => p[p.length - i] === rest[0][rest[0].length - i]); i++) {
-    trail.unshift(rest[0][rest[0].length - i]);
-  }
-  let label = trail.join("/") || runs[0].leg;
-  if (!label) {
-    const names = rest.map((p) => p.join("/"));
-    let common = names[0];
-    for (const n of names) while (!n.startsWith(common)) common = common.slice(0, -1);
-    label = common.replace(/[\s_.\-]*\d*$/, "");
-  }
-  return { parent: lead.join("/"), label: label || "repeats" };
+  return { parent: runs[0].group_parent || "", name: runs[0].group_name || runs[0].name };
 }
 
 // The mean of a set of values and its standard error, or the single value
@@ -878,7 +859,7 @@ function meanAndError(values, errors) {
 }
 
 function navRepeats(gid, runs, prefix, alone) {
-  const { parent, label } = repeatsName(runs);
+  const { parent, name: full } = repeatsName(runs);
   const current = runs.find((r) => r.id === state.current);
   const active = state.view === "run" && current;
   const open = state.repeatsOpen.has(gid) ? state.repeatsOpen.get(gid) : Boolean(current);
@@ -888,18 +869,16 @@ function navRepeats(gid, runs, prefix, alone) {
   const done = runs.filter((r) => r.free_energy !== null && r.free_energy !== undefined);
   const [mean, error] = meanAndError(done.map((r) => r.free_energy), done.map((r) => r.free_energy_error));
   const dg = mean !== null ? `ΔG ${fmt(mean, 2)} ± ${fmt(error, 2)}` : "";
-  const own = parent ? `${parent}/` : "";
-  const name = alone && parent ? parent.slice(prefix.length) : own.slice(prefix.length) + label;
+  const name = alone && parent ? parent.slice(prefix.length) : full.slice(prefix.length);
   return `<details class="nav-repeats" data-repeats="${esc(gid)}"${open ? " open" : ""}>
     <summary class="${active ? "active" : ""}"><a href="#${(current || runs[0]).id}"><span class="name">${esc(name)}</span></a>
       <div class="meta"><span>${runs.length} repeats · ${statuses}</span><span>${dg}</span></div></summary>
-    ${runs.map((r) => navLink(r, r.name.slice(own.length))).join("")}
+    ${runs.map((r) => navLink(r, r.group_label || r.name)).join("")}
   </details>`;
 }
 
 function repeatLabel(group, r) {
-  const { parent } = repeatsName(group.runs);
-  return parent ? r.name.slice(parent.length + 1) : r.name;
+  return r.label || r.name;
 }
 
 // The mean PMF of the analysed repeats and its standard error, if they share
@@ -2400,7 +2379,7 @@ function renderSummaryPage() {
 
   let table = `<div class="table-wrap"><table><tr><th>Simulation</th><th>Repeats</th><th class="num">ΔG (kcal/mol)</th><th>Problems</th><th>Runs</th></tr>`;
   for (const s of d.simulations) {
-    const runs = s.runs.map((r) => `<a href="#${r.id}" class="status-${r.status}" title="${esc(r.name)}: ${esc(r.status)}">${esc(r.name.slice(r.name.lastIndexOf("/") + 1))}</a>`).join("");
+    const runs = s.runs.map((r) => `<a href="#${r.id}" class="status-${r.status}" title="${esc(r.name)}: ${esc(r.status)}">${esc(r.label || r.name)}</a>`).join("");
     const open = s.runs.length > 1 ? "Open the first repeat" : "Open this run";
     table += `<tr><td><a class="sim-link" href="#${s.runs[0].id}" title="${open}">${esc(s.name)}</a><div class="muted">${esc(s.leg)}${s.absolute ? ` · ${esc(s.schedule)}` : ""}</div></td>
       <td>${repeats(s)}${s.num_analysed < s.runs.length ? `<div class="muted">${s.num_analysed} analysed</div>` : ""}</td>

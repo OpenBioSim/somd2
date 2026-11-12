@@ -45,6 +45,8 @@ from ._network import build_network as _build_network
 from ._network import find_network as _find_network
 from ._network import read_network as _read_network
 from ._summary import build_summary as _build_summary
+from ._summary import label_repeats as _label_repeats
+from ._summary import repeat_names as _repeat_names
 
 _static = _Path(__file__).parent / "_static"
 
@@ -205,7 +207,9 @@ class _Handler(_BaseHTTPRequestHandler):
                 else:
                     self.send_error(404)
             elif parts == ["api", "simulations"]:
-                self._json([sim.overview() for sim in registry.refresh()])
+                self._json(
+                    _label_repeats([sim.overview() for sim in registry.refresh()])
+                )
             elif parts == ["api", "network"] and self.server.network is None:
                 self.send_error(404)
             elif len(parts) == 3 and parts[:2] == ["api", "group"]:
@@ -218,6 +222,10 @@ class _Handler(_BaseHTTPRequestHandler):
                     key=lambda s: s.name,
                 )
                 runs = [s.group_entry(interval) for s in members]
+                if runs:
+                    _, _, labels = _repeat_names([r["name"] for r in runs])
+                    for run, label in zip(runs, labels):
+                        run["label"] = label
                 self._json({"id": group, "runs": runs})
             elif parts in (["api", "summary"], ["api", "network"]):
                 interval = self._analysis_interval()
