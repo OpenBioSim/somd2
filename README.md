@@ -581,19 +581,33 @@ mols = sr.load("reference.s3")
 # Equilibrate at lambda = 1, starting from the lambda = 1 coordinates.
 mols = sr.morph.link_to_perturbed(mols)
 mols = mols.minimisation(lambda_value=1.0).run().commit()
-d = mols.dynamics(lambda_value=1.0, timestep="2fs", temperature="25oC")
+
+# Relax the solvent with the heavy atoms of everything else restrained.
+restraints = sr.restraints.positional(
+    mols, atoms=mols["not water and not element H"], k="10 kcal mol-1 A-2"
+)
+d = mols.dynamics(
+    lambda_value=1.0, timestep="1fs", temperature="25oC", restraints=restraints
+)
 d.run("100ps")
+mols = d.commit()
+
+# Then equilibrate without restraints.
+d = mols.dynamics(lambda_value=1.0, timestep="2fs", temperature="25oC")
+d.run("2ns")
 mols = d.commit()
 
 sr.stream.save(mols, "perturbed.s3")
 ```
 
-Running the dynamics without a pressure keeps the box of the input system, as
-needed for GCMC. If the λ = 1 system is equilibrated at constant pressure, its
-box will differ, so for GCMC it should be rescaled to the input system's box and
-re-equilibrated at constant volume. The input system should be equilibrated at
-λ = 0 in the same way, so that both end states start from comparable
-conditions.
+How long to equilibrate depends on the system: a protein-ligand complex
+generally needs longer than a ligand in solvent, and more if the λ = 1
+conformation differs a lot from the input. Running the dynamics without a
+pressure keeps the box of the input system, as needed for GCMC. If the λ = 1
+system is equilibrated at constant pressure, its box will differ, so for GCMC
+it should be rescaled to the input system's box and re-equilibrated at
+constant volume. The input system should be equilibrated at λ = 0 in the same
+way, so that both end states start from comparable conditions.
 
 <a id="rest2"></a>
 
