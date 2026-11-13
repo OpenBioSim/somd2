@@ -26,6 +26,8 @@ simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and
   between λ windows.
 - 🎯 **[Adaptive replica exchange](#adaptive-replica-exchange)**: sampling
   concentrated on the λ windows that are slowest to converge.
+- 🌱 **[Multi-conformational seeding](#multi-conformational-seeding)**: windows
+  near λ = 1 start from an equilibrated λ = 1 system.
 - 🌡️ **[REST2](#rest2)**: replica exchange with solute scaling.
 - 💧 **[GCMC](#gcmc)**: grand canonical Monte Carlo water sampling.
 - 🔄 **[Terminal ring flips](#terminal-ring-flip-monte-carlo)**: Monte Carlo
@@ -536,6 +538,62 @@ logs the estimated compute per cycle and final variance relative to every window
 being hot. If most windows stay hot, a smaller interval costs little, while if
 most go cold, a larger interval saves more. Values between 2 and 8 are
 reasonable, and the interval can be changed on restart.
+
+<a id="multi-conformational-seeding"></a>
+
+## 🌱 Multi-conformational seeding
+
+By default, every λ window starts from the coordinates of the input system,
+i.e. the reference end state (λ = 0). When the two end states prefer different
+conformations, e.g. a different ligand pose, side chain rotamer or water
+network, the windows near λ = 1 then start far from their own equilibrium.
+They need longer to relax, and replica exchange can carry the λ = 0
+conformation across the whole λ range.
+
+For [replica exchange](#replica-exchange) simulations, the windows closest to
+the perturbed end state can instead start from an equilibrated λ = 1 system,
+passed with `--perturbed-system`:
+
+```
+somd2 reference.s3 --perturbed-system perturbed.s3 --replica-exchange
+```
+
+The windows with λ > 0.5 start from the perturbed system, and the rest from the
+input system, or the other way round with `--swap-end-states`. Replica exchange
+then mixes the two sets of conformations, so both are sampled throughout. The
+option has no effect without `--replica-exchange`.
+
+The perturbed system must be the same system as the input, with the same atoms
+in the same order. SOMD2 takes its λ = 1 coordinates, i.e. the `coordinates1`
+property of each perturbable molecule and the coordinates of everything else,
+and its periodic box. With [GCMC](#gcmc), which runs at constant volume, the box
+must match that of the input system.
+
+The perturbed system can be made by equilibrating the input system at λ = 1 with
+Sire. Dynamics on a system linked to its perturbed end state update the
+`coordinates1` property of the perturbable molecules:
+
+```python
+import sire as sr
+
+mols = sr.load("reference.s3")
+
+# Equilibrate at lambda = 1, starting from the lambda = 1 coordinates.
+mols = sr.morph.link_to_perturbed(mols)
+mols = mols.minimisation(lambda_value=1.0).run().commit()
+d = mols.dynamics(lambda_value=1.0, timestep="2fs", temperature="25oC")
+d.run("100ps")
+mols = d.commit()
+
+sr.stream.save(mols, "perturbed.s3")
+```
+
+Running the dynamics without a pressure keeps the box of the input system, as
+needed for GCMC. If the λ = 1 system is equilibrated at constant pressure, its
+box will differ, so for GCMC it should be rescaled to the input system's box and
+re-equilibrated at constant volume. The input system should be equilibrated at
+λ = 0 in the same way, so that both end states start from comparable
+conditions.
 
 <a id="rest2"></a>
 
