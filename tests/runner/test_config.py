@@ -444,3 +444,51 @@ def test_gcmc_runs_in_nvt():
             RunnerBase._compare_configs(
                 last_config, new.as_dict(sire_compatible=sire_compatible)
             )
+
+
+def test_gcmc_region_options():
+    """
+    Validate the GCMC region options, and that runs without GCMC can be
+    restarted although the defaults of these options have changed.
+    """
+    import pytest
+
+    from somd2.runner._base import RunnerBase
+
+    config = Config()
+    assert config.gcmc_selection == "auto"
+    assert config.gcmc_radius == "auto"
+    assert config.gcmc_num_waters == "auto"
+    assert config.gcmc_radius_padding == sr.u("5 A")
+
+    config.gcmc_selection = "None"
+    assert config.gcmc_selection is None
+    config.gcmc_selection = "AUTO"
+    assert config.gcmc_selection == "auto"
+    config.gcmc_radius = "Auto"
+    assert config.gcmc_radius == "auto"
+    config.gcmc_num_waters = "12"
+    assert config.gcmc_num_waters == 12
+
+    for padding in ("-1 A", "0 A", "1 ps"):
+        with pytest.raises(ValueError):
+            config.gcmc_radius_padding = padding
+
+    old = Config(gcmc_selection=None, gcmc_radius="4 A", gcmc_num_waters=20)
+    RunnerBase._compare_configs(old.as_dict(), Config().as_dict())
+
+    # The padding is reflected in the resolved radius, so it can change on restart.
+    old = Config(gcmc=True, pressure=None, gcmc_radius="8 A", gcmc_radius_padding="3 A")
+    new = Config(gcmc=True, pressure=None, gcmc_radius="8 A")
+    RunnerBase._compare_configs(old.as_dict(), new.as_dict())
+
+    old = Config(
+        gcmc=True,
+        pressure=None,
+        gcmc_selection=None,
+        gcmc_radius="4 A",
+        gcmc_num_waters=20,
+    )
+    new = Config(gcmc=True, pressure=None, gcmc_radius="4 A", gcmc_num_waters=20)
+    with pytest.raises(ValueError):
+        RunnerBase._compare_configs(old.as_dict(), new.as_dict())

@@ -397,11 +397,6 @@ class RunnerBase:
             if value is not None:
                 self._config._extra_args[option] = value
 
-        # GCMC LRC map options.
-        if self._config.gcmc and self._config.use_dispersion_correction:
-            self._config._extra_args["use_gcmc_lrc"] = True
-            self._config._extra_args["num_gcmc_waters"] = self._config.gcmc_num_waters
-
         # Auto-generate Morse restraints for ring-breaking perturbations with no
         # user-supplied Morse restraints. This is done before any modification of
         # the bonded terms, and before the reference system is stored and the
@@ -1074,6 +1069,92 @@ class RunnerBase:
             self._config.checkpoint_frequency / self._config.energy_frequency
         )
 
+    def _set_gcmc_region(self):
+        """
+        Validate the GCMC selection and resolve the 'auto' GCMC options: the
+        selection of perturbed atoms, a radius that covers the selection, and
+        enough ghost waters to fill the free volume of the GCMC sphere. These
+        are resolved from the input system, so a restart resolves them to the
+        same values.
+        """
+        from .._utils._gcmc import (
+            auto_selection,
+            ghost_waters,
+            selection_geometry,
+            selection_sites,
+        )
+
+        is_auto = self._config.gcmc_selection == "auto"
+        if is_auto:
+            try:
+                self._config.gcmc_selection = auto_selection(self._system)
+            except Exception as e:
+                msg = (
+                    f"Unable to select the perturbed atoms for the GCMC sphere: {e}. "
+                    "Set 'gcmc_selection' explicitly."
+                )
+                _logger.error(msg)
+                raise ValueError(msg)
+
+        selection = self._config.gcmc_selection
+
+        # The radius isn't used when sampling the entire simulation box.
+        if selection is None:
+            if self._config.gcmc_num_waters == "auto":
+                self._config.gcmc_num_waters = 20
+            _logger.info(
+                "GCMC moves will be attempted within the entire simulation box "
+                f"with {self._config.gcmc_num_waters} ghost waters."
+            )
+            return
+
+        try:
+            _sr.mol.selection_to_atoms(self._system, selection)
+        except Exception:
+            msg = "Invalid 'gcmc_selection' value."
+            _logger.error(msg)
+            raise ValueError(msg)
+
+        try:
+            centre, extent = selection_geometry(self._system, selection)
+
+            if isinstance(self._config.gcmc_radius, str):
+                radius = extent + self._config.gcmc_radius_padding.to("A")
+                self._config.gcmc_radius = f"{radius:.3f} A"
+
+            if self._config.gcmc_num_waters == "auto":
+                self._config.gcmc_num_waters = ghost_waters(
+                    self._system,
+                    centre,
+                    self._config.gcmc_radius.to("A"),
+                    self._config.gcmc_standard_volume.value(),
+                )
+            sites = selection_sites(self._system, selection) if is_auto else []
+        except Exception as e:
+            msg = f"Unable to set up the GCMC sphere for '{selection}': {e}"
+            _logger.error(msg)
+            raise ValueError(msg)
+
+        if len(sites) > 1:
+            import itertools as _itertools
+
+            import numpy as _np
+
+            separation = max(
+                _np.linalg.norm(a - b) for a, b in _itertools.combinations(sites, 2)
+            )
+            _logger.warning(
+                f"The perturbed atoms form {len(sites)} separate sites, up to "
+                f"{separation:.1f} Å apart, so the GCMC sphere covers all of them "
+                f"with a radius of {self._config.gcmc_radius}. Set 'gcmc_selection' "
+                "to restrict it to one site."
+            )
+
+        _logger.info(
+            f"GCMC sphere of radius {self._config.gcmc_radius} centred on "
+            f"'{selection}', with {self._config.gcmc_num_waters} ghost waters."
+        )
+
     def _check_gcmc(self):
         """
         Validate the GCMC options, if GCMC is used.
@@ -1164,19 +1245,17 @@ class RunnerBase:
                 _logger.error(msg)
                 raise ValueError(msg)
 
-            # Make sure the selection is valid.
-            if self._config.gcmc_selection is not None:
-                try:
-                    _sr.mol.selection_to_atoms(
-                        self._system, self._config.gcmc_selection
-                    )
-                except:
-                    msg = "Invalid 'gcmc_selection' value."
-                    _logger.error(msg)
-                    raise ValueError(msg)
-
             # Store the excess chemcical potential value.
             self._mu_ex = self._config.gcmc_excess_chemical_potential.value()
+
+            self._set_gcmc_region()
+
+            # GCMC LRC map options.
+            if self._config.use_dispersion_correction:
+                self._config._extra_args["use_gcmc_lrc"] = True
+                self._config._extra_args["num_gcmc_waters"] = (
+                    self._config.gcmc_num_waters
+                )
 
     def _set_terminal_groups(self):
         """
@@ -1331,7 +1410,6 @@ class RunnerBase:
                 "no_logger": True,
                 "num_ghost_waters": self._config.gcmc_num_waters,
                 "overwrite": self._config.overwrite,
-                "radius": str(self._config.gcmc_radius),
                 "reference": self._config.gcmc_selection,
                 "restart": self._is_restart,
                 "softcore_form": self._config.softcore_form,
@@ -1342,6 +1420,9 @@ class RunnerBase:
                 "batch_size": self._config.gcmc_batch_size,
                 "num_attempts": self._config.gcmc_num_attempts,
             }
+            # The radius is left unresolved when sampling the entire simulation box.
+            if not isinstance(self._config.gcmc_radius, str):
+                self._gcmc_kwargs["radius"] = str(self._config.gcmc_radius)
             if self._config.platform == "opencl":
                 self._gcmc_kwargs["opencl_platform_index"] = (
                     self._config.opencl_platform_index
@@ -2487,7 +2568,8 @@ class RunnerBase:
                         pass
 
                     # Remove the additional GCMC waters from the end of the system.
-                    for mol in system.molecules()[-self._config.gcmc_num_waters :]:
+                    num_ghosts = self._config.gcmc_num_waters
+                    for mol in system.molecules()[-num_ghosts:] if num_ghosts else []:
                         _logger.debug(
                             f"Removing GCMC water molecule {mol.number()} for {_lam_sym}={self._lambda_values[i]:.5f}"
                         )
@@ -2519,7 +2601,11 @@ class RunnerBase:
             )
 
         allowed_diffs = _Config._restart_allowed_diffs
+        no_gcmc = not config1.get("gcmc") and not config2.get("gcmc")
         for key in config1.keys():
+            # The GCMC options are unused without GCMC, and their defaults have changed.
+            if no_gcmc and key.startswith("gcmc_"):
+                continue
             if key not in allowed_diffs:
                 # Extract the config values.
                 v1 = config1[key]

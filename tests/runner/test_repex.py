@@ -1240,6 +1240,7 @@ def test_repex_gcmc_without_a_selection(ethane_methanol):
             "replica_exchange": True,
             "max_contexts": 2,
             "gcmc": True,
+            "gcmc_selection": None,
             "gcmc_frequency": "4fs",
         }
 
