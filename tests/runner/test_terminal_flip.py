@@ -157,6 +157,35 @@ def test_multiple_groups_disjoint_mobile(diphenylethane_mols):
     assert mobile_0.isdisjoint(mobile_1)
 
 
+def test_distorted_ring_flip_angle(phenethyl_mols, monkeypatch):
+    """
+    A ring too distorted for the geometric flip angle gets its angle from the
+    number of neighbours of the pivot, so a planar pivot flips by 180°.
+    """
+    import sire.convert
+
+    from somd2.runner._samplers import _terminal_flip
+
+    def no_rdkit(*args, **kwargs):
+        raise RuntimeError("RDKit isn't needed for the flip angle")
+
+    monkeypatch.setattr(sire.convert, "to_rdkit", no_rdkit)
+    monkeypatch.setattr(_terminal_flip, "_auto_flip_angle", lambda *args: 165.0)
+    groups = detect_terminal_groups(phenethyl_mols)
+    assert len(groups) == 1
+    angle, _ = groups[0]
+    assert angle == pytest.approx(180.0)
+
+
+def test_max_mobile_atoms(phenethyl_mols):
+    """Groups with more mobile atoms than the limit are skipped."""
+    _, atoms = detect_terminal_groups(phenethyl_mols)[0]
+    num_mobile = len(atoms) - 2
+
+    assert len(detect_terminal_groups(phenethyl_mols, max_mobile_atoms=num_mobile)) == 1
+    assert detect_terminal_groups(phenethyl_mols, max_mobile_atoms=num_mobile - 1) == []
+
+
 # ---------------------------------------------------------------------------
 # Config validation
 # ---------------------------------------------------------------------------
@@ -166,6 +195,14 @@ def test_config_terminal_flip_frequency_none():
     """terminal_flip_frequency defaults to None (disabled)."""
     config = Config()
     assert config.terminal_flip_frequency is None
+
+
+def test_config_terminal_flip_max_mobile_atoms():
+    """There is no mobile atom limit by default."""
+    assert Config().terminal_flip_max_mobile_atoms is None
+    assert (
+        Config(terminal_flip_max_mobile_atoms=15).terminal_flip_max_mobile_atoms == 15
+    )
 
 
 def test_config_terminal_flip_frequency_valid():
