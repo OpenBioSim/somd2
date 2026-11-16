@@ -4,88 +4,12 @@ import sire as sr
 from somd2._utils._gcmc import (
     _minimum_image,
     _positions,
-    auto_selection,
     ghost_waters,
-    perturbed_atoms,
     selection_geometry,
     selection_sites,
     vanishing_atoms,
 )
-
-
-def test_perturbed_atoms(ethane_methanol):
-    """
-    Make sure that atoms whose element changes, and heavy atoms whose LJ
-    parameters change, are perturbed, but not hydrogens whose LJ parameters
-    change.
-    """
-    mol = ethane_methanol.molecules("property is_perturbable")[0]
-    indices = perturbed_atoms(mol)
-
-    hydrogens = []
-    for i, atom in enumerate(mol.atoms()):
-        element0 = atom.property("element0").symbol()
-        element1 = atom.property("element1").symbol()
-        lj_changes = atom.property("LJ0") != atom.property("LJ1")
-        changed = element0 != element1 or (element0 != "H" and lj_changes)
-        assert (i in indices) == changed
-        if element0 == element1 == "H" and lj_changes:
-            hydrogens.append(i)
-
-    # Some hydrogens change LJ parameters without being perturbed.
-    assert hydrogens
-    assert 0 < len(indices) < mol.num_atoms()
-
-
-def test_perturbed_atoms_decoupled(abfe_charge_change_mols):
-    """
-    Make sure that every heavy atom of a decoupled ligand is perturbed.
-    """
-    mol = abfe_charge_change_mols.molecules("property is_perturbable")[0]
-    heavy = [
-        i
-        for i, atom in enumerate(mol.atoms())
-        if atom.property("element0").symbol() != "H"
-    ]
-    assert perturbed_atoms(mol) == heavy
-
-
-def test_auto_selection_reloaded(ethane_methanol, tmp_path):
-    """
-    Make sure that the selection picks the same atoms from the system reloaded
-    from file, as the viewer does, which has new molecule numbers.
-    """
-    selection = auto_selection(ethane_methanol)
-    indices = ethane_methanol.atoms().find(ethane_methanol[selection].atoms())
-
-    mol = ethane_methanol.molecules("property is_perturbable")[0]
-    offset = ethane_methanol.atoms().find(mol.atoms()[0])
-    assert indices == [offset + i for i in perturbed_atoms(mol)]
-
-    reference = sr.morph.extract_reference(ethane_methanol)
-    files = sr.save(reference, str(tmp_path / "system"), format=["prm7", "rst7"])
-    reloaded = sr.load(files)
-    assert reloaded.atoms().find(reloaded[selection].atoms()) == indices
-
-
-def test_auto_selection_skips_perturbable_waters(ethane_methanol):
-    """
-    Make sure that perturbable waters and single-atom ions, e.g. co-alchemical
-    ions, don't move the GCMC sphere away from the perturbable solute.
-    """
-    water = ethane_methanol["water"].molecules()[0]
-    system = ethane_methanol.clone()
-    system.update(water.edit().set_property("is_perturbable", True).commit())
-
-    assert auto_selection(system) == auto_selection(ethane_methanol)
-
-    # A single-atom molecule, standing in for a perturbable ion.
-    ion = water.edit().remove(sr.legacy.Mol.AtomIdx(2)).remove(sr.legacy.Mol.AtomIdx(1))
-    ion = ion.commit().edit().renumber().set_property("is_perturbable", True).commit()
-    system = ethane_methanol.clone()
-    system.add(ion)
-
-    assert auto_selection(system) == auto_selection(ethane_methanol)
+from somd2._utils._perturbed import perturbed_selection
 
 
 def test_vanishing_atoms(ethane_methanol, abfe_charge_change_mols):
@@ -110,7 +34,7 @@ def test_selection_geometry(ethane_methanol):
     """
     Make sure the extent covers the selected atoms in both end states.
     """
-    selection = auto_selection(ethane_methanol)
+    selection = perturbed_selection(ethane_methanol)
     centre, extent = selection_geometry(ethane_methanol, selection)
     assert 0 < extent < 5
     assert centre.shape == (3,)
@@ -127,7 +51,7 @@ def test_selection_geometry_periodic(ethane_methanol):
     """
     import numpy as np
 
-    selection = auto_selection(ethane_methanol)
+    selection = perturbed_selection(ethane_methanol)
     centre, extent = selection_geometry(ethane_methanol, selection)
 
     # Move one atom of the molecule by a box vector in both end states.
@@ -189,7 +113,7 @@ def test_selection_sites(ethane_methanol):
     """
     import numpy as np
 
-    selection = auto_selection(ethane_methanol)
+    selection = perturbed_selection(ethane_methanol)
     assert len(selection_sites(ethane_methanol, selection)) == 1
 
     # Add the oxygen of a water far from the perturbable molecule.
@@ -213,7 +137,7 @@ def test_ghost_waters(ethane_methanol):
     Make sure the ghost waters cover the free volume of the sphere, which is
     small in water, plus a margin.
     """
-    selection = auto_selection(ethane_methanol)
+    selection = perturbed_selection(ethane_methanol)
     centre, extent = selection_geometry(ethane_methanol, selection)
 
     volume = 30.543

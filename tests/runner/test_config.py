@@ -492,3 +492,55 @@ def test_gcmc_region_options():
     new = Config(gcmc=True, pressure=None, gcmc_radius="4 A", gcmc_num_waters=20)
     with pytest.raises(ValueError):
         RunnerBase._compare_configs(old.as_dict(), new.as_dict())
+
+
+def test_rest2_region_options(ethane_methanol):
+    """
+    Validate the REST2 region options, and that the automatic region is
+    resolved and recorded when REST2 is used, and left unset otherwise.
+    """
+    from pathlib import Path
+
+    import pytest
+
+    from somd2._utils._perturbed import perturbed_selection
+
+    config = Config()
+    assert config.rest2_selection == "auto"
+    assert config.rest2_bonds == 2
+
+    config.rest2_selection = "None"
+    assert config.rest2_selection is None
+    config.rest2_selection = "AUTO"
+    assert config.rest2_selection == "auto"
+    config.rest2_bonds = "3"
+    assert config.rest2_bonds == 3
+
+    for bonds in (-1, "two", 2.5, True):
+        with pytest.raises(ValueError):
+            config.rest2_bonds = bonds
+
+    # A REST2 run started with the previous default region can't silently
+    # switch to the automatic region on restart.
+    from somd2.runner._base import RunnerBase
+
+    old = Config(rest2_scale=2.0, rest2_selection=None).as_dict()
+    new = Config(rest2_scale=2.0, rest2_selection="molidx 0 and atomidx 0").as_dict()
+    with pytest.raises(ValueError, match="'rest2_selection' to None"):
+        RunnerBase._compare_configs(old, new)
+
+    for scale, expected in (
+        (2.0, perturbed_selection(ethane_methanol, 2)),
+        (1.0, None),
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = Runner(
+                ethane_methanol,
+                Config(platform="cpu", output_directory=tmpdir, rest2_scale=scale),
+            )
+            assert runner._config.rest2_selection == expected
+
+            written = Config.from_yaml(str(Path(tmpdir) / "config.yaml"))
+            assert written.rest2_selection == expected
+
+    somd2._logger.remove()
