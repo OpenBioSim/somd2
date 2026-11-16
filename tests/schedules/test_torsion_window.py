@@ -112,18 +112,38 @@ def _linearise(mol, angle, state, remove_terms=()):
     return cursor.commit()
 
 
+def _spanned_angles(mol):
+    """
+    Return the angles of the molecule that a non-zero dihedral passes through at
+    both end states, sorted, since the order of the potentials isn't fixed.
+    """
+    info = mol.info()
+
+    def spanned(state):
+        angles = set()
+        for p in mol.property(f"dihedral{state}").potentials():
+            if p.function().is_zero():
+                continue
+            idx = [
+                info.atom_idx(a).value()
+                for a in (p.atom0(), p.atom1(), p.atom2(), p.atom3())
+            ]
+            for a, b, c in (idx[:3], idx[1:]):
+                angles.add((min(a, c), b, max(a, c)))
+        return angles
+
+    angles = sorted(spanned(0) & spanned(1))
+    if not angles:
+        raise ValueError("No angles spanned by non-zero dihedrals at both end states")
+    return angles
+
+
 def _spanned_angle(mol):
     """
     Return an angle of the molecule that a non-zero dihedral passes through at
     both end states.
     """
-    info = mol.info()
-    for p in mol.property("dihedral0").potentials():
-        if p.function().is_zero():
-            continue
-        idx = [info.atom_idx(a).value() for a in (p.atom0(), p.atom1(), p.atom2())]
-        return tuple(idx)
-    raise ValueError("No non-zero dihedrals")
+    return _spanned_angles(mol)[0]
 
 
 def _linear_system(mols, remove_terms=(1,)):
@@ -276,15 +296,8 @@ def test_runner_torsion_window_both_ends(diphenylethane_mols):
 
     mols = diphenylethane_mols.clone()
     mol = mols.molecules("property is_perturbable")[0]
-    info = mol.info()
 
-    angles = []
-    for p in mol.property("dihedral0").potentials():
-        if p.function().is_zero():
-            continue
-        idx = tuple(info.atom_idx(a).value() for a in (p.atom0(), p.atom1(), p.atom2()))
-        if all(set(idx) != set(a) for a in angles):
-            angles.append(idx)
+    angles = _spanned_angles(mol)
     mol = _linearise(mol, angles[0], 1)
     mol = _linearise(mol, angles[1], 0)
     mols.update(mol)
