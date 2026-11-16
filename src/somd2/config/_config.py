@@ -652,8 +652,9 @@ class Config:
             this is the number of waters that fill the free volume of the GCMC sphere, i.e.
             the sphere, given 'gcmc_standard_volume', less the waters and heavy atoms already
             inside, other than atoms that vanish in either end state, plus a margin for
-            fluctuations. When GCMC moves are attempted within the entire simulation volume,
-            then this is 20.
+            fluctuations. Enough are added to cover fluctuations in the number of waters in
+            the simulation box from bulk moves, which is all of them when GCMC moves are
+            attempted within the entire simulation volume.
 
         gcmc_radius: str
             The radius of the GCMC sphere. If 'auto' (the default), then this is the largest

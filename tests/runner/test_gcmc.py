@@ -184,8 +184,11 @@ def test_runner_gcmc_auto_region(ethane_methanol):
     """
     pytest.importorskip("loch")
 
-    from somd2._utils._gcmc import ghost_waters, selection_geometry
+    from somd2._utils._gcmc import bulk_ghost_waters, ghost_waters, selection_geometry
     from somd2._utils._perturbed import perturbed_selection
+
+    bulk = bulk_ghost_waters(ethane_methanol)
+    assert bulk > 0
 
     with tempfile.TemporaryDirectory() as tmpdir:
         config = Config(
@@ -209,9 +212,10 @@ def test_runner_gcmc_auto_region(ethane_methanol):
         assert resolved.gcmc_selection == selection
         assert resolved.gcmc_radius.to("A") == pytest.approx(extent + 5.0, abs=1e-3)
         volume = resolved.gcmc_standard_volume.value()
-        assert resolved.gcmc_num_waters == ghost_waters(
+        pocket = ghost_waters(
             ethane_methanol, centre, resolved.gcmc_radius.to("A"), volume
         )
+        assert resolved.gcmc_num_waters == pocket + bulk
 
         written = Config.from_yaml(str(Path(tmpdir) / "config.yaml"))
         assert written.gcmc_selection == selection
@@ -225,7 +229,22 @@ def test_runner_gcmc_auto_region(ethane_methanol):
         runner = Runner(ethane_methanol, config)
         resolved = runner._config
         assert resolved.gcmc_radius.to("A") == pytest.approx(8.0)
-        assert resolved.gcmc_num_waters == ghost_waters(
-            ethane_methanol, centre, 8.0, volume
+        assert resolved.gcmc_num_waters == (
+            ghost_waters(ethane_methanol, centre, 8.0, volume) + bulk
         )
         assert runner._gcmc_kwargs["radius"] == str(resolved.gcmc_radius)
+
+    # Without bulk moves only the sphere needs ghost waters.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config.output_directory = tmpdir
+        config.gcmc_radius = "auto"
+        config.gcmc_bulk_sampling_probability = 0.0
+        runner = Runner(ethane_methanol, config)
+        assert runner._config.gcmc_num_waters == pocket
+
+    # Moves within the entire box only need to cover its fluctuations.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config.output_directory = tmpdir
+        config.gcmc_selection = None
+        runner = Runner(ethane_methanol, config)
+        assert runner._config.gcmc_num_waters == bulk

@@ -1097,7 +1097,12 @@ class RunnerBase:
         are resolved from the input system, so a restart resolves them to the
         same values.
         """
-        from .._utils._gcmc import ghost_waters, selection_geometry, selection_sites
+        from .._utils._gcmc import (
+            bulk_ghost_waters,
+            ghost_waters,
+            selection_geometry,
+            selection_sites,
+        )
         from .._utils._perturbed import perturbed_selection
 
         is_auto = self._config.gcmc_selection == "auto"
@@ -1117,7 +1122,7 @@ class RunnerBase:
         # The radius isn't used when sampling the entire simulation box.
         if selection is None:
             if self._config.gcmc_num_waters == "auto":
-                self._config.gcmc_num_waters = 20
+                self._config.gcmc_num_waters = bulk_ghost_waters(self._system)
             _logger.info(
                 "GCMC moves will be attempted within the entire simulation box "
                 f"with {self._config.gcmc_num_waters} ghost waters."
@@ -1139,12 +1144,16 @@ class RunnerBase:
                 self._config.gcmc_radius = f"{radius:.3f} A"
 
             if self._config.gcmc_num_waters == "auto":
-                self._config.gcmc_num_waters = ghost_waters(
+                num_waters = ghost_waters(
                     self._system,
                     centre,
                     self._config.gcmc_radius.to("A"),
                     self._config.gcmc_standard_volume.value(),
                 )
+                # Bulk moves draw on the same ghost waters.
+                if self._config.gcmc_bulk_sampling_probability > 0:
+                    num_waters += bulk_ghost_waters(self._system)
+                self._config.gcmc_num_waters = num_waters
             sites = selection_sites(self._system, selection) if is_auto else []
         except Exception as e:
             msg = f"Unable to set up the GCMC sphere for '{selection}': {e}"

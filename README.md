@@ -654,8 +654,10 @@ radius covers these atoms in both end states, plus `--gcmc-radius-padding`
 (5 Å by default), and enough ghost waters are added to fill the free volume of
 the sphere, i.e. its volume less the waters and heavy atoms already inside,
 other than atoms that vanish in either end state, plus a margin for
-fluctuations. The resolved selection, radius and number of waters are logged
-and written to the config file.
+fluctuations. More are added to cover fluctuations in the number of waters in
+the box from bulk moves, which are controlled by
+`--gcmc-bulk-sampling-probability`. The resolved selection, radius and number of
+waters are logged and written to the config file.
 
 To define a different GCMC region, use the `--gcmc-selection` option, which
 should be a `Sire` selection string that specifies the atoms defining the centre

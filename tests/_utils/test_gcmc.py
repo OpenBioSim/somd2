@@ -3,6 +3,7 @@ import sire as sr
 
 from somd2._utils._gcmc import (
     _minimum_image,
+    bulk_ghost_waters,
     _positions,
     ghost_waters,
     selection_geometry,
@@ -151,3 +152,20 @@ def test_ghost_waters(ethane_methanol):
 
     # A larger water model fills the sphere with fewer waters.
     assert ghost_waters(ethane_methanol, centre, extent + 10, 2 * volume) < large
+
+
+def test_bulk_ghost_waters(ethane_methanol):
+    """
+    Make sure the bulk ghost waters cover four standard deviations of the
+    fluctuation in the number of waters in the box.
+    """
+    import math
+
+    num_waters = ethane_methanol["water"].molecules().num_molecules()
+    expected = math.ceil(4 * math.sqrt(0.08 * num_waters))
+    assert bulk_ghost_waters(ethane_methanol) == expected
+
+    # No waters, no fluctuations.
+    system = ethane_methanol.clone()
+    system.remove(system["water"].molecules())
+    assert bulk_ghost_waters(system) == 0

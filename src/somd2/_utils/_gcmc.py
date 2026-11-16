@@ -19,7 +19,7 @@
 # along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
-__all__ = ["selection_geometry", "selection_sites", "ghost_waters"]
+__all__ = ["selection_geometry", "selection_sites", "ghost_waters", "bulk_ghost_waters"]
 
 # The volume of a heavy atom and its hydrogens at protein density, in waters.
 _HEAVY_ATOM_WATERS = 0.58
@@ -28,6 +28,12 @@ _HEAVY_ATOM_WATERS = 0.58
 # fill the empty sphere, and its minimum.
 _GHOST_WATER_MARGIN = 0.1
 _MIN_GHOST_WATER_MARGIN = 10
+
+# The variance of the number of waters in the box from bulk moves, as a fraction of
+# the number of waters, and the number of standard deviations to cover. Measured
+# from the fluctuations in GCMC runs, which include some drift.
+_BULK_WATER_VARIANCE = 0.08
+_BULK_WATER_SIGMAS = 4
 
 # Selected atoms closer than this, in Angstrom, belong to the same site.
 _SITE_DISTANCE = 4.0
@@ -292,3 +298,32 @@ def ghost_waters(system, centre, radius, standard_volume):
     free = max(_math.ceil(empty - _HEAVY_ATOM_WATERS * occupied - waters), 0)
     margin = max(_math.ceil(_GHOST_WATER_MARGIN * empty), _MIN_GHOST_WATER_MARGIN)
     return free + margin
+
+
+def bulk_ghost_waters(system):
+    """
+    Return the number of ghost waters needed to cover fluctuations in the
+    number of waters in the simulation box from bulk GCMC moves.
+
+    Parameters
+    ----------
+
+    system: sire.system.System
+        The system.
+
+    Returns
+    -------
+
+    num_waters: int
+        The number of ghost waters.
+    """
+    import math as _math
+
+    try:
+        num_waters = system["water"].molecules().num_molecules()
+    except KeyError:
+        num_waters = 0
+
+    return _math.ceil(
+        _BULK_WATER_SIGMAS * _math.sqrt(_BULK_WATER_VARIANCE * num_waters)
+    )
