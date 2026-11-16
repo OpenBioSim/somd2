@@ -132,6 +132,7 @@ class Config:
             "gcmc_batch_size",
             "gcmc_num_attempts",
             "gcmc_radius_padding",
+            "terminal_flip_max_mobile_atoms",
             "rest2_bonds",
             "torsion_window",
         ]

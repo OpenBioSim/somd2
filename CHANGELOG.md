@@ -46,6 +46,7 @@ Changelog
 * Runners now work on a copy of the config, so that changes they make, e.g. to the lambda schedule, don't carry over to other runners created from the same config [#287](https://github.com/OpenBioSim/somd2/pull/287).
 * Default the GCMC region to a sphere around the perturbed atoms, with a radius and number of ghost waters chosen automatically, via new `auto` defaults for `gcmc_selection`, `gcmc_radius` and `gcmc_num_waters`, and a `gcmc_radius_padding` option. GCMC within the entire simulation box is still available with `gcmc_selection=None` [#291](https://github.com/OpenBioSim/somd2/pull/291).
 * Default the REST2 region to the perturbed atoms and the atoms within `rest2_bonds` bonds of them, via a new `auto` default for `rest2_selection`. All atoms of the perturbable molecules can still be scaled with `rest2_selection=None` [#292](https://github.com/OpenBioSim/somd2/pull/292).
+* Take the terminal ring flip angle of a distorted ring from the number of neighbours of its pivot, rather than from RDKit, which assigned 120° to aromatic rings when MDAnalysis wasn't available [#294](https://github.com/OpenBioSim/somd2/pull/294).
 
 [2026.2.0](https://github.com/openbiosim/somd2/compare/2026.1.0...2026.2.0) - Sep 2026
 --------------------------------------------------------------------------------------
