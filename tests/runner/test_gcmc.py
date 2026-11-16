@@ -184,7 +184,8 @@ def test_runner_gcmc_auto_region(ethane_methanol):
     """
     pytest.importorskip("loch")
 
-    from somd2._utils._gcmc import auto_selection, ghost_waters, selection_geometry
+    from somd2._utils._gcmc import ghost_waters, selection_geometry
+    from somd2._utils._perturbed import perturbed_selection
 
     with tempfile.TemporaryDirectory() as tmpdir:
         config = Config(
@@ -202,7 +203,7 @@ def test_runner_gcmc_auto_region(ethane_methanol):
 
         runner = Runner(ethane_methanol, config)
 
-        selection = auto_selection(ethane_methanol)
+        selection = perturbed_selection(ethane_methanol)
         centre, extent = selection_geometry(ethane_methanol, selection)
         resolved = runner._config
         assert resolved.gcmc_selection == selection

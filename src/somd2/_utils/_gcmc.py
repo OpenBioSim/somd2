@@ -19,7 +19,7 @@
 # along with SOMD2. If not, see <http://www.gnu.org/licenses/>.
 #####################################################################
 
-__all__ = ["auto_selection", "selection_geometry", "selection_sites", "ghost_waters"]
+__all__ = ["selection_geometry", "selection_sites", "ghost_waters"]
 
 # The volume of a heavy atom and its hydrogens at protein density, in waters.
 _HEAVY_ATOM_WATERS = 0.58
@@ -31,38 +31,6 @@ _MIN_GHOST_WATER_MARGIN = 10
 
 # Selected atoms closer than this, in Angstrom, belong to the same site.
 _SITE_DISTANCE = 4.0
-
-
-def perturbed_atoms(mol):
-    """
-    Return the indices of the atoms of a perturbable molecule that change
-    between the end states: atoms whose element changes, including ghost
-    atoms, and heavy atoms whose Lennard-Jones parameters change. Hydrogens
-    whose Lennard-Jones parameters change are left out, since this is often
-    only a change in atom type caused by changes elsewhere in the molecule. If
-    no atoms change, then all atoms are returned.
-
-    Parameters
-    ----------
-
-    mol: sire.mol.Molecule
-        The perturbable molecule.
-
-    Returns
-    -------
-
-    indices: list of int
-        The indices of the perturbed atoms within the molecule.
-    """
-
-    def changes(atom):
-        element = atom.property("element0").symbol()
-        if element != atom.property("element1").symbol():
-            return True
-        return element != "H" and atom.property("LJ0") != atom.property("LJ1")
-
-    indices = [i for i, atom in enumerate(mol.atoms()) if changes(atom)]
-    return indices or list(range(mol.num_atoms()))
 
 
 def vanishing_atoms(mol):
@@ -98,41 +66,6 @@ def vanishing_atoms(mol):
         or decoupled(atom, 0)
         or decoupled(atom, 1)
     ]
-
-
-def auto_selection(system):
-    """
-    Return a selection string for the perturbed atoms of the perturbable
-    molecules in the system. Perturbable waters and single-atom ions, e.g.
-    co-alchemical ions, are left out unless they are the only perturbable
-    molecules. Molecules are selected by index, rather than number, so that the
-    selection also works for the system reloaded from file.
-
-    Parameters
-    ----------
-
-    system: sire.system.System
-        The system containing the perturbable molecules.
-
-    Returns
-    -------
-
-    selection: str
-        The selection string.
-    """
-    perturbable = system.molecules("property is_perturbable")
-    try:
-        solutes = system.molecules("property is_perturbable and not water")
-    except KeyError:
-        solutes = []
-    solutes = [mol for mol in solutes if mol.num_atoms() > 1] or perturbable
-
-    molecules = system.molecules()
-    parts = []
-    for mol in solutes:
-        indices = ",".join(str(i) for i in perturbed_atoms(mol))
-        parts.append(f"(molidx {molecules.find(mol)} and atomidx {indices})")
-    return " or ".join(parts)
 
 
 def _space(system):

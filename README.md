@@ -619,11 +619,21 @@ perturbations involving conformational changes, e.g. ring flips. It is enabled
 with the `--rest2-scale` option, which specifies the "temperature" of the REST2
 region relative to the rest of the system.
 
-By default, the REST2 region comprises *all* atoms in perturbable molecules.
-Atoms in other, non-perturbable molecules can be added with `--rest2-selection`,
-a `Sire` selection string. If the selection includes atoms in perturbable
-molecules, only the selected atoms of those molecules are scaled, so a subset of
-a perturbable molecule can be chosen.
+By default, the REST2 region comprises the perturbed atoms, i.e. atoms whose
+element changes between the end states, including ghost atoms, and heavy atoms
+whose Lennard-Jones parameters change, along with the atoms within
+`--rest2-bonds` bonds of them (2 by default). Torsions are only scaled when all
+four atoms are in the REST2 region, so this includes the torsions about every
+bond to a perturbed atom, while keeping the region, and the change in energy
+between λ windows, small. The resolved selection is logged and written to the
+config file.
+
+A different region can be chosen with `--rest2-selection`, a `Sire` selection
+string. Use `--rest2-selection none` to scale *all* atoms in perturbable
+molecules. Atoms in other, non-perturbable molecules can be added with a
+selection. If the selection includes atoms in perturbable molecules, only the
+selected atoms of those molecules are scaled, so a subset of a perturbable
+molecule can be chosen.
 
 The REST2 schedule is a triangular function that starts and ends at 1.0,
 peaking at the value of `--rest2-scale` in the middle of the λ schedule.

@@ -898,6 +898,26 @@ class RunnerBase:
                 is_rest2 = True
                 _logger.info(f"REST2 scaling factors: {self._rest2_scale_factors}")
 
+        # Resolve the automatic REST2 region, which is only used with REST2.
+        if self._config.rest2_selection == "auto":
+            if is_rest2:
+                from .._utils._perturbed import perturbed_selection
+
+                try:
+                    self._config.rest2_selection = perturbed_selection(
+                        self._system, self._config.rest2_bonds
+                    )
+                except Exception as e:
+                    msg = (
+                        f"Unable to select the perturbed atoms for the REST2 region: {e}. "
+                        "Set 'rest2_selection' explicitly."
+                    )
+                    _logger.error(msg)
+                    raise ValueError(msg) from e
+                _logger.info(f"REST2 region: '{self._config.rest2_selection}'")
+            else:
+                self._config.rest2_selection = None
+
         # Make sure the REST2 selection is valid.
         if self._config.rest2_selection is not None:
             try:
@@ -1077,17 +1097,13 @@ class RunnerBase:
         are resolved from the input system, so a restart resolves them to the
         same values.
         """
-        from .._utils._gcmc import (
-            auto_selection,
-            ghost_waters,
-            selection_geometry,
-            selection_sites,
-        )
+        from .._utils._gcmc import ghost_waters, selection_geometry, selection_sites
+        from .._utils._perturbed import perturbed_selection
 
         is_auto = self._config.gcmc_selection == "auto"
         if is_auto:
             try:
-                self._config.gcmc_selection = auto_selection(self._system)
+                self._config.gcmc_selection = perturbed_selection(self._system)
             except Exception as e:
                 msg = (
                     f"Unable to select the perturbed atoms for the GCMC sphere: {e}. "
@@ -2598,6 +2614,13 @@ class RunnerBase:
                 f"would be applied ({windows}), but the simulation was started "
                 "before 'torsion_window' existed. Set 'torsion_window' to "
                 "'false' to restart it."
+            )
+
+        if not config1.get("rest2_selection") and config2.get("rest2_selection"):
+            raise ValueError(
+                "The simulation was started with a REST2 region containing all "
+                "atoms of the perturbable molecules. Set 'rest2_selection' to "
+                "None to restart it."
             )
 
         allowed_diffs = _Config._restart_allowed_diffs

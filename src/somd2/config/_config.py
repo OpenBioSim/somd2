@@ -132,6 +132,7 @@ class Config:
             "gcmc_batch_size",
             "gcmc_num_attempts",
             "gcmc_radius_padding",
+            "rest2_bonds",
             "torsion_window",
         ]
     )
@@ -231,7 +232,8 @@ class Config:
         gcmc_num_attempts=10000,
         use_dispersion_correction=False,
         rest2_scale=1.0,
-        rest2_selection=None,
+        rest2_selection="auto",
+        rest2_bonds=2,
         softcore_form="auto",
         taylor_power=1,
         beutler_alpha=0.5,
@@ -702,11 +704,20 @@ class Config:
         rest2_selection: str
             A sire selection string for atoms to include in the REST2 region in
             addition to any perturbable molecules. For example, "molidx 0 and residx 0,1,2"
-            would select atoms from the first three residues of the first molecule. If None,
-            then all atoms within perturbable molecules will be included in the REST2 region.
-            When atoms within a perturbable molecule are included in the selection, then only
-            those atoms will be considered as part of the REST2 region. This allows REST2 to
-            be applied to protein mutations.
+            would select atoms from the first three residues of the first molecule. If 'auto'
+            (the default), then the REST2 region contains the perturbed atoms, i.e. atoms
+            whose element changes between the end states, including ghost atoms, and heavy
+            atoms whose Lennard-Jones parameters change, and the atoms within 'rest2_bonds'
+            bonds of them. If None, then all atoms within perturbable molecules will be
+            included in the REST2 region. When atoms within a perturbable molecule are
+            included in the selection, then only those atoms will be considered as part of
+            the REST2 region. This allows REST2 to be applied to protein mutations.
+
+        rest2_bonds: int
+            The number of bonds from the perturbed atoms to extend the REST2 region when
+            'rest2_selection' is 'auto'. Torsions are only scaled when all four atoms are in
+            the REST2 region, so the default of 2 includes the torsions about every bond to
+            a perturbed atom.
 
         softcore_form: str
             The soft-core potential form to use for alchemical interactions. Valid
@@ -926,6 +937,7 @@ class Config:
         self.use_dispersion_correction = use_dispersion_correction
         self.rest2_scale = rest2_scale
         self.rest2_selection = rest2_selection
+        self.rest2_bonds = rest2_bonds
         self.restart = restart
         self.use_backup = use_backup
         self.softcore_form = softcore_form
@@ -2888,7 +2900,31 @@ class Config:
         if rest2_selection is not None:
             if not isinstance(rest2_selection, str):
                 raise TypeError("'rest2_selection' must be of type 'str'")
+            # Allow all atoms of the perturbable molecules to be chosen from the command line.
+            if rest2_selection.strip().lower() == "none":
+                rest2_selection = None
+            elif rest2_selection.strip().lower() == "auto":
+                rest2_selection = "auto"
         self._rest2_selection = rest2_selection
+
+    @property
+    def rest2_bonds(self):
+        return self._rest2_bonds
+
+    @rest2_bonds.setter
+    def rest2_bonds(self, rest2_bonds):
+        if isinstance(rest2_bonds, bool) or (
+            isinstance(rest2_bonds, float) and not rest2_bonds.is_integer()
+        ):
+            raise ValueError("'rest2_bonds' must be an integer")
+        if not isinstance(rest2_bonds, int):
+            try:
+                rest2_bonds = int(rest2_bonds)
+            except Exception:
+                raise ValueError("'rest2_bonds' must be an integer")
+        if rest2_bonds < 0:
+            raise ValueError("'rest2_bonds' must be greater than or equal to 0")
+        self._rest2_bonds = rest2_bonds
 
     @property
     def restart(self):
