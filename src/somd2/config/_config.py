@@ -131,6 +131,7 @@ class Config:
             "restraint_search_frequency",
             "gcmc_batch_size",
             "gcmc_num_attempts",
+            "gcmc_radius_padding",
             "torsion_window",
         ]
     )
@@ -218,11 +219,12 @@ class Config:
         terminal_flip_max_mobile_atoms=None,
         gcmc=False,
         gcmc_frequency=None,
-        gcmc_selection=None,
+        gcmc_selection="auto",
         gcmc_excess_chemical_potential="-6.09 kcal/mol",
         gcmc_standard_volume="30.543 A^3",
-        gcmc_num_waters=20,
-        gcmc_radius="4 A",
+        gcmc_num_waters="auto",
+        gcmc_radius="auto",
+        gcmc_radius_padding="5 A",
         gcmc_bulk_sampling_probability=0.1,
         gcmc_tolerance=0.0,
         gcmc_batch_size=1000,
@@ -626,9 +628,12 @@ class Config:
             same as 'energy_frequency'. This must be a multiple of 'energy_frequency'.
 
         gcmc_selection: str
-            A sire sslection string specifying the atoms that define the centre of geometry
-            of the GCMC sphere. If None, then GCMC moves will be attempted within the entire
-            simulation volume.
+            A sire selection string specifying the atoms that define the centre of geometry
+            of the GCMC sphere. If 'auto' (the default), then the perturbed atoms are used,
+            i.e. atoms whose element changes between the end states, including ghost atoms,
+            and heavy atoms whose Lennard-Jones parameters change, or every atom of a
+            perturbable molecule in which none do. If None, then
+            GCMC moves will be attempted within the entire simulation volume.
 
         gcmc_excess_chemical_potential: str
             The excess chemical potential of water in kcal/mol. The default value is calibrated
@@ -641,10 +646,22 @@ class Config:
 
         gcmc_num_waters: int
             The additional number of ghost water molecules to add to the system. These are
-            used as placeholders for GCMC insertion moves.
+            used as placeholders for GCMC insertion moves. If 'auto' (the default), then
+            this is the number of waters that fill the free volume of the GCMC sphere, i.e.
+            the sphere, given 'gcmc_standard_volume', less the waters and heavy atoms already
+            inside, other than atoms that vanish in either end state, plus a margin for
+            fluctuations. When GCMC moves are attempted within the entire simulation volume,
+            then this is 20.
 
         gcmc_radius: str
-            The radius of the GCMC sphere.
+            The radius of the GCMC sphere. If 'auto' (the default), then this is the largest
+            distance of the 'gcmc_selection' atoms from their centre of geometry, in either
+            end state, plus 'gcmc_radius_padding'. This is unused when GCMC moves are
+            attempted within the entire simulation volume.
+
+        gcmc_radius_padding: str
+            The distance added to the extent of the 'gcmc_selection' atoms when
+            'gcmc_radius' is 'auto'.
 
         gcmc_bulk_sampling_probability: float
             The probability of performing bulk GCMC moves, i.e. within the entire simulation
@@ -901,6 +918,7 @@ class Config:
         self.gcmc_standard_volume = gcmc_standard_volume
         self.gcmc_num_waters = gcmc_num_waters
         self.gcmc_radius = gcmc_radius
+        self.gcmc_radius_padding = gcmc_radius_padding
         self.gcmc_bulk_sampling_probability = gcmc_bulk_sampling_probability
         self.gcmc_tolerance = gcmc_tolerance
         self.gcmc_batch_size = gcmc_batch_size
@@ -2622,6 +2640,11 @@ class Config:
         if gcmc_selection is not None:
             if not isinstance(gcmc_selection, str):
                 raise TypeError("'gcmc_selection' must be of type 'str'")
+            # Allow the entire simulation volume to be chosen from the command line.
+            if gcmc_selection.strip().lower() == "none":
+                gcmc_selection = None
+            elif gcmc_selection.strip().lower() == "auto":
+                gcmc_selection = "auto"
         self._gcmc_selection = gcmc_selection
 
     @property
@@ -2678,6 +2701,12 @@ class Config:
 
     @gcmc_num_waters.setter
     def gcmc_num_waters(self, gcmc_num_waters):
+        if (
+            isinstance(gcmc_num_waters, str)
+            and gcmc_num_waters.strip().lower() == "auto"
+        ):
+            self._gcmc_num_waters = "auto"
+            return
         if gcmc_num_waters is not None:
             if not isinstance(gcmc_num_waters, int):
                 try:
@@ -2698,6 +2727,10 @@ class Config:
         if not isinstance(gcmc_radius, str):
             raise TypeError("'gcmc_radius' must be of type 'str'")
 
+        if gcmc_radius.strip().lower() == "auto":
+            self._gcmc_radius = "auto"
+            return
+
         from sire.units import angstrom
 
         try:
@@ -2711,6 +2744,33 @@ class Config:
             raise ValueError("'gcmc_radius' units are invalid.")
 
         self._gcmc_radius = gcmc_r
+
+    @property
+    def gcmc_radius_padding(self):
+        return self._gcmc_radius_padding
+
+    @gcmc_radius_padding.setter
+    def gcmc_radius_padding(self, gcmc_radius_padding):
+        if not isinstance(gcmc_radius_padding, str):
+            raise TypeError("'gcmc_radius_padding' must be of type 'str'")
+
+        from sire.units import angstrom
+
+        try:
+            padding = _sr.u(gcmc_radius_padding)
+        except Exception:
+            raise ValueError(
+                "Unable to parse 'gcmc_radius_padding' as a Sire GeneralUnit: "
+                f"{gcmc_radius_padding}"
+            )
+
+        if not padding.has_same_units(angstrom):
+            raise ValueError("'gcmc_radius_padding' units are invalid.")
+
+        if padding.value() <= 0:
+            raise ValueError("'gcmc_radius_padding' must be greater than 0")
+
+        self._gcmc_radius_padding = padding
 
     @property
     def gcmc_bulk_sampling_probability(self):

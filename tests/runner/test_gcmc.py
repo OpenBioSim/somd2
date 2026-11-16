@@ -38,6 +38,7 @@ def test_runner_gcmc_without_a_selection(ethane_methanol):
             max_threads=1,
             num_lambda=2,
             gcmc=True,
+            gcmc_selection=None,
             gcmc_frequency="4fs",
         )
 
@@ -173,3 +174,57 @@ def test_runner_gcmc_runtime_remainder(ethane_methanol):
         # remainder, for each window.
         log = (Path(tmpdir) / config.log_file).read_text()
         assert log.count("Performing GCMC move at") == 10
+
+
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
+def test_runner_gcmc_auto_region(ethane_methanol):
+    """
+    Validate that the default GCMC region is a sphere around the perturbed atoms,
+    and that the resolved options are written to the config file.
+    """
+    pytest.importorskip("loch")
+
+    from somd2._utils._gcmc import auto_selection, ghost_waters, selection_geometry
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = Config(
+            runtime="8fs",
+            output_directory=tmpdir,
+            energy_frequency="4fs",
+            checkpoint_frequency="4fs",
+            frame_frequency="4fs",
+            platform="cuda",
+            max_threads=1,
+            num_lambda=2,
+            gcmc=True,
+            gcmc_frequency="4fs",
+        )
+
+        runner = Runner(ethane_methanol, config)
+
+        selection = auto_selection(ethane_methanol)
+        centre, extent = selection_geometry(ethane_methanol, selection)
+        resolved = runner._config
+        assert resolved.gcmc_selection == selection
+        assert resolved.gcmc_radius.to("A") == pytest.approx(extent + 5.0, abs=1e-3)
+        volume = resolved.gcmc_standard_volume.value()
+        assert resolved.gcmc_num_waters == ghost_waters(
+            ethane_methanol, centre, resolved.gcmc_radius.to("A"), volume
+        )
+
+        written = Config.from_yaml(str(Path(tmpdir) / "config.yaml"))
+        assert written.gcmc_selection == selection
+        assert written.gcmc_radius == resolved.gcmc_radius
+        assert written.gcmc_num_waters == resolved.gcmc_num_waters
+
+    # An explicit radius is kept, and the ghost waters are sized for it.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config.output_directory = tmpdir
+        config.gcmc_radius = "8 A"
+        runner = Runner(ethane_methanol, config)
+        resolved = runner._config
+        assert resolved.gcmc_radius.to("A") == pytest.approx(8.0)
+        assert resolved.gcmc_num_waters == ghost_waters(
+            ethane_methanol, centre, 8.0, volume
+        )
+        assert runner._gcmc_kwargs["radius"] == str(resolved.gcmc_radius)

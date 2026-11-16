@@ -636,11 +636,23 @@ in which case there must be one value for each λ window.
 
 SOMD2 also supports grand canonical Monte Carlo (GCMC) water sampling using
 the [loch](https://github.com/OpenBioSim/loch) package. This can be enabled
-using the `--gcmc` option. To define a GCMC region, use the `--gcmc-selection`
-option, which should be a `Sire` selection string that specifies the atoms
-defining the centre of geometry for the GCMC region. The radius of the GCMC
-sphere can be controlled using the `--gcmc-radius` option. To see all GCMC
-related options, run:
+using the `--gcmc` option. By default, GCMC moves are attempted within a sphere
+centred on the perturbed atoms, i.e. atoms whose element changes between the
+end states, including ghost atoms, and heavy atoms whose Lennard-Jones
+parameters change, or the whole ligand for ABFE. The
+radius covers these atoms in both end states, plus `--gcmc-radius-padding`
+(5 Å by default), and enough ghost waters are added to fill the free volume of
+the sphere, i.e. its volume less the waters and heavy atoms already inside,
+other than atoms that vanish in either end state, plus a margin for
+fluctuations. The resolved selection, radius and number of waters are logged
+and written to the config file.
+
+To define a different GCMC region, use the `--gcmc-selection` option, which
+should be a `Sire` selection string that specifies the atoms defining the centre
+of geometry for the GCMC region. The radius of the GCMC sphere can be set with
+the `--gcmc-radius` option, and the number of ghost waters with
+`--gcmc-num-waters`. To attempt moves within the entire simulation box, use
+`--gcmc-selection none`. To see all GCMC related options, run:
 
 ```
 somd2 --help | grep -A2 '  --gcmc'
