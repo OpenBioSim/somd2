@@ -172,7 +172,6 @@ def _detect_for_view(mol, all_atoms, flip_angle, max_mobile_atoms, seen):
 
     num_atoms = mol.num_atoms()
     seen_bonds = set()
-    rdmol = None  # lazily initialised if geometric detection fails
 
     for i in range(num_atoms):
         atom_i_idx = _Mol.AtomIdx(i)
@@ -210,7 +209,7 @@ def _detect_for_view(mol, all_atoms, flip_angle, max_mobile_atoms, seen):
 
             # Skip groups with too many mobile atoms.
             if max_mobile_atoms is not None and len(mobile) > max_mobile_atoms:
-                _logger.warning(
+                _logger.info(
                     f"Terminal group at pivot atom {j} has {len(mobile)} mobile "
                     f"atoms (max_mobile_atoms={max_mobile_atoms}). Skipping group."
                 )
@@ -255,39 +254,30 @@ def _detect_for_view(mol, all_atoms, flip_angle, max_mobile_atoms, seen):
                 group_angle = _round_to_symmetry_angle(raw)
 
                 if group_angle is None:
-                    # Geometric detection failed; fall back to hybridization.
-                    try:
-                        if rdmol is None:
-                            from sire.convert import to_rdkit as _to_rdkit
-                            from rdkit.Chem import HybridizationType as _HybType
-
-                            rdmol = _to_rdkit(mol)
-                        hyb = rdmol.GetAtomWithIdx(j).GetHybridization()
-                        if hyb == _HybType.SP2:
-                            group_angle = 180.0
-                        elif hyb == _HybType.SP3:
-                            group_angle = 120.0
-                        else:
-                            _logger.warning(
-                                f"Terminal group at pivot atom {j}: geometric "
-                                f"detection gave unrecognised angle "
-                                f"({raw:.1f}{_degree_sym}) and hybridization "
-                                f"({hyb}) has no defined flip angle. Skipping."
-                            )
-                            continue
+                    # A distorted ring, so use the number of neighbours of the
+                    # pivot in this end state: planar (3) flips by 180°,
+                    # tetrahedral (4) by 120°.
+                    num_neighbours = sum(
+                        1
+                        for n in connectivity.connections_to(pivot_idx_obj)
+                        if mol.atom(n).property("element").num_protons() > 0
+                    )
+                    group_angle = {3: 180.0, 4: 120.0}.get(num_neighbours)
+                    if group_angle is None:
                         _logger.warning(
                             f"Terminal group at pivot atom {j}: geometric "
                             f"detection gave unrecognised angle "
-                            f"({raw:.1f}{_degree_sym}), using hybridization-based "
-                            f"angle {group_angle}{_degree_sym} (pivot is {hyb.name})."
-                        )
-                    except Exception as e:
-                        _logger.warning(
-                            f"Terminal group at pivot atom {j} has no recognised "
-                            f"rotational symmetry (raw angle = {raw:.1f}{_degree_sym}) "
-                            f"and hybridization fallback failed: {e}. Skipping."
+                            f"({raw:.1f}{_degree_sym}) and the pivot has "
+                            f"{num_neighbours} neighbours, so it has no defined "
+                            "flip angle. Skipping."
                         )
                         continue
+                    _logger.info(
+                        f"Terminal group at pivot atom {j}: geometric "
+                        f"detection gave unrecognised angle "
+                        f"({raw:.1f}{_degree_sym}), using {group_angle}{_degree_sym} "
+                        f"for a pivot with {num_neighbours} neighbours."
+                    )
 
                 _logger.debug(
                     f"Terminal group at pivot atom {j}: auto-detected flip "
