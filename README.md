@@ -684,7 +684,9 @@ When using the CUDA platform, make sure that `nvcc` is in your `PATH`. If you
 require a different `nvcc` to that provided by conda, you can set the
 `PYCUDA_NVCC` environment variable to point to the desired `nvcc` binary.
 Depending on your setup, you may also need to install the `cuda-nvvm` package
-from `conda-forge`.
+from `conda-forge`. If compiling fails with `unsupported GNU version`, see the
+[loch notes](https://github.com/OpenBioSim/loch#notes) for choosing the
+compiler that `nvcc` uses.
 
 <a id="terminal-ring-flip-monte-carlo"></a>
 
