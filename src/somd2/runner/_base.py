@@ -2636,6 +2636,23 @@ class RunnerBase:
                 "None to restart it."
             )
 
+        # Runs started before 'rest2_profile' existed used the linear profile.
+        scale = config1.get("rest2_scale")
+        try:
+            has_rest2 = scale is not None and float(scale) != 1.0
+        except (TypeError, ValueError):
+            has_rest2 = False
+        if (
+            has_rest2
+            and "rest2_profile" not in config1
+            and config2.get("rest2_profile", "linear") != "linear"
+        ):
+            raise ValueError(
+                "The simulation was started before 'rest2_profile' existed, so it "
+                "used the linear REST2 profile. Set 'rest2_profile' to 'linear' to "
+                "restart it."
+            )
+
         allowed_diffs = _Config._restart_allowed_diffs
         no_gcmc = not config1.get("gcmc") and not config2.get("gcmc")
         for key in config1.keys():

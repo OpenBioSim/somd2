@@ -234,7 +234,7 @@ class Config:
         gcmc_num_attempts=10000,
         use_dispersion_correction=False,
         rest2_scale=1.0,
-        rest2_profile="linear",
+        rest2_profile="exponential",
         rest2_selection="auto",
         rest2_bonds=2,
         softcore_form="auto",
@@ -707,8 +707,8 @@ class Config:
 
         rest2_profile: str
             How a single 'rest2_scale' rises from 1.0 at the end states to its value at
-            lambda = 0.5: "linear" (the default), or "exponential", where each step
-            multiplies the scale factor by the same ratio. The exponential profile gives a
+            lambda = 0.5: "exponential" (the default), where each step multiplies the
+            scale factor by the same ratio, or "linear". The exponential profile gives a
             geometric ladder of effective temperatures, which helps sampling propagate
             between windows when a large scale factor is used. It has no effect when
             'rest2_scale' is a list.

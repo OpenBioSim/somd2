@@ -48,7 +48,7 @@ Changelog
 * Default the REST2 region to the perturbed atoms and the atoms within `rest2_bonds` bonds of them, via a new `auto` default for `rest2_selection`. All atoms of the perturbable molecules can still be scaled with `rest2_selection=None` [#292](https://github.com/OpenBioSim/somd2/pull/292).
 * Take the terminal ring flip angle of a distorted ring from the number of neighbours of its pivot, rather than from RDKit, which assigned 120° to aromatic rings when MDAnalysis wasn't available [#294](https://github.com/OpenBioSim/somd2/pull/294).
 * Include whole ring systems containing perturbed atoms in the automatic REST2 region, so that the torsions about a perturbed ring's bonds to the rest of the molecule are scaled [#296](https://github.com/OpenBioSim/somd2/pull/296).
-* Add a `rest2_profile` option, which can be set to `exponential` for a geometric ladder of REST2 scale factors rather than a linear one [#296](https://github.com/OpenBioSim/somd2/pull/296).
+* Add a `rest2_profile` option. The default, `exponential`, gives a geometric ladder of REST2 scale factors, rather than the previous linear rise, which is still available as `linear`. REST2 runs started before this change must set `rest2_profile` to `linear` to restart [#296](https://github.com/OpenBioSim/somd2/pull/296).
 
 [2026.2.0](https://github.com/openbiosim/somd2/compare/2026.1.0...2026.2.0) - Sep 2026
 --------------------------------------------------------------------------------------

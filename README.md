@@ -638,11 +638,11 @@ selected atoms of those molecules are scaled, so a subset of a perturbable
 molecule can be chosen.
 
 The REST2 schedule starts and ends at 1.0, peaking at the value of
-`--rest2-scale` in the middle of the λ schedule. By default it rises linearly.
-With `--rest2-profile exponential`, each step instead multiplies the scale
-factor by the same ratio, giving a geometric ladder of effective temperatures,
-which helps sampling propagate between windows when a large scale factor is
-used. Passing multiple values to `--rest2-scale` gives full control of the
+`--rest2-scale` in the middle of the λ schedule. By default each step
+multiplies the scale factor by the same ratio, giving a geometric ladder of
+effective temperatures, which helps sampling propagate between windows when a
+large scale factor is used. Use `--rest2-profile linear` for a linear rise
+instead. Passing multiple values to `--rest2-scale` gives full control of the
 schedule, in which case there must be one value for each λ window.
 
 <a id="gcmc"></a>
