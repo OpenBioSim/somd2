@@ -905,7 +905,7 @@ class RunnerBase:
 
                 try:
                     self._config.rest2_selection = perturbed_selection(
-                        self._system, self._config.rest2_bonds
+                        self._system, self._config.rest2_bonds, rings=True
                     )
                 except Exception as e:
                     msg = (

@@ -709,8 +709,8 @@ class Config:
             would select atoms from the first three residues of the first molecule. If 'auto'
             (the default), then the REST2 region contains the perturbed atoms, i.e. atoms
             whose element changes between the end states, including ghost atoms, and heavy
-            atoms whose Lennard-Jones parameters change, and the atoms within 'rest2_bonds'
-            bonds of them. If None, then all atoms within perturbable molecules will be
+            atoms whose Lennard-Jones parameters change, any ring systems that contain
+            them or are bonded to them, and the atoms within 'rest2_bonds' bonds of these. If None, then all atoms within perturbable molecules will be
             included in the REST2 region. When atoms within a perturbable molecule are
             included in the selection, then only those atoms will be considered as part of
             the REST2 region. This allows REST2 to be applied to protein mutations.

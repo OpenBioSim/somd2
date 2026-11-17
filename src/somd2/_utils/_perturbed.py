@@ -54,6 +54,52 @@ def perturbed_atoms(mol):
     return indices or list(range(mol.num_atoms()))
 
 
+def _connectivities(mol):
+    """
+    Return the connectivity of each end state of a perturbable molecule, or its
+    single connectivity if it doesn't change.
+    """
+    names = ["connectivity0", "connectivity1"]
+    if not all(mol.has_property(name) for name in names):
+        names = ["connectivity"]
+    return [mol.property(name) for name in names]
+
+
+def _ring_systems(mol, indices):
+    """
+    Return the given atoms plus the atoms of every ring system, in either end
+    state, that contains one of them or is bonded to one of them. A ring system
+    is followed through ring bonds only, so fused rings are included, but rings
+    joined by a single bond, e.g. a biaryl, are not.
+    """
+    from sire.legacy.Mol import AtomIdx as _AtomIdx
+
+    region = set(indices)
+    for connectivity in _connectivities(mol):
+        seeds = set()
+        for i in indices:
+            atom = _AtomIdx(i)
+            if connectivity.in_ring(atom):
+                seeds.add(i)
+            seeds.update(
+                n.value()
+                for n in connectivity.connections_to(atom)
+                if connectivity.in_ring(n)
+            )
+
+        seen = set(seeds)
+        stack = list(seeds)
+        while stack:
+            atom = _AtomIdx(stack.pop())
+            for n in connectivity.connections_to(atom):
+                if n.value() not in seen and connectivity.in_ring(atom, n):
+                    seen.add(n.value())
+                    stack.append(n.value())
+        region |= seen
+
+    return sorted(region)
+
+
 def _neighbours(mol, indices, bonds):
     """
     Return the indices of the atoms within a number of bonds of the given
@@ -61,10 +107,7 @@ def _neighbours(mol, indices, bonds):
     """
     from sire.legacy.Mol import AtomIdx as _AtomIdx
 
-    names = ["connectivity0", "connectivity1"]
-    if not all(mol.has_property(name) for name in names):
-        names = ["connectivity"]
-    connectivities = [mol.property(name) for name in names]
+    connectivities = _connectivities(mol)
 
     region = set(indices)
     shell = set(indices)
@@ -80,10 +123,14 @@ def _neighbours(mol, indices, bonds):
     return sorted(region)
 
 
-def perturbed_selection(system, bonds=0):
+def perturbed_selection(system, bonds=0, rings=False):
     """
     Return a selection string for the perturbed atoms of the perturbable
     molecules in the system, and the atoms within a number of bonds of them.
+    With 'rings', ring systems containing a perturbed atom, or bonded to one,
+    are included whole before the selection is extended, so that a perturbed
+    ring and the torsions about its bonds to the rest of the molecule are
+    covered.
     Perturbable waters and single-atom ions, e.g. co-alchemical ions, are left
     out unless they are the only perturbable molecules. Molecules are selected
     by index, rather than number, so that the selection also works for the
@@ -97,6 +144,9 @@ def perturbed_selection(system, bonds=0):
 
     bonds: int
         The number of bonds from the perturbed atoms to extend the selection.
+
+    rings: bool
+        Whether to include the ring systems of the perturbed atoms whole.
 
     Returns
     -------
@@ -114,7 +164,10 @@ def perturbed_selection(system, bonds=0):
     molecules = system.molecules()
     parts = []
     for mol in solutes:
-        indices = _neighbours(mol, perturbed_atoms(mol), bonds)
+        indices = perturbed_atoms(mol)
+        if rings:
+            indices = _ring_systems(mol, indices)
+        indices = _neighbours(mol, indices, bonds)
         atoms = ",".join(str(i) for i in indices)
         parts.append(f"(molidx {molecules.find(mol)} and atomidx {atoms})")
     return " or ".join(parts)
