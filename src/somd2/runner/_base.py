@@ -888,6 +888,11 @@ class RunnerBase:
                         _logger.error(msg)
                         raise ValueError(msg)
                 self._rest2_scale_factors = self._config.rest2_scale
+                if self._config.rest2_profile != "linear":
+                    _logger.warning(
+                        "'rest2_profile' is ignored, since 'rest2_scale' gives a "
+                        f"scale factor for each {_lam_sym} window."
+                    )
 
             # If there are any non-zero REST2 scale factors, then log it.
             if any(

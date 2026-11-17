@@ -1,3 +1,4 @@
+import pytest
 import sire as sr
 
 from somd2._utils._perturbed import _ring_systems, perturbed_atoms, perturbed_selection
@@ -176,3 +177,47 @@ def test_perturbed_selection_rings_without_rings(ethane_methanol):
         assert perturbed_selection(ethane_methanol, bonds, rings=True) == (
             perturbed_selection(ethane_methanol, bonds)
         )
+
+
+@pytest.mark.parametrize(
+    "smiles, seed_in_ring, size",
+    [
+        # A biaryl: a ring atom at the junction brings in only its own ring.
+        ("c1ccccc1-c1ccccc1", True, 6),
+        # Fused rings form one ring system.
+        ("c1ccc2ccccc2c1", True, 10),
+        # Large rings, e.g. macrocycles, aren't ring systems.
+        ("C1CCCCCCCCCCC1", True, 1),
+        # A substituent on a ring brings in the ring.
+        ("Cc1ccccc1", False, 7),
+    ],
+)
+def test_ring_systems_smiles(smiles, seed_in_ring, size):
+    """
+    Make sure ring systems stop at bonds between rings and at large rings.
+    """
+    from sire.legacy.Mol import AtomIdx
+
+    mol = sr.smiles(smiles)
+    c = mol.property("connectivity")
+    heavy = [i for i, a in enumerate(mol.atoms()) if a.element().symbol() != "H"]
+
+    if seed_in_ring:
+        # A ring atom bonded to a heavy atom in a different ring, or any ring atom.
+        seed = next(
+            (
+                i
+                for i in heavy
+                if any(
+                    n.value() in heavy and not c.in_ring(AtomIdx(i), n)
+                    for n in c.connections_to(AtomIdx(i))
+                )
+                and c.in_ring(AtomIdx(i))
+            ),
+            heavy[0],
+        )
+    else:
+        seed = next(i for i in heavy if not c.in_ring(AtomIdx(i)))
+
+    region = [i for i in _ring_systems(mol, [seed]) if i in heavy]
+    assert len(region) == size
