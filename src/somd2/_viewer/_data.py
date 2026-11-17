@@ -1274,10 +1274,13 @@ class Simulation:
         rest2 = config.get("rest2_scale")
         if rest2 is not None:
             if isinstance(rest2, (int, float)):
-                factors = [
-                    1.0 + (float(rest2) - 1.0) * (1.0 - 2.0 * abs(lam - 0.5))
-                    for lam in lambda_energy
-                ]
+                from .._utils._schedules import rest2_scale_factors
+
+                factors = rest2_scale_factors(
+                    float(rest2),
+                    lambda_energy,
+                    config.get("rest2_profile") or "linear",
+                )
             else:
                 factors = [float(x) for x in rest2]
             if len(factors) == len(lambda_energy) and any(

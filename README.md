@@ -621,11 +621,13 @@ region relative to the rest of the system.
 
 By default, the REST2 region comprises the perturbed atoms, i.e. atoms whose
 element changes between the end states, including ghost atoms, and heavy atoms
-whose Lennard-Jones parameters change, along with the atoms within
-`--rest2-bonds` bonds of them (2 by default). Torsions are only scaled when all
-four atoms are in the REST2 region, so this includes the torsions about every
-bond to a perturbed atom, while keeping the region, and the change in energy
-between λ windows, small. The resolved selection is logged and written to the
+whose Lennard-Jones parameters change, along with any ring systems that contain
+them or are bonded to them, and the atoms within `--rest2-bonds` bonds of these
+(2 by default). Torsions are only scaled when all four atoms are in the REST2
+region, so this includes the torsions about every bond to a perturbed atom, and
+about the bonds joining a perturbed ring to the rest of the molecule, e.g. for
+a ring that flips, while keeping the region, and the change in energy between λ
+windows, small. The resolved selection is logged and written to the
 config file.
 
 A different region can be chosen with `--rest2-selection`, a `Sire` selection
@@ -635,10 +637,13 @@ selection. If the selection includes atoms in perturbable molecules, only the
 selected atoms of those molecules are scaled, so a subset of a perturbable
 molecule can be chosen.
 
-The REST2 schedule is a triangular function that starts and ends at 1.0,
-peaking at the value of `--rest2-scale` in the middle of the λ schedule.
-Passing multiple values to `--rest2-scale` gives full control of the schedule,
-in which case there must be one value for each λ window.
+The REST2 schedule starts and ends at 1.0, peaking at the value of
+`--rest2-scale` in the middle of the λ schedule. By default each step
+multiplies the scale factor by the same ratio, giving a geometric ladder of
+effective temperatures, which helps sampling propagate between windows when a
+large scale factor is used. Use `--rest2-profile linear` for a linear rise
+instead. Passing multiple values to `--rest2-scale` gives full control of the
+schedule, in which case there must be one value for each λ window.
 
 <a id="gcmc"></a>
 

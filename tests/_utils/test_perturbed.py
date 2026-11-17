@@ -1,6 +1,7 @@
+import pytest
 import sire as sr
 
-from somd2._utils._perturbed import perturbed_atoms, perturbed_selection
+from somd2._utils._perturbed import _ring_systems, perturbed_atoms, perturbed_selection
 
 
 def test_perturbed_atoms(ethane_methanol):
@@ -141,3 +142,82 @@ def test_perturbed_selection_ring_break(ring_break_mols):
         edited = mol.edit().set_property("connectivity", default).commit()
         assert j not in [n.value() for n in default.connections_to(AtomIdx(i))]
         assert j in _neighbours(edited, [i], 1)
+
+
+def test_ring_systems(diphenylethane_mols):
+    """
+    A ring is included whole when one of its atoms, or an atom bonded to it, is
+    given, but rings joined only through other atoms are not.
+    """
+    from sire.legacy.Mol import AtomIdx
+
+    mol = diphenylethane_mols.molecules("property is_perturbable")[0]
+    c = mol.property("connectivity")
+    rings = [i for i in range(mol.num_atoms()) if c.in_ring(AtomIdx(i))]
+
+    # One ring atom gives its whole ring and nothing of the other ring.
+    first = _ring_systems(mol, [rings[0]])
+    ring = [i for i in first if c.in_ring(AtomIdx(i))]
+    assert len(ring) == 6
+    assert set(rings) - set(ring)
+
+    # An atom bonded to the ring, but not in it, also brings in the ring.
+    outside = next(
+        n.value()
+        for i in ring
+        for n in c.connections_to(AtomIdx(i))
+        if not c.in_ring(n)
+    )
+    assert set(ring) | {outside} <= set(_ring_systems(mol, [outside]))
+
+
+def test_perturbed_selection_rings_without_rings(ethane_methanol):
+    """Including ring systems changes nothing for a molecule without rings."""
+    for bonds in (0, 2):
+        assert perturbed_selection(ethane_methanol, bonds, rings=True) == (
+            perturbed_selection(ethane_methanol, bonds)
+        )
+
+
+@pytest.mark.parametrize(
+    "smiles, seed_in_ring, size",
+    [
+        # A biaryl: a ring atom at the junction brings in only its own ring.
+        ("c1ccccc1-c1ccccc1", True, 6),
+        # Fused rings form one ring system.
+        ("c1ccc2ccccc2c1", True, 10),
+        # Large rings, e.g. macrocycles, aren't ring systems.
+        ("C1CCCCCCCCCCC1", True, 1),
+        # A substituent on a ring brings in the ring.
+        ("Cc1ccccc1", False, 7),
+    ],
+)
+def test_ring_systems_smiles(smiles, seed_in_ring, size):
+    """
+    Make sure ring systems stop at bonds between rings and at large rings.
+    """
+    from sire.legacy.Mol import AtomIdx
+
+    mol = sr.smiles(smiles)
+    c = mol.property("connectivity")
+    heavy = [i for i, a in enumerate(mol.atoms()) if a.element().symbol() != "H"]
+
+    if seed_in_ring:
+        # A ring atom bonded to a heavy atom in a different ring, or any ring atom.
+        seed = next(
+            (
+                i
+                for i in heavy
+                if any(
+                    n.value() in heavy and not c.in_ring(AtomIdx(i), n)
+                    for n in c.connections_to(AtomIdx(i))
+                )
+                and c.in_ring(AtomIdx(i))
+            ),
+            heavy[0],
+        )
+    else:
+        seed = next(i for i in heavy if not c.in_ring(AtomIdx(i)))
+
+    region = [i for i in _ring_systems(mol, [seed]) if i in heavy]
+    assert len(region) == size

@@ -508,6 +508,11 @@ def test_rest2_region_options(ethane_methanol):
     config = Config()
     assert config.rest2_selection == "auto"
     assert config.rest2_bonds == 2
+    assert config.rest2_profile == "exponential"
+    config.rest2_profile = "Linear"
+    assert config.rest2_profile == "linear"
+    with pytest.raises(ValueError):
+        config.rest2_profile = "cubic"
 
     config.rest2_selection = "None"
     assert config.rest2_selection is None
@@ -544,3 +549,26 @@ def test_rest2_region_options(ethane_methanol):
             assert written.rest2_selection == expected
 
     somd2._logger.remove()
+
+
+def test_rest2_profile_restart():
+    """
+    A REST2 run started before 'rest2_profile' existed can't silently switch to
+    the exponential profile on restart, while runs without REST2 are unaffected.
+    """
+    import pytest
+
+    from somd2.runner._base import RunnerBase
+
+    def old_config(**kwargs):
+        config = Config(**kwargs).as_dict()
+        config.pop("rest2_profile")
+        return config
+
+    new = Config(rest2_scale=2.0).as_dict()
+    with pytest.raises(ValueError, match="'rest2_profile' to 'linear'"):
+        RunnerBase._compare_configs(old_config(rest2_scale=2.0), new)
+
+    linear = Config(rest2_scale=2.0, rest2_profile="linear").as_dict()
+    RunnerBase._compare_configs(old_config(rest2_scale=2.0), linear)
+    RunnerBase._compare_configs(old_config(), Config().as_dict())

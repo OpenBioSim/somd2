@@ -858,14 +858,13 @@ class RunnerBase:
             # Single value. Interpolate between 1.0 at the end states and rest2_scale
             # at lambda = 0.5.
             if isinstance(self._config.rest2_scale, float):
-                scale_factors = []
-                for lambda_value in self._lambda_energy:
-                    scale_factors.append(
-                        1.0
-                        + (self._config.rest2_scale - 1.0)
-                        * (1.0 - 2.0 * abs(lambda_value - 0.5))
-                    )
-                self._rest2_scale_factors = scale_factors
+                from .._utils._schedules import rest2_scale_factors
+
+                self._rest2_scale_factors = rest2_scale_factors(
+                    self._config.rest2_scale,
+                    self._lambda_energy,
+                    self._config.rest2_profile,
+                )
             else:
                 if len(self._config.rest2_scale) != len(self._lambda_energy):
                     msg = f"Length of 'rest2_scale' must match the number of {_lam_sym} values."
@@ -889,6 +888,11 @@ class RunnerBase:
                         _logger.error(msg)
                         raise ValueError(msg)
                 self._rest2_scale_factors = self._config.rest2_scale
+                if self._config.rest2_profile != "linear":
+                    _logger.warning(
+                        "'rest2_profile' is ignored, since 'rest2_scale' gives a "
+                        f"scale factor for each {_lam_sym} window."
+                    )
 
             # If there are any non-zero REST2 scale factors, then log it.
             if any(
@@ -905,7 +909,7 @@ class RunnerBase:
 
                 try:
                     self._config.rest2_selection = perturbed_selection(
-                        self._system, self._config.rest2_bonds
+                        self._system, self._config.rest2_bonds, rings=True
                     )
                 except Exception as e:
                     msg = (
@@ -2630,6 +2634,23 @@ class RunnerBase:
                 "The simulation was started with a REST2 region containing all "
                 "atoms of the perturbable molecules. Set 'rest2_selection' to "
                 "None to restart it."
+            )
+
+        # Runs started before 'rest2_profile' existed used the linear profile.
+        scale = config1.get("rest2_scale")
+        try:
+            has_rest2 = scale is not None and float(scale) != 1.0
+        except (TypeError, ValueError):
+            has_rest2 = False
+        if (
+            has_rest2
+            and "rest2_profile" not in config1
+            and config2.get("rest2_profile", "linear") != "linear"
+        ):
+            raise ValueError(
+                "The simulation was started before 'rest2_profile' existed, so it "
+                "used the linear REST2 profile. Set 'rest2_profile' to 'linear' to "
+                "restart it."
             )
 
         allowed_diffs = _Config._restart_allowed_diffs
