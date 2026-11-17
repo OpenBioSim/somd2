@@ -26,6 +26,7 @@ __all__ = [
     "windowed_torsions",
     "ring_break_morph",
     "reverse_ring_break_morph",
+    "rest2_scale_factors",
 ]
 
 
@@ -514,3 +515,36 @@ def windowed_torsions(schedule, start, end):
                 )
 
     return s
+
+
+def rest2_scale_factors(scale, lambda_values, profile="linear"):
+    """
+    Return the REST2 scale factor at each lambda value, rising from 1.0 at the
+    end states to 'scale' at lambda = 0.5.
+
+    Parameters
+    ----------
+
+    scale: float
+        The scale factor at lambda = 0.5.
+
+    lambda_values: list of float
+        The lambda values.
+
+    profile: str
+        How the scale factor rises: "linear", or "exponential", where each
+        step multiplies the scale factor by the same ratio, i.e. a geometric
+        ladder of effective temperatures.
+
+    Returns
+    -------
+
+    factors: list of float
+        The scale factor at each lambda value.
+    """
+    fractions = [1.0 - 2.0 * abs(lam - 0.5) for lam in lambda_values]
+    if profile == "linear":
+        return [1.0 + (scale - 1.0) * f for f in fractions]
+    if profile == "exponential":
+        return [scale**f for f in fractions]
+    raise ValueError(f"Unknown REST2 profile: {profile}")

@@ -508,6 +508,11 @@ def test_rest2_region_options(ethane_methanol):
     config = Config()
     assert config.rest2_selection == "auto"
     assert config.rest2_bonds == 2
+    assert config.rest2_profile == "linear"
+    config.rest2_profile = "Exponential"
+    assert config.rest2_profile == "exponential"
+    with pytest.raises(ValueError):
+        config.rest2_profile = "cubic"
 
     config.rest2_selection = "None"
     assert config.rest2_selection is None

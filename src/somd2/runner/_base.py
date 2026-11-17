@@ -858,14 +858,13 @@ class RunnerBase:
             # Single value. Interpolate between 1.0 at the end states and rest2_scale
             # at lambda = 0.5.
             if isinstance(self._config.rest2_scale, float):
-                scale_factors = []
-                for lambda_value in self._lambda_energy:
-                    scale_factors.append(
-                        1.0
-                        + (self._config.rest2_scale - 1.0)
-                        * (1.0 - 2.0 * abs(lambda_value - 0.5))
-                    )
-                self._rest2_scale_factors = scale_factors
+                from .._utils._schedules import rest2_scale_factors
+
+                self._rest2_scale_factors = rest2_scale_factors(
+                    self._config.rest2_scale,
+                    self._lambda_energy,
+                    self._config.rest2_profile,
+                )
             else:
                 if len(self._config.rest2_scale) != len(self._lambda_energy):
                     msg = f"Length of 'rest2_scale' must match the number of {_lam_sym} values."

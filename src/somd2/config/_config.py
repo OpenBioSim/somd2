@@ -76,6 +76,7 @@ class Config:
         "log_level": [level.lower() for level in _logger._core.levels],
         "softcore_form": ["auto", "zacharias", "taylor", "beutler"],
         "torsion_window": ["auto", "true", "false"],
+        "rest2_profile": ["linear", "exponential"],
         "precision": ["single", "mixed", "double"],
     }
 
@@ -233,6 +234,7 @@ class Config:
         gcmc_num_attempts=10000,
         use_dispersion_correction=False,
         rest2_scale=1.0,
+        rest2_profile="linear",
         rest2_selection="auto",
         rest2_bonds=2,
         softcore_form="auto",
@@ -703,6 +705,14 @@ class Config:
             values are used, then the number should match the number of lambda windows at which
             energies are sampled.
 
+        rest2_profile: str
+            How a single 'rest2_scale' rises from 1.0 at the end states to its value at
+            lambda = 0.5: "linear" (the default), or "exponential", where each step
+            multiplies the scale factor by the same ratio. The exponential profile gives a
+            geometric ladder of effective temperatures, which helps sampling propagate
+            between windows when a large scale factor is used. It has no effect when
+            'rest2_scale' is a list.
+
         rest2_selection: str
             A sire selection string for atoms to include in the REST2 region in
             addition to any perturbable molecules. For example, "molidx 0 and residx 0,1,2"
@@ -938,6 +948,7 @@ class Config:
         self.gcmc_num_attempts = gcmc_num_attempts
         self.use_dispersion_correction = use_dispersion_correction
         self.rest2_scale = rest2_scale
+        self.rest2_profile = rest2_profile
         self.rest2_selection = rest2_selection
         self.rest2_bonds = rest2_bonds
         self.restart = restart
@@ -2908,6 +2919,22 @@ class Config:
             elif rest2_selection.strip().lower() == "auto":
                 rest2_selection = "auto"
         self._rest2_selection = rest2_selection
+
+    @property
+    def rest2_profile(self):
+        return self._rest2_profile
+
+    @rest2_profile.setter
+    def rest2_profile(self, rest2_profile):
+        if not isinstance(rest2_profile, str):
+            raise TypeError("'rest2_profile' must be of type 'str'")
+        rest2_profile = rest2_profile.lower().replace(" ", "")
+        if rest2_profile not in self._choices["rest2_profile"]:
+            raise ValueError(
+                "'rest2_profile' not recognised. Valid options are: "
+                f"{', '.join(self._choices['rest2_profile'])}"
+            )
+        self._rest2_profile = rest2_profile
 
     @property
     def rest2_bonds(self):

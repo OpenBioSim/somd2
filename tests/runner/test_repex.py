@@ -710,6 +710,26 @@ def test_rest2_scale(ethane_methanol, rest2_scale, is_valid):
                 runner = RunnerBase(ethane_methanol, Config(**config))
 
 
+def test_rest2_profile(ethane_methanol):
+    """The runner uses the chosen profile for a single REST2 scale factor."""
+    from somd2._utils._schedules import rest2_scale_factors
+
+    for profile in ("linear", "exponential"):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Config(
+                output_directory=tmpdir,
+                platform="CPU",
+                max_threads=1,
+                num_lambda=5,
+                replica_exchange=True,
+                rest2_scale=4.0,
+                rest2_profile=profile,
+            )
+            runner = RunnerBase(ethane_methanol, config)
+            expected = rest2_scale_factors(4.0, runner._lambda_energy, profile)
+            assert runner._rest2_scale_factors == pytest.approx(expected)
+
+
 @pytest.mark.parametrize(
     "rest2_selection, is_valid",
     [
