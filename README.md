@@ -416,7 +416,7 @@ This requires the CUDA platform, PME, and single or mixed precision.
 cuPotential chooses its own PME parameters, so [PME tuning](#pme-tuning) is
 skipped, and it uses a fixed `--pme-tolerance` of 5e-4. Its integrator and
 barostat are used with the default `langevin_middle` integrator, otherwise only
-the nonbonded force is replaced. GCMC isn't supported yet.
+the nonbonded force is replaced.
 
 <a id="replica-exchange"></a>
 

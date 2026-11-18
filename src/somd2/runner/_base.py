@@ -1210,8 +1210,6 @@ class RunnerBase:
             msg = "cuPotential requires 'cutoff_type' to be 'pme'."
         elif self._config.precision == "double":
             msg = "cuPotential doesn't support double precision."
-        elif self._config.gcmc:
-            msg = "cuPotential is not yet supported for GCMC simulations."
         elif any(
             getattr(self._config, option) is not None
             for option in ["pme_alpha", "pme_grid", "pme_spacing"]
