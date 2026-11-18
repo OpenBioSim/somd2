@@ -222,7 +222,9 @@ def vacuum_settings(config, ignore):
 
 
 def _is_cutoff_option(key):
-    return key in ("cutoff", "cutoff_type", "tune_pme") or key.startswith("pme_")
+    return key in ("cutoff", "cutoff_type", "tune_pme") or key.startswith(
+        ("pme_", "cupotential")
+    )
 
 
 def vacuum_settings_keys(settings):

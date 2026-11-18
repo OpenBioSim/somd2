@@ -42,6 +42,8 @@ simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and
   limit, or to extend an existing simulation.
 - 🎛️ **[PME tuning](#pme-tuning)**: automatic choice of the smallest PME grid
   that meets the requested accuracy, for faster simulations on CUDA and OpenCL.
+- ⚡ **[NVIDIA cuPotential](#nvidia-cupotential)**: experimental support for
+  NVIDIA's accelerated PME, integrator and barostat.
 - 📊 **[Viewer](#viewer)**: a web page for monitoring simulations as they run
   and analysing their results.
 - 📋 **[Command-line summary](#summary-from-the-command-line)**: the progress
@@ -392,6 +394,29 @@ the maximum grid spacing, e.g. `--pme-spacing "0.12 nm"`, optionally along with
 `--pme-alpha`, the splitting parameter in inverse nanometers. If `--pme-alpha`
 isn't set it is derived from the tolerance. Tuning is skipped when any of these
 are set.
+
+<a id="nvidia-cupotential"></a>
+
+## ⚡ NVIDIA cuPotential
+
+SOMD2 has experimental support for the
+[NVIDIA cuPotential](https://github.com/NVIDIA/cuPotential) OpenMM plugin,
+which replaces OpenMM's PME nonbonded force, Langevin middle integrator and
+Monte Carlo barostat with faster equivalents. This needs a version of Sire
+built with cuPotential support. See the
+[Sire installation instructions](https://github.com/OpenBioSim/sire/tree/feature_cuPotential#experimental-nvidia-cupotential-support)
+for how to build it, and for a caveat about the plugin's performance for
+alchemical simulations. To enable it, use `--cupotential`, e.g.:
+
+```
+somd2 perturbable_system.bss --cupotential
+```
+
+This requires the CUDA platform, PME, and single or mixed precision.
+cuPotential chooses its own PME parameters, so [PME tuning](#pme-tuning) is
+skipped, and it uses a fixed `--pme-tolerance` of 5e-4. Its integrator and
+barostat are used with the default `langevin_middle` integrator, otherwise only
+the nonbonded force is replaced. GCMC isn't supported yet.
 
 <a id="replica-exchange"></a>
 

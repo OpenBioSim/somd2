@@ -161,6 +161,7 @@ class Config:
         pme_grid=None,
         pme_spacing=None,
         tune_pme=True,
+        cupotential=False,
         h_mass_factor=1.5,
         hmr=True,
         num_lambda=11,
@@ -316,6 +317,14 @@ class Config:
             Whether to tune the PME parameters for the fastest settings that are at
             least as accurate as the defaults. This only applies on the CUDA and
             OpenCL platforms, and is ignored if any of the PME options are set.
+
+        cupotential: bool
+            Whether to use NVIDIA cuPotential for the PME nonbonded interactions,
+            and its Langevin middle integrator and Monte Carlo barostat when using
+            the "langevin_middle" integrator. This requires the CUDA platform,
+            single or mixed precision, and a version of Sire built with cuPotential
+            support, and uses a fixed PME tolerance of 5e-4. It is ignored for
+            simulations without a periodic space.
 
         h_mass_factor: float
             Factor by which to scale hydrogen masses.
@@ -878,6 +887,7 @@ class Config:
         self.pme_grid = pme_grid
         self.pme_spacing = pme_spacing
         self.tune_pme = tune_pme
+        self.cupotential = cupotential
         self.h_mass_factor = h_mass_factor
         self.hmr = hmr
         self.timestep = timestep
@@ -1373,6 +1383,16 @@ class Config:
         if not isinstance(tune_pme, bool):
             raise ValueError("'tune_pme' must be of type 'bool'")
         self._tune_pme = tune_pme
+
+    @property
+    def cupotential(self):
+        return self._cupotential
+
+    @cupotential.setter
+    def cupotential(self, cupotential):
+        if not isinstance(cupotential, bool):
+            raise ValueError("'cupotential' must be of type 'bool'")
+        self._cupotential = cupotential
 
     @property
     def h_mass_factor(self):

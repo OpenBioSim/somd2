@@ -397,6 +397,8 @@ class RunnerBase:
             if value is not None:
                 self._config._extra_args[option] = value
 
+        self._check_cupotential()
+
         # Auto-generate Morse restraints for ring-breaking perturbations with no
         # user-supplied Morse restraints. This is done before any modification of
         # the bonded terms, and before the reference system is stored and the
@@ -1184,6 +1186,63 @@ class RunnerBase:
             f"'{selection}', with {self._config.gcmc_num_waters} ghost waters."
         )
 
+    def _check_cupotential(self):
+        """
+        Validate the cuPotential options and pass them to Sire.
+        """
+
+        self._use_cupotential = False
+
+        if not self._config.cupotential:
+            return
+
+        if not self._has_space:
+            _logger.warning(
+                "cuPotential requires a periodic space, so it won't be used for "
+                "this simulation."
+            )
+            return
+
+        msg = None
+        if self._config.platform != "cuda":
+            msg = "cuPotential requires the CUDA platform."
+        elif self._config.cutoff_type != "pme":
+            msg = "cuPotential requires 'cutoff_type' to be 'pme'."
+        elif self._config.precision == "double":
+            msg = "cuPotential doesn't support double precision."
+        elif self._config.gcmc:
+            msg = "cuPotential is not yet supported for GCMC simulations."
+        elif any(
+            getattr(self._config, option) is not None
+            for option in ["pme_alpha", "pme_grid", "pme_spacing"]
+        ):
+            msg = (
+                "cuPotential chooses its own PME parameters, so 'pme_alpha', "
+                "'pme_grid' and 'pme_spacing' can't be set."
+            )
+        if msg is not None:
+            _logger.error(msg)
+            raise ValueError(msg)
+
+        tolerance = 5e-4
+        if self._config.pme_tolerance != tolerance:
+            _logger.warning(
+                f"cuPotential uses a fixed PME tolerance of {tolerance}, so the "
+                f"'pme_tolerance' of {self._config.pme_tolerance} will be ignored."
+            )
+
+        self._config._extra_args["tolerance"] = tolerance
+        self._config._extra_args["use_cupotential"] = True
+        self._use_cupotential = True
+
+        if self._config.integrator == "langevin_middle":
+            _logger.info("Using cuPotential, including its integrator and barostat.")
+        else:
+            _logger.warning(
+                "The cuPotential integrator only supports 'langevin_middle', so "
+                f"the standard '{self._config.integrator}' integrator will be used."
+            )
+
     def _check_gcmc(self):
         """
         Validate the GCMC options, if GCMC is used.
@@ -1554,6 +1613,10 @@ class RunnerBase:
         reuse the same values, or load the values saved by a previous run.
         """
         import yaml as _yaml
+
+        # cuPotential chooses its own PME parameters.
+        if self._use_cupotential:
+            return
 
         pme_file = _Path(self._filenames["pme"])
 
@@ -2035,6 +2098,11 @@ class RunnerBase:
         # Find all perturbable molecules in the system..
         pert_mols = self._system.molecules("property is_perturbable")
 
+        # cuPotential is CUDA only, so can't be used for the CPU context.
+        extra_args = {
+            k: v for k, v in self._config._extra_args.items() if k != "use_cupotential"
+        }
+
         # Check constraints at lambda = 0 and lambda = 1 for each perturbable molecule.
         for mol in pert_mols:
             # Create a dynamics object.
@@ -2042,7 +2110,7 @@ class RunnerBase:
                 constraint=self._config.constraint,
                 perturbable_constraint=self._config.perturbable_constraint,
                 platform="cpu",
-                map=self._config._extra_args,
+                map=extra_args,
             )
 
             # Get the constraints at lambda = 0.
