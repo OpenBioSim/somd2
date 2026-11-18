@@ -1564,7 +1564,7 @@ class RepexRunner(_RunnerBase):
             if gcmc_sampler is not None and is_gcmc:
                 gcmc_sampler.push()
                 try:
-                    _logger.info(f"Performing GCMC move at {_lam_sym} = {lam:.5f}")
+                    _logger.debug(f"Performing GCMC move at {_lam_sym} = {lam:.5f}")
                     gcmc_sampler.move(dynamics.context())
                 finally:
                     gcmc_sampler.pop()
@@ -1576,7 +1576,9 @@ class RepexRunner(_RunnerBase):
 
             # Perform a terminal flip move before dynamics if requested.
             if self._terminal_flip_samplers is not None and is_terminal_flip:
-                _logger.info(f"Performing terminal flip move at {_lam_sym} = {lam:.5f}")
+                _logger.debug(
+                    f"Performing terminal flip move at {_lam_sym} = {lam:.5f}"
+                )
                 self._terminal_flip_samplers[index].move(dynamics.context())
 
             # Snapshot the context state for crash recovery. The slot was just
@@ -1587,7 +1589,7 @@ class RepexRunner(_RunnerBase):
                     getPositions=True, getVelocities=True
                 )
 
-            _logger.info(f"Running dynamics at {_lam_sym} = {lam:.5f}")
+            _logger.debug(f"Running dynamics at {_lam_sym} = {lam:.5f}")
 
             # Draw new velocities from the Maxwell-Boltzmann distribution.
             if self._config.randomise_velocities:
