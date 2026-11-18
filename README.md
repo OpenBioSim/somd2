@@ -421,8 +421,9 @@ the nonbonded force is replaced.
 cuPotential's integrator only supports rigid water and groups of one to three
 hydrogens constrained to a central atom with the same length. With the default
 `--perturbable-constraint h_bonds_not_heavy_perturbed`, a perturbed hydrogen on,
-e.g., a methyl group has a different, lambda-dependent constraint length, so
-creating the context fails at lambda > 0. For such perturbations, use
+e.g., a methyl group has a different, lambda-dependent constraint length. Sire
+then warns and uses OpenMM's integrator and barostat instead, with cuPotential's
+nonbonded force. To keep cuPotential's integrator for such perturbations, use
 `--perturbable-constraint h_bonds_not_perturbed`, which leaves the bonds to
 perturbed hydrogens unconstrained.
 
