@@ -116,6 +116,7 @@ class Config:
             "max_gpus",
             "use_backup",
             "save_trajectories",
+            "save_crash_report",
             "write_config",
             "log_level",
             "log_file",
