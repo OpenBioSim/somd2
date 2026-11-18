@@ -418,6 +418,14 @@ skipped, and it uses a fixed `--pme-tolerance` of 5e-4. Its integrator and
 barostat are used with the default `langevin_middle` integrator, otherwise only
 the nonbonded force is replaced.
 
+cuPotential's integrator only supports rigid water and groups of one to three
+hydrogens constrained to a central atom with the same length. With the default
+`--perturbable-constraint h_bonds_not_heavy_perturbed`, a perturbed hydrogen on,
+e.g., a methyl group has a different, lambda-dependent constraint length, so
+creating the context fails at lambda > 0. For such perturbations, use
+`--perturbable-constraint h_bonds_not_perturbed`, which leaves the bonds to
+perturbed hydrogens unconstrained.
+
 <a id="replica-exchange"></a>
 
 ## 🔁 Replica exchange
