@@ -33,6 +33,7 @@ def test_cupotential_requires_cuda(ethane_methanol):
             Runner(ethane_methanol, config)
 
 
+@pytest.mark.skipif(not has_cuda, reason="CUDA not available.")
 def test_cupotential_rejects_double_precision(ethane_methanol):
     """Validate that cuPotential is rejected with double precision."""
     with tempfile.TemporaryDirectory() as tmpdir:
