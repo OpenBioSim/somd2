@@ -404,7 +404,7 @@ SOMD2 has experimental support for the
 which replaces OpenMM's PME nonbonded force, Langevin middle integrator and
 Monte Carlo barostat with faster equivalents. This needs a version of Sire
 built with cuPotential support. See the
-[Sire installation instructions](https://github.com/OpenBioSim/sire/tree/feature_cuPotential#experimental-nvidia-cupotential-support)
+[Sire installation instructions](https://github.com/OpenBioSim/sire/tree/devel#experimental-nvidia-cupotential-support)
 for how to build it, and for a caveat about the plugin's performance for
 alchemical simulations. To enable it, use `--cupotential`, e.g.:
 
