@@ -42,7 +42,7 @@ simulations. Built on top of [Sire](https://github.com/OpenBioSim/sire) and
   limit, or to extend an existing simulation.
 - 🎛️ **[PME tuning](#pme-tuning)**: automatic choice of the smallest PME grid
   that meets the requested accuracy, for faster simulations on CUDA and OpenCL.
-- ⚡ **[NVIDIA cuPotential](#nvidia-cupotential)**: experimental support for
+- 🚀 **[NVIDIA cuPotential](#nvidia-cupotential)**: experimental support for
   NVIDIA's accelerated PME, integrator and barostat.
 - 📊 **[Viewer](#viewer)**: a web page for monitoring simulations as they run
   and analysing their results.
@@ -397,7 +397,7 @@ are set.
 
 <a id="nvidia-cupotential"></a>
 
-## ⚡ NVIDIA cuPotential
+## 🚀 NVIDIA cuPotential
 
 SOMD2 has experimental support for the
 [NVIDIA cuPotential](https://github.com/NVIDIA/cuPotential) OpenMM plugin,
