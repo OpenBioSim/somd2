@@ -1430,7 +1430,10 @@ class DynamicsCache:
             the visible set, whereas pynvml and pyopencl enumerate all devices
             on the machine, so the two only agree when the visible set starts
             at zero and is contiguous. CUDA_VISIBLE_DEVICES entries may be
-            either an index or a UUID.
+            either an index or a UUID. In containerized or cgroup-isolated
+            environments where only a subset of GPU device nodes is mounted,
+            OpenCL may expose fewer devices than the physical index and will
+            fall back to pynvml.
         """
 
         device = str(device).strip()
@@ -1461,11 +1464,11 @@ class DynamicsCache:
                 ocl_device = all_devices[device_index]
                 vendor = ocl_device.vendor
             else:
-                msg = f"Device index {device_index} out of range. Found {len(all_devices)} GPU(s)."
-                _logger.error(msg)
-                raise IndexError(msg)
-        except IndexError:
-            raise
+                msg = (
+                    f"Device index {device_index} out of range for OpenCL "
+                    f"(found {len(all_devices)} GPU(s)); falling back to pynvml."
+                )
+                _logger.warning(msg)
         except Exception:
             _logger.warning(
                 "Could not query GPU platform via OpenCL; falling back to pynvml for NVIDIA detection."
@@ -1477,13 +1480,15 @@ class DynamicsCache:
                 import pynvml
 
                 pynvml.nvmlInit()
-                if is_uuid:
-                    handle = pynvml.nvmlDeviceGetHandleByUUID(device.encode())
-                else:
-                    handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
-                memory = pynvml.nvmlDeviceGetMemoryInfo(handle)
-                pynvml.nvmlShutdown()
-                return (memory.used, memory.free, memory.total)
+                try:
+                    if is_uuid:
+                        handle = pynvml.nvmlDeviceGetHandleByUUID(device.encode())
+                    else:
+                        handle = pynvml.nvmlDeviceGetHandleByIndex(device_index)
+                    memory = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                    return (memory.used, memory.free, memory.total)
+                finally:
+                    pynvml.nvmlShutdown()
             except Exception as e:
                 if vendor is None:
                     msg = f"Could not get GPU memory info for device {device} via OpenCL or pynvml: {e}"

@@ -50,6 +50,7 @@ Changelog
 * Include whole ring systems containing perturbed atoms in the automatic REST2 region, so that the torsions about a perturbed ring's bonds to the rest of the molecule are scaled [#296](https://github.com/OpenBioSim/somd2/pull/296).
 * Add a `rest2_profile` option. The default, `exponential`, gives a geometric ladder of REST2 scale factors, rather than the previous linear rise, which is still available as `linear`. REST2 runs started before this change must set `rest2_profile` to `linear` to restart [#296](https://github.com/OpenBioSim/somd2/pull/296).
 * Log the per-window GCMC, terminal flip and dynamics messages of replica exchange runs at debug level, rather than info, reducing the size of the log by around 30 times. Progress is still logged once per cycle [#298](https://github.com/OpenBioSim/somd2/pull/298).
+* Fixed an `IndexError` when querying GPU memory if OpenCL enumerates fewer devices than the requested device index, allowing fallback to `pynvml` [#301](https://github.com/OpenBioSim/somd2/pull/301).
 
 [2026.2.0](https://github.com/openbiosim/somd2/compare/2026.1.0...2026.2.0) - Sep 2026
 --------------------------------------------------------------------------------------

@@ -36,3 +36,7 @@ output.yaml
 
 # Auto-generated version file
 src/somd2/_version.py
+
+# Cached inputs.
+cache
+tests/cache
